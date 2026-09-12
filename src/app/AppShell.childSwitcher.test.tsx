@@ -115,10 +115,35 @@ describe('AppShell child chips (UX-324, switch forced on)', () => {
   })
 })
 
-describe('AppShell child chips as they SHIP (UX-330 — switch off)', () => {
+describe('AppShell child chips as they SHIP (FIX-231 — the switch is ON)', () => {
   beforeEach(() => {
     // Read the shipped `CHILD_SWITCHER_ENABLED`, not a forced value.
     forceSwitcherEnabled.current = undefined
+  })
+
+  it('renders the real switcher at BOTH sites for a parent with two children', () => {
+    renderShell()
+
+    // Positively, so the assertion cannot pass vacuously: the caret at both
+    // sites is the affordance, and both are the same component.
+    expect(screen.getAllByTestId('ArrowDropDownIcon')).toHaveLength(2)
+    expect(screen.getAllByRole('button', { name: SWITCHER })).toHaveLength(2)
+  })
+
+  it('renders the read-only chip at BOTH sites for a child profile', () => {
+    profileRef.current = UserProfile.Lincoln
+    activeChildRef.current = { ...activeChildRef.current, isChildProfile: true }
+    renderShell()
+
+    expect(screen.getAllByText('Lincoln').length).toBeGreaterThan(0)
+    expect(screen.queryByTestId('ArrowDropDownIcon')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: SWITCHER })).not.toBeInTheDocument()
+  })
+})
+
+describe('AppShell child chips with the switch forced back OFF (UX-330)', () => {
+  beforeEach(() => {
+    forceSwitcherEnabled.current = false
   })
 
   it('renders the read-only chip at BOTH sites, even for a parent with two children', () => {

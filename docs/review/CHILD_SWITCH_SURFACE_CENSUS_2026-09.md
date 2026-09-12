@@ -165,18 +165,57 @@ The two arms are how the surface comes by the identity it writes with — `useAc
 switch reaches a prop-threaded editor **through** its parent, and two of this run's four fixes
 (`SaleEntryForm`, `KitBuilderForm`) are prop-arm surfaces that a hook-only heuristic could not see.
 
-**The header switcher is currently OFF** (`CHILD_SWITCHER_ENABLED === false`, UX-330), so the shell
-route into these surfaces is closed today. It is not the only route: **8** pages render an in-page
-`<ChildSelector>` and **13** feature files hold some in-page child control, and every defect on a page
-with one of those is reachable **right now**. That is why the fixes in this run are not deferred until
-the constant flips back.
+### Re-derived 2026-09-11 (FIX-231 — the switcher is back ON)
+
+Same command, on the branch that flips `CHILD_SWITCHER_ENABLED` to `true` and makes Today's
+`ContextBar` render the same chip. Pasted, not retyped:
+
+```
+source files scanned (non-test, under src/, excluding src/test/): 778
+files reading useActiveChild: 73
+candidates: 94 (hook arm 42, prop arm 52)
+files rendering an in-page <ChildSelector>: 9
+feature files referencing setActiveChildId (any in-page child control): 15
+census rows: 94
+by verdict: {"BIND":6,"HIDE":3,"RESET":18,"GATE":10,"SAFE":57}
+by severity: {"P1":0,"P2":4,"P3":2,"—":88}
+census problems: 0
+```
+
+**The candidate set did not move — still 94, still every row filled, still `P1: 0`** — which is the
+property the flip rests on. (This block was pasted before review round 2 closed `UX-333`; the reading
+after that fix is `BIND: 7`, `RESET: 17`, `P3: 1`, pasted in §7.) What moved is the denominator: three new non-test source files (the
+`UX-394` profile-child seed, the duplicate-document survey and the shared canonical-children read)
+and two more files *naming* `useActiveChild`, both of which name it in prose rather than calling it
+(`ContextBar`'s new docblock says why the chip reads the hook instead of the prop it is handed).
+`ContextBar` itself is **not** a candidate: it holds no child-scoped editable state and performs no
+write, which is why it has no row — the heuristic over-matches on purpose and still does not reach a
+component that renders a chip and four navigation icons.
+
+**The header switcher is now ON** (`CHILD_SWITCHER_ENABLED === true`, `FIX-231`, owner decision
+2026-09-11), so the shell route into every surface below is open — and since `UX-362` so is Today's
+`ContextBar`, which renders the same chip. That is a widening, and it is taken deliberately: `UX-329`
+**bounded** the class rather than patching a seventh member of it, `FIX-223` cleared the P1s, and the
+rows still open sit on avatar, admin and dialog surfaces that **each carry their own in-page child
+control** — so they were already reachable with the constant `false`. The switcher widens the reach;
+it did not create them. **9** pages render an in-page `<ChildSelector>` and **15** feature files hold
+some in-page child control, which is the same reason the fixes in `AUDIT-222`'s run were not deferred
+until the flip.
+
+**That sentence was too broad when first written, and this run's review round 2 proved it.** One of
+the six — `UX-333`, `useBackgroundReimagine` — is the single open row whose *Reachable by a switch
+today?* column reads **Shell only**: Books has no in-page `ChildSelector`, so the flip is what opened
+it, and on a legacy book with no `createdFor` a finished reimagine was filed under whoever the header
+was on when the paid call returned. **A run that flips the constant owns the rows the flip creates**,
+so it is fixed here (BIND, the `UX-327` answer) rather than deferred. `FIX-232` closes the remaining
+five.
 
 ## 5. The registry
 
 | Surface (file) | Child-scoped state it holds | What it writes, and to which collection | Reachable by a switch today? | Verdict | Severity |
 |---|---|---|---|---|---|
 | `src/components/ChildSelector.tsx` | one add-child dialog flag | nothing — it calls `onSelect`, and its avatar icon is a read | It **is** the switch (8 pages) | **SAFE** — the control itself holds no child-scoped draft; the dialog boolean survives a selection and means the same thing either way | — |
-| `src/components/ChildSwitcherChip.tsx` | one menu anchor element | nothing — a source scan already pins that it writes no Firestore document | It **is** the shell switch (off since UX-330) | **SAFE** — the anchor is a DOM node for a menu, not child-scoped state, and the chip's whole job is to call `setActiveChildId` | — |
+| `src/components/ChildSwitcherChip.tsx` | one menu anchor element | nothing — a source scan already pins that it writes no Firestore document | It **is** the switch — the shell's two sites and, since `UX-362`, Today's `ContextBar`; ON since `FIX-231` | **SAFE** — the anchor is a DOM node for a menu, not child-scoped state, and the chip's whole job is to call `setActiveChildId` | — |
 | `src/components/CreativeTimer.tsx` | a picked subject and a save flag around `useCreativeTimer` | delegated — `useCreativeTimer` writes `hours` | Selector (mounted on several pages) | **BIND** — the hook carries `ownerChildId` from `startTimer` (UX-327), and this host already renders `timerOwnerDiffers(state.ownerChildId, activeChildId)` so a running timer names the child its minutes will go to | — |
 | `src/components/DebugPanel.tsx` | a minimised flag and a service-worker status string | nothing — it is a read-only diagnostic overlay | Everywhere it is mounted | **SAFE** — it renders `activeChildId` as text and writes nothing anywhere | — |
 | `src/core/curriculum/useSkillMap.ts` | the loaded `ChildSkillMap` for the `childId` prop | `childSkillMaps/{childId}` — create-if-missing on read, plus an `updateSkillMap` writer | Selector (via `LearningMap` on Progress) | **GATE** — this row was **wrong**, and Codex round 4 caught it: I checked `updateSkillMap` (which genuinely has no caller) and missed `updateNodeStatus`, which `LearningMap` calls. `skillMap` was not cleared on a `childId` change, and a rejected `getDoc` escaped the load's only `catch` while `finally` still cleared `isLoading` — so the next status edit spread `...skillMap?.skills` into a `setDoc` on the **new** child's document. Now: the map is dropped **during render** on a target change, an outer `catch` records `loadFailed`, and `updateNodeStatus` refuses unless `skillMapIsEditable` — the shared `core/hooks/childScopedGate` rule, one definition with `useDailyPlan`. Fixed by FIX-223 (UX-344) | — |
@@ -198,7 +237,7 @@ the constant flips back.
 | `src/features/books/MakeStickerDialog.tsx` | a generated sticker awaiting save | `stickerLibrary` — `childId: null` by construction | Shell only | **SAFE** — the write stamps `childId: null`; a sticker belongs to the family, so there is no child to mis-target | — |
 | `src/features/books/SightWordDashboard.tsx` | one selected word | `sightWordProgress` via `confirmMastery` | Shell only | **SAFE** — `confirmMastery` is `useSightWordProgress`'s writer, which rebuilds the document id from the `childId` it currently holds; the selected word is a word, not a child-scoped draft | — |
 | `src/features/books/SketchScanner.tsx` | a captured sketch, its cleaned and fancy versions | `stickerLibrary` — `childId: null` by construction | Shell only | **SAFE** — same as above; the `profile` field it does write is a picker the person sets, not the active child | — |
-| `src/features/books/useBackgroundReimagine.ts` | a running reimagine job and its result | `stickerLibrary` + `artifacts`, stamped with the `childId` prop | Shell only | **RESET** needed — a finished job's "save this" survives a switch and the artifact is stamped with the live prop | P3 · `UX-333` |
+| `src/features/books/useBackgroundReimagine.ts` | a running reimagine job and its result | `stickerLibrary` + `artifacts`, stamped with the job's own `ownerChildId` | Shell only | **BIND** — `ReimagineJob.ownerChildId` / `ownerChildName` are captured at `startReimagine` and both auto-saves resolve through them, so a paid picture is filed under the child it was started for however the header moves. BIND rather than the RESET first prescribed here, on the `useCreativeTimer` reading (`UX-327`): the work is done and was paid for, so the WRITE is bound rather than the result discarded. Fixed by FIX-231 | — |
 | `src/features/books/useBook.ts` | the open book, save state | `books`, `hours`, `artifacts` | Shell only | **SAFE** — every write reads `book.childId` from the loaded document; `useBookshelf`'s `createBook` takes the `childId` it was called with | — |
 | `src/features/books/useBookGenerateChat.ts` | chat history, current story, level stretch, theme | `books/{bookId}` | Shell only | **SAFE** — a draft book is persisted as soon as a story exists and `bookId` pins every later write; the resume path reads the document's `childId` (FEAT-188) | — |
 | `src/features/books/useSightWordProgress.ts` | the child's word progress map | `sightWordProgress/{childId}_{word}` | Selector (Books, Progress) | **SAFE** — the document id is built from the `childId` the hook was called with at the moment of the write, and the map is re-read on a prop change | — |
@@ -342,12 +381,36 @@ say so in their rows: `ArmorTab` and `AvatarAdminTab` write `xpLedger`; `useQues
 `hoursAdjustments`, and the owner's authorisation named the Historical Hours dialog specifically.
 Those are propose-and-confirm decisions, not this run's to make.
 
-**Not done.** The switcher stays off (`CHILD_SWITCHER_ENABLED === false`); flipping it back is its own
-one-line PR once the P1s here are cleared. (They are, as of `FIX-223` — the P2s and P3s are not, and
-the flip is still nobody's side effect.) The eight in-page `ChildSelector`s stay (owner: later) —
-and it is worth restating that they are why these fixes are not deferred: `RecordsPage`, `TodayPage`,
-`CurriculumTab`, `ArmorTab` and `MyAvatarPage` can all be re-targeted **today**, with the shell
-switcher off.
+**Not done** *(as `AUDIT-222` wrote it, 2026-09-10)*. The switcher stays off
+(`CHILD_SWITCHER_ENABLED === false`); flipping it back is its own one-line PR once the P1s here are
+cleared. (They are, as of `FIX-223` — the P2s and P3s are not, and the flip is still nobody's side
+effect.) The eight in-page `ChildSelector`s stay (owner: later) — and it is worth restating that they
+are why these fixes are not deferred: `RecordsPage`, `TodayPage`, `CurriculumTab`, `ArmorTab` and
+`MyAvatarPage` can all be re-targeted **today**, with the shell switcher off.
+
+**Since done (`FIX-231`, 2026-09-11).** The flip happened, and it was nobody's side effect: it is an
+owner decision — *"Turn the switcher ON, and make Today's chip the same one"* — taken with the P2s
+and P3s still open, on the reading this paragraph itself gives. Every one of the six sits on a
+surface with its own in-page child control, so each was already reachable with the constant `false`;
+what the flip changes is how many taps it takes to reach them, not whether it can be done. Against
+that: the shell naming the active child and offering no way to change it is the root cause of the
+owner's report of the week, and `UX-362` is the same defect on Today.
+
+**One exception, found by this run's own review round 2 and fixed here rather than deferred.**
+`UX-333` (`useBackgroundReimagine`) is the single open row reading **Shell only** — Books has no
+in-page `ChildSelector` — so the sentence above is not true of it: the flip is what opened it, and on
+a legacy book with no `createdFor` a finished reimagine was filed under whoever the header was on when
+the paid call returned. **A run that flips the constant owns the rows the flip creates.** It is BIND
+(the `UX-327` answer: the work is done and was paid for, so bind the write rather than discard the
+result). The reading after that fix, pasted:
+
+```
+by verdict: {"BIND":7,"HIDE":3,"RESET":17,"GATE":10,"SAFE":57}
+by severity: {"P1":0,"P2":4,"P3":1,"—":89}
+census problems: 0
+```
+
+`FIX-232` closes the remaining five.
 
 ## 8. The shell rule
 

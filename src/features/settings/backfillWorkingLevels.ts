@@ -27,10 +27,10 @@ import type {
 } from '../../core/types/evaluation'
 import type { QuestMode, SessionQuestion } from '../quest/questTypes'
 import {
-  childrenCollection,
   evaluationSessionsCollection,
   skillSnapshotsCollection,
 } from '../../core/firebase/firestore'
+import { loadCanonicalChildren } from '../../core/firebase/loadCanonicalChildren'
 import {
   computeWorkingLevelFromSession,
   deriveWorkingLevelFromEvaluation,
@@ -148,11 +148,11 @@ export function computeBackfillForMode(
 export async function backfillWorkingLevels(
   familyId: string,
 ): Promise<BackfillResult[]> {
-  const childrenSnap = await getDocs(childrenCollection(familyId))
-  const children = childrenSnap.docs.map((d) => ({
-    id: d.id,
-    name: (d.data() as { name?: string }).name ?? d.id,
-  }))
+  // UX-394: the app's own children, not every document in the collection —
+  // otherwise a backfill writes a `skillSnapshots` document under a duplicate
+  // child id that no screen has ever shown, turning an inert stray into one
+  // with records under it.
+  const children = await loadCanonicalChildren(familyId)
 
   const thirtyDaysAgo = new Date(Date.now() - THIRTY_DAYS_MS).toISOString()
   const results: BackfillResult[] = []

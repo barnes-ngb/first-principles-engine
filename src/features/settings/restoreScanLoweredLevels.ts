@@ -40,13 +40,13 @@
  * It is a button on the admin Dev tab, never a page-view effect.
  */
 
-import { doc, getDoc, getDocs } from 'firebase/firestore'
+import { doc, getDoc } from 'firebase/firestore'
 
 import {
-  childrenCollection,
   learnerModelsCollection,
   skillSnapshotsCollection,
 } from '../../core/firebase/firestore'
+import { loadCanonicalChildren } from '../../core/firebase/loadCanonicalChildren'
 import type { SkillSnapshot, WorkingLevel, WorkingLevels } from '../../core/types'
 import type { LearnerModel } from '../../core/types/learnerModel'
 import { mapSubjectBucket } from '../../core/hooks/useScanToActivityConfig'
@@ -236,12 +236,15 @@ export interface ChildScanLoweredLevels {
 export async function findScanLoweredLevels(
   familyId: string,
 ): Promise<ChildScanLoweredLevels[]> {
-  const childrenSnap = await getDocs(childrenCollection(familyId))
+  // UX-394: the app's own children, not every document in the collection. This
+  // survey is where the ~20 duplicate Lincoln/London documents were first seen,
+  // because it looped the raw collection while every screen deduped.
+  const children = await loadCanonicalChildren(familyId)
   const results: ChildScanLoweredLevels[] = []
 
-  for (const childDoc of childrenSnap.docs) {
-    const childId = childDoc.id
-    const childName = (childDoc.data() as { name?: string }).name ?? childId
+  for (const child of children) {
+    const childId = child.id
+    const childName = child.name
     const row: ChildScanLoweredLevels = { childId, childName, offers: [], skipped: [] }
 
     try {
