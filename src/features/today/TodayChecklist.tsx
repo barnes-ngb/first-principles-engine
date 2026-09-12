@@ -69,6 +69,7 @@ import {
   isPhotoDoor,
   resolveTodayRow,
   TODAY_ROW_DOOR_LABEL,
+  TodayRowConfigsState,
   TodayRowDoor,
 } from './todayRowKind'
 import type { TodayRowConfigLike } from './todayRowKind'
@@ -249,6 +250,19 @@ interface TodayChecklistProps {
    * `WorkbookConfigLike` mocks that omit it just resolve to no re-test).
    */
   configs?: Array<WorkbookConfigLike & TodayRowConfigLike>
+  /**
+   * Whether `configs` can be believed yet (UX-363, Codex round 1 P2).
+   *
+   * `useActivityConfigs` hands `[]` before its snapshot arrives and keeps `[]`
+   * when the read throws, and an empty list is an ANSWER — *"no curriculum
+   * activity"* — which would be asserted about every row on first paint and
+   * permanently on a failed read. The caller owns the hook, so it owns the
+   * distinction; absent means settled, which is what every existing caller and
+   * every test already meant.
+   */
+  configsLoading?: boolean
+  /** The configs read failed. A failure is never rendered as an empty result. */
+  configsFailed?: boolean
   onPreCompletionScan: (file: File, index: number) => void
   captureLoading: boolean
   captureItemIndex: number | null
@@ -296,6 +310,8 @@ export default function TodayChecklist({
   onBackfillWorkbookScan,
   todayArtifacts = [],
   configs = [],
+  configsLoading = false,
+  configsFailed = false,
   onPreCompletionScan,
   captureLoading,
   captureItemIndex,
@@ -314,6 +330,15 @@ export default function TodayChecklist({
   onOpenDecisionsChange,
 }: TodayChecklistProps) {
   const navigate = useNavigate()
+  // UX-363 / Codex round 1 (P2): a failed read is not an affirmative empty, and
+  // an unsettled one is not an answer either. `failed` is checked first — a read
+  // that errored is not still loading, and its sentence is the one that does not
+  // resolve on its own.
+  const configsState = configsFailed
+    ? TodayRowConfigsState.Failed
+    : configsLoading
+      ? TodayRowConfigsState.Loading
+      : TodayRowConfigsState.Settled
   const [editingPlan, setEditingPlan] = useState(false)
   const [addingItem, setAddingItem] = useState(false)
   const [newItemTitle, setNewItemTitle] = useState('')
@@ -936,7 +961,7 @@ export default function TodayChecklist({
             // Resolved from the family's own curriculum rows — `itemType` is only
             // the fallback — so the tell can never promise a door the row does
             // not have. See `todayRowKind.ts` for the resolution order.
-            const row = resolveTodayRow(item, configs)
+            const row = resolveTodayRow(item, configs, configsState)
             const doorLabel = isPhotoDoor(row.addDoor)
               ? TODAY_ROW_DOOR_LABEL[row.addDoor]
               : TODAY_ROW_DOOR_LABEL[TodayRowDoor.AddPhoto]
@@ -1341,7 +1366,13 @@ export default function TodayChecklist({
                     too, because on a routine and an app row there was otherwise
                     nowhere on Today to add anything at all. The pipeline behind
                     it is unchanged. */}
-                {item.completed && item.evidenceArtifactId && (() => {
+                {item.evidenceArtifactId && (() => {
+                  // UX-363 / Codex round 1 (P2): NOT gated on `completed` any
+                  // more. A pre-completion capture sets `evidenceArtifactId`
+                  // without ticking the box, so gating the chip here removed the
+                  // door (which reads the same field) and put nothing in its
+                  // place — the row went silent about a photo that had just
+                  // saved, which is the uncertainty this whole row exists to end.
                   // FEAT-184 / UX-151: a kid's photo that read as a curriculum
                   // page keeps its analysis on the scan doc but acts on nothing;
                   // `pendingScanId` surfaces it here as "Review this" on the
@@ -1722,7 +1753,7 @@ export default function TodayChecklist({
               word rather than a second vocabulary for the same stack of photos. */}
           {captureDialogIndex !== null
             && checklist[captureDialogIndex]
-            && resolveTodayRow(checklist[captureDialogIndex], configs).addDoor === TodayRowDoor.AddPage
+            && resolveTodayRow(checklist[captureDialogIndex], configs, configsState).addDoor === TodayRowDoor.AddPage
             ? 'Add pages'
             : 'Add photos'}
           {captureDialogIndex !== null && checklist[captureDialogIndex] &&

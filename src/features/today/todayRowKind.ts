@@ -101,8 +101,36 @@ export const TodayRowKind = {
   Strand: ActivityType.Strand,
   Watch: 'watch',
   Unknown: 'unknown',
+  /**
+   * The curriculum list has not settled, or failed to load (Codex round 1, P2).
+   *
+   * `useActivityConfigs` hands `[]` before its snapshot arrives and keeps `[]`
+   * when the read throws — so resolving against it would answer **`unknown`**,
+   * and `unknown` is an affirmative claim: *"not linked to a curriculum
+   * activity"*, on a row that may well be. On a failed read it would stand
+   * there permanently. That is the rule this repo keeps relearning — a failed
+   * read is never rendered as an affirmative empty result (`UX-356`, `UX-365`,
+   * and the census's own GATE verdict) — so an unsettled list gets its own
+   * answer that claims nothing about the row.
+   */
+  Unresolved: 'unresolved',
 } as const
 export type TodayRowKind = (typeof TodayRowKind)[keyof typeof TodayRowKind]
+
+/**
+ * Whether the caller's curriculum list can be believed yet.
+ *
+ * Passed rather than inferred, because an empty list and an unread list are
+ * indistinguishable from inside this function and mean opposite things: a child
+ * really can have no configs, and that is an answer.
+ */
+export const TodayRowConfigsState = {
+  Settled: 'settled',
+  Loading: 'loading',
+  Failed: 'failed',
+} as const
+export type TodayRowConfigsState =
+  (typeof TodayRowConfigsState)[keyof typeof TodayRowConfigsState]
 
 /**
  * The one place a row invites her to add to it.
@@ -151,6 +179,10 @@ export const DOOR_FOR_KIND: Record<TodayRowKind, TodayRowDoor> = {
   [TodayRowKind.Strand]: TodayRowDoor.RecordSession,
   [TodayRowKind.Watch]: TodayRowDoor.Watch,
   [TodayRowKind.Unknown]: TodayRowDoor.AddPhoto,
+  // An unsettled list cannot tell us this is a workbook, and the capture path
+  // cannot either — with no configs to match, it takes the evidence branch. So
+  // the honest door is the plain photo, and it is the door that will actually run.
+  [TodayRowKind.Unresolved]: TodayRowDoor.AddPhoto,
 }
 
 /**
@@ -190,7 +222,22 @@ export const TODAY_ROW_KIND_WORD: Record<TodayRowKind, string> = {
   [TodayRowKind.Strand]: ACTIVITY_TYPE_WORDS[ActivityType.Strand].label,
   [TodayRowKind.Watch]: 'Video',
   [TodayRowKind.Unknown]: 'No curriculum row',
+  // Present tense and no claim about the row: it says what the APP is doing,
+  // which is the only thing true yet. The failed-read wording is below.
+  [TodayRowKind.Unresolved]: 'Checking your curriculum…',
 }
+
+/**
+ * What an `Unresolved` row says when the read FAILED rather than not finished.
+ *
+ * Two states, two sentences, kept apart on purpose: *"checking"* resolves on its
+ * own and *"couldn't read"* does not, so *"try again"* is wrong advice for one of
+ * them — the `dailyPlanGate` distinction (`UX-352`), on a read instead of a write.
+ * The note says what still works, because the capture door is right beside it.
+ */
+export const CONFIG_READ_FAILED_TELL = 'Couldn’t read your curriculum list'
+export const CONFIG_READ_FAILED_NOTE =
+  'So this row cannot say what it is or where it stands. A photo still saves as evidence; reopening Today re-reads the list.'
 
 /** Why a row resolved to `unknown`. `null` on every row that resolved. */
 export const TodayRowUnknownReason = {
@@ -205,19 +252,37 @@ export type TodayRowUnknownReason =
   (typeof TodayRowUnknownReason)[keyof typeof TodayRowUnknownReason]
 
 /**
+ * What the capture door on an unplaced row actually does — one clause, shared.
+ *
+ * **Codex round 1 (P1) caught the first draft of these notes claiming *"no lesson
+ * count moves"*, and it was false.** A photo on a row the app cannot place takes
+ * `useUnifiedCapture`'s classification path, which fuzzy-matches the page by
+ * name and may create or advance a workbook (and does say so, in its own snack).
+ * Narrowing that write is a `skillSnapshots` / `activityConfigs` change and
+ * therefore propose-and-confirm — filed as `UX-403`, with the proposal, rather
+ * than made here. What was this run's to fix is the sentence, so the sentence now
+ * says what happens.
+ *
+ * One clause, appended to all three reasons, so no note can drift from another
+ * about the same door.
+ */
+export const UNPLACED_ROW_EVIDENCE_CLAUSE =
+  'A photo saves as evidence here; if it reads as a workbook page, the app files it on Curriculum and says which.'
+
+/**
  * The one line the row shows when there is nowhere on Today to add to it.
  *
- * Each says what the photo *will* do as well as what it will not, because the
+ * Each names its own reason and then says what the photo will do, because the
  * capture is still offered — a sentence that only said "no" would read as a
  * refusal of a door that is right there.
  */
 export const TODAY_ROW_UNKNOWN_NOTE: Record<TodayRowUnknownReason, string> = {
   [TodayRowUnknownReason.NoMatch]:
-    'Not linked to a curriculum activity — a photo saves as evidence, and no lesson count moves. Progress → Curriculum is where a count lives.',
+    `Not linked to a curriculum activity, so nothing on this row tracks a count. ${UNPLACED_ROW_EVIDENCE_CLAUSE}`,
   [TodayRowUnknownReason.Ambiguous]:
-    'More than one curriculum activity answers to this name, so this row cannot tell which. A photo saves as evidence; Progress → Curriculum is where a duplicate gets sorted out.',
+    `More than one curriculum activity answers to this name, so this row cannot tell which — Progress → Curriculum is where a duplicate gets sorted out. ${UNPLACED_ROW_EVIDENCE_CLAUSE}`,
   [TodayRowUnknownReason.StaleJoin]:
-    'The curriculum activity this was planned from is finished or gone — a photo saves as evidence, and no lesson count moves.',
+    `The curriculum activity this was planned from is finished or gone, so nothing on this row tracks a count. ${UNPLACED_ROW_EVIDENCE_CLAUSE}`,
 }
 
 /**
@@ -340,16 +405,36 @@ function build(
   kind: TodayRowKind,
   config: TodayRowConfigLike | null,
   unknownReason: TodayRowUnknownReason | null = null,
+  /**
+   * The curriculum row this resolves to when the DOCUMENT is not in hand.
+   *
+   * A stamped `workbookConfigId` is on the row, not in the config list, so the
+   * capture path uses it whether or not the list has loaded — see step 2.
+   */
+  configIdOverride: string | null = null,
 ): TodayRow {
   const where = positionPhrase(kind, config)
   const word = TODAY_ROW_KIND_WORD[kind]
   return {
     kind,
-    configId: config?.id ?? null,
+    configId: config?.id ?? configIdOverride,
     tell: where ? `${word} · ${where}` : word,
     addDoor: DOOR_FOR_KIND[kind],
     unknownReason,
     note: unknownReason ? TODAY_ROW_UNKNOWN_NOTE[unknownReason] : null,
+  }
+}
+
+/** The `Unresolved` answer, which claims nothing about the row. */
+function buildUnresolved(state: TodayRowConfigsState): TodayRow {
+  const failed = state === TodayRowConfigsState.Failed
+  return {
+    kind: TodayRowKind.Unresolved,
+    configId: null,
+    tell: failed ? CONFIG_READ_FAILED_TELL : TODAY_ROW_KIND_WORD[TodayRowKind.Unresolved],
+    addDoor: DOOR_FOR_KIND[TodayRowKind.Unresolved],
+    unknownReason: null,
+    note: failed ? CONFIG_READ_FAILED_NOTE : null,
   }
 }
 
@@ -366,11 +451,19 @@ export function resolveTodayRow(
     'label' | 'itemType' | 'activityConfigId' | 'workbookConfigId' | 'strandConfigId' | 'subjectBucket'
   >,
   configs: TodayRowConfigLike[],
+  /**
+   * Whether `configs` can be believed yet. Defaults to `settled` so every
+   * existing caller and every test keeps its meaning; the Today surface passes
+   * its hook's real state (Codex round 1, P2).
+   */
+  configsState: TodayRowConfigsState = TodayRowConfigsState.Settled,
 ): TodayRow {
+  const settled = configsState === TodayRowConfigsState.Settled
   const byId = (id: string | undefined): TodayRowConfigLike | undefined =>
     id ? configs.find((c) => c.id === id && isLive(c)) : undefined
 
-  // 1 · A curated video is never a curriculum row.
+  // 1 · A curated video is never a curriculum row. It needs no config, so it is
+  //     answerable even while the list is unread.
   if (item.itemType === TodayRowKind.Watch) return build(TodayRowKind.Watch, null)
 
   // 2 · The workbook question, asked exactly as `useUnifiedCapture` asks it, so
@@ -381,10 +474,24 @@ export function resolveTodayRow(
   //     skipping it here would make the row read *Routine* while its photo went
   //     to a workbook — the one disagreement this step exists to prevent. A
   //     finished program is a separate question, and it belongs on the door
-  //     rather than on the label that describes it.
+  //     rather than on the label that describes it (`UX-399`).
+  //
+  //     **The STAMP answers even when the document is not in hand** (Codex round
+  //     1, P2): `workbookConfigId` lives on the row, so the capture path resolves
+  //     it with no config list at all — and a row that reads *"No curriculum
+  //     row"* while its photo advances the workbook it names is the exact
+  //     contradiction this step exists to prevent, arriving through an unread
+  //     list. The position is simply absent until the document loads.
   const workbookConfigId = item.workbookConfigId ?? findWorkbookConfigId(item, configs)
-  const workbook = workbookConfigId ? configs.find((c) => c.id === workbookConfigId) : undefined
-  if (workbook) return build(TodayRowKind.Workbook, workbook)
+  if (workbookConfigId) {
+    const workbook = configs.find((c) => c.id === workbookConfigId) ?? null
+    return build(TodayRowKind.Workbook, workbook, null, workbookConfigId)
+  }
+
+  // An unread list cannot answer any of the questions below — and answering them
+  // against `[]` would claim *"not linked to a curriculum activity"* about a row
+  // that may well be, permanently so on a failed read.
+  if (!settled) return buildUnresolved(configsState)
 
   // 3 · The stamped curriculum join. A stale stamp is its own answer.
   if (item.activityConfigId) {
@@ -411,16 +518,21 @@ export function resolveTodayRow(
     return build(kind, named)
   }
 
-  // 7 · What the row says it is — a record of an intention, not of a config.
+  // 7 · Ambiguity outranks what the row SAYS it is (Codex round 1, P2).
+  //
+  //     Two live configs answering to one label is a fact about the family's
+  //     curriculum; `itemType` on a model-planned row is a word. Letting the word
+  //     win would defeat the duplicate-safety rule of step 6 on exactly the rows
+  //     it is least trustworthy for — and it would offer a *door* chosen from the
+  //     word, on a name the app has just admitted it cannot resolve.
+  if (ambiguous) return build(TodayRowKind.Unknown, null, TodayRowUnknownReason.Ambiguous)
+
+  // 8 · What the row says it is — a record of an intention, not of a config.
   const stated = kindFromItemType(item.itemType)
   if (stated) return build(stated, null)
 
-  // 8 · Nothing answers. Say so, and offer the door that is honest.
-  return build(
-    TodayRowKind.Unknown,
-    null,
-    ambiguous ? TodayRowUnknownReason.Ambiguous : TodayRowUnknownReason.NoMatch,
-  )
+  // 9 · Nothing answers. Say so, and offer the door that is honest.
+  return build(TodayRowKind.Unknown, null, TodayRowUnknownReason.NoMatch)
 }
 
 /** Does this row's door put a photo on it? The two capture doors, named once. */

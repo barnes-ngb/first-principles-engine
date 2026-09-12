@@ -340,6 +340,30 @@ export function useUnifiedCapture({
         return ok
       }
 
+      // ── UX-363 / Codex round 1 (P1) — WHY THIS PATH IS UNCHANGED. ──
+      //
+      // Below this point a NON-workbook row's photo takes the classification
+      // path, which calls `syncScanToConfig` with no target: it fuzzy-matches by
+      // name and may **create** a workbook config or advance one, then writes
+      // `childSkillMaps`, merges `skillSnapshots.conceptualBlocks` and
+      // auto-completes bypassed rows. Codex round 1 was right that a door
+      // labelled *Add a photo* should not do that — a photo taken under
+      // *Handwriting* can move an unrelated workbook.
+      //
+      // It is **not fixed here, and not because it is small.** The fix is to stop
+      // writing `activityConfigs`, `childSkillMaps` and
+      // `skillSnapshots.conceptualBlocks` on this path, and `skillSnapshots` is on
+      // `CLAUDE.md`'s never-silently-change list: *"Changes touching these are
+      // proposed and stop for a human decision."* Narrowing a write is still
+      // changing it, and this one also decides whether a scanned page can create
+      // a curriculum row at all — the door `UX-315` is separately weighing. So it
+      // is filed as **UX-403** with the proposal written out, and what `UX-363`
+      // fixes instead is the part that was genuinely its own: the row's note no
+      // longer claims *"no lesson count moves"*, because that sentence was false.
+      //
+      // The reach `UX-363` added is immaterial to the hazard: the same photo on
+      // the same row took the same path the moment the box was ticked, which is
+      // one tap earlier than before, not a new capability.
       try {
         // 1. Try the scan pipeline (AI vision analysis)
         const record = await runScan(file, familyId, childId, captureContext)

@@ -3,7 +3,14 @@ import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 
 import TodayChecklist from './TodayChecklist'
-import { TODAY_ROW_UNKNOWN_NOTE, TodayRowUnknownReason } from './todayRowKind'
+import {
+  CONFIG_READ_FAILED_NOTE,
+  CONFIG_READ_FAILED_TELL,
+  TODAY_ROW_KIND_WORD,
+  TODAY_ROW_UNKNOWN_NOTE,
+  TodayRowKind,
+  TodayRowUnknownReason,
+} from './todayRowKind'
 import type { TodayRowConfigLike } from './todayRowKind'
 import type { ChecklistItem, DayLog, SkillSnapshot } from '../../core/types'
 import { ActivityType, PlanType, SubjectBucket } from '../../core/types/enums'
@@ -25,7 +32,13 @@ const configs: TodayRowConfigLike[] = [
 
 function renderRow(
   item: ChecklistItem,
-  opts: { onStrandSessionOpen?: ReturnType<typeof vi.fn> } = {},
+  opts: {
+    onStrandSessionOpen?: ReturnType<typeof vi.fn>
+    configsLoading?: boolean
+    configsFailed?: boolean
+    /** A failed read really does leave the list empty — say so faithfully. */
+    configs?: TodayRowConfigLike[]
+  } = {},
 ) {
   const dayLog = { id: '2026-09-12', date: '2026-09-12', checklist: [item] } as unknown as DayLog
   render(
@@ -44,7 +57,9 @@ function renderRow(
         onTeachHelperOpen={vi.fn()}
         onUnifiedCapture={vi.fn()}
         onStrandSessionOpen={opts.onStrandSessionOpen ?? vi.fn()}
-        configs={configs}
+        configs={opts.configs ?? configs}
+        configsLoading={opts.configsLoading ?? false}
+        configsFailed={opts.configsFailed ?? false}
         onPreCompletionScan={vi.fn()}
         captureLoading={false}
         captureItemIndex={null}
@@ -160,5 +175,49 @@ describe('TodayChecklist — the row carries its own add-door (UX-363)', () => {
     // nothing was taken away: after completion the generic capture is still there.
     renderRow(item({ label: 'History (30m)', completed: true }))
     expect(addPhoto()).not.toBeNull()
+  })
+})
+
+// ── Codex round 1 ────────────────────────────────────────────────────────────
+
+describe('TodayChecklist — an unread curriculum list claims nothing (P2)', () => {
+  it('does not say "No curriculum row" while the configs read is in flight', () => {
+    renderRow(item({ label: 'Handwriting (15m)' }), { configsLoading: true })
+    expect(screen.queryByText('No curriculum row')).toBeNull()
+    expect(screen.getByText(TODAY_ROW_KIND_WORD[TodayRowKind.Unresolved])).toBeTruthy()
+  })
+
+  it('a FAILED configs read says so and still offers the photo', () => {
+    renderRow(item({ label: 'Handwriting (15m)' }), { configsFailed: true })
+    expect(screen.getByText(CONFIG_READ_FAILED_TELL)).toBeTruthy()
+    expect(screen.getByText(CONFIG_READ_FAILED_NOTE)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^add a photo$/i })).not.toBeNull()
+  })
+
+  it('a stamped workbook still reads as one, and still offers Add page', () => {
+    // A failed read leaves the list empty, so there is no document to take a
+    // position from — but the stamp is on the ROW, and the capture path uses it.
+    renderRow(
+      item({ label: 'GATB Math (30m)', workbookConfigId: 'wb-1' }),
+      { configsFailed: true, configs: [] },
+    )
+    expect(screen.getByText('Workbook')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^add page$/i })).not.toBeNull()
+    expect(screen.queryByText(CONFIG_READ_FAILED_TELL)).toBeNull()
+  })
+})
+
+describe('TodayChecklist — a saved photo is visible before the box is ticked (P2)', () => {
+  it('an INCOMPLETE row carrying evidence shows the Captured chip', () => {
+    // The pre-completion capture sets `evidenceArtifactId` without ticking the
+    // box, so gating the chip on `completed` left the row silent about a photo
+    // that had just saved — and the door, reading the same field, was gone.
+    renderRow(item({ completed: false, evidenceArtifactId: 'a1', evidenceCollection: 'artifacts' }))
+    expect(screen.getByText(/captured/i)).toBeTruthy()
+  })
+
+  it('and a completed one still does', () => {
+    renderRow(item({ completed: true, evidenceArtifactId: 'a1', evidenceCollection: 'artifacts' }))
+    expect(screen.getByText(/captured/i)).toBeTruthy()
   })
 })

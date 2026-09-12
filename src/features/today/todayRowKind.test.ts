@@ -1,15 +1,19 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  CONFIG_READ_FAILED_NOTE,
+  CONFIG_READ_FAILED_TELL,
   DOOR_FOR_KIND,
   isPhotoDoor,
   resolveTodayRow,
   TODAY_ROW_DOOR_LABEL,
   TODAY_ROW_KIND_WORD,
   TODAY_ROW_UNKNOWN_NOTE,
+  TodayRowConfigsState,
   TodayRowDoor,
   TodayRowKind,
   TodayRowUnknownReason,
+  UNPLACED_ROW_EVIDENCE_CLAUSE,
 } from './todayRowKind'
 import type { TodayRowConfigLike } from './todayRowKind'
 import type { ChecklistItem } from '../../core/types'
@@ -228,9 +232,104 @@ describe('resolveTodayRow — unknown says which kind of nothing it is', () => {
 
   it('every unknown row still gets a capture door — the note explains, it does not refuse', () => {
     for (const reason of Object.values(TodayRowUnknownReason)) {
-      expect(TODAY_ROW_UNKNOWN_NOTE[reason]).toContain('photo')
+      expect(TODAY_ROW_UNKNOWN_NOTE[reason]).toContain(UNPLACED_ROW_EVIDENCE_CLAUSE)
     }
     expect(DOOR_FOR_KIND[TodayRowKind.Unknown]).toBe(TodayRowDoor.AddPhoto)
+  })
+
+  // Codex round 1 (P1): the first draft said "no lesson count moves", which is
+  // false — an unplaced row's photo takes the fuzzy classification path and may
+  // create or advance a workbook. Narrowing that write is propose-and-confirm
+  // (UX-403); the sentence was this run's to fix.
+  it('no note claims a photo changes nothing', () => {
+    for (const note of Object.values(TODAY_ROW_UNKNOWN_NOTE)) {
+      expect(note).not.toMatch(/no lesson count moves|nothing (?:else )?moves|changes nothing/i)
+    }
+  })
+
+  it('ambiguity outranks what the row SAYS it is', () => {
+    const duplicated: TodayRowConfigLike[] = [
+      config({ id: 'a', name: 'Sight word games', type: ActivityType.Routine }),
+      config({ id: 'b', name: 'Sight word games', type: ActivityType.Activity }),
+    ]
+    // A model-planned row asserting a kind must not be believed over the fact
+    // that the app cannot tell which curriculum row it names.
+    const row = resolveTodayRow(
+      item({ label: 'Sight word games (10m)', itemType: 'routine' }),
+      duplicated,
+    )
+    expect(row.kind).toBe(TodayRowKind.Unknown)
+    expect(row.unknownReason).toBe(TodayRowUnknownReason.Ambiguous)
+    // …and with no duplicate, the asserted kind is still honoured.
+    expect(
+      resolveTodayRow(item({ label: 'Nothing here (10m)', itemType: 'routine' }), duplicated).kind,
+    ).toBe(TodayRowKind.Routine)
+  })
+})
+
+// ── An unread curriculum list is not an empty one (Codex round 1, P2) ────────
+
+describe('resolveTodayRow — an unsettled or failed configs read claims nothing', () => {
+  const loading = TodayRowConfigsState.Loading
+  const failed = TodayRowConfigsState.Failed
+
+  it('does not call a row "No curriculum row" while the list is still loading', () => {
+    const row = resolveTodayRow(item({ label: 'Handwriting (15m)' }), [], loading)
+    expect(row.kind).toBe(TodayRowKind.Unresolved)
+    expect(row.unknownReason).toBeNull()
+    expect(row.note).toBeNull()
+    expect(row.tell).not.toContain('No curriculum row')
+  })
+
+  it('a FAILED read says so, in its own sentence, and still offers the photo', () => {
+    const row = resolveTodayRow(item({ label: 'Handwriting (15m)' }), [], failed)
+    expect(row.kind).toBe(TodayRowKind.Unresolved)
+    expect(row.tell).toBe(CONFIG_READ_FAILED_TELL)
+    expect(row.note).toBe(CONFIG_READ_FAILED_NOTE)
+    expect(row.addDoor).toBe(TodayRowDoor.AddPhoto)
+  })
+
+  it('the two sentences are kept apart — one resolves itself, the other does not', () => {
+    expect(CONFIG_READ_FAILED_TELL).not.toBe(TODAY_ROW_KIND_WORD[TodayRowKind.Unresolved])
+  })
+
+  it('a stamped workbook is STILL a workbook — the capture path uses the stamp', () => {
+    for (const state of [loading, failed]) {
+      const row = resolveTodayRow(
+        item({ label: 'GATB Math (30m)', workbookConfigId: 'wb-1' }),
+        [],
+        state,
+      )
+      expect(row.kind).toBe(TodayRowKind.Workbook)
+      expect(row.configId).toBe('wb-1')
+      expect(row.addDoor).toBe(TodayRowDoor.AddPage)
+      // No position: the document is not in hand, and inventing one is the thing
+      // this module refuses everywhere else.
+      expect(row.tell).toBe('Workbook')
+    }
+  })
+
+  it('a stamped activityConfigId is NOT called stale while the list is unread', () => {
+    const row = resolveTodayRow(
+      item({ label: 'History (30m)', activityConfigId: 'st-1' }),
+      [],
+      loading,
+    )
+    expect(row.kind).toBe(TodayRowKind.Unresolved)
+    expect(row.unknownReason).toBeNull()
+  })
+
+  it('a watch row needs no config, so it answers either way', () => {
+    for (const state of [loading, failed]) {
+      expect(resolveTodayRow(item({ itemType: 'watch' }), [], state).kind)
+        .toBe(TodayRowKind.Watch)
+    }
+  })
+
+  it('once settled, an empty list IS an answer', () => {
+    const row = resolveTodayRow(item({ label: 'Handwriting (15m)' }), [])
+    expect(row.kind).toBe(TodayRowKind.Unknown)
+    expect(row.unknownReason).toBe(TodayRowUnknownReason.NoMatch)
   })
 })
 
