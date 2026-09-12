@@ -10,6 +10,7 @@ import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
 import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
 import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked'
+import AddIcon from '@mui/icons-material/Add'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
@@ -67,6 +68,8 @@ interface PlanPreviewCardProps {
   onMoveItem?: (dayIndex: number, itemIndex: number, direction: -1 | 1) => void
   onRemoveItem?: (dayIndex: number, itemIndex: number) => void
   onUpdateTime?: (dayIndex: number, itemIndex: number, newMinutes: number) => void
+  /** Open the shared Curriculum/video chooser for this day. Takes precedence over the video-only door. */
+  onAddItem?: (dayIndex: number) => void
   /** Open the curated-video picker to plan a watch item onto this day (FEAT-104). */
   onAddWatchItem?: (dayIndex: number) => void
   /**
@@ -154,7 +157,7 @@ function EditableTime({ minutes, editable, onUpdate }: { minutes: number; editab
   )
 }
 
-export default function PlanPreviewCard({ plan, hoursPerDay, masteryReviewLine, weekStart, snapshot, onToggleItem, onGenerateActivity, generatingItemId, onMoveItem, onRemoveItem, onUpdateTime, onAddWatchItem, onMoveItemToDay, onSwapWatchItem, itemEditLockReason, dayTypes, onDayTypeChange }: PlanPreviewCardProps) {
+export default function PlanPreviewCard({ plan, hoursPerDay, masteryReviewLine, weekStart, snapshot, onToggleItem, onGenerateActivity, generatingItemId, onMoveItem, onRemoveItem, onUpdateTime, onAddItem, onAddWatchItem, onMoveItemToDay, onSwapWatchItem, itemEditLockReason, dayTypes, onDayTypeChange }: PlanPreviewCardProps) {
   const budgetMinutes = Math.round(hoursPerDay * 60)
   const [removeConfirm, setRemoveConfirm] = useState<{ dayIndex: number; itemIndex: number; title: string } | null>(null)
   /** UX-251: which row's reorder overflow is open. One menu for the whole card. */
@@ -619,21 +622,20 @@ export default function PlanPreviewCard({ plan, hoursPerDay, masteryReviewLine, 
               )
             })()}
 
-            {/* Plan a curated video onto this day (FEAT-104) — picks from the
-                vetted library, never an open search. */}
+            {/* One add door per day; existing video-only callers retain their picker. */}
             {/* UX-261: not on a set-aside day. Pre-Apply the row would be
                 erased by the next `enforceDayTypes`; at Apply the day is
                 skipped entirely, so it would never be written. An affordance
                 whose result is discarded is the "silently inert button" FEAT-138
                 went out of its way to stop rendering. */}
-            {onAddWatchItem && !isSetAside && (
+            {(onAddItem || onAddWatchItem) && !isSetAside && (
               <Button
                 size="small"
-                startIcon={<OndemandVideoIcon sx={{ fontSize: 16 }} />}
-                onClick={() => onAddWatchItem(dayIndex)}
-                sx={{ mt: 0.5, ml: 1, textTransform: 'none' }}
+                startIcon={onAddItem ? <AddIcon /> : <OndemandVideoIcon sx={{ fontSize: 16 }} />}
+                onClick={() => (onAddItem ?? onAddWatchItem)?.(dayIndex)}
+                sx={{ mt: 0.5, ml: 1, textTransform: 'none', minHeight: 44 }}
               >
-                Add a video
+                {onAddItem ? 'Add item' : 'Add a video'}
               </Button>
             )}
           </Box>

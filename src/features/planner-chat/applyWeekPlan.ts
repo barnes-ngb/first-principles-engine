@@ -264,7 +264,12 @@ export function buildApplyChecklist(
   lessonCardMap: Map<string, string>,
 ): ChecklistItem[] {
   return items.map((item) => {
-    const workbookConfigId = findWorkbookConfigId(
+    const selectedConfig = item.activityConfigId
+      ? activityConfigs.find((config) => config.id === item.activityConfigId && !(config as { completed?: boolean }).completed)
+      : undefined
+    const workbookConfigId = item.activityConfigId
+      ? selectedConfig?.type === 'workbook' && selectedConfig.scannable !== false ? selectedConfig.id : undefined
+      : findWorkbookConfigId(
       { label: item.title, subjectBucket: item.subjectBucket },
       activityConfigs,
     )
@@ -282,11 +287,14 @@ export function buildApplyChecklist(
     // workbook and moving an unrelated strand's count, which no increment can
     // take back. A missed stamp costs the day-surface button; the Curriculum
     // row's own is one screen away.
-    const strandConfigId = ambiguousAcrossTypes(item.title, activityConfigs)
-      ? undefined
-      : findStrandConfigId({ label: item.title }, activityConfigs)
+    const strandConfigId = item.activityConfigId
+      ? selectedConfig?.type === 'strand' ? selectedConfig.id : undefined
+      : ambiguousAcrossTypes(item.title, activityConfigs)
+        ? undefined
+        : findStrandConfigId({ label: item.title }, activityConfigs)
     return {
       label: `${item.title} (${item.estimatedMinutes}m)`,
+      ...(item.activityConfigId ? { activityConfigId: item.activityConfigId } : {}),
       ...(strandConfigId ? { strandConfigId } : {}),
       completed: false,
       skillTags: item.skillTags,

@@ -1610,7 +1610,9 @@ export default function CurriculumTab() {
         open={addDialogOpen}
         childId={activeChildId}
         nextSortOrder={configs.length + 1}
-        onAdd={(data) => void handleAddActivity(data)}
+        onAdd={handleAddActivity}
+        description={`For ${childName}. Saves a reusable resource; your current week is unchanged.`}
+        submitLabel="Save to Curriculum"
         onClose={() => setAddDialogOpen(false)}
         // UX-335 — so the cleared-activity notice can say whose it was. Looked
         // up from the family's own children: identity, never a literal name.
