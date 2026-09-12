@@ -4,6 +4,7 @@ import type {
   AdjustmentDecision,
   AssignmentAction,
   ChatMessageRole,
+  ChecklistItemKind,
   DayBlockType,
   DayType,
   EnergyLevel,
@@ -388,8 +389,19 @@ export interface ChecklistItem {
   rolledOver?: boolean
   /** ISO date string (YYYY-MM-DD) of the original day this item was rolled from. */
   rolledOverFrom?: string
-  /** Item type: routine, workbook, evaluation (Knowledge Mine/Fluency), activity, or watch (curated video). */
-  itemType?: 'routine' | 'workbook' | 'evaluation' | 'activity' | 'watch'
+  /**
+   * What this row is — every `ActivityType`, plus `watch` (UX-363).
+   *
+   * **The fallback, never the authority.** `todayRowKind.resolveTodayRow` reads
+   * the family's own `activityConfigs` first and only falls back to this field,
+   * because most rows carry none (the planner round-trips through routine prose)
+   * and an AI-planned row's value is an assertion rather than a record. An
+   * unrecognised value reads as `unknown`, which offers the honest door.
+   *
+   * Widened from a hand-written five-member union to `ChecklistItemKind`; every
+   * previously stored value is still a member, so there is no migration.
+   */
+  itemType?: ChecklistItemKind
   /** Evaluation mode when itemType is 'evaluation'. */
   evaluationMode?: 'phonics' | 'comprehension' | 'fluency' | 'math'
   /**
@@ -621,8 +633,12 @@ export interface DraftPlanItem {
   category?: 'must-do' | 'choose'
   /** Guidance note when an item is skipped (from AI). */
   skipGuidance?: string
-  /** Item type: routine, workbook, evaluation (Knowledge Mine/Fluency), activity, or watch (curated video). */
-  itemType?: 'routine' | 'workbook' | 'evaluation' | 'activity' | 'watch'
+  /**
+   * What this row will be — every `ActivityType`, plus `watch` (UX-363).
+   * Carried onto the `ChecklistItem` verbatim by `buildApplyChecklist`; see the
+   * field docs there.
+   */
+  itemType?: ChecklistItemKind
   /** Evaluation mode when itemType is 'evaluation'. */
   evaluationMode?: 'phonics' | 'comprehension' | 'fluency' | 'math'
   /** Route to navigate to (e.g., '/quest') for in-app activities. */

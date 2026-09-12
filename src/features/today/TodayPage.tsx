@@ -218,7 +218,11 @@ export default function TodayPage() {
 
   // FEAT-62 (legacy-item fallback): scannable workbook configs let unstamped items
   // resolve their workbook by name/subject match for routed capture + backfill.
-  const { configs: activityConfigs } = useActivityConfigs(selectedChildId)
+  const {
+    configs: activityConfigs,
+    loading: activityConfigsLoading,
+    error: activityConfigsError,
+  } = useActivityConfigs(selectedChildId)
 
   const [strandSessionId, setStrandSessionId] = useState<string | null>(null)
   const [strandSessionSaving, setStrandSessionSaving] = useState(false)
@@ -1552,6 +1556,10 @@ export default function TodayPage() {
           onBackfillWorkbookScan={handleBackfillWorkbookScan}
           todayArtifacts={todayArtifacts}
           configs={activityConfigs}
+          // UX-363 / Codex round 1 (P2): an unread or failed configs read is not
+          // an empty curriculum. The hook already distinguishes the three states.
+          configsLoading={activityConfigsLoading}
+          configsFailed={!!activityConfigsError}
           onPreCompletionScan={handlePreCompletionScan}
           captureLoading={scanLoading}
           captureItemIndex={scanItemIndex}

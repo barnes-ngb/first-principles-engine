@@ -21,7 +21,15 @@ export function buildCurriculumDraftItem(config: ActivityConfig): DraftPlanItem 
     skillTags: [],
     accepted: true,
     category: 'must-do',
-    itemType: config.type === 'workbook' ? 'workbook' : config.type === 'routine' ? 'routine' : 'activity',
+    // UX-363: the row says what the config IS, rather than being flattened into
+    // one of three words. This used to read `workbook ? 'workbook' : routine ?
+    // 'routine' : 'activity'`, so a strand, an app and a formation block all
+    // arrived on Today as `'activity'` — the hand-written-union shape UX-204
+    // made unrepresentable on Progress → Curriculum, on the field that decides
+    // what a row's door is. `ChecklistItemKind` spreads `ActivityType`, so the
+    // config's own type is carried verbatim and an eighth member needs no edit
+    // here at all.
+    itemType: config.type,
     isAppBlock: config.type === 'app',
   }
 }
