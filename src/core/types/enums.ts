@@ -386,6 +386,34 @@ export const ActivityType = {
 } as const
 export type ActivityType = (typeof ActivityType)[keyof typeof ActivityType]
 
+/**
+ * What a planned ROW is — the stored `itemType` on a `ChecklistItem` /
+ * `DraftPlanItem` (UX-363).
+ *
+ * Every `ActivityType`, **derived rather than retyped**, plus `watch`, which is
+ * the one row kind that is not a curriculum activity at all (it names a
+ * `watchLibrary` video, and `watchDayItem` is its only writer).
+ *
+ * It used to be a hand-written `'routine' | 'workbook' | 'evaluation' |
+ * 'activity' | 'watch'` — five strings against a seven-member `ActivityType` —
+ * so a strand row, an app row and a formation row had no way to say what they
+ * were, and `buildCurriculumDraftItem` collapsed all three into `'activity'`.
+ * That is the `resolveDailyBudget` lesson (a copy of a union silently excludes
+ * every new member) on the field that decides what a row's door is. Spreading
+ * `ActivityType` means an eighth member arrives here for free and fails to
+ * compile in `todayRowKind`'s `Record`, which is where the decision belongs.
+ *
+ * **Widening the stored field is not widening what a MODEL may assert** — see
+ * `AI_ASSERTABLE_ITEM_KINDS` in `planner-chat/chatPlanner.logic.ts`, which stays
+ * the legacy five. A row that says it is a strand because a config says so is a
+ * record; one that says so because an LLM emitted the word is a guess.
+ */
+export const ChecklistItemKind = {
+  ...ActivityType,
+  Watch: 'watch',
+} as const
+export type ChecklistItemKind = (typeof ChecklistItemKind)[keyof typeof ChecklistItemKind]
+
 export const ActivityFrequency = {
   Daily: 'daily',
   ThreePerWeek: '3x',

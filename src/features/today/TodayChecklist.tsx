@@ -66,6 +66,13 @@ import { findWorkbookConfigId } from '../../core/utils/workbookMatching'
 import { findStrandConfigId } from '../progress/strand'
 import type { WorkbookConfigLike } from '../../core/utils/workbookMatching'
 import {
+  isPhotoDoor,
+  resolveTodayRow,
+  TODAY_ROW_DOOR_LABEL,
+  TodayRowDoor,
+} from './todayRowKind'
+import type { TodayRowConfigLike } from './todayRowKind'
+import {
   ENGAGEMENT_RETEST_REASON,
   GRADE_NOTE_RETEST_REASON,
   enqueueStuckRetests,
@@ -241,7 +248,7 @@ interface TodayChecklistProps {
    * optional `currentPosition` — an `ActivityConfig` supplies it; the looser
    * `WorkbookConfigLike` mocks that omit it just resolve to no re-test).
    */
-  configs?: Array<WorkbookConfigLike & { currentPosition?: number }>
+  configs?: Array<WorkbookConfigLike & TodayRowConfigLike>
   onPreCompletionScan: (file: File, index: number) => void
   captureLoading: boolean
   captureItemIndex: number | null
@@ -925,6 +932,23 @@ export default function TodayChecklist({
               )
             }
 
+            // UX-363: what this row IS, and the one place she adds to it.
+            // Resolved from the family's own curriculum rows — `itemType` is only
+            // the fallback — so the tell can never promise a door the row does
+            // not have. See `todayRowKind.ts` for the resolution order.
+            const row = resolveTodayRow(item, configs)
+            const doorLabel = isPhotoDoor(row.addDoor)
+              ? TODAY_ROW_DOOR_LABEL[row.addDoor]
+              : TODAY_ROW_DOOR_LABEL[TodayRowDoor.AddPhoto]
+            // The photo door. Two changes from FEAT-109's version, and only two:
+            // it is reachable BEFORE the box is checked (that was the whole of
+            // *"where do I add to this lesson?"* having no answer on three row
+            // shapes out of four), and it says which record it makes. A row whose
+            // own door is not a photo — a strand, a quest, a video — keeps the
+            // post-completion capture it already had, so nothing is taken away.
+            const showPhotoDoor =
+              !item.evidenceArtifactId && (item.completed || isPhotoDoor(row.addDoor))
+
             return (
               <Box key={index}>
                 {showBlockHeader && blockHeaderLabel && (
@@ -1027,6 +1051,57 @@ export default function TodayChecklist({
                     )
                   })()}
                 </Stack>
+                {/*
+                  UX-363 — the row's type tell, and its own add-door, on one
+                  line. A workbook, a routine, a strand and an app used to render
+                  as the same title with `(20m)` and a checkbox, so "add to the
+                  lesson" meant four different things and the screen never said
+                  which. The tell names the kind and, where the row has one, where
+                  it stands — "Workbook · lesson 35", "Strand · session 14" — in
+                  the same seven words Progress → Curriculum uses, because they
+                  are read from the same table.
+                */}
+                <Stack
+                  direction="row"
+                  spacing={1}
+                  alignItems="center"
+                  flexWrap="wrap"
+                  useFlexGap
+                  sx={{ ml: 5, mt: 0.25 }}
+                >
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ fontSize: '0.7rem' }}
+                  >
+                    {row.tell}
+                  </Typography>
+                  {showPhotoDoor && (
+                    <Button
+                      size="small"
+                      variant="text"
+                      startIcon={captureLoading && captureItemIndex === index
+                        ? <CircularProgress size={14} />
+                        : <AddAPhotoIcon sx={{ fontSize: 16 }} />}
+                      disabled={captureLoading && captureItemIndex === index}
+                      onClick={() => setCaptureDialogIndex(index)}
+                      sx={{ fontSize: '0.7rem', textTransform: 'none', minWidth: 0, py: 0 }}
+                    >
+                      {doorLabel}
+                    </Button>
+                  )}
+                </Stack>
+                {/* The one line saying why there is no curriculum count behind
+                    this row — and what the photo still does. Only on `unknown`. */}
+                {row.note && (
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ display: 'block', ml: 5, fontSize: '0.7rem', fontStyle: 'italic' }}
+                  >
+                    {row.note}
+                  </Typography>
+                )}
                 {/* Content guide (what to cover today) */}
                 {item.contentGuide && !item.completed && (
                   <Box sx={{ mt: 0.5, ml: 5, pl: 1, borderLeft: '2px solid', borderLeftColor: 'divider' }}>
@@ -1256,26 +1331,16 @@ export default function TodayChecklist({
                   </Stack>
                 )}
 
-                {/* Unified capture (FEAT-109): one "Add photo(s)" button opens a
-                    staging dialog where repeated camera taps AND multi-select
-                    uploads accumulate into one batch, saved together — so Shelly
-                    can shoot several pages of one item, not just upload them. */}
-                {item.completed && !item.evidenceArtifactId && (
-                  <Box sx={{ ml: 5, mt: 0.5 }}>
-                    <Button
-                      size="small"
-                      variant="text"
-                      startIcon={captureLoading && captureItemIndex === index
-                        ? <CircularProgress size={14} />
-                        : <AddAPhotoIcon sx={{ fontSize: 16 }} />}
-                      disabled={captureLoading && captureItemIndex === index}
-                      onClick={() => setCaptureDialogIndex(index)}
-                      sx={{ fontSize: '0.75rem', color: 'text.secondary', textTransform: 'none' }}
-                    >
-                      Add photo(s)
-                    </Button>
-                  </Box>
-                )}
+                {/* Unified capture (FEAT-109): one button opens a staging dialog
+                    where repeated camera taps AND multi-select uploads accumulate
+                    into one batch, saved together — so Shelly can shoot several
+                    pages of one item, not just upload them.
+
+                    UX-363 moved the button UP, onto the row's tell line, and gave
+                    it the kind's own word: it renders before the box is checked
+                    too, because on a routine and an app row there was otherwise
+                    nowhere on Today to add anything at all. The pipeline behind
+                    it is unchanged. */}
                 {item.completed && item.evidenceArtifactId && (() => {
                   // FEAT-184 / UX-151: a kid's photo that read as a curriculum
                   // page keeps its analysis on the scan doc but acts on nothing;
@@ -1346,7 +1411,7 @@ export default function TodayChecklist({
                       onClick={() => onStrandSessionOpen(strandId)}
                       sx={{ ml: 5, mt: 0.5 }}
                     >
-                      Record a session
+                      {TODAY_ROW_DOOR_LABEL[TodayRowDoor.RecordSession]}
                     </Button>
                   )
                 })()}
@@ -1653,7 +1718,13 @@ export default function TodayChecklist({
         maxWidth="xs"
       >
         <DialogTitle sx={{ pb: 1 }}>
-          Add photos
+          {/* UX-363: a workbook's pages are pages. The dialog takes the row's own
+              word rather than a second vocabulary for the same stack of photos. */}
+          {captureDialogIndex !== null
+            && checklist[captureDialogIndex]
+            && resolveTodayRow(checklist[captureDialogIndex], configs).addDoor === TodayRowDoor.AddPage
+            ? 'Add pages'
+            : 'Add photos'}
           {captureDialogIndex !== null && checklist[captureDialogIndex] &&
             ` — ${checklist[captureDialogIndex].label.replace(/\s*\(\d+m\)\s*$/, '').trim()}`}
         </DialogTitle>
