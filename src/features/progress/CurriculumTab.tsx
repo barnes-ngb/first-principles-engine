@@ -1612,6 +1612,9 @@ export default function CurriculumTab() {
         nextSortOrder={configs.length + 1}
         onAdd={(data) => void handleAddActivity(data)}
         onClose={() => setAddDialogOpen(false)}
+        // UX-335 — so the cleared-activity notice can say whose it was. Looked
+        // up from the family's own children: identity, never a literal name.
+        childName={(id) => childList.find((c) => c.id === id)?.name}
       />
 
       {/* Per-card certificate confirm dialog */}

@@ -773,15 +773,46 @@ export default function PlannerChatPage() {
     return unsubscribe
   }, [familyId, conversationDocId, activeChildId])
 
-  // Load skill snapshot
+  /**
+   * Load skill snapshot.
+   *
+   * UX-337's shape one page over — UX-334, **RESET.** The `if (snap.exists())`
+   * was written to avoid clobbering a loaded snapshot with an empty one, and
+   * what it also did was make the listener *replace-only*: a child with no
+   * `skillSnapshots` document, or one whose read fails, left the PREVIOUS
+   * child's snapshot in `snapshot` — and `snapshot` is a prompt input. It
+   * reaches `buildPlannerPrompt` through the `inputs` object at every one of
+   * the three generate paths, so a week could be planned for one boy against
+   * his brother's working levels and priority skills, with nothing on screen
+   * saying so.
+   *
+   * A missing document and a failed read both clear it, and that is deliberate
+   * rather than lazy: the `useBusinessGoal` lesson (UX-329, Codex round 5) is
+   * that a failed read is not an affirmative empty result, and the two are kept
+   * apart wherever the answer is *rendered*. Here the answer is *sent* — the
+   * only two outcomes available are "plan with this child's snapshot" and
+   * "plan with no snapshot", and planning with the wrong child's is not one of
+   * them. So both clear, and the prompt degrades to the no-snapshot shape it
+   * already handles for a family that has never filled one in.
+   *
+   * The other two values this census row names were checked and need nothing:
+   * `weekPlan` is keyed on `weekRange.start` alone — a week document is the
+   * family's, not a child's — and `hoursPerDay` re-derives on every child
+   * change already, since `dailyRoutine` is filtered by `activeChildId`.
+   */
   useEffect(() => {
-    if (!activeChildId) return
+    if (!activeChildId) {
+      setSnapshot(null)
+      return
+    }
     const ref = doc(skillSnapshotsCollection(familyId), activeChildId)
-    const unsubscribe = onSnapshot(ref, (snap) => {
-      if (snap.exists()) {
-        setSnapshot({ ...snap.data(), id: snap.id })
-      }
-    })
+    const unsubscribe = onSnapshot(
+      ref,
+      (snap) => {
+        setSnapshot(snap.exists() ? { ...snap.data(), id: snap.id } : null)
+      },
+      () => setSnapshot(null),
+    )
     return unsubscribe
   }, [familyId, activeChildId])
 

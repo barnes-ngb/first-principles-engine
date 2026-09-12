@@ -39,6 +39,7 @@ import QuickCheckPanel from './QuickCheckPanel'
 import WorkingLevelsSection from './WorkingLevelsSection'
 import SkipAdvisorChip from '../planner-chat/SkipAdvisorChip'
 import { evaluatePrioritySkillStatus } from '../planner-chat/skipAdvisor.logic'
+import { SKILL_LEVEL_OBSERVATION_NOTE } from './skillLevelCopy'
 
 const emptySnapshot = (childId: string): SkillSnapshot => ({
   childId,
@@ -399,6 +400,10 @@ export default function SkillSnapshotPage() {
                         sx={{ minWidth: 140 }}
                         value={skill.level}
                         onChange={(e) => handleUpdateSkill(index, 'level', e.target.value)}
+                        // UX-393 — a level is an observation. The write is
+                        // unchanged; this says what it reaches and what it does
+                        // not, from the one copy module the quick check reads.
+                        helperText={SKILL_LEVEL_OBSERVATION_NOTE}
                       >
                         {Object.values(SkillLevel).map((lvl) => (
                           <MenuItem key={lvl} value={lvl}>{lvl}</MenuItem>

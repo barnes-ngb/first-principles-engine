@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import Alert from '@mui/material/Alert'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
 import Dialog from '@mui/material/Dialog'
@@ -16,6 +17,11 @@ import { SubjectBucket, SubjectBucketLabel } from '../../core/types/enums'
 import type { ActivityFrequency, ActivityType } from '../../core/types/enums'
 import { durationOptionsWithValue } from './durationOptions'
 import { unitLabelForNewActivity } from './strand'
+import {
+  EMPTY_ADD_ACTIVITY_DRAFT,
+  addActivityDraftIsEmpty,
+  addActivitySwitchNotice,
+} from './addActivityOwnership'
 
 interface AddActivityDialogProps {
   open: boolean
@@ -23,6 +29,11 @@ interface AddActivityDialogProps {
   nextSortOrder: number
   onAdd: (data: NewActivityConfig) => void
   onClose: () => void
+  /**
+   * Name for a child id, for the UX-335 notice. Optional: without it the
+   * sentence still says the activity was cleared, it just cannot say whose.
+   */
+  childName?: (id: string) => string | undefined
 }
 
 /**
@@ -74,30 +85,59 @@ export default function AddActivityDialog({
   nextSortOrder,
   onAdd,
   onClose,
+  childName,
 }: AddActivityDialogProps) {
-  const [name, setName] = useState('')
-  const [type, setType] = useState<ActivityType>('workbook')
-  const [subject, setSubject] = useState<SubjectBucket>('Reading')
-  const [minutes, setMinutes] = useState(20)
-  const [frequency, setFrequency] = useState<ActivityFrequency>('daily')
-  const [scannable, setScannable] = useState(true)
-  const [totalUnits, setTotalUnits] = useState('')
-  const [currentPosition, setCurrentPosition] = useState('')
+  const [name, setName] = useState(EMPTY_ADD_ACTIVITY_DRAFT.name)
+  const [type, setType] = useState<ActivityType>(EMPTY_ADD_ACTIVITY_DRAFT.type)
+  const [subject, setSubject] = useState<SubjectBucket>(EMPTY_ADD_ACTIVITY_DRAFT.subject)
+  const [minutes, setMinutes] = useState(EMPTY_ADD_ACTIVITY_DRAFT.minutes)
+  const [frequency, setFrequency] = useState<ActivityFrequency>(EMPTY_ADD_ACTIVITY_DRAFT.frequency)
+  const [scannable, setScannable] = useState(EMPTY_ADD_ACTIVITY_DRAFT.scannable)
+  const [totalUnits, setTotalUnits] = useState(EMPTY_ADD_ACTIVITY_DRAFT.totalUnits)
+  const [currentPosition, setCurrentPosition] = useState(EMPTY_ADD_ACTIVITY_DRAFT.currentPosition)
   // FEAT-199. Default off: the quick-log row is for EXTRA work a kid logs
   // themselves, and most configs are the planned day the checklist already
   // shows. Opting in is one tap here, or on the activity's own menu later.
-  const [quickLog, setQuickLog] = useState(false)
+  const [quickLog, setQuickLog] = useState(EMPTY_ADD_ACTIVITY_DRAFT.quickLog)
 
   const reset = () => {
-    setName('')
-    setType('workbook')
-    setSubject('Reading')
-    setMinutes(20)
-    setFrequency('daily')
-    setScannable(true)
-    setTotalUnits('')
-    setCurrentPosition('')
-    setQuickLog(false)
+    setName(EMPTY_ADD_ACTIVITY_DRAFT.name)
+    setType(EMPTY_ADD_ACTIVITY_DRAFT.type)
+    setSubject(EMPTY_ADD_ACTIVITY_DRAFT.subject)
+    setMinutes(EMPTY_ADD_ACTIVITY_DRAFT.minutes)
+    setFrequency(EMPTY_ADD_ACTIVITY_DRAFT.frequency)
+    setScannable(EMPTY_ADD_ACTIVITY_DRAFT.scannable)
+    setTotalUnits(EMPTY_ADD_ACTIVITY_DRAFT.totalUnits)
+    setCurrentPosition(EMPTY_ADD_ACTIVITY_DRAFT.currentPosition)
+    setQuickLog(EMPTY_ADD_ACTIVITY_DRAFT.quickLog)
+  }
+
+  /**
+   * UX-335 — a typed activity belongs to the child it was typed for, and a
+   * child change clears it rather than re-pointing it.
+   *
+   * `handleAdd` below stamps the live `childId` prop, so a filled form plus a
+   * selector tap (or, since FIX-231, an app-bar tap) plus Add created one boy's
+   * workbook on his brother's curriculum, where it plans every day.
+   *
+   * Adjusting state during render is React's own answer to "derive from a
+   * changed prop"; this repo's lint forbids the set-state-in-effect form
+   * (the `ArmorTab` / UX-336 precedent).
+   */
+  const [formChildId, setFormChildId] = useState(childId)
+  const [switchNotice, setSwitchNotice] = useState<string | null>(null)
+  if (formChildId !== childId) {
+    setSwitchNotice(
+      addActivitySwitchNotice(
+        !addActivityDraftIsEmpty({
+          name, type, subject, minutes, frequency, scannable, totalUnits, currentPosition, quickLog,
+        }),
+        childName?.(formChildId),
+        childName?.(childId),
+      ),
+    )
+    setFormChildId(childId)
+    reset()
   }
 
   const handleAdd = () => {
@@ -137,6 +177,13 @@ export default function AddActivityDialog({
       <DialogTitle>Add Activity</DialogTitle>
       <DialogContent>
         <Stack spacing={2.5} sx={{ mt: 1 }}>
+          {/* UX-335 — the cleared activity is named, and so is whose it was. A
+              silently emptied form is how this whole class of defect hides. */}
+          {switchNotice && (
+            <Alert severity="info" onClose={() => setSwitchNotice(null)}>
+              {switchNotice}
+            </Alert>
+          )}
           <TextField
             label="Name"
             value={name}

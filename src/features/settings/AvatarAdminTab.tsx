@@ -47,6 +47,11 @@ import type {
   XpLedger,
 } from '../../core/types'
 import { addXpEvent } from '../../core/xp/addXpEvent'
+import {
+  avatarAdminDraftIsEmpty,
+  avatarAdminSwitchNotice,
+  clearedAvatarAdminDraft,
+} from './avatarAdminOwnership'
 import { addDiamondEvent } from '../../core/xp/addDiamondEvent'
 import { DIAMOND_EVENTS } from '../../core/types'
 
@@ -104,6 +109,49 @@ export default function AvatarAdminTab() {
   const [deleteProfileLoading, setDeleteProfileLoading] = useState(false)
 
   const today = getTodayDateString()
+
+  /**
+   * UX-341 — a typed award belongs to the child it was typed for, and a child
+   * change clears it rather than re-pointing it.
+   *
+   * `handleAdjustXp`, `handleAwardDiamonds` and `handleDeductDiamonds` all read
+   * the live `activeChildId`, so a filled form plus a chip tap plus Award
+   * landed one boy's XP on his brother's `xpLedger` — moving his armor unlocks
+   * and tier with it — or his diamonds on his brother's `avatarProfiles`.
+   *
+   * The two confirm dialogs are closed as part of the reset, and that half is
+   * not cosmetic: *Deduct diamonds* names the child in its text and its own
+   * button calls `handleDeductDiamonds` directly, so an open one would sit
+   * there reading "Remove 10 diamonds from <the other boy>" over a live button
+   * — which is `UX-336`'s **Correction** dialog exactly, one surface over.
+   * *Regenerate base character* goes with it for the same reason: it spends a
+   * paid image call against whoever is selected when it is confirmed.
+   *
+   * `feedback` is cleared too — a green "Awarded 10 XP" left standing under
+   * the newly-selected boy's name reads as a receipt for him.
+   *
+   * Adjusting state during render is React's own answer to "derive from a
+   * changed value"; this repo's lint forbids the set-state-in-effect form.
+   */
+  const [formChildId, setFormChildId] = useState(activeChildId)
+  const [switchNotice, setSwitchNotice] = useState<string | null>(null)
+  if (formChildId !== activeChildId) {
+    const cleared = clearedAvatarAdminDraft()
+    setSwitchNotice(
+      avatarAdminSwitchNotice(
+        !avatarAdminDraftIsEmpty({ xpAmount, diamondAmount, diamondReason }),
+        children.find((c) => c.id === formChildId)?.name,
+        children.find((c) => c.id === activeChildId)?.name,
+      ),
+    )
+    setFormChildId(activeChildId)
+    setXpAmount(cleared.xpAmount)
+    setDiamondAmount(cleared.diamondAmount)
+    setDiamondReason(cleared.diamondReason)
+    setConfirmDeduct(false)
+    setRegenBaseCharConfirmOpen(false)
+    setFeedback(null)
+  }
 
   // ── Listen to profile ──────────────────────────────────────────
   useEffect(() => {
@@ -626,6 +674,14 @@ export default function AvatarAdminTab() {
 
   return (
     <Stack spacing={3}>
+      {/* UX-341 — the dropped award is named, and so is whose it was. It stays
+          until dismissed: an emptied form with no sentence is how this whole
+          class of defect hides. */}
+      {switchNotice && (
+        <Alert severity="info" onClose={() => setSwitchNotice(null)}>
+          {switchNotice}
+        </Alert>
+      )}
       {/* ── Child selector ──────────────────────────────────────── */}
       <Box>
         <Typography variant="subtitle2" color="text.secondary" gutterBottom>
