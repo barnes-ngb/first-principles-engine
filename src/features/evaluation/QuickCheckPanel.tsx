@@ -13,6 +13,7 @@ import Typography from '@mui/material/Typography'
 
 import type { SkillSnapshot } from '../../core/types'
 import type { SkillLevel } from '../../core/types/enums'
+import { SKILL_LEVEL_OBSERVATION_NOTE } from './skillLevelCopy'
 import { SKILL_TAG_MAP } from '../../core/types/skillTags'
 
 // ── Quick Check Prompts ──────────────────────────────────────────
@@ -174,6 +175,13 @@ export default function QuickCheckPanel({
                 <Stack spacing={1}>
                   <Typography variant="caption" color="text.secondary">
                     Tap the level that matches what you observed:
+                  </Typography>
+                  {/* UX-393 — the same sentence the Skill Snapshot level
+                      dropdown shows, from the one copy module, so the two
+                      controls that write this field cannot come to say
+                      different things about it. The write is unchanged. */}
+                  <Typography variant="caption" color="text.secondary">
+                    {SKILL_LEVEL_OBSERVATION_NOTE}
                   </Typography>
                   <ToggleButtonGroup
                     exclusive

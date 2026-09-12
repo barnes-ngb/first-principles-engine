@@ -1614,6 +1614,9 @@ export default function CurriculumTab() {
         description={`For ${childName}. Saves a reusable resource; your current week is unchanged.`}
         submitLabel="Save to Curriculum"
         onClose={() => setAddDialogOpen(false)}
+        // UX-335 — so the cleared-activity notice can say whose it was. Looked
+        // up from the family's own children: identity, never a literal name.
+        childName={(id) => childList.find((c) => c.id === id)?.name}
       />
 
       {/* Per-card certificate confirm dialog */}

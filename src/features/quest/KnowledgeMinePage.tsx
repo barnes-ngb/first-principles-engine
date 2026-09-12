@@ -127,6 +127,41 @@ export default function KnowledgeMinePage() {
 
   // Load in-progress quest sessions (within 24h) for resume card
   const [resumeSession, setResumeSession] = useState<(EvaluationSession & Partial<InteractiveSessionData>) | null>(null)
+
+  /**
+   * UX-338 — the resume card belongs to the child whose session it is, and a
+   * child change drops it rather than leaving it live over the new one.
+   *
+   * This page has no `ChildSelector` of its own; the shell's chip is the only
+   * way the child changes here, which is why the census marks it *Shell only*
+   * and why `FIX-231` is what made it reachable. The load below is a Firestore
+   * round trip, so between the switch and its answer the card held the previous
+   * boy's partial quest with both of its buttons live — and *Start fresh*
+   * writes `status: 'abandoned'` onto that session document, closing out one
+   * boy's unfinished quest because a parent tidied up while looking at his
+   * brother. Nothing recovers it: the ledger row is the record.
+   *
+   * **RESET with no notice.** Nothing is lost — the session is safe in
+   * Firestore and reappears on switching back, and the new child's own resume
+   * card arrives one read later — so there is nothing to make visible.
+   * `activeDomain` goes with it because it is the domain picked for the
+   * previous child's run and it labels the quest screens.
+   *
+   * It is a render-time compare rather than a clear inside the effect below,
+   * because that effect also re-runs on `quest.screen` — clearing there would
+   * blank the card every time a parent returned to the intro.
+   *
+   * Adjusting state during render is React's own answer to "derive from a
+   * changed value"; this repo's lint forbids the set-state-in-effect form
+   * (the `ArmorTab` / UX-336 precedent).
+   */
+  const [resumeChildId, setResumeChildId] = useState(activeChildId)
+  if (resumeChildId !== activeChildId) {
+    setResumeChildId(activeChildId)
+    setResumeSession(null)
+    setActiveDomain(null)
+  }
+
   useEffect(() => {
     if (!activeChildId || !familyId) return
     let cancelled = false

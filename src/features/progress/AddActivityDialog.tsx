@@ -17,6 +17,11 @@ import { SubjectBucket, SubjectBucketLabel } from '../../core/types/enums'
 import type { ActivityFrequency, ActivityType } from '../../core/types/enums'
 import { durationOptionsWithValue } from './durationOptions'
 import { unitLabelForNewActivity } from './strand'
+import {
+  EMPTY_ADD_ACTIVITY_DRAFT,
+  addActivityDraftIsEmpty,
+  addActivitySwitchNotice,
+} from './addActivityOwnership'
 
 interface AddActivityDialogProps {
   open: boolean
@@ -26,6 +31,11 @@ interface AddActivityDialogProps {
   onClose: () => void
   description?: string
   submitLabel?: string
+  /**
+   * Name for a child id, for the UX-335 notice. Optional: without it the
+   * sentence still says the activity was cleared, it just cannot say whose.
+   */
+  childName?: (id: string) => string | undefined
 }
 
 /**
@@ -71,16 +81,50 @@ const FREQUENCY_OPTIONS: { value: ActivityFrequency; label: string }[] = [
   { value: '1x', label: '1x/week' },
 ]
 
+/**
+ * UX-335 — a typed activity belongs to the child it was typed for, and a child
+ * change clears it rather than re-pointing it.
+ *
+ * `handleAdd` stamps the live `childId`, so a filled form plus a selector tap
+ * (or, since FIX-231, an app-bar tap) plus Add created one boy's workbook on
+ * his brother's curriculum, where it then plans every day.
+ *
+ * **The reset is the remount**, not a list of setters: `key={props.childId}`
+ * gives a new child a new form, so every field clears by construction and a
+ * field added later cannot be forgotten. An in-flight save keeps the props it
+ * started with.
+ *
+ * **The notice is a separate question**, and it is the one a list of setters
+ * cannot answer: *was there anything to lose?* A sentence on every switch is
+ * one nobody reads by the time it matters (the UX-336 `DEFAULT_AWARD_TYPE`
+ * lesson), so the form reports its own dirtiness up through `onDirtyChange`
+ * and the wrapper — which is the only thing that outlives the remount — decides
+ * what to say. `addActivityOwnership.ts` owns both halves of that decision, so
+ * the emptiness rule and the sentence have one definition rather than two.
+ */
 export default function AddActivityDialog(props: AddActivityDialogProps) {
   const [owner, setOwner] = useState(props.childId)
-  const [resetNotice, setResetNotice] = useState(false)
+  const [resetNotice, setResetNotice] = useState<string | null>(null)
+  // State rather than a ref: a ref read during render is not reliable (and this
+  // repo's lint says so). The form only reports a CHANGE, so this re-renders
+  // the wrapper at most twice per form — once on the first keystroke and once
+  // if the draft empties again.
+  const [dirty, setDirty] = useState(false)
   if (owner !== props.childId) {
+    setResetNotice(
+      addActivitySwitchNotice(
+        dirty,
+        props.childName?.(owner),
+        props.childName?.(props.childId),
+      ),
+    )
     setOwner(props.childId)
-    setResetNotice(true)
+    setDirty(false)
   }
   // A new child gets a new form; an in-flight save keeps its original props.
   return <AddActivityForm key={props.childId} {...props} resetNotice={resetNotice}
-    onClose={() => { setResetNotice(false); props.onClose() }} />
+    onDirtyChange={setDirty}
+    onClose={() => { setResetNotice(null); props.onClose() }} />
 }
 
 function AddActivityForm({
@@ -92,7 +136,11 @@ function AddActivityForm({
   description,
   submitLabel = 'Add',
   resetNotice,
-}: AddActivityDialogProps & { resetNotice: boolean }) {
+  onDirtyChange,
+}: AddActivityDialogProps & {
+  resetNotice: string | null
+  onDirtyChange: (dirty: boolean) => void
+}) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const mounted = useRef(false)
@@ -101,30 +149,40 @@ function AddActivityForm({
     mounted.current = true
     return () => { mounted.current = false }
   }, [])
-  const [name, setName] = useState('')
-  const [type, setType] = useState<ActivityType>('workbook')
-  const [subject, setSubject] = useState<SubjectBucket>('Reading')
-  const [minutes, setMinutes] = useState(20)
-  const [frequency, setFrequency] = useState<ActivityFrequency>('daily')
-  const [scannable, setScannable] = useState(true)
-  const [totalUnits, setTotalUnits] = useState('')
-  const [currentPosition, setCurrentPosition] = useState('')
+  const [name, setName] = useState(EMPTY_ADD_ACTIVITY_DRAFT.name)
+  const [type, setType] = useState<ActivityType>(EMPTY_ADD_ACTIVITY_DRAFT.type)
+  const [subject, setSubject] = useState<SubjectBucket>(EMPTY_ADD_ACTIVITY_DRAFT.subject)
+  const [minutes, setMinutes] = useState(EMPTY_ADD_ACTIVITY_DRAFT.minutes)
+  const [frequency, setFrequency] = useState<ActivityFrequency>(EMPTY_ADD_ACTIVITY_DRAFT.frequency)
+  const [scannable, setScannable] = useState(EMPTY_ADD_ACTIVITY_DRAFT.scannable)
+  const [totalUnits, setTotalUnits] = useState(EMPTY_ADD_ACTIVITY_DRAFT.totalUnits)
+  const [currentPosition, setCurrentPosition] = useState(EMPTY_ADD_ACTIVITY_DRAFT.currentPosition)
   // FEAT-199. Default off: the quick-log row is for EXTRA work a kid logs
   // themselves, and most configs are the planned day the checklist already
   // shows. Opting in is one tap here, or on the activity's own menu later.
-  const [quickLog, setQuickLog] = useState(false)
+  const [quickLog, setQuickLog] = useState(EMPTY_ADD_ACTIVITY_DRAFT.quickLog)
 
   const reset = () => {
-    setName('')
-    setType('workbook')
-    setSubject('Reading')
-    setMinutes(20)
-    setFrequency('daily')
-    setScannable(true)
-    setTotalUnits('')
-    setCurrentPosition('')
-    setQuickLog(false)
+    setName(EMPTY_ADD_ACTIVITY_DRAFT.name)
+    setType(EMPTY_ADD_ACTIVITY_DRAFT.type)
+    setSubject(EMPTY_ADD_ACTIVITY_DRAFT.subject)
+    setMinutes(EMPTY_ADD_ACTIVITY_DRAFT.minutes)
+    setFrequency(EMPTY_ADD_ACTIVITY_DRAFT.frequency)
+    setScannable(EMPTY_ADD_ACTIVITY_DRAFT.scannable)
+    setTotalUnits(EMPTY_ADD_ACTIVITY_DRAFT.totalUnits)
+    setCurrentPosition(EMPTY_ADD_ACTIVITY_DRAFT.currentPosition)
+    setQuickLog(EMPTY_ADD_ACTIVITY_DRAFT.quickLog)
   }
+
+  // UX-335 — report dirtiness to the wrapper, which is the only thing that
+  // outlives the `key` remount and so the only thing that can say what was
+  // lost. Computed through the one shared rule, never a second field list, and
+  // reported from an effect because a parent callback fired during render is a
+  // write to another component while this one renders.
+  const isDirty = !addActivityDraftIsEmpty({
+    name, type, subject, minutes, frequency, scannable, totalUnits, currentPosition, quickLog,
+  })
+  useEffect(() => { onDirtyChange(isDirty) }, [isDirty, onDirtyChange])
 
   const handleAdd = async () => {
     if (!name.trim() || saveLock.current) return
@@ -177,7 +235,10 @@ function AddActivityForm({
     <Dialog open={open} onClose={handleClose} fullWidth maxWidth="sm">
       <DialogTitle>Add Activity</DialogTitle>
       <DialogContent>
-        {resetNotice && <Alert severity="info" sx={{ mb: 1 }}>Child changed. The unfinished form was cleared. Any save already started stays with its original child.</Alert>}
+        {/* UX-335 — the cleared activity is named, and so is whose it was. A
+            silently emptied form is how this whole class of defect hides, and a
+            sentence on every switch is one nobody reads by the time it matters. */}
+        {resetNotice && <Alert severity="info" sx={{ mb: 1 }}>{resetNotice}</Alert>}
         {description && <Typography variant="body2" color="text.secondary">{description}</Typography>}
         {error && <Alert severity="error" sx={{ mt: 1 }}>{error}</Alert>}
         <Stack component="fieldset" disabled={saving} spacing={2.5} sx={{ mt: 1, mx: 0, p: 0, border: 0, minWidth: 0 }}>

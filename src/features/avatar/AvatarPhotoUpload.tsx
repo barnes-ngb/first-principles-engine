@@ -12,6 +12,7 @@ import { app } from '../../core/firebase/firebase'
 import { avatarProfilesCollection } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { safeSetProfile } from './safeProfileWrite'
+import { stagedPhotoSwitchNotice } from './avatarChildSwitch'
 import type { AvatarProfile, CharacterFeatures } from '../../core/types'
 import ArtHelpSheet, { ArtHelpButton, GenerateHint } from '../books/ArtHelpSheet'
 import { ART_QUOTA_MESSAGE } from '../business/useArtQuota'
@@ -44,9 +45,37 @@ export default function AvatarPhotoUpload({
   // same per-child, per-week counter every art surface shares. Capability,
   // never name — a kid profile is capped, a parent is not. At the cap the
   // button stands down for the warm message; there is no confirm dialog.
-  const { isChildProfile } = useActiveChild()
+  const { isChildProfile, children } = useActiveChild()
   const { atLimit, limit, remaining, recordGeneration } = useAvatarArtQuota()
   const artAudience = isChildProfile ? 'kid' : 'parent'
+
+  /**
+   * UX-331 — a staged photo belongs to the child it was picked for, and a child
+   * change drops it rather than re-pointing it.
+   *
+   * `handlePhotoTransform` below reads the live `childId` prop, so a preview
+   * plus a chip tap plus *Transform!* wrote one boy's face into his brother's
+   * `characterFeatures` and `photoUrl` and spent a paid `extractFeatures` call
+   * out of the shared weekly art budget doing it.
+   *
+   * Adjusting state during render is React's own answer to "derive from a
+   * changed prop"; this repo's lint forbids the set-state-in-effect form
+   * (the `ArmorTab` / UX-336 precedent).
+   */
+  const [stagedChildId, setStagedChildId] = useState(childId)
+  const [switchNotice, setSwitchNotice] = useState<string | null>(null)
+  if (stagedChildId !== childId) {
+    setSwitchNotice(
+      stagedPhotoSwitchNotice(
+        photoPreviewUrl !== null,
+        children.find((c) => c.id === stagedChildId)?.name,
+        children.find((c) => c.id === childId)?.name,
+      ),
+    )
+    setStagedChildId(childId)
+    setPhotoPreviewUrl(null)
+    setPhotoError(null)
+  }
 
   const titleFont = isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive'
 
@@ -163,6 +192,15 @@ export default function AvatarPhotoUpload({
             spends, and what it never touches. */}
         <ArtHelpButton onClick={() => setShowArtHelp(true)} />
       </Box>
+
+      {/* UX-331 — the dropped photo is named, and so is whose it was. It stays
+          until dismissed: a cleared preview with no sentence is how this whole
+          class of defect hides. */}
+      {switchNotice && (
+        <Alert severity="info" sx={{ mb: 1.5, fontSize: '0.8rem' }} onClose={() => setSwitchNotice(null)}>
+          {switchNotice}
+        </Alert>
+      )}
 
       {!photoPreviewUrl ? (
         <Box

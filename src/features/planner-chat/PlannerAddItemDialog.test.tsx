@@ -102,7 +102,13 @@ describe('Planner Add item', () => {
     expect(screen.getByRole('button', { name: 'Saving…' })).toBeDisabled()
     view.rerender(<AddActivityDialog open childId="c2" nextSortOrder={1} onAdd={onAdd} onClose={onClose} />)
     expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue('')
-    expect(screen.getByRole('alert')).toHaveTextContent('Child changed')
+    // The sentence comes from `progress/addActivityOwnership.ts` since FIX-232,
+    // which merged this fix with UX-335's: the reset is still this PR's `key`
+    // remount, and the WORDS are now the shared rule's, so the two runs' copy
+    // cannot drift. This call site passes no `childName`, so the unnamed
+    // variant is correct here — Curriculum's does, and names both boys.
+    expect(screen.getByRole('alert')).toHaveTextContent(/was cleared/)
+    expect(screen.getByRole('alert')).toHaveTextContent(/never added/)
     await act(async () => finish())
     expect(onAdd).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ childId: 'c1', name: 'Lincoln book' }))
     expect(onClose).not.toHaveBeenCalled()
