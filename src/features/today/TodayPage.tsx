@@ -218,7 +218,11 @@ export default function TodayPage() {
 
   // FEAT-62 (legacy-item fallback): scannable workbook configs let unstamped items
   // resolve their workbook by name/subject match for routed capture + backfill.
-  const { configs: activityConfigs } = useActivityConfigs(selectedChildId)
+  const {
+    configs: activityConfigs,
+    loading: activityConfigsLoading,
+    error: activityConfigsError,
+  } = useActivityConfigs(selectedChildId)
 
   const [strandSessionId, setStrandSessionId] = useState<string | null>(null)
   const [strandSessionSaving, setStrandSessionSaving] = useState(false)
@@ -1307,11 +1311,8 @@ export default function TodayPage() {
           activeChild={activeChild}
           dateKey={today}
         />
-        <Typography variant="h4" component="h1">{pageHeading}</Typography>
-        <HelpStrip
-          pageKey="today"
-          text="Tap items off as you go — everything saves itself."
-        />
+        {/* UX-362: which boy, before anything about him — same order as the
+            loaded page below. */}
         {isKidProfile ? (
           <Typography variant="subtitle1" color="text.secondary">
             {selectedChild?.name ?? 'Loading...'}
@@ -1326,6 +1327,11 @@ export default function TodayPage() {
             emptyMessage="Add a child to start logging."
           />
         )}
+        <Typography variant="h4" component="h1">{pageHeading}</Typography>
+        <HelpStrip
+          pageKey="today"
+          text="Tap items off as you go — everything saves itself."
+        />
         {selectedChildId && (
           <SectionCard title="DayLog">
             <LoadingState label="Loading today's log..." />
@@ -1343,6 +1349,35 @@ export default function TodayPage() {
         dateKey={today}
         onCaptureArtifact={scrollToArtifacts}
       />
+
+      {/* ── UX-362: which boy, before anything about him ───────────────────
+          AUDIT-228 counted six things about one particular child rendering
+          above the control that says which child — the ContextBar chip, this
+          heading, the day arrows, `WeekRibbon`'s five dots, the day banner and
+          `HelpStrip`. The chip above is now the switcher itself, and the
+          selector moves up beside it rather than sitting six sections down.
+          The in-page selector STAYS (owner: the in-page selectors stay); this
+          is a reorder, not a removal, and it writes nothing that did not get
+          written before.
+
+          A kid profile gets the name as text and NO selector — capability,
+          never a name, the same answer `ChildSwitcherChip` gives the chip
+          above it. */}
+      {isKidProfile ? (
+        <Typography variant="subtitle1" color="text.secondary">
+          {selectedChild?.name}
+        </Typography>
+      ) : (
+        <ChildSelector
+          children={children}
+          selectedChildId={selectedChildId}
+          onSelect={setSelectedChildId}
+          onChildAdded={addChild}
+          isLoading={isLoadingChildren}
+          emptyMessage="Add a child to start logging."
+        />
+      )}
+
       <Typography variant="h4" component="h1">{pageHeading}</Typography>
 
       {/* Day Switcher */}
@@ -1440,20 +1475,6 @@ export default function TodayPage() {
         pageKey="today"
         text="Tap items off as you go — everything saves itself."
       />
-      {isKidProfile ? (
-        <Typography variant="subtitle1" color="text.secondary">
-          {selectedChild?.name}
-        </Typography>
-      ) : (
-        <ChildSelector
-          children={children}
-          selectedChildId={selectedChildId}
-          onSelect={setSelectedChildId}
-          onChildAdded={addChild}
-          isLoading={isLoadingChildren}
-          emptyMessage="Add a child to start logging."
-        />
-      )}
 
       <HelperPanel template={activeTemplate} />
 
@@ -1535,6 +1556,10 @@ export default function TodayPage() {
           onBackfillWorkbookScan={handleBackfillWorkbookScan}
           todayArtifacts={todayArtifacts}
           configs={activityConfigs}
+          // UX-363 / Codex round 1 (P2): an unread or failed configs read is not
+          // an empty curriculum. The hook already distinguishes the three states.
+          configsLoading={activityConfigsLoading}
+          configsFailed={!!activityConfigsError}
           onPreCompletionScan={handlePreCompletionScan}
           captureLoading={scanLoading}
           captureItemIndex={scanItemIndex}

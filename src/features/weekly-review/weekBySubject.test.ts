@@ -26,6 +26,7 @@ import {
   subjectEvidenceLine,
   subjectHoursLine,
   subjectItemsLine,
+  subjectSourcesLine,
   subjectTopicsLine,
 } from './weekBySubject'
 import type { WeekBySubjectInput } from './weekBySubject'
@@ -545,5 +546,373 @@ describe('the lines state a record and never a target', () => {
   it('counts evidence in the plural only when there is more than one', () => {
     expect(subjectEvidenceLine(1)).toBe('1 piece of evidence captured')
     expect(subjectEvidenceLine(4)).toBe('4 pieces of evidence captured')
+  })
+})
+
+// ── UX-408: the counted time no completed item accounts for ─────────────────
+//
+// Owner, Friday 2026-09-11: *"I added time in artefacts and it didn't change it
+// for packing and independent play."* Practical Arts read **4 hours · 1 piece of
+// evidence** and named nothing, because the door he used — Today's Capture card
+// — writes an `hours` document carrying the activity's name in `notes` plus one
+// artifact, and no checklist row at all.
+
+describe('what else was logged (UX-408)', () => {
+  it('names an hours entry by its notes — the Capture card’s own door', () => {
+    const rows = groupWeekBySubject(
+      input({
+        hoursEntries: [
+          {
+            id: 'h1',
+            childId: CHILD,
+            date: '2026-09-08',
+            minutes: 45,
+            subjectBucket: SubjectBucket.PracticalArts,
+            notes: 'Packing',
+          } as HoursEntry,
+          {
+            id: 'h2',
+            childId: CHILD,
+            date: '2026-09-09',
+            minutes: 30,
+            subjectBucket: SubjectBucket.PracticalArts,
+            notes: 'Packing',
+          } as HoursEntry,
+          {
+            id: 'h3',
+            childId: CHILD,
+            date: '2026-09-09',
+            minutes: 60,
+            subjectBucket: SubjectBucket.PracticalArts,
+            notes: 'Independent play',
+          } as HoursEntry,
+        ],
+      }),
+    )
+    const practical = bySubject(rows, SubjectBucket.PracticalArts)
+    expect(practical?.items).toEqual([])
+    expect(subjectSourcesLine(practical!.sourcesWithoutItem)).toBe(
+      'Packing ×2 · Independent play ×1',
+    )
+  })
+
+  it('names an adjustment by its reason', () => {
+    const rows = groupWeekBySubject(
+      input({
+        adjustments: [
+          {
+            id: 'a1',
+            childId: CHILD,
+            date: '2026-09-08',
+            minutes: 25,
+            reason: 'Watched video: Volcanoes',
+            subjectBucket: SubjectBucket.Science,
+          } as HoursAdjustment,
+        ],
+      }),
+    )
+    expect(subjectSourcesLine(bySubject(rows, SubjectBucket.Science)!.sourcesWithoutItem)).toBe(
+      'Watched video: Volcanoes ×1',
+    )
+  })
+
+  it('counts a family-wide adjustment for this child, the DATA-09 rule', () => {
+    const rows = groupWeekBySubject(
+      input({
+        adjustments: [
+          {
+            id: 'a1',
+            childId: 'both',
+            date: '2026-09-08',
+            minutes: 30,
+            reason: 'Dad Lab: circuits',
+            subjectBucket: SubjectBucket.Science,
+          } as HoursAdjustment,
+          {
+            id: 'a2',
+            childId: 'other-kid',
+            date: '2026-09-08',
+            minutes: 30,
+            reason: 'Not this child',
+            subjectBucket: SubjectBucket.Science,
+          } as HoursAdjustment,
+        ],
+      }),
+    )
+    expect(subjectSourcesLine(bySubject(rows, SubjectBucket.Science)!.sourcesWithoutItem)).toBe(
+      'Dad Lab: circuits ×1',
+    )
+  })
+
+  it('never names a correction that subtracts', () => {
+    // The fold emits every adjustment including negative ones, because a
+    // correction must subtract everywhere. Naming one would read as work done.
+    const rows = groupWeekBySubject(
+      input({
+        hoursEntries: [
+          {
+            id: 'h1',
+            childId: CHILD,
+            date: '2026-09-08',
+            minutes: 60,
+            subjectBucket: SubjectBucket.Science,
+            notes: 'Volcano model',
+          } as HoursEntry,
+        ],
+        adjustments: [
+          {
+            id: 'a1',
+            childId: CHILD,
+            date: '2026-09-08',
+            minutes: -20,
+            reason: 'Double-logged, removing',
+            subjectBucket: SubjectBucket.Science,
+          } as HoursAdjustment,
+        ],
+      }),
+    )
+    const science = bySubject(rows, SubjectBucket.Science)!
+    expect(science.totalMinutes).toBe(40)
+    expect(subjectSourcesLine(science.sourcesWithoutItem)).toBe('Volcano model ×1')
+  })
+
+  it('names a block that carries minutes and has no completed item — a Life Day', () => {
+    // The Life Day block is `Other` at 120 minutes; its chips are completed
+    // items worth zero, in their own subjects. Before UX-408 the two hours sat
+    // in Other with nothing beside them.
+    const lifeDay = {
+      childId: CHILD,
+      date: '2026-09-08',
+      blocks: [
+        {
+          type: 'Other',
+          title: 'Life Day',
+          subjectBucket: SubjectBucket.Other,
+          actualMinutes: 120,
+        },
+      ],
+      checklist: [
+        item({
+          label: '📦 Packing',
+          estimatedMinutes: 0,
+          subjectBucket: SubjectBucket.PracticalArts,
+        }),
+      ],
+    } as unknown as DayLog
+
+    const rows = groupWeekBySubject(input({ dayLogs: [lifeDay] }))
+    const other = bySubject(rows, SubjectBucket.Other)!
+    expect(other.totalMinutes).toBe(120)
+    expect(subjectSourcesLine(other.sourcesWithoutItem)).toBe('Life Day ×1')
+    // The chip is still an item, under its own subject, worth no minutes.
+    const practical = bySubject(rows, SubjectBucket.PracticalArts)!
+    expect(subjectItemsLine(practical.items)).toBe('📦 Packing ×1')
+    expect(practical.totalMinutes).toBe(0)
+  })
+
+  it('does NOT name a block the completed item beside it already names', () => {
+    // The mirror of the fold's own dedupe, through the same matcher: naming both
+    // would name one afternoon twice.
+    const dayLog = {
+      childId: CHILD,
+      date: '2026-09-08',
+      blocks: [
+        {
+          type: 'Other',
+          title: 'Fast Phonics',
+          subjectBucket: SubjectBucket.Reading,
+          actualMinutes: 20,
+        },
+      ],
+      checklist: [item({ label: 'Fast Phonics (20m)', estimatedMinutes: 20 })],
+    } as unknown as DayLog
+
+    const rows = groupWeekBySubject(input({ dayLogs: [dayLog] }))
+    const reading = bySubject(rows, SubjectBucket.Reading)!
+    expect(subjectItemsLine(reading.items)).toBe('Fast Phonics ×1')
+    expect(reading.sourcesWithoutItem).toEqual([])
+  })
+
+  it('still names a block whose only matching item is UNCHECKED', () => {
+    // The fold does not count that item's minutes either, so nothing names the
+    // block's time unless this line does.
+    const dayLog = {
+      childId: CHILD,
+      date: '2026-09-08',
+      blocks: [
+        {
+          type: 'Other',
+          title: 'Fast Phonics',
+          subjectBucket: SubjectBucket.Reading,
+          actualMinutes: 20,
+        },
+      ],
+      checklist: [
+        item({ label: 'Fast Phonics (20m)', estimatedMinutes: 20, completed: false }),
+      ],
+    } as unknown as DayLog
+
+    const rows = groupWeekBySubject(input({ dayLogs: [dayLog] }))
+    const reading = bySubject(rows, SubjectBucket.Reading)!
+    expect(reading.items).toEqual([])
+    expect(subjectSourcesLine(reading.sourcesWithoutItem)).toBe('Fast Phonics ×1')
+  })
+
+  it('says nothing for a block with no actual minutes — it counted nothing', () => {
+    const dayLog = {
+      childId: CHILD,
+      date: '2026-09-08',
+      blocks: [
+        {
+          type: 'Other',
+          title: 'Planned but not done',
+          subjectBucket: SubjectBucket.Reading,
+          plannedMinutes: 30,
+        },
+      ],
+      checklist: [],
+    } as unknown as DayLog
+
+    expect(groupWeekBySubject(input({ dayLogs: [dayLog] }))).toEqual([])
+  })
+
+  it('ignores another child’s entries, blocks and adjustments', () => {
+    const rows = groupWeekBySubject(
+      input({
+        dayLogs: [
+          {
+            childId: 'other-kid',
+            date: '2026-09-08',
+            blocks: [
+              {
+                type: 'Other',
+                title: 'Life Day',
+                subjectBucket: SubjectBucket.Other,
+                actualMinutes: 120,
+              },
+            ],
+            checklist: [],
+          } as unknown as DayLog,
+        ],
+        hoursEntries: [
+          {
+            id: 'h1',
+            childId: 'other-kid',
+            date: '2026-09-08',
+            minutes: 45,
+            subjectBucket: SubjectBucket.PracticalArts,
+            notes: 'His brother’s packing',
+          } as HoursEntry,
+        ],
+      }),
+    )
+    expect(rows).toEqual([])
+  })
+
+  it('names nothing it cannot name, rather than inventing a label', () => {
+    const rows = groupWeekBySubject(
+      input({
+        hoursEntries: [
+          {
+            id: 'h1',
+            childId: CHILD,
+            date: '2026-09-08',
+            minutes: 45,
+            subjectBucket: SubjectBucket.PracticalArts,
+          } as HoursEntry,
+        ],
+      }),
+    )
+    const practical = bySubject(rows, SubjectBucket.PracticalArts)!
+    expect(practical.totalMinutes).toBe(45)
+    expect(practical.sourcesWithoutItem).toEqual([])
+    expect(subjectSourcesLine(practical.sourcesWithoutItem)).toBe('')
+  })
+
+  it('caps the named list honestly, the items line’s own rule', () => {
+    const hoursEntries = Array.from({ length: MAX_NAMED_ENTRIES + 2 }, (_, i) => ({
+      id: `h${i}`,
+      childId: CHILD,
+      date: '2026-09-08',
+      minutes: 10,
+      subjectBucket: SubjectBucket.PracticalArts,
+      notes: `Thing ${i}`,
+    })) as HoursEntry[]
+    const rows = groupWeekBySubject(input({ hoursEntries }))
+    const line = subjectSourcesLine(bySubject(rows, SubjectBucket.PracticalArts)!.sourcesWithoutItem)
+    expect(line).toMatch(/\+2 more$/)
+  })
+
+  it('carries a subject held up ONLY by a named source, at zero net minutes', () => {
+    // A positive entry cancelled by a correcting adjustment: the fold says zero,
+    // and something a person did is still on the record.
+    const rows = groupWeekBySubject(
+      input({
+        hoursEntries: [
+          {
+            id: 'h1',
+            childId: CHILD,
+            date: '2026-09-08',
+            minutes: 30,
+            subjectBucket: SubjectBucket.PE,
+            notes: 'Outside',
+          } as HoursEntry,
+        ],
+        adjustments: [
+          {
+            id: 'a1',
+            childId: CHILD,
+            date: '2026-09-08',
+            minutes: -30,
+            reason: 'Counted twice',
+            subjectBucket: SubjectBucket.PE,
+          } as HoursAdjustment,
+        ],
+      }),
+    )
+    const pe = bySubject(rows, SubjectBucket.PE)!
+    expect(pe.totalMinutes).toBe(0)
+    expect(subjectSourcesLine(pe.sourcesWithoutItem)).toBe('Outside ×1')
+  })
+
+  it('changes no minute of the shared fold’s answer', () => {
+    // The positive control this section needs: naming is naming. Every fixture
+    // above folds to exactly what `computeHoursSummary` says, because UX-408
+    // added a LABEL and no arithmetic.
+    const dayLogs = [
+      {
+        childId: CHILD,
+        date: '2026-09-08',
+        blocks: [
+          {
+            type: 'Other',
+            title: 'Life Day',
+            subjectBucket: SubjectBucket.Other,
+            actualMinutes: 120,
+          },
+        ],
+        checklist: [
+          item({
+            label: '📦 Packing',
+            estimatedMinutes: 0,
+            subjectBucket: SubjectBucket.PracticalArts,
+          }),
+        ],
+      } as unknown as DayLog,
+    ]
+    const hoursEntries = [
+      {
+        id: 'h1',
+        childId: CHILD,
+        date: '2026-09-09',
+        minutes: 45,
+        subjectBucket: SubjectBucket.PracticalArts,
+        notes: 'Packing',
+      } as HoursEntry,
+    ]
+    const rows = groupWeekBySubject(input({ dayLogs, hoursEntries }))
+    const summary = computeHoursSummary(dayLogs, hoursEntries, [], CHILD)
+    expect(rows.reduce((sum, r) => sum + r.totalMinutes, 0)).toBe(summary.totalMinutes)
+    expect(summary.totalMinutes).toBe(165)
   })
 })

@@ -7,9 +7,11 @@ import {
 } from './childSwitcher'
 
 /**
- * The audience rule, with the UX-330 switch forced ON. These are UX-324's
- * original assertions, re-pointed rather than deleted: the switcher has to stay
- * provably correct while it is off, or turning it back on is a fresh gamble.
+ * The audience rule, with the switch forced ON. These are UX-324's original
+ * assertions, re-pointed rather than deleted when UX-330 turned the switcher
+ * off: the switcher had to stay provably correct while it was off, or turning
+ * it back on would have been a fresh gamble. `FIX-231` turned it back on and
+ * they are unchanged — which is the point of having written them this way.
  */
 describe('canSwitchChild with the switch ON (UX-324)', () => {
   it('lets a parent with two children switch', () => {
@@ -42,11 +44,34 @@ describe('canSwitchChild with the switch OFF (UX-330)', () => {
     expect(canSwitchChild({ isChildProfile: false, childCount: 1 }, false)).toBe(false)
   })
 
-  it('is what SHIPS — the default answers no to a parent with two children', () => {
-    // Omitting the argument reads the shipped `CHILD_SWITCHER_ENABLED`. This is
-    // the ship-state assertion: when UX-329 closes and the constant flips, this
-    // expectation flips with it, in the same one-line reviewable PR.
-    expect(canSwitchChild({ isChildProfile: false, childCount: 2 })).toBe(false)
+  it('is still the whole switch — forcing it off refuses the one audience', () => {
+    // The parameter is what keeps the OFF state provably correct now that the
+    // shipped default is ON. Turning it back off must not be a fresh gamble
+    // either, so the off path keeps its own assertions.
+    expect(canSwitchChild({ isChildProfile: false, childCount: 2 }, false)).toBe(false)
+  })
+})
+
+/**
+ * FIX-231 — the shipped state, read by omitting the argument. `UX-329` bounded
+ * the class the switcher exposed (five verdicts, a derived registry, a test
+ * that fails closed) and `FIX-223` cleared the P1s, so the owner's 2026-09-11
+ * decision turned the constant back on.
+ */
+describe('canSwitchChild as it SHIPS (FIX-231 — the switch is ON)', () => {
+  it('lets a parent with two children switch', () => {
+    expect(canSwitchChild({ isChildProfile: false, childCount: 2 })).toBe(true)
+  })
+
+  it('still refuses a child profile — capability, never a name', () => {
+    // The flag widened exactly one audience. A kid's setter is a no-op, so a
+    // menu here would be a control that silently does nothing.
+    expect(canSwitchChild({ isChildProfile: true, childCount: 2 })).toBe(false)
+  })
+
+  it('still refuses a single-child family', () => {
+    expect(canSwitchChild({ isChildProfile: false, childCount: 1 })).toBe(false)
+    expect(canSwitchChild({ isChildProfile: false, childCount: 0 })).toBe(false)
   })
 })
 

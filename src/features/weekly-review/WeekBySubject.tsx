@@ -7,6 +7,7 @@ import SectionCard from '../../components/SectionCard'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import {
   EVIDENCE_UNAVAILABLE_LINE,
+  SOURCES_WITHOUT_ITEM_PREFIX,
   WEEK_BY_SUBJECT_CAPTION,
   WEEK_BY_SUBJECT_EMPTY_LINE,
   WEEK_BY_SUBJECT_TITLE,
@@ -14,6 +15,7 @@ import {
   subjectEvidenceLine,
   subjectHoursLine,
   subjectItemsLine,
+  subjectSourcesLine,
   subjectTopicsLine,
 } from './weekBySubject'
 import type { WeekSubjectSummary } from './weekBySubject'
@@ -120,14 +122,21 @@ function WeekBySubjectBody({ familyId, childId, weekKey }: WeekBySubjectProps) {
 
 /**
  * One subject's week: its name and counted time on one line, then what got
- * done, then what was captured, then — for a strand — which topics.
+ * done, then what else was logged, then what was captured, then — for a strand —
+ * which topics.
  *
  * Each line is omitted when it has nothing to say, rather than rendering an
  * empty label. The hours sit beside the subject name and the items below,
  * because they are two readings of the week and not one explaining the other.
+ *
+ * *Also logged* sits directly under the items and in the same weight, because it
+ * is the same claim — work that happened — arriving through a door that writes
+ * no checklist row (UX-408). It is secondary in colour only so the two can be
+ * told apart at a glance, not because it counts for less.
  */
 function SubjectBlock({ subject }: { subject: WeekSubjectSummary }) {
   const items = subjectItemsLine(subject.items)
+  const sources = subjectSourcesLine(subject.sourcesWithoutItem)
   const evidence = subjectEvidenceLine(subject.artifactCount)
   const topics = subjectTopicsLine(subject.topics)
 
@@ -151,6 +160,11 @@ function SubjectBlock({ subject }: { subject: WeekSubjectSummary }) {
 
       <Stack spacing={0.25} sx={{ mt: 0.5 }}>
         {items && <Typography variant="body2">{items}</Typography>}
+        {sources && (
+          <Typography variant="body2" color="text.secondary">
+            {SOURCES_WITHOUT_ITEM_PREFIX}: {sources}
+          </Typography>
+        )}
         {topics && (
           <Typography variant="body2" color="text.secondary">
             Topics: {topics}

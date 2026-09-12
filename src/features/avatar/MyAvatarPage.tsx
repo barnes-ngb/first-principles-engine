@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { addDoc, arrayRemove, deleteField, doc, getDoc, getDocs, onSnapshot, query, setDoc, updateDoc, where } from 'firebase/firestore'
+import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import CircularProgress from '@mui/material/CircularProgress'
 import Dialog from '@mui/material/Dialog'
@@ -71,6 +72,7 @@ import { calculateTier } from './voxel/tierMaterials'
 import AvatarCharacterDisplay from './AvatarCharacterDisplay'
 import type { HeroAnimationTuningOverride } from './voxel/heroAnimationTuning'
 import { ARMOR_DEBUG_DEFAULTS, type ArmorDebugOverrides } from './voxel/armorDebugTuning'
+import { heroHubSwitchNotice } from './avatarChildSwitch'
 import ArmorSuitUpPanel from './ArmorSuitUpPanel'
 import AvatarCustomizer from './AvatarCustomizer'
 import { getDailyArmorStatusFromSession, getBestOfSlotForgedPieces } from './armorStatus'
@@ -315,6 +317,54 @@ export default function MyAvatarPage() {
   const armorDebugEnabled = typeof window !== 'undefined'
     && new URLSearchParams(window.location.search).get('armorDebug') === '1'
   const [armorDebugValues, setArmorDebugValues] = useState<ArmorDebugOverrides>(ARMOR_DEBUG_DEFAULTS)
+
+  /**
+   * UX-332 — the Hero Hub draft belongs to the child it was started for, and a
+   * child change clears it rather than re-pointing it.
+   *
+   * `screenshotData` is the half that crosses a rail: `saveToPortfolio` stamps
+   * an `artifacts` document with the live `childId` and titles it with the live
+   * child's name, while the PNG it uploads is a picture of the PREVIOUS boy's
+   * character — so one boy's armor was filed in his brother's portfolio under
+   * his brother's name, with no way to tell afterwards.
+   *
+   * `localProportions` already re-seeded on its own (the profile listener
+   * writes it from the new child's saved customization before `loading`
+   * clears), so it is left to that one writer rather than given a second.
+   * `heroAnimationTuning` and `armorDebugValues` never re-seeded at all, and
+   * are cleared here: neither reaches Firestore, but a tuning session begun
+   * for one boy stayed overlaid on the other, which reads as *his* character
+   * being wrong.
+   *
+   * **No XP path changes.** `addXpEvent` is called from the armor-equip flow
+   * with the same event, the same 5, and the same dedup key it always was;
+   * that flow reads `profile` and `childId`, which re-seed together through the
+   * one listener, so it never held a draft to re-point. This is `DOC-25`
+   * attribution-only and it does not even reach the `xpLedger` write — it
+   * prevents a stale `artifacts` write and nothing else.
+   *
+   * Adjusting state during render is React's own answer to "derive from a
+   * changed value"; this repo's lint forbids the set-state-in-effect form
+   * (the `ArmorTab` / UX-336 precedent).
+   */
+  const [hubChildId, setHubChildId] = useState(childId)
+  const [childSwitchNotice, setChildSwitchNotice] = useState<string | null>(null)
+  if (hubChildId !== childId) {
+    setChildSwitchNotice(
+      heroHubSwitchNotice(
+        { hasScreenshot: screenshotData !== null, tunerOpen },
+        children.find((c) => c.id === hubChildId)?.name,
+        children.find((c) => c.id === childId)?.name,
+      ),
+    )
+    setHubChildId(childId)
+    setScreenshotData(null)
+    setShowScreenshotModal(false)
+    setTunerOpen(false)
+    setHeroAnimationTuning({})
+    setArmorDebugValues(ARMOR_DEBUG_DEFAULTS)
+  }
+
   const siblingChild = children.find((c) => c.id !== childId)
   const siblingId = brothersMode ? siblingChild?.id : undefined
   const siblingProfile = useAvatarProfile(familyId, siblingId)
@@ -1291,6 +1341,14 @@ export default function MyAvatarPage() {
 
   return (
     <Box sx={{ minHeight: '100dvh', bgcolor: bgColor, color: textColor, pb: 3, maxWidth: '100vw', overflowX: 'hidden', boxSizing: 'border-box' }}>
+      {/* UX-332 — what the switch took, and whose it was. It stays until
+          dismissed: a page that silently discards a captured screenshot is how
+          this whole class of defect hides. */}
+      {childSwitchNotice && (
+        <Alert severity="info" sx={{ m: 1 }} onClose={() => setChildSwitchNotice(null)}>
+          {childSwitchNotice}
+        </Alert>
+      )}
       {/* ── Portal Transition Overlay ────────────────────────── */}
       {portalPrompt && (
         <Dialog

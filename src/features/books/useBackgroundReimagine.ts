@@ -34,6 +34,27 @@ export interface ReimagineJob {
   intensity: 'light' | 'medium' | 'full'
   /** True when the reimagine was rendered with a transparent background (sticker mode). */
   transparent: boolean
+  /**
+   * **Whose picture this is** (`UX-333`) — captured at `startReimagine`, never
+   * read live.
+   *
+   * A reimagine is a paid call that finishes minutes later, and the Books area
+   * has **no in-page `ChildSelector`** — the app-bar switcher (`FIX-231`) is
+   * its only route to a child change, which is why this row sat open until the
+   * switcher came on. `BookEditorPage` derives the hook's `childId` as
+   * `book?.createdFor ?? activeChild?.id`, so on a **legacy book with no
+   * `createdFor`** it follows the live child; a switch mid-job then had the
+   * auto-save effect file the finished picture into the other boy's
+   * `stickerLibrary` and portfolio `artifacts`, permanently.
+   *
+   * BIND rather than RESET, the `useCreativeTimer.ownerChildId` answer
+   * (`UX-327`): the work is already done and was paid for, so the **write** is
+   * bound to the child it was started for rather than the result being thrown
+   * away. Nothing about the picture changes — only whose it is.
+   */
+  ownerChildId: string
+  /** The owner's name as it stood at the start, for the saved label. */
+  ownerChildName: string
 }
 
 interface UseBackgroundReimagineOptions {
@@ -199,6 +220,9 @@ export function useBackgroundReimagine({
         startedAt: Date.now(),
         intensity: intensityLabel,
         transparent: transparent ?? false,
+        // UX-333: whose picture this is, decided here and never re-read.
+        ownerChildId: childId,
+        ownerChildName: childName,
       })
 
       try {
@@ -242,7 +266,20 @@ export function useBackgroundReimagine({
         )
       }
     },
-    [enhanceSketch, familyId, bookTheme, capReached, recordGeneration, imageFailureRef],
+    // `childId` / `childName` are here because the job is STAMPED with them at
+    // start (UX-333). A stale closure would capture whoever was active when
+    // this callback was last memoized, which is the defect wearing a different
+    // hat — `useBook.persist`'s lesson (UX-345).
+    [
+      enhanceSketch,
+      familyId,
+      bookTheme,
+      capReached,
+      recordGeneration,
+      imageFailureRef,
+      childId,
+      childName,
+    ],
   )
 
   // ── Actions on the result ────────────────────────────────────────
@@ -265,7 +302,13 @@ export function useBackgroundReimagine({
 
   const handleAddAsSticker = useCallback(() => {
     if (!job || job.status !== 'done' || !job.resultUrl) return
-    onAddSticker(job.sourcePageId, job.resultUrl, job.resultStoragePath ?? '', `${childName}'s reimagined drawing`)
+    // UX-333: the job's own owner, not whoever the header is on now.
+    onAddSticker(
+      job.sourcePageId,
+      job.resultUrl,
+      job.resultStoragePath ?? '',
+      `${job.ownerChildName || childName}'s reimagined drawing`,
+    )
     setJob(null)
     setShowChoiceDialog(false)
   }, [job, onAddSticker, childName])
@@ -274,18 +317,23 @@ export function useBackgroundReimagine({
     async (url?: string, storagePath?: string) => {
       const saveUrl = url ?? job?.resultUrl
       if (!saveUrl) return
+      // UX-333: the child the job was STARTED for. A reimagine is a paid call
+      // that lands minutes later, and Books has no in-page selector, so the
+      // live `childId` here is whoever the app-bar switcher is on now.
+      const ownerId = job?.ownerChildId || childId
+      const ownerName = job?.ownerChildName || childName
       try {
         await addDoc(stickerLibraryCollection(familyId), {
           url: saveUrl,
           storagePath: storagePath ?? job?.resultStoragePath ?? '',
-          label: `${childName}'s reimagined drawing`,
+          label: `${ownerName}'s reimagined drawing`,
           category: 'custom',
-          childId,
+          childId: ownerId,
           createdAt: new Date().toISOString(),
           tags: ['object'],
-          childProfile: childId.includes('london')
+          childProfile: ownerId.includes('london')
             ? 'london'
-            : childId.includes('lincoln')
+            : ownerId.includes('lincoln')
               ? 'lincoln'
               : 'both',
         })
@@ -293,7 +341,15 @@ export function useBackgroundReimagine({
         // Best effort — don't block the user
       }
     },
-    [familyId, childId, childName, job?.resultUrl, job?.resultStoragePath],
+    [
+      familyId,
+      childId,
+      childName,
+      job?.ownerChildId,
+      job?.ownerChildName,
+      job?.resultUrl,
+      job?.resultStoragePath,
+    ],
   )
 
   // ── Persist the enhanced illustration as a portfolio artifact ─────
@@ -302,10 +358,12 @@ export function useBackgroundReimagine({
   const saveEnhancedArtifact = useCallback(
     async (url?: string, storagePath?: string) => {
       const saveUrl = url ?? job?.resultUrl
-      if (!familyId || !childId || !saveUrl) return
+      // UX-333: bound to the job's owner, exactly as the gallery write is.
+      const ownerId = job?.ownerChildId || childId
+      if (!familyId || !ownerId || !saveUrl) return
       try {
         const artifact: Omit<Artifact, 'id'> = {
-          childId,
+          childId: ownerId,
           title: 'Enhanced illustration',
           type: EvidenceType.Photo,
           uri: saveUrl,
@@ -324,7 +382,7 @@ export function useBackgroundReimagine({
         // Best effort — don't block the user
       }
     },
-    [familyId, childId, job?.resultUrl, job?.resultStoragePath],
+    [familyId, childId, job?.ownerChildId, job?.resultUrl, job?.resultStoragePath],
   )
 
   // ── Auto-save every reimagine result to gallery ──────────────────

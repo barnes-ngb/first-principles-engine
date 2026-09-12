@@ -71,6 +71,22 @@ const swapButtons = () => screen.queryAllByRole('button', { name: /change video/
 const removeButtons = () => screen.queryAllByRole('button', { name: /remove from this day/i })
 
 describe('PlanDayCards — a live week is editable (FEAT-138)', () => {
+  it('uses one Add item door before and after Apply, retaining the selected day', () => {
+    const onAddItem = vi.fn()
+    const view = renderApplied({ onAddItem, onAddWatchItem: vi.fn() })
+    expect(screen.queryByRole('button', { name: 'Add a video' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Add item' }))
+    expect(onAddItem).toHaveBeenCalledWith(0)
+    view.unmount()
+    renderApplied({ applied: false, onAddItem })
+    expect(screen.getByRole('button', { name: 'Add item' })).toBeInTheDocument()
+  })
+
+  it('withholds Add item on Life Days', () => {
+    renderApplied({ onAddItem: vi.fn(), dayTypes: [{ day: 'Monday', dayType: 'life' }] })
+    expect(screen.queryByRole('button', { name: 'Add item' })).not.toBeInTheDocument()
+  })
+
   it('offers move-to-another-day and remove on every row of an applied week', () => {
     renderApplied()
     expect(moveButtons()).toHaveLength(2)

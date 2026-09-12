@@ -96,13 +96,42 @@ export default function DispositionProfile() {
   // Track AI generatedAt so we can detect "newer AI available"
   const [aiGeneratedAt, setAiGeneratedAt] = useState<string | null>(null)
 
-  // Load cached disposition + overrides on mount / child change
+  /**
+   * Load cached disposition + overrides on mount / child change.
+   *
+   * UX-337 — **RESET.** `overrides` and `editingKey` were already cleared here,
+   * which is why the cross-child *write* was unreachable and the census
+   * recorded a working reset. `result`, `cacheAge` and `aiGeneratedAt` were
+   * not: they were only ever REPLACED, and only when the new child happened to
+   * have a fresh cache — so switching to a boy with no cache, or an expired
+   * one, or a document that failed to read, left his brother's generated
+   * narrative on screen under his name, beside his own overrides. Nothing is
+   * written from it, but a parent reads a paragraph about persistence and
+   * curiosity and takes it to be about the child whose name is at the top of
+   * the page. That is the whole defect.
+   *
+   * Clearing loses nothing a person made: the narrative is a Firestore-backed
+   * 24-hour cache, so the new child's own copy arrives one read later and the
+   * fallback is this section's existing empty state with its Generate button —
+   * which is the honest thing to show while we do not know. So there is no
+   * notice: RESET's "make the loss visible" rule is about work that cannot be
+   * recovered, and there is none here.
+   *
+   * The `cancelled` flag closes the second half of the same defect: `getDoc` is
+   * a round trip, and without it a switch during the read let the PREVIOUS
+   * child's cache land after the clear.
+   */
   useEffect(() => {
     if (!familyId || !activeChildId) return
     setOverrides({})
     setEditingKey(null)
+    setResult(null)
+    setCacheAge(null)
+    setAiGeneratedAt(null)
+    let cancelled = false
     const childRef = doc(db, `families/${familyId}/children/${activeChildId}`)
     void getDoc(childRef).then((snap) => {
+      if (cancelled) return
       const data = snap.data()
       const cached = data?.dispositionCache as DispositionCache | undefined
       if (cached?.generatedAt && cached.result) {
@@ -118,6 +147,7 @@ export default function DispositionProfile() {
       const savedOverrides = data?.dispositionOverrides as DispositionOverrides | undefined
       if (savedOverrides) setOverrides(savedOverrides)
     })
+    return () => { cancelled = true }
   }, [familyId, activeChildId])
 
   const handleGenerate = useCallback(async (bypassCache?: boolean) => {

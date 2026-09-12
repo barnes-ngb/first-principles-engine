@@ -10,7 +10,7 @@ import type {
   WeekPlan,
 } from '../../core/types'
 import type { ChatResponse } from '../../core/ai/useAI'
-import { ActivityFrequency, AssignmentAction, MasteryGate, MasteryGateLabel, SubjectBucket } from '../../core/types/enums'
+import { ActivityFrequency, AssignmentAction, ChecklistItemKind, MasteryGate, MasteryGateLabel, SubjectBucket } from '../../core/types/enums'
 import { ALL_SKILL_TAGS, SKILL_TAG_MAP, suggestTagsForSubject } from '../../core/types/skillTags'
 import { formatDateYmd, parseDateYmd } from '../../core/utils/format'
 import { getEffectiveMasteryGate } from './skipAdvisor.logic'
@@ -1031,6 +1031,34 @@ export function buildPlannerPrompt(inputs: PlanGeneratorInputs): string {
 
 const VALID_SUBJECT_BUCKETS = new Set<string>(Object.values(SubjectBucket))
 
+/**
+ * The row kinds a MODEL may assert — the legacy five, deliberately unchanged.
+ *
+ * `ChecklistItemKind` widened to every `ActivityType` plus `watch` (UX-363) so
+ * that a row planned from a real curriculum row can say it is a strand, an app
+ * or a formation block. That widening is about **records**: the writer is
+ * `buildCurriculumDraftItem`, stamping the type off the config the parent
+ * picked, and such a row carries `activityConfigId` so `resolveTodayRow` reads
+ * the config itself and never has to trust this field.
+ *
+ * A model's `itemType` has no such backing. Letting it emit `"strand"` would put
+ * the word *Strand* under a row with no strand behind it, and no session count
+ * and no *Record a session* — a tell that describes nothing. So this list stays
+ * exactly the five values that were accepted before, and anything else is
+ * dropped as it always was.
+ */
+const AI_ASSERTABLE_ITEM_KINDS = new Set<string>([
+  ChecklistItemKind.Routine,
+  ChecklistItemKind.Workbook,
+  ChecklistItemKind.Evaluation,
+  ChecklistItemKind.Activity,
+  ChecklistItemKind.Watch,
+])
+
+function isAiAssertableItemKind(value: unknown): value is ChecklistItemKind {
+  return typeof value === 'string' && AI_ASSERTABLE_ITEM_KINDS.has(value)
+}
+
 /** Extract a JSON object string from text that may contain preamble or surrounding prose. */
 function extractJsonObject(text: string): string | null {
   const trimmed = text.trim()
@@ -1469,8 +1497,7 @@ export function parseAIResponse(response: ChatResponse, prioritySkillTags: strin
           mvdEssential: rawItem.mvdEssential === true ? true : rawItem.category === 'must-do' ? true : undefined,
           category: rawItem.category === 'choose' ? 'choose' as const : 'must-do' as const,
           skipGuidance: typeof rawItem.skipGuidance === 'string' ? rawItem.skipGuidance : undefined,
-          ...(typeof rawItem.itemType === 'string' && ['routine', 'workbook', 'evaluation', 'activity', 'watch'].includes(rawItem.itemType)
-            ? { itemType: rawItem.itemType as 'routine' | 'workbook' | 'evaluation' | 'activity' | 'watch' } : {}),
+          ...(isAiAssertableItemKind(rawItem.itemType) ? { itemType: rawItem.itemType } : {}),
           ...(typeof rawItem.evaluationMode === 'string' && ['phonics', 'comprehension', 'fluency', 'math'].includes(rawItem.evaluationMode)
             ? { evaluationMode: rawItem.evaluationMode as 'phonics' | 'comprehension' | 'fluency' | 'math' } : {}),
           ...(typeof rawItem.link === 'string' ? { link: rawItem.link } : {}),

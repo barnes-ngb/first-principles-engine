@@ -32,6 +32,8 @@
  * after the review was generated shows up immediately instead of going stale.
  */
 
+import { weekRangeFromDateKey } from '../../core/utils/dateKey'
+
 /** Says which count this is, so it can be reconciled with the Records page. */
 export const HOURS_SOURCE_CAPTION =
   'Counted the same way as the Records page and the compliance pack.'
@@ -103,6 +105,186 @@ export const HISTORY_UNAVAILABLE_LINE =
  */
 export const POSITIONS_PENDING_LINE =
   'This week’s workbook positions haven’t been recorded yet — they’re saved overnight, once Saturday is over.'
+
+/**
+ * What is said when that overnight save was due and did not arrive (UX-407).
+ *
+ * {@link POSITIONS_PENDING_LINE} promises a date. UX-406 gave this page a week
+ * selector, and the owner's own screen already showed the sentence on a **Friday
+ * evening** about a week whose Saturday had passed six days earlier — so the
+ * promise was not merely early, it was false, and it would have stayed false
+ * every time the page was opened.
+ *
+ * The old guard was `!reviewWasGenerated(review)` alone, which is the right
+ * question (*did the cron write this week?*) attached to the wrong sentence
+ * (*it will, tonight*). The question is unchanged; what is new is that a
+ * negative answer has **two** meanings and they are now kept apart, which is
+ * this page's one rule applied to a promise instead of to a read:
+ *
+ *   • the save is still ahead  → the promise, which is true;
+ *   • the save was due and the document is not there → this line.
+ *
+ * "Still ahead" is measured against the cron's own scheduled instant, not the
+ * viewer's calendar day — see {@link positionsPendingLine}.
+ *
+ * It says what is observable and nothing about why. *"The cron didn't run"* is a
+ * claim about a server this page has no information from — the run may have
+ * thrown, the Claude call may have failed (in which case `generateReviewForChild`
+ * writes nothing at all, positions included — filed as `UX-409`), or the family
+ * may simply not have existed that week. What a parent needs to know is
+ * narrower and is all true: there is no rate, and **the numbers above are not
+ * affected**, because the hours and the evidence are folded live from the
+ * records and never came from this document.
+ */
+export const POSITIONS_MISSING_LINE =
+  'No workbook positions were saved for this week, so there’s no coverage rate to show. The hours and evidence above are read live and aren’t affected.'
+
+/**
+ * The zone the overnight save is scheduled in, and the time it fires.
+ *
+ * A mirror of `WEEKLY_REVIEW_SCHEDULE` in `functions/src/ai/evaluate.ts`
+ * (`"every sunday 00:15"`, `"America/Chicago"` — UX-263). It cannot be imported:
+ * that module pulls in `firebase-admin` and `firebase-functions`, and it is not
+ * in `functions/src/shared/`, the only directory both projects compile. So it is
+ * copied — and **pinned by a source scan** in `weekHours.test.ts`, which reads
+ * the Cloud Function's own constant and fails if these two drift. A hand-kept
+ * copy with nothing standing on it is the guard ARCH-47 exists to replace; a
+ * hand-kept copy with a test on it is what this repo does everywhere the project
+ * boundary makes one definition impossible (`lastWeekKey` / `lastCompletedSchoolWeekKey`
+ * are the precedent, pinned from both sides).
+ */
+export const REVIEW_SAVE_TIME_ZONE = 'America/Chicago'
+/** `HH:mm`, 24-hour, in {@link REVIEW_SAVE_TIME_ZONE}. */
+export const REVIEW_SAVE_DUE_TIME = '00:15'
+
+/** `YYYY-MM-DD` and `HH:mm` for an instant, as read in a given zone. */
+function civilPartsInZone(
+  instant: Date,
+  timeZone: string,
+): { date: string; time: string } {
+  // `en-CA` formats a date as `YYYY-MM-DD`, which is the key shape every date in
+  // this app is stored in, and `hourCycle: 'h23'` keeps midnight as `00` rather
+  // than `24`. A zone the runtime does not know throws, which the caller catches.
+  const date = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(instant)
+  const time = new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).format(instant)
+  return { date, time }
+}
+
+/** The day after a `YYYY-MM-DD` key. */
+function nextDay(dateKey: string): string {
+  const d = new Date(`${dateKey}T00:00:00`)
+  d.setDate(d.getDate() + 1)
+  const yyyy = d.getFullYear()
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${yyyy}-${mm}-${dd}`
+}
+
+/**
+ * Which of the two positions sentences is true for this week, right now.
+ *
+ * The overnight save for a week runs once that week's Saturday has closed —
+ * **00:15 on the following Sunday, in the family's zone** (UX-263) — so the
+ * promise holds until that instant and not a minute longer. The week's Saturday
+ * comes from `weekRangeFromDateKey`, the same helper the page's own reads
+ * resolve their range from, rather than from six days added here: a second copy
+ * of that arithmetic is what produced UX-218.
+ *
+ * **The boundary is the cron's scheduled instant, not the browser's calendar
+ * day** (Codex round 1, P2). A date-only comparison against the viewer's local
+ * date changes state at *their* midnight: in Central that showed the failure
+ * sentence for the fifteen minutes before the cron was even due, a device set
+ * ahead of Central showed it hours early, and one behind kept promising a save
+ * that had already run. So `now` is an instant and both sides of the comparison
+ * are read in {@link REVIEW_SAVE_TIME_ZONE} — the answer is then the same on
+ * every device, which is what a records surface owes a reader.
+ *
+ * Two fallbacks, both to the sentence that claims less: an unparseable week key,
+ * and a runtime whose `Intl` cannot resolve the zone (old mobile browsers ship
+ * without the full tz database). Where we cannot tell which week or what time it
+ * is, the promise is the safe thing to say.
+ */
+export function positionsPendingLine(weekKey: string, now: Date): string {
+  const saturday = weekRangeFromDateKey(weekKey).end
+  const dueDate = nextDay(saturday)
+  try {
+    const { date, time } = civilPartsInZone(now, REVIEW_SAVE_TIME_ZONE)
+    if (date < dueDate) return POSITIONS_PENDING_LINE
+    if (date === dueDate && time < REVIEW_SAVE_DUE_TIME) return POSITIONS_PENDING_LINE
+    return POSITIONS_MISSING_LINE
+  } catch {
+    return POSITIONS_PENDING_LINE
+  }
+}
+
+/**
+ * How long until this week's overnight save is due, from `from` — `null` once it
+ * is, and when the answer cannot be computed.
+ *
+ * **A page opened before the deadline must not go on promising a save after it**
+ * (Codex round 2, P2). The page resolves `now` once at mount — deliberately, and
+ * UX-218's Codex rounds 2 and 3 are why the WEEK must keep working that way — so
+ * a tab left open across 00:15 on a Sunday kept the promise until it was
+ * reloaded, which is the exact failure UX-407 exists to close, one boundary
+ * later. `WeekPaceSection` schedules a single re-read at this moment.
+ *
+ * The zone offset is resolved by comparing the civil rendering of an instant
+ * against the same fields read as UTC, twice — the standard two-pass, because
+ * the offset at the guessed instant can differ from the offset at the true one
+ * across a DST change. The second pass settles it everywhere except inside the
+ * skipped hour itself, where the answer can be an hour out; the caller re-checks
+ * the predicate when the timer fires, so a wake that is early simply schedules
+ * another and a wake that is late costs an hour of a stale sentence rather than
+ * a reload.
+ */
+export function msUntilPositionsDue(weekKey: string, from: Date): number | null {
+  const dueDate = nextDay(weekRangeFromDateKey(weekKey).end)
+  try {
+    const naive = Date.parse(`${dueDate}T${REVIEW_SAVE_DUE_TIME}:00Z`)
+    if (!Number.isFinite(naive)) return null
+    let due = naive - zoneOffsetMs(new Date(naive), REVIEW_SAVE_TIME_ZONE)
+    due = naive - zoneOffsetMs(new Date(due), REVIEW_SAVE_TIME_ZONE)
+    const ms = due - from.getTime()
+    return ms > 0 ? ms : null
+  } catch {
+    return null
+  }
+}
+
+/** How far ahead of UTC this zone is at this instant, in milliseconds. */
+function zoneOffsetMs(instant: Date, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(instant)
+  const field = (type: string) =>
+    Number(parts.find((p) => p.type === type)?.value ?? '0')
+  const asUtc = Date.UTC(
+    field('year'),
+    field('month') - 1,
+    field('day'),
+    field('hour'),
+    field('minute'),
+    field('second'),
+  )
+  return asUtc - instant.getTime()
+}
 
 /**
  * What is said when the week's review document could not be read at all.
