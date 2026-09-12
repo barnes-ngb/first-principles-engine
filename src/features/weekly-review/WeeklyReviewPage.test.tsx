@@ -534,3 +534,68 @@ describe('switching weeks while an apply is in flight', () => {
     expect(screen.getByText(/Applied 1 adjustment/)).toBeInTheDocument()
   })
 })
+
+// ── A–B–A: an identity can come back, a count cannot (UX-406, round 3) ──────
+
+describe('an apply that finishes after leaving a week and returning to it', () => {
+  const withAdjustment = (): WeeklyReview =>
+    ({
+      childId: 'c1',
+      weekKey: '2026-08-30',
+      status: 'draft',
+      paceAdjustments: [
+        {
+          id: 'adj-0',
+          area: 'Math',
+          currentPace: '1 lesson/day',
+          suggestedPace: '2 lessons/day',
+          rationale: 'Moving quickly',
+          decision: 'pending',
+        },
+      ],
+    }) as unknown as WeeklyReview
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('is still refused when the parent comes back to the week they left', async () => {
+    // Codex round 3, P2. The guard first held the (child, week) KEY, and an
+    // identity can return: A → B → A left the ref reading exactly what the tap
+    // had captured, so a completion from the FIRST visit to A was waved through
+    // and cleared decisions made on the second. A key says where you are; the
+    // question is when.
+    vi.useFakeTimers().setSystemTime(new Date('2026-09-11T20:30:00'))
+    currentDoc = withAdjustment()
+
+    let settle: (applied: number) => void = () => {}
+    mockRunTransaction.mockImplementation(
+      () => new Promise<number>((resolve) => { settle = resolve }),
+    )
+
+    render(<WeeklyReviewPage />)
+
+    // A: accept and apply.
+    fireEvent.click(screen.getByLabelText('Accept adjustment'))
+    fireEvent.click(screen.getByRole('button', { name: /Apply 1 Adjustment/ }))
+    expect(mockRunTransaction).toHaveBeenCalledTimes(1)
+
+    // B, then back to A — before the first transaction resolves.
+    fireEvent.click(screen.getByText('This week'))
+    fireEvent.click(screen.getByText('Last week'))
+    expect(screen.getByText('Week of Aug 31 – Sep 4')).toBeInTheDocument()
+
+    // A fresh decision on this second visit to the same week.
+    fireEvent.click(screen.getByLabelText('Accept adjustment'))
+    expect(screen.getByRole('button', { name: /Apply 1 Adjustment/ })).toBeEnabled()
+
+    // The first visit's write lands. It may not clear this visit's tick, and it
+    // may not announce itself.
+    await act(async () => {
+      settle(1)
+    })
+
+    expect(screen.queryByText(/Applied 1 adjustment/)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Apply 1 Adjustment/ })).toBeEnabled()
+  })
+})

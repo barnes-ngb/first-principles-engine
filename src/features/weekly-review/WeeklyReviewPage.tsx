@@ -244,12 +244,12 @@ function WeeklyReviewBody({ childContext, embedded }: { childContext: UseActiveC
     // An apply may be in flight for the week we are leaving. Its own write is
     // correct and is left to finish — the ticks belonged to that week — but the
     // BUTTON here belongs to the new one, so the spinner is cleared now and the
-    // old operation is forbidden from reporting (see `applyKeyRef` below).
+    // old operation is forbidden from reporting (see `screenEpochRef` below).
     setIsSaving(false)
   }
 
-  // The live (child, week) the screen is on, readable the instant an await
-  // resolves (Codex round 2, P2).
+  // A MONOTONIC token for "which screen is this", readable the instant an await
+  // resolves (Codex rounds 2 and 3, both P2).
   //
   // `handleApplyAdjustments` awaits a transaction, and UX-406 made it possible
   // for the parent to change week while it does. Its success path clears
@@ -260,12 +260,22 @@ function WeeklyReviewBody({ childContext, embedded }: { childContext: UseActiveC
   // scoped is the REPORTING and the state it clears — `useDayLog`'s own rule
   // (UX-351 / UX-352), where a ref plays the part a captured value cannot,
   // because a captured value is the screen as it was at the tap.
-  // Kept current in an EFFECT rather than during render: React forbids writing
-  // a ref while rendering, and the effect runs at commit — long before any
-  // awaited transaction can resolve, which is the only moment this is read.
-  const applyKeyRef = useRef(loadKey)
+  //
+  // **It counts rather than naming** (round 3, P2). The first cut held the
+  // `(child, week)` KEY, and an identity can come back: A → B → A leaves the ref
+  // reading exactly what the tap captured, so a completion from the first visit
+  // to A was waved through and cleared decisions made on the second. A key says
+  // *where* you are and the question is *when* — so this is a counter, bumped
+  // every time the pair changes, and a number that has moved on can never
+  // return. It is the sequence `UX-352` uses for the same reason, where energy
+  // and plan type are enum strings with no object identity to play the part.
+  //
+  // Kept current in an EFFECT rather than during render: React forbids writing a
+  // ref while rendering, and the effect runs at commit — long before any awaited
+  // transaction can resolve, which is the only moment this is read.
+  const screenEpochRef = useRef(0)
   useEffect(() => {
-    applyKeyRef.current = loadKey
+    screenEpochRef.current += 1
   }, [loadKey])
 
   const handleAdjustmentDecision = useCallback(
@@ -284,9 +294,9 @@ function WeeklyReviewBody({ childContext, embedded }: { childContext: UseActiveC
 
   const handleApplyAdjustments = useCallback(async () => {
     if (!review || !activeChildId) return
-    // The screen this tap was made on. Every state write after the await is
-    // guarded on it still being the screen (Codex round 2, P2).
-    const tappedOn = applyKeyRef.current
+    // The screen this tap was made on, as a number that only ever advances.
+    // Every state write after the await is guarded on it (Codex rounds 2 / 3).
+    const tappedOn = screenEpochRef.current
     setIsSaving(true)
 
     if (countAccepted(adjustments) === 0) {
@@ -325,10 +335,12 @@ function WeeklyReviewBody({ childContext, embedded }: { childContext: UseActiveC
         return accepted
       })
 
-      // The parent has moved to another week or another child. The write landed
-      // on the week it was made for; saying so over a different week's screen,
-      // and clearing that week's ticks, is the part that must not happen.
-      if (applyKeyRef.current !== tappedOn) return
+      // The parent has moved on — to another week, another child, or away and
+      // back again, which is the case a key could not see. The write landed on
+      // the week it was made for; saying so over a screen that has since been
+      // left and re-entered, and clearing the ticks made on that second visit,
+      // is the part that must not happen.
+      if (screenEpochRef.current !== tappedOn) return
 
       if (applied === 0) {
         setSnack({
@@ -344,12 +356,12 @@ function WeeklyReviewBody({ childContext, embedded }: { childContext: UseActiveC
       }
     } catch (err) {
       console.error('Failed to apply adjustments', err)
-      if (applyKeyRef.current !== tappedOn) return
+      if (screenEpochRef.current !== tappedOn) return
       setSnack({ text: 'Failed to apply. Try again.', severity: 'error' })
     }
     // The reset above already cleared the spinner for the new week; clearing it
     // again from here would be this operation touching a screen it has left.
-    if (applyKeyRef.current === tappedOn) setIsSaving(false)
+    if (screenEpochRef.current === tappedOn) setIsSaving(false)
   }, [review, activeChildId, weekKey, familyId, adjustments, decisionDraft])
 
   const acceptedCount = countAccepted(adjustments)
