@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import Alert from '@mui/material/Alert'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
 import Dialog from '@mui/material/Dialog'
@@ -21,8 +22,10 @@ interface AddActivityDialogProps {
   open: boolean
   childId: string
   nextSortOrder: number
-  onAdd: (data: NewActivityConfig) => void
+  onAdd: (data: NewActivityConfig) => void | Promise<void>
   onClose: () => void
+  description?: string
+  submitLabel?: string
 }
 
 /**
@@ -68,13 +71,36 @@ const FREQUENCY_OPTIONS: { value: ActivityFrequency; label: string }[] = [
   { value: '1x', label: '1x/week' },
 ]
 
-export default function AddActivityDialog({
+export default function AddActivityDialog(props: AddActivityDialogProps) {
+  const [owner, setOwner] = useState(props.childId)
+  const [resetNotice, setResetNotice] = useState(false)
+  if (owner !== props.childId) {
+    setOwner(props.childId)
+    setResetNotice(true)
+  }
+  // A new child gets a new form; an in-flight save keeps its original props.
+  return <AddActivityForm key={props.childId} {...props} resetNotice={resetNotice}
+    onClose={() => { setResetNotice(false); props.onClose() }} />
+}
+
+function AddActivityForm({
   open,
   childId,
   nextSortOrder,
   onAdd,
   onClose,
-}: AddActivityDialogProps) {
+  description,
+  submitLabel = 'Add',
+  resetNotice,
+}: AddActivityDialogProps & { resetNotice: boolean }) {
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const mounted = useRef(false)
+  const saveLock = useRef(false)
+  useEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false }
+  }, [])
   const [name, setName] = useState('')
   const [type, setType] = useState<ActivityType>('workbook')
   const [subject, setSubject] = useState<SubjectBucket>('Reading')
@@ -100,35 +126,50 @@ export default function AddActivityDialog({
     setQuickLog(false)
   }
 
-  const handleAdd = () => {
-    if (!name.trim()) return
-    onAdd({
-      name: name.trim(),
-      type,
-      subjectBucket: subject,
-      defaultMinutes: minutes,
-      frequency,
-      childId,
-      sortOrder: nextSortOrder,
-      scannable,
-      // Written only when true — `addActivityConfig` spreads this object
-      // straight into `setDoc`, and Firestore rejects an explicit `undefined`.
-      ...(quickLog ? { quickLog: true } : {}),
-      ...(scannable && totalUnits ? { totalUnits: Number(totalUnits) } : {}),
-      ...(scannable && currentPosition ? { currentPosition: Number(currentPosition) } : {}),
-      // UX-281: one definition of the new row's unit label, so this door and
-      // the chat's addActivity card cannot disagree — a strand needs
-      // 'session', and it is not scannable.
-      ...(unitLabelForNewActivity(type, scannable)
-        ? { unitLabel: unitLabelForNewActivity(type, scannable) }
-        : {}),
-    })
-    reset()
-    onClose()
+  const handleAdd = async () => {
+    if (!name.trim() || saveLock.current) return
+    saveLock.current = true
+    setSaving(true)
+    setError(null)
+    try {
+      await onAdd({
+        name: name.trim(),
+        type,
+        subjectBucket: subject,
+        defaultMinutes: minutes,
+        frequency,
+        childId,
+        sortOrder: nextSortOrder,
+        scannable,
+        // Written only when true — `addActivityConfig` spreads this object
+        // straight into `setDoc`, and Firestore rejects an explicit `undefined`.
+        ...(quickLog ? { quickLog: true } : {}),
+        ...(scannable && totalUnits ? { totalUnits: Number(totalUnits) } : {}),
+        ...(scannable && currentPosition ? { currentPosition: Number(currentPosition) } : {}),
+        // UX-281: one definition of the new row's unit label, so this door and
+        // the chat's addActivity card cannot disagree — a strand needs
+        // 'session', and it is not scannable.
+        ...(unitLabelForNewActivity(type, scannable)
+          ? { unitLabel: unitLabelForNewActivity(type, scannable) }
+          : {}),
+      })
+      if (mounted.current) {
+        reset()
+        onClose()
+      }
+    } catch (err) {
+      console.warn('[Curriculum] Activity save failed', err)
+      if (mounted.current) setError('Could not save this activity. Your entries are still here; try again.')
+    } finally {
+      saveLock.current = false
+      if (mounted.current) setSaving(false)
+    }
   }
 
   const handleClose = () => {
+    if (saveLock.current) return
     reset()
+    setError(null)
     onClose()
   }
 
@@ -136,7 +177,10 @@ export default function AddActivityDialog({
     <Dialog open={open} onClose={handleClose} fullWidth maxWidth="sm">
       <DialogTitle>Add Activity</DialogTitle>
       <DialogContent>
-        <Stack spacing={2.5} sx={{ mt: 1 }}>
+        {resetNotice && <Alert severity="info" sx={{ mb: 1 }}>Child changed. The unfinished form was cleared. Any save already started stays with its original child.</Alert>}
+        {description && <Typography variant="body2" color="text.secondary">{description}</Typography>}
+        {error && <Alert severity="error" sx={{ mt: 1 }}>{error}</Alert>}
+        <Stack component="fieldset" disabled={saving} spacing={2.5} sx={{ mt: 1, mx: 0, p: 0, border: 0, minWidth: 0 }}>
           <TextField
             label="Name"
             value={name}
@@ -150,9 +194,10 @@ export default function AddActivityDialog({
             <Typography variant="caption" color="text.secondary">
               Type
             </Typography>
-            <Stack direction="row" spacing={1}>
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
               {TYPE_OPTIONS.map((opt) => (
                 <Chip
+                  disabled={saving}
                   key={opt.value}
                   label={opt.label}
                   variant={type === opt.value ? 'filled' : 'outlined'}
@@ -173,6 +218,7 @@ export default function AddActivityDialog({
             <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
               {SUBJECT_OPTIONS.map((opt) => (
                 <Chip
+                  disabled={saving}
                   key={opt.value}
                   label={opt.label}
                   variant={subject === opt.value ? 'filled' : 'outlined'}
@@ -209,6 +255,7 @@ export default function AddActivityDialog({
             <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
               {FREQUENCY_OPTIONS.map((opt) => (
                 <Chip
+                  disabled={saving}
                   key={opt.value}
                   label={opt.label}
                   variant={frequency === opt.value ? 'filled' : 'outlined'}
@@ -226,12 +273,14 @@ export default function AddActivityDialog({
             </Typography>
             <Stack direction="row" spacing={1}>
               <Chip
+                  disabled={saving}
                 label="Yes"
                 variant={quickLog ? 'filled' : 'outlined'}
                 color={quickLog ? 'primary' : 'default'}
                 onClick={() => setQuickLog(true)}
               />
               <Chip
+                  disabled={saving}
                 label="No"
                 variant={!quickLog ? 'filled' : 'outlined'}
                 color={!quickLog ? 'primary' : 'default'}
@@ -247,12 +296,14 @@ export default function AddActivityDialog({
               </Typography>
               <Stack direction="row" spacing={1}>
                 <Chip
+                  disabled={saving}
                   label="Yes"
                   variant={scannable ? 'filled' : 'outlined'}
                   color={scannable ? 'primary' : 'default'}
                   onClick={() => setScannable(true)}
                 />
                 <Chip
+                  disabled={saving}
                   label="No"
                   variant={!scannable ? 'filled' : 'outlined'}
                   color={!scannable ? 'primary' : 'default'}
@@ -285,9 +336,9 @@ export default function AddActivityDialog({
         </Stack>
       </DialogContent>
       <DialogActions>
-        <Button onClick={handleClose}>Cancel</Button>
-        <Button variant="contained" onClick={handleAdd} disabled={!name.trim()}>
-          Add
+        <Button onClick={handleClose} disabled={saving}>Cancel</Button>
+        <Button variant="contained" onClick={handleAdd} disabled={!name.trim() || saving} sx={{ minHeight: 44 }}>
+          {saving ? 'Saving…' : submitLabel}
         </Button>
       </DialogActions>
     </Dialog>

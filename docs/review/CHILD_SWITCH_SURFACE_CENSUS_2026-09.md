@@ -210,6 +210,24 @@ was on when the paid call returned. **A run that flips the constant owns the row
 so it is fixed here (BIND, the `UX-327` answer) rather than deferred. `FIX-232` closes the remaining
 five.
 
+### Re-derived 2026-09-12 (UX-396)
+
+`node --import tsx scripts/childSwitchCensus.ts` (same script as `npm run census:child-switch`):
+
+```
+source files scanned (non-test, under src/, excluding src/test/): 781
+files reading useActiveChild: 73
+candidates: 95 (hook arm 42, prop arm 53)
+files rendering an in-page <ChildSelector>: 9
+feature files referencing setActiveChildId (any in-page child control): 15
+census rows: 95
+by verdict: {"BIND":8,"HIDE":3,"RESET":17,"GATE":10,"SAFE":57}
+by severity: {"P1":0,"P2":3,"P3":1,"—":91}
+census problems: 0
+```
+
+The Planner add dialog is bound to its displayed child and day. The shared activity form now resets on a child change; this addresses the form risk recorded in UX-335. Earlier dated counts above remain historical readings.
+
 ## 5. The registry
 
 | Surface (file) | Child-scoped state it holds | What it writes, and to which collection | Reachable by a switch today? | Verdict | Severity |
@@ -261,9 +279,10 @@ five.
 | `src/features/monthly-review/KidBooksAboutMePage.tsx` | the child's published review books | nothing — a read-only query | No — kid-facing page | **GATE** — `lastChildId` is compared during render and the list is emptied with `loading` set back to true, so one child's books are never shown under another's name | — |
 | `src/features/monthly-review/MonthlyBooksTab.tsx` | a generate-dialog flag; the list follows the active child | delegated to `GenerateNowDialog` | Selector (Review) | **SAFE** — the list uses the Review shell’s live child data, including additions; the modal generation dialog receives only the selected child and refreshes its default when opened | — |
 | `src/features/monthly-review/MonthlyReviewReader.tsx` | reader mode, page index, publish dialog | `monthlyReviews` via publish/unpublish callables | Shell only | **SAFE** — publish targets `review.childId` and `review.month` from the loaded document | — |
-| `src/features/planner-chat/PlannerChatPage.tsx` | a whole draft week, the chat transcript, day types | `days`, `weeks`, `plannerConversations`, `dailyPlans`, `lessonCards`, `artifacts` | Selector (its own `ChildSelector`) | **RESET** — `conversationDocId` is keyed on `(weekStart, childId)` and the subscribe effect clears `messages` / `currentDraft` / `dayTypes` / `applied` / `setupComplete` before resubscribing (FEAT-112's clear covers the child too) | — |
+| `src/features/planner-chat/PlannerChatPage.tsx` | a whole draft week, the chat transcript, day types, add-item target | `days`, `weeks`, `plannerConversations`, `dailyPlans`, `lessonCards`, `artifacts` | Selector (its own `ChildSelector`) | **RESET** — `conversationDocId` is keyed on `(weekStart, childId)` and the subscribe effect clears `messages` / `currentDraft` / `dayTypes` / `applied` / `setupComplete` before resubscribing (FEAT-112's clear covers the child too); the new add dialog is keyed and gated by family/child/week/day, scope changes close it with a notice, and a generation guard suppresses late local completion | — |
 | `src/features/planner/TeachHelperDialog.tsx` | a loaded snapshot + lesson card for one item | `lessonCards` | Selector (Today) | **SAFE** — `lessonCardKey` is `${childId}:${item.id}:${item.lessonCardId}` and every load and write is guarded on it, so a stale card cannot be saved under a new child | — |
-| `src/features/progress/AddActivityDialog.tsx` | a typed new activity — name, type, subject, minutes, cadence, position | `activityConfigs` — a new row via `onAdd` | Selector (Curriculum) | **RESET** needed — the form does not reset on a `childId` change and `handleAdd` stamps the live prop, so a typed activity can be created for the sibling | P2 · `UX-335` |
+| `src/features/planner-chat/PlannerAddItemDialog.tsx` | selected Curriculum item, new resource form, pending add | `activityConfigs` and `days` through central writers | Selector (Planner host) | **BIND** — the host keys and gates the dialog by family/child/week/day; confirmed saves capture that identity, an unmounted dialog ignores late completion, and loading/error states gate selection | — |
+| `src/features/progress/AddActivityDialog.tsx` | a typed new activity and pending save | `activityConfigs` — a new row via `onAdd` | Selector (Curriculum, Planner) | **RESET** — `AddActivityForm` is keyed by `childId`, with a visible reset notice; an already-started save retains its original props and the unmounted form cannot close its successor | — |
 | `src/features/progress/ArmorTab.tsx` | a typed XP award — amount, reason, type | `xpLedger` via `addXpEvent`, plus armor unlocks | Selector (its own child chips) | **RESET** — the award form survived the switch and `doAward` reads the live `childId`. `formChildId` is now compared during render, the draft is cleared through `armorAwardOwnership.ts`, the **Correction** confirm dialog is closed with it (its own button calls `doAward` directly), and an `Alert` names both boys. It **prevents** a write rather than changing one, so no `xpLedger` write path changed — `DOC-25` attribution-only, all four terms in PR #1823. Fixed by FIX-223 (UX-336) | — |
 | `src/features/progress/CertificateScanSection.tsx` | a scanned certificate result awaiting Confirm, plus its preview | `activityConfigs` + `skillSnapshots` via `applyUpdate(familyId, activeChildId, pendingResult)` | Selector (inside `CurriculumTab` since UX-326) | **RESET** — `scanChildId` is compared during render; the pending result and preview are dropped and the parent is told to scan again, **and a run token discards a scan that completes after the change** (Codex round 3: `useScan` sets its result unconditionally, so an in-flight scan repopulated after the switch and reached `syncScanToConfig` with the new child's id — `WorkshopPage`'s round-4 defect on another surface). Fixed here (UX-329) — it **prevents** a write rather than changing one, so the `skillSnapshots` lane is untouched | — |
 | `src/features/progress/CurriculumTab.tsx` | staged scan pages, a strand-session draft, a certificate confirm | `activityConfigs`, `scans`, `skillSnapshots`, `childSkillMaps`, `artifacts` | Selector (its own `ChildSelector`) | **RESET** — `stagedChildId` is stamped at staging time, a switch drops the batch with one line saying so, the write path guards on it again, and a switch **during** a batch discards the completion (UX-275) | — |

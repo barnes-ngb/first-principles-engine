@@ -166,6 +166,8 @@ import PlannerCompactSetup from './PlannerCompactSetup'
 import PlannerChatDrawer from './PlannerChatDrawer'
 import WeekFocusPanel from './WeekFocusPanel'
 import PlanDayCards from './PlanDayCards'
+import PlannerAddItemDialog from './PlannerAddItemDialog'
+import { addCurriculumItemToPlan } from './curriculumDayItem'
 import StickyApplyBar from './StickyApplyBar'
 import WatchLibraryPicker from '../watch/WatchLibraryPicker'
 import { buildWatchDraftItem } from '../watch/watchDayItem'
@@ -426,7 +428,7 @@ export default function PlannerChatPage() {
   const [masterySummary, setMasterySummary] = useState<PlannerMasterySummary | null>(null)
 
   // Activity configs → routine text (replaces old free-text dailyRoutine)
-  const { configs: activityConfigs, deleteConfig } = useActivityConfigs(activeChildId ?? '')
+  const { configs: activityConfigs, loading: activityConfigsLoading, error: activityConfigsError, deleteConfig } = useActivityConfigs(activeChildId ?? '')
   const dailyRoutine = useMemo(
     () => activityConfigsToRoutineText(activityConfigs),
     [activityConfigs],
@@ -2131,6 +2133,22 @@ Generate a plan for Monday through Friday.`.trim()
     addVideo: addWatchVideo,
   } = useWatchLibrary(activeChildId)
   const [watchPickerDay, setWatchPickerDay] = useState<number | null>(null)
+  const addItemScope = `${familyId}/${activeChildId}/${weekRange.start}`
+  const [addItemTarget, setAddItemTarget] = useState<{ scope: string; dayIndex: number | null } | null>(null)
+  const [trackedAddScope, setTrackedAddScope] = useState(addItemScope)
+  const [watchPickerScope, setWatchPickerScope] = useState(addItemScope)
+  const addGeneration = useRef(0)
+  useEffect(() => {
+    addGeneration.current += 1
+    return () => { addGeneration.current += 1 }
+  }, [addItemScope])
+  if (trackedAddScope !== addItemScope) {
+    setTrackedAddScope(addItemScope)
+    setAddItemTarget(null)
+    setWatchPickerDay(null)
+    if (addItemTarget) setSnack({ text: 'Child or week changed. The unfinished item form was closed.', severity: 'info' })
+  }
+
 
   /**
    * Add a curated video to `dayIndex`.
@@ -3425,7 +3443,7 @@ ${dayPrompts}`
                   return next
                 })
               }}
-              onAddWorkbook={() => navigate('/progress?tab=curriculum')}
+              onAddWorkbook={isParent ? () => setAddItemTarget({ scope: addItemScope, dayIndex: null }) : undefined}
               weekNotes={weekNotes}
               onWeekNotesChange={setWeekNotes}
               onGenerate={handleSetupComplete}
@@ -3505,7 +3523,7 @@ ${dayPrompts}`
                 onMoveItem={handleMoveItem}
                 onRemoveItem={handleRemoveItem}
                 onUpdateTime={handleUpdateTime}
-                onAddWatchItem={isParent ? (dayIndex) => setWatchPickerDay(dayIndex) : undefined}
+                onAddItem={isParent ? (dayIndex) => setAddItemTarget({ scope: addItemScope, dayIndex }) : undefined}
                 onMoveItemToDay={isParent ? (dayIndex, itemIndex) => setMoveTarget({ dayIndex, itemIndex }) : undefined}
                 onSwapWatchItem={isParent ? (dayIndex, itemIndex) => setSwapTarget({ dayIndex, itemIndex }) : undefined}
                 itemEditLockReason={itemEditLockReason}
@@ -3582,7 +3600,7 @@ ${dayPrompts}`
                   snapshot={snapshot}
                   generatingItemId={generatingItemId}
                   applied
-                  onAddWatchItem={isParent ? (dayIndex) => setWatchPickerDay(dayIndex) : undefined}
+                  onAddItem={isParent ? (dayIndex) => setAddItemTarget({ scope: addItemScope, dayIndex }) : undefined}
                   onRemoveItem={isParent ? handleRemoveItem : undefined}
                   onMoveItemToDay={isParent ? (dayIndex, itemIndex) => setMoveTarget({ dayIndex, itemIndex }) : undefined}
                   onSwapWatchItem={isParent ? (dayIndex, itemIndex) => setSwapTarget({ dayIndex, itemIndex }) : undefined}
@@ -3760,12 +3778,51 @@ ${dayPrompts}`
         />
       )}
 
+      {isParent && activeChildId && activeChild && addItemTarget?.scope === addItemScope && (
+        <PlannerAddItemDialog
+          key={`${addItemScope}/${addItemTarget.dayIndex}`}
+          familyId={familyId} childId={activeChildId} childName={activeChild.name}
+          dayLabel={addItemTarget.dayIndex !== null && currentDraft?.days[addItemTarget.dayIndex]
+            ? `${currentDraft.days[addItemTarget.dayIndex].day}, ${dateKeyForDayPlan(weekRange.start, currentDraft.days[addItemTarget.dayIndex].day as typeof WEEK_DAYS[number])}`
+            : undefined}
+          applied={applied} configs={activityConfigs} loading={activityConfigsLoading} error={activityConfigsError}
+          onClose={() => setAddItemTarget(null)}
+          onResourceSaved={name => setSnack({ text: `Saved ${name} to ${activeChild.name}'s Curriculum. Your current week is unchanged.`, severity: 'success' })}
+          onVideo={() => {
+            setWatchPickerScope(addItemScope)
+            setWatchPickerDay(addItemTarget.dayIndex)
+            setAddItemTarget(null)
+          }}
+          onAdd={async config => {
+            if (!currentDraft || addItemTarget.dayIndex === null) throw new Error('Choose a day first.')
+            const generation = addGeneration.current
+            const updated = await addCurriculumItemToPlan({
+              canEdit: isParent, familyId, childId: activeChildId, weekStart: weekRange.start,
+              draft: currentDraft, dayIndex: addItemTarget.dayIndex, applied, config,
+            })
+            if (addGeneration.current === generation) {
+              setCurrentDraft(updated)
+              if (!applied) setPlanDirty(true)
+              setSnack({ text: applied ? `Added ${config.name} to ${activeChild.name}'s day.` : `Added ${config.name} to the draft. Apply the plan to save it.`, severity: 'success' })
+            }
+            if (applied) {
+              // The day is already saved. A failed mirror sync must not invite a duplicate add.
+              try { await persistConversation({ currentDraft: updated }) }
+              catch (err) {
+                console.warn('[Planner] Item saved but conversation sync failed', err)
+                if (addGeneration.current === generation) setSnack({ text: 'Item added to the day, but the planner view could not sync. The saved checklist has it.', severity: 'warning' })
+              }
+            }
+          }}
+        />
+      )}
+
       {/* Watch Vehicle — pick a vetted video to plan onto the chosen day (FEAT-104).
           FEAT-107: parents can vet a new video in inline (no trip to the library)
           and jump to the full library for bulk curation. Both affordances are
           gated to parents — omitting the handlers hides them for kids. */}
       <WatchLibraryPicker
-        open={watchPickerDay !== null}
+        open={isParent && watchPickerDay !== null && watchPickerScope === addItemScope}
         onClose={() => setWatchPickerDay(null)}
         /* The full in-scope library — the picker itself drops retired entries
            (FEAT-129), so a retired video can never be planned from any caller. */
@@ -3773,7 +3830,7 @@ ${dayPrompts}`
         loading={watchLoading}
         error={watchError}
         onSelect={(video) => {
-          if (watchPickerDay !== null) void handleAddWatchItem(watchPickerDay, video)
+          if (isParent && watchPickerScope === addItemScope && watchPickerDay !== null) void handleAddWatchItem(watchPickerDay, video)
           setWatchPickerDay(null)
         }}
         onAddVideo={isParent ? async (video) => { await addWatchVideo(video) } : undefined}
