@@ -9,6 +9,7 @@ import { addCurriculumItemToPlan, buildCurriculumDraftItem, canPlanActivity } fr
 import { buildApplyChecklist } from './applyWeekPlan'
 import { applyDayTypeToDay } from './plannerDayTypes'
 import { DayType } from '../../core/types/enums'
+import { editDraftDayItems } from './editDraftDayItems'
 
 const config: ActivityConfig = {
   id: 'selected', childId: 'c1', name: 'Reading', type: 'workbook', subjectBucket: 'Reading',
@@ -22,6 +23,46 @@ const input = { canEdit: true, familyId: 'f1', childId: 'c1', weekStart: '2026-0
 beforeEach(() => { addLive.mockReset().mockResolvedValue({ status: 'done' }) })
 
 describe('adding Curriculum to a day', () => {
+  async function addedLightDay() {
+    const hidden = buildCurriculumDraftItem({ ...config, id: 'hidden-original' })
+    const light = applyDayTypeToDay({ ...draft.days[0], items: [hidden] }, DayType.Light, [])
+    const result = await addCurriculumItemToPlan({ ...input, draft: { ...draft, days: [light] } })
+    return { day: result.days[0], added: result.days[0].items.at(-1)!, hidden }
+  }
+
+  it.each(['remove', 'toggle', 'retime'] as const)('keeps a %s edit after restoring the Light day to Full', async operation => {
+    const { day, added, hidden } = await addedLightDay()
+    const items = operation === 'remove'
+      ? day.items.filter(item => item.id !== added.id)
+      : day.items.map(item => item.id !== added.id ? item : {
+        ...item, ...(operation === 'toggle' ? { accepted: false } : { estimatedMinutes: 35 }),
+      })
+    const edited = editDraftDayItems(day, items)
+    const restored = applyDayTypeToDay(edited, DayType.Normal, [])
+    expect(restored.items).toEqual([hidden, ...items.filter(item => item.id === added.id)])
+    expect(day.setAsideItems).toEqual([hidden, added])
+    expect(addLive).not.toHaveBeenCalled()
+  })
+
+  it.each([DayType.Normal, DayType.Light])('moves the added row to a %s day without restoring a duplicate', async targetType => {
+    const { day, added, hidden } = await addedLightDay()
+    const target = applyDayTypeToDay({ ...draft.days[0], day: 'Tuesday' }, targetType, [])
+    const sourceEdited = editDraftDayItems(day, day.items.filter(item => item.id !== added.id))
+    const targetEdited = editDraftDayItems(target, [...target.items, added])
+    const sourceFull = applyDayTypeToDay(sourceEdited, DayType.Normal, [])
+    const targetFull = applyDayTypeToDay(targetEdited, DayType.Normal, [])
+    expect(sourceFull.items).toEqual([hidden])
+    expect(targetFull.items.filter(item => item.id === added.id)).toEqual([added])
+  })
+
+  it('keeps reordered additions while retaining hidden Full-day rows', async () => {
+    const { day, added, hidden } = await addedLightDay()
+    const result = await addCurriculumItemToPlan({ ...input, draft: { ...draft, days: [day] } })
+    const second = result.days[0].items.at(-1)!
+    const edited = editDraftDayItems(result.days[0], [second, ...day.items])
+    expect(applyDayTypeToDay(edited, DayType.Normal, []).items).toEqual([hidden, second, added])
+  })
+
   it('keeps an addition when a Light day returns to Full', async () => {
     const original = buildCurriculumDraftItem({ ...config, id: 'original' })
     const full = { ...draft.days[0], items: [original] }

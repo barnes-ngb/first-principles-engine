@@ -2,6 +2,7 @@ import type { ActivityConfig, DraftPlanItem, DraftWeeklyPlan } from '../../core/
 import { addItemToLiveDay } from '../today/liveDayEdit'
 import { buildApplyChecklist } from './applyWeekPlan'
 import { dateKeyForDayPlan, generateItemId, WEEK_DAYS } from './chatPlanner.logic'
+import { editDraftDayItems } from './editDraftDayItems'
 
 export function canPlanActivity(config: ActivityConfig, childId: string): boolean {
   return !config.completed && (config.childId === childId || config.childId === 'both')
@@ -58,11 +59,6 @@ export async function addCurriculumItemToPlan(params: {
   return {
     ...draft,
     days: draft.days.map((existing, index) => index === dayIndex
-      ? {
-        ...existing,
-        items: [...existing.items, item],
-        // Full restores this stash after a Light day; keep the parent's addition there too.
-        ...(existing.setAsideItems ? { setAsideItems: [...existing.setAsideItems, item] } : {}),
-      } : existing),
+      ? editDraftDayItems(existing, [...existing.items, item]) : existing),
   }
 }

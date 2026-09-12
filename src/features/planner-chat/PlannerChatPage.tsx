@@ -168,6 +168,7 @@ import WeekFocusPanel from './WeekFocusPanel'
 import PlanDayCards from './PlanDayCards'
 import PlannerAddItemDialog from './PlannerAddItemDialog'
 import { addCurriculumItemToPlan } from './curriculumDayItem'
+import { editDraftDayItems } from './editDraftDayItems'
 import StickyApplyBar from './StickyApplyBar'
 import WatchLibraryPicker from '../watch/WatchLibraryPicker'
 import { buildWatchDraftItem } from '../watch/watchDayItem'
@@ -2092,12 +2093,9 @@ Generate a plan for Monday through Friday.`.trim()
       ...currentDraft,
       days: currentDraft.days.map((day, i) => {
         if (i !== dayIndex) return day
-        return {
-          ...day,
-          items: day.items.map((item) =>
+        return editDraftDayItems(day, day.items.map((item) =>
             item.id === itemId ? { ...item, accepted: !item.accepted } : item,
-          ),
-        }
+          ))
       }),
     }
     setCurrentDraft(updated)
@@ -2115,7 +2113,7 @@ Generate a plan for Monday through Friday.`.trim()
         if (i !== dayIndex) return day
         const newItems = [...day.items]
         ;[newItems[itemIndex], newItems[newIndex]] = [newItems[newIndex], newItems[itemIndex]]
-        return { ...day, items: newItems }
+        return editDraftDayItems(day, newItems)
       }),
     }
     setCurrentDraft(updated)
@@ -2367,7 +2365,7 @@ Generate a plan for Monday through Friday.`.trim()
         const mirrored: DraftWeeklyPlan = {
           ...currentDraft,
           days: currentDraft.days.map((day, i) =>
-            i === dayIndex ? { ...day, items: day.items.filter((_, idx) => idx !== itemIndex) } : day,
+            i === dayIndex ? editDraftDayItems(day, day.items.filter((_, idx) => idx !== itemIndex)) : day,
           ),
         }
         setCurrentDraft(mirrored)
@@ -2390,7 +2388,7 @@ Generate a plan for Monday through Friday.`.trim()
       days: currentDraft.days.map((day, i) => {
         if (i !== dayIndex) return day
         const newItems = day.items.filter((_, idx) => idx !== itemIndex)
-        return { ...day, items: newItems }
+        return editDraftDayItems(day, newItems)
       }),
     }
     setCurrentDraft(updated)
@@ -2446,8 +2444,8 @@ Generate a plan for Monday through Friday.`.trim()
       const mirrored: DraftWeeklyPlan = {
         ...currentDraft,
         days: currentDraft.days.map((day, i) => {
-          if (i === dayIndex) return { ...day, items: day.items.filter((_, idx) => idx !== itemIndex) }
-          if (i === toDayIndex) return { ...day, items: [...day.items, item] }
+          if (i === dayIndex) return editDraftDayItems(day, day.items.filter((_, idx) => idx !== itemIndex))
+          if (i === toDayIndex) return editDraftDayItems(day, [...day.items, item])
           return day
         }),
       }
@@ -2520,7 +2518,7 @@ Generate a plan for Monday through Friday.`.trim()
         ...currentDraft,
         days: currentDraft.days.map((day, i) =>
           i === dayIndex
-            ? { ...day, items: day.items.map((it, idx) => (idx === itemIndex ? swappedDraft : it)) }
+            ? editDraftDayItems(day, day.items.map((it, idx) => (idx === itemIndex ? swappedDraft : it)))
             : day,
         ),
       }
@@ -2574,7 +2572,7 @@ Generate a plan for Monday through Friday.`.trim()
         const newItems = day.items.map((item, idx) =>
           idx === itemIndex ? { ...item, estimatedMinutes: clamped } : item,
         )
-        return { ...day, items: newItems }
+        return editDraftDayItems(day, newItems)
       }),
     }
     setCurrentDraft(updated)
