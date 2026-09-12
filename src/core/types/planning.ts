@@ -604,6 +604,8 @@ export interface DraftDayPlan {
 
 export interface DraftPlanItem {
   id: string
+  /** Explicit parent selection from Curriculum; avoids guessing a source by title at Apply. */
+  activityConfigId?: string
   title: string
   subjectBucket: SubjectBucket
   estimatedMinutes: number

@@ -78,6 +78,7 @@ interface PlanDayCardsProps {
    * `!applied` is what made the planner's add path vanish the moment the week
    * went live.
    */
+  onAddItem?: (dayIndex: number) => void
   onAddWatchItem?: (dayIndex: number) => void
   /**
    * Move an item to a different day of the week. **Survives Apply** (FEAT-138)
@@ -120,6 +121,7 @@ export default function PlanDayCards({
   onMoveItem,
   onRemoveItem,
   onUpdateTime,
+  onAddItem,
   onAddWatchItem,
   onMoveItemToDay,
   onSwapWatchItem,
@@ -165,6 +167,7 @@ export default function PlanDayCards({
         onMoveItem={!applied ? onMoveItem : undefined}
         onRemoveItem={onRemoveItem}
         onUpdateTime={!applied ? onUpdateTime : undefined}
+        onAddItem={onAddItem}
         onAddWatchItem={onAddWatchItem}
         onMoveItemToDay={onMoveItemToDay}
         onSwapWatchItem={onSwapWatchItem}
