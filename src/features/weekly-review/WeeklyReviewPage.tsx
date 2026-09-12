@@ -1,4 +1,4 @@
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -241,7 +241,32 @@ function WeeklyReviewBody({ childContext, embedded }: { childContext: UseActiveC
     setReviewFailed(false)
     setDecisionDraft({})
     setIsLoading(true)
+    // An apply may be in flight for the week we are leaving. Its own write is
+    // correct and is left to finish — the ticks belonged to that week — but the
+    // BUTTON here belongs to the new one, so the spinner is cleared now and the
+    // old operation is forbidden from reporting (see `applyKeyRef` below).
+    setIsSaving(false)
   }
+
+  // The live (child, week) the screen is on, readable the instant an await
+  // resolves (Codex round 2, P2).
+  //
+  // `handleApplyAdjustments` awaits a transaction, and UX-406 made it possible
+  // for the parent to change week while it does. Its success path clears
+  // `decisionDraft` and snacks — so without this, the old week's write would
+  // silently discard the ticks just made for the NEW week and announce itself
+  // over it. **The write itself is never cancelled**: it targets the document it
+  // was made against, and a correction a person confirmed must land. What is
+  // scoped is the REPORTING and the state it clears — `useDayLog`'s own rule
+  // (UX-351 / UX-352), where a ref plays the part a captured value cannot,
+  // because a captured value is the screen as it was at the tap.
+  // Kept current in an EFFECT rather than during render: React forbids writing
+  // a ref while rendering, and the effect runs at commit — long before any
+  // awaited transaction can resolve, which is the only moment this is read.
+  const applyKeyRef = useRef(loadKey)
+  useEffect(() => {
+    applyKeyRef.current = loadKey
+  }, [loadKey])
 
   const handleAdjustmentDecision = useCallback(
     (adjustmentId: string, decision: AdjustmentDecision) => {
@@ -259,6 +284,9 @@ function WeeklyReviewBody({ childContext, embedded }: { childContext: UseActiveC
 
   const handleApplyAdjustments = useCallback(async () => {
     if (!review || !activeChildId) return
+    // The screen this tap was made on. Every state write after the await is
+    // guarded on it still being the screen (Codex round 2, P2).
+    const tappedOn = applyKeyRef.current
     setIsSaving(true)
 
     if (countAccepted(adjustments) === 0) {
@@ -297,6 +325,11 @@ function WeeklyReviewBody({ childContext, embedded }: { childContext: UseActiveC
         return accepted
       })
 
+      // The parent has moved to another week or another child. The write landed
+      // on the week it was made for; saying so over a different week's screen,
+      // and clearing that week's ticks, is the part that must not happen.
+      if (applyKeyRef.current !== tappedOn) return
+
       if (applied === 0) {
         setSnack({
           text: 'Those suggestions are no longer on this review — it was regenerated.',
@@ -311,9 +344,12 @@ function WeeklyReviewBody({ childContext, embedded }: { childContext: UseActiveC
       }
     } catch (err) {
       console.error('Failed to apply adjustments', err)
+      if (applyKeyRef.current !== tappedOn) return
       setSnack({ text: 'Failed to apply. Try again.', severity: 'error' })
     }
-    setIsSaving(false)
+    // The reset above already cleared the spinner for the new week; clearing it
+    // again from here would be this operation touching a screen it has left.
+    if (applyKeyRef.current === tappedOn) setIsSaving(false)
   }, [review, activeChildId, weekKey, familyId, adjustments, decisionDraft])
 
   const acceptedCount = countAccepted(adjustments)

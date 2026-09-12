@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { WeeklyReview } from '../../core/types'
@@ -80,12 +80,14 @@ const mockOnSnapshot = vi.fn(
     return () => {}
   },
 )
+/** A transaction the test resolves by hand, so a week can change mid-write. */
+const mockRunTransaction = vi.fn()
 vi.mock('firebase/firestore', () => ({
   doc: vi.fn(() => ({})),
   onSnapshot: (
     ...args: [unknown, (snap: unknown) => void, (err: unknown) => void]
   ) => mockOnSnapshot(...args),
-  runTransaction: vi.fn(),
+  runTransaction: (...args: unknown[]) => mockRunTransaction(...args),
 }))
 
 vi.mock('../../core/firebase/firestore', () => ({
@@ -444,5 +446,91 @@ describe('the week selector (UX-406)', () => {
       'utf8',
     )
     expect(source).not.toMatch(/isLincoln|'Lincoln'|"Lincoln"|'London'|"London"/)
+  })
+})
+
+// ── An in-flight apply belongs to the week it was made on (UX-406, round 2) ──
+
+describe('switching weeks while an apply is in flight', () => {
+  const withAdjustment = (): WeeklyReview =>
+    ({
+      childId: 'c1',
+      weekKey: '2026-08-30',
+      status: 'draft',
+      paceAdjustments: [
+        {
+          id: 'adj-0',
+          area: 'Math',
+          currentPace: '1 lesson/day',
+          suggestedPace: '2 lessons/day',
+          rationale: 'Moving quickly',
+          decision: 'pending',
+        },
+      ],
+    }) as unknown as WeeklyReview
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('does not announce the old week’s write over the new week’s screen', async () => {
+    vi.useFakeTimers().setSystemTime(new Date('2026-09-11T20:30:00'))
+    currentDoc = withAdjustment()
+
+    // A transaction that does not resolve until the test says so — the window
+    // in which the parent can change week.
+    let settle: (applied: number) => void = () => {}
+    mockRunTransaction.mockImplementation(
+      () => new Promise<number>((resolve) => { settle = resolve }),
+    )
+
+    render(<WeeklyReviewPage />)
+
+    // Accept the one adjustment and apply it.
+    fireEvent.click(screen.getByLabelText('Accept adjustment'))
+    fireEvent.click(screen.getByRole('button', { name: /Apply 1 Adjustment/ }))
+    expect(mockRunTransaction).toHaveBeenCalledTimes(1)
+
+    // The parent moves to the week they were actually logging in.
+    fireEvent.click(screen.getByText('This week'))
+    expect(screen.getByText('Week of Sep 7–11')).toBeInTheDocument()
+
+    // The old week's write lands. It is correct and it is left alone — what it
+    // may not do is report itself over a different week.
+    await act(async () => {
+      settle(1)
+    })
+
+    expect(screen.queryByText(/Applied 1 adjustment/)).not.toBeInTheDocument()
+  })
+
+  it('clears the spinner for the new week rather than leaving it stuck', () => {
+    vi.useFakeTimers().setSystemTime(new Date('2026-09-11T20:30:00'))
+    currentDoc = withAdjustment()
+    mockRunTransaction.mockImplementation(() => new Promise<number>(() => {}))
+
+    render(<WeeklyReviewPage />)
+    fireEvent.click(screen.getByLabelText('Accept adjustment'))
+    fireEvent.click(screen.getByRole('button', { name: /Apply 1 Adjustment/ }))
+    expect(screen.getByRole('button', { name: 'Applying...' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('This week'))
+    // The new week has its own document and its own button state; the old
+    // operation is still in flight and owns neither.
+    expect(screen.queryByRole('button', { name: 'Applying...' })).not.toBeInTheDocument()
+  })
+
+  it('still reports a write that finishes on the week it was made for', async () => {
+    vi.useFakeTimers().setSystemTime(new Date('2026-09-11T20:30:00'))
+    currentDoc = withAdjustment()
+    mockRunTransaction.mockResolvedValue(1)
+
+    render(<WeeklyReviewPage />)
+    fireEvent.click(screen.getByLabelText('Accept adjustment'))
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Apply 1 Adjustment/ }))
+    })
+
+    expect(screen.getByText(/Applied 1 adjustment/)).toBeInTheDocument()
   })
 })

@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 
@@ -15,6 +15,7 @@ import {
   HOURS_UNAVAILABLE_LINE,
   REVIEW_UNAVAILABLE_LINE,
   hoursLoggedLine,
+  msUntilPositionsDue,
   positionsPendingLine,
   reviewWasGenerated,
 } from './weekHours'
@@ -107,7 +108,54 @@ function WeekPaceBody({
   now,
 }: WeekPaceSectionProps) {
   const { totalMinutes, loading, error } = useWeekHours(familyId, childId, weekKey)
-  const resolvedNow = useMemo(() => now ?? new Date(), [now])
+
+  // The sentence's clock ADVANCES; the page's week does not (Codex round 2, P2).
+  //
+  // `WeeklyReviewPage` resolves `now` once at mount, and the WEEK must keep
+  // working that way — UX-218's Codex rounds 2 and 3 showed that a week key which
+  // can change on any unrelated re-render leaves `review`, `isLoading` and
+  // `decisionDraft` behind. But a tab left open across 00:15 on a Sunday then
+  // went on promising a save that was already due, until it was reloaded: UX-407's
+  // own defect, one boundary later. So the clock behind THIS sentence is state,
+  // re-read when the tab comes back and once at the deadline itself, while the
+  // week stays exactly as resolved.
+  const [clock, setClock] = useState<Date>(() => now ?? new Date())
+  // Re-seeded during RENDER when the caller's instant changes, not from an
+  // effect — `useWeekHoursInputs`'s own `requestKey` pattern, and for its
+  // reason: a stale answer must never be shown as the new one's, and setting
+  // state inside an effect to do it costs a cascading render.
+  const [seededFrom, setSeededFrom] = useState(now)
+  if (seededFrom !== now) {
+    setSeededFrom(now)
+    setClock(now ?? new Date())
+  }
+
+  useEffect(() => {
+    const refresh = () => setClock(new Date())
+    // A phone leaves by switching apps and never unmounts (`useDebounce`'s own
+    // lesson, UX-353), so the tab coming back is the common case; the timer
+    // covers a tab left open and visible across the deadline.
+    const onVisible = () => {
+      if (typeof document === 'undefined' || document.visibilityState === 'visible') refresh()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', refresh)
+
+    // One timer, at the moment the save comes due. When it fires the effect
+    // re-runs against the new clock, `msUntilPositionsDue` returns null, and no
+    // further timer is set — so an early wake schedules one more and a correct
+    // wake schedules none. `setTimeout` is capped at a 32-bit delay, so a
+    // deadline further out than that simply waits for the tab to come back.
+    const ms = msUntilPositionsDue(weekKey, clock)
+    const timer =
+      ms !== null && ms <= 2_147_483_647 ? setTimeout(refresh, ms) : undefined
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', refresh)
+      if (timer !== undefined) clearTimeout(timer)
+    }
+  }, [weekKey, clock])
 
   const current = useMemo(
     () => normalizeCurriculumSnapshot(review?.curriculumPositions),
@@ -177,7 +225,7 @@ function WeekPaceBody({
 
       {!reviewFailed && !reviewWasGenerated(review) && (
         <Typography variant="body2" color="text.secondary">
-          {positionsPendingLine(weekKey, resolvedNow)}
+          {positionsPendingLine(weekKey, clock)}
         </Typography>
       )}
 

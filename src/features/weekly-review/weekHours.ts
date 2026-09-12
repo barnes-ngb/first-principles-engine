@@ -228,6 +228,65 @@ export function positionsPendingLine(weekKey: string, now: Date): string {
 }
 
 /**
+ * How long until this week's overnight save is due, from `from` — `null` once it
+ * is, and when the answer cannot be computed.
+ *
+ * **A page opened before the deadline must not go on promising a save after it**
+ * (Codex round 2, P2). The page resolves `now` once at mount — deliberately, and
+ * UX-218's Codex rounds 2 and 3 are why the WEEK must keep working that way — so
+ * a tab left open across 00:15 on a Sunday kept the promise until it was
+ * reloaded, which is the exact failure UX-407 exists to close, one boundary
+ * later. `WeekPaceSection` schedules a single re-read at this moment.
+ *
+ * The zone offset is resolved by comparing the civil rendering of an instant
+ * against the same fields read as UTC, twice — the standard two-pass, because
+ * the offset at the guessed instant can differ from the offset at the true one
+ * across a DST change. The second pass settles it everywhere except inside the
+ * skipped hour itself, where the answer can be an hour out; the caller re-checks
+ * the predicate when the timer fires, so a wake that is early simply schedules
+ * another and a wake that is late costs an hour of a stale sentence rather than
+ * a reload.
+ */
+export function msUntilPositionsDue(weekKey: string, from: Date): number | null {
+  const dueDate = nextDay(weekRangeFromDateKey(weekKey).end)
+  try {
+    const naive = Date.parse(`${dueDate}T${REVIEW_SAVE_DUE_TIME}:00Z`)
+    if (!Number.isFinite(naive)) return null
+    let due = naive - zoneOffsetMs(new Date(naive), REVIEW_SAVE_TIME_ZONE)
+    due = naive - zoneOffsetMs(new Date(due), REVIEW_SAVE_TIME_ZONE)
+    const ms = due - from.getTime()
+    return ms > 0 ? ms : null
+  } catch {
+    return null
+  }
+}
+
+/** How far ahead of UTC this zone is at this instant, in milliseconds. */
+function zoneOffsetMs(instant: Date, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(instant)
+  const field = (type: string) =>
+    Number(parts.find((p) => p.type === type)?.value ?? '0')
+  const asUtc = Date.UTC(
+    field('year'),
+    field('month') - 1,
+    field('day'),
+    field('hour'),
+    field('minute'),
+    field('second'),
+  )
+  return asUtc - instant.getTime()
+}
+
+/**
  * What is said when the week's review document could not be read at all.
  *
  * The third instance of this page's one rule (Codex round 3, P2): a failed read

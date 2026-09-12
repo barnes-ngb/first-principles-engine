@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import { render, screen } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, render, screen } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { CurriculumSnapshot, WeekEvidence, WeeklyReview } from '../../core/types'
 
@@ -474,5 +474,58 @@ describe('the parent-only rate reaches no kid-facing surface', () => {
       if (file.endsWith('PaceGaugePanel.tsx')) continue
       expect(text, `${file} mounts PaceGaugePanel`).not.toMatch(/PaceGaugePanel/)
     }
+  })
+})
+
+// ── The sentence's clock advances without a reload (UX-407, round 2) ────────
+
+describe('the positions sentence corrects itself at the deadline', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('stops promising the save once the deadline passes, with no reload', () => {
+    vi.useFakeTimers()
+    // Mounted at 11pm Central on the Saturday — an hour and a quarter before the
+    // save is due at 00:15 CT Sunday.
+    const mountedAt = new Date('2026-09-06T04:00:00Z')
+    vi.setSystemTime(mountedAt)
+    renderWithReview(null, [], { now: mountedAt })
+    expect(screen.getByText(/saved overnight, once Saturday is over/)).toBeInTheDocument()
+
+    // The tab is left open across the deadline. The page's WEEK is unchanged —
+    // only this sentence's clock moves.
+    act(() => {
+      vi.advanceTimersByTime(90 * 60 * 1000)
+    })
+
+    expect(screen.queryByText(/saved overnight, once Saturday is over/)).not.toBeInTheDocument()
+    expect(screen.getByText(/No workbook positions were saved for this week/)).toBeInTheDocument()
+  })
+
+  it('re-reads the clock when the tab comes back', () => {
+    vi.useFakeTimers()
+    const mountedAt = new Date('2026-09-06T04:00:00Z')
+    vi.setSystemTime(mountedAt)
+    renderWithReview(null, [], { now: mountedAt })
+    expect(screen.getByText(/saved overnight, once Saturday is over/)).toBeInTheDocument()
+
+    // A phone leaves by switching apps and never unmounts, so the timer is not
+    // the only route back — this is the common one.
+    vi.setSystemTime(new Date('2026-09-06T06:00:00Z'))
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'))
+    })
+
+    expect(screen.getByText(/No workbook positions were saved for this week/)).toBeInTheDocument()
+  })
+
+  it('schedules nothing once the deadline is already past', () => {
+    vi.useFakeTimers()
+    const late = new Date('2026-09-12T01:30:00Z') // the owner's Friday
+    vi.setSystemTime(late)
+    renderWithReview(null, [], { now: late })
+    expect(screen.getByText(/No workbook positions were saved for this week/)).toBeInTheDocument()
+    expect(vi.getTimerCount()).toBe(0)
   })
 })
