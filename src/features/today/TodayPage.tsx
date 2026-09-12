@@ -50,7 +50,7 @@ import {
   skillSnapshotsCollection,
 } from '../../core/firebase/firestore'
 import { useProfile } from '../../core/profile/useProfile'
-import type { Artifact, ChapterBook, ChapterQuestionPoolItem, ChecklistItem as ChecklistItemType, CurriculumDetected, DailyPlan, DraftDayPlan, DraftPlanItem, ScanRecord, SkillSnapshot, WatchVideo, WorksheetScanResult } from '../../core/types'
+import type { ActivityConfig, Artifact, ChapterBook, ChapterQuestionPoolItem, ChecklistItem as ChecklistItemType, CurriculumDetected, DailyPlan, DraftDayPlan, DraftPlanItem, ScanRecord, SkillSnapshot, WatchVideo, WorksheetScanResult } from '../../core/types'
 import { effectiveRecommendation, isWorksheetScan } from '../../core/types'
 import TeachHelperDialog from '../planner/TeachHelperDialog'
 import {
@@ -116,6 +116,9 @@ import DraftReadyCard from '../monthly-review/DraftReadyCard'
 import WeekFocusCard from './WeekFocusCard'
 import WeekRibbon from './WeekRibbon'
 import WorkshopGameCards from './WorkshopGameCards'
+
+/** Stable empty list, so gating on it does not churn every consumer's deps. */
+const EMPTY_ACTIVITY_CONFIGS: ActivityConfig[] = []
 
 export default function TodayPage() {
   const navigate = useNavigate()
@@ -219,10 +222,24 @@ export default function TodayPage() {
   // FEAT-62 (legacy-item fallback): scannable workbook configs let unstamped items
   // resolve their workbook by name/subject match for routed capture + backfill.
   const {
-    configs: activityConfigs,
-    loading: activityConfigsLoading,
+    configs: rawActivityConfigs,
+    loading: rawActivityConfigsLoading,
     error: activityConfigsError,
+    configsChildId: activityConfigsChildId,
   } = useActivityConfigs(selectedChildId)
+  // UX-363, Codex round 2 (P1): the hook does not reset `configs` / `loading`
+  // when the child changes, so between a switch and the next snapshot they still
+  // describe the PREVIOUS child. Treating that as settled let a similarly named
+  // row resolve to the old child's workbook — and `syncScanToConfig` loads a
+  // `targetConfigId` by id without checking `childId`, so a capture would have
+  // advanced the other boy's lesson count. Until the hook's state is stamped with
+  // the child on screen it is an unsettled read, and the list handed to the
+  // checklist and to the capture hook is EMPTY rather than the wrong child's:
+  // `configsLoading` alone would still leave the raw array reaching
+  // `findWorkbookConfigId` and `findStrandConfigId`.
+  const activityConfigsSettled = activityConfigsChildId === selectedChildId
+  const activityConfigs = activityConfigsSettled ? rawActivityConfigs : EMPTY_ACTIVITY_CONFIGS
+  const activityConfigsLoading = rawActivityConfigsLoading || !activityConfigsSettled
 
   const [strandSessionId, setStrandSessionId] = useState<string | null>(null)
   const [strandSessionSaving, setStrandSessionSaving] = useState(false)

@@ -36,34 +36,40 @@
 //  1. **Watch** — `itemType: 'watch'` is authoritative and is the one kind that
 //     is definitionally *not* a curriculum row (it names a `watchLibrary`
 //     video). `watchDayItem` is the only writer of it.
-//  2. **Workbook, resolved EXACTLY as the capture path resolves it** —
-//     `item.workbookConfigId ?? findWorkbookConfigId(item, configs)`, the same
-//     expression `useUnifiedCapture` evaluates before anything else. It is
-//     first among the curriculum kinds for one reason: it is the only door with
-//     a consequence that cannot be taken back (`currentPosition` advances), so
-//     the tell must say what the photo is actually going to do. Asking a
-//     different question here than the capture asks is how a row comes to read
-//     *Routine* while its photo advances a workbook.
-//  3. **The stamped `activityConfigId`** — written by `buildApplyChecklist`
-//     when the row was planned from a named curriculum row. A **stale** stamp
-//     resolves to nothing rather than falling back to the label, the rule
-//     `findStrandConfigId` already follows: the row told us which row it meant,
-//     and the answer is that that row is gone, not that another will do.
+//  2. **The row's own `workbookConfigId` stamp** — written by
+//     `buildApplyChecklist` for a workbook and nothing else, and the first thing
+//     `useUnifiedCapture` reads, so it is the one workbook answer that cannot
+//     disagree with the door. It answers with no list in hand (the ID is on the
+//     row), but once the list has **settled** and the document is not in it, the
+//     stamp is stale and says so — `syncScanToConfig` would return
+//     `target-missing`, so *Add page* would advertise nothing.
+//  3. **The stamped `activityConfigId`** — written from the activity a parent
+//     actually picked. It comes BEFORE the fuzzy workbook match, because
+//     `buildApplyChecklist` deliberately leaves `workbookConfigId` unset for a
+//     non-workbook, and `isSameWorkbook` will match a strand or routine whose
+//     name merely shares two words and a subject with a workbook. The row
+//     already told us what it is. A **stale** stamp resolves to nothing rather
+//     than falling back to the label, the rule `findStrandConfigId` follows.
 //  4. **Strand**, through the shared `findStrandConfigId` — the same function
 //     that decides whether the *Record a session* button renders, so the tell
 //     and the door cannot disagree about whether this is a strand.
 //  5. **`itemType: 'evaluation'`** — the planner writes these itself
 //     (`chatPlanner.logic`'s Knowledge Mine row) and they have no config.
-//  6. **The row's name**, against every live config of any type, through
+//  6. **The fuzzy workbook match**, for a row carrying no stamp at all — a
+//     legacy row, or one the routine-text round trip stripped the join from
+//     (`UX-402`). Here it is the capture path's own question, asked its way.
+//  7. **The row's name**, against every live config of any type, through
 //     `activityMatchNames` + `nameKey` — the repo's one comparison key for a
 //     human-typed name (`UX-205`), so a renamed row keeps its tell (`UX-280`).
 //     **A single distinct match, or none**: two rows answering to one label is
 //     the duplicate case Curriculum's own notice exists to surface, and picking
 //     one would be the app deciding what her curriculum is.
-//  7. **`itemType`**, the legacy five and whatever an older build stored.
-//  8. **`unknown`**, which says so and offers the honest door.
+//  8. **Ambiguity**, which outranks step 9 — a duplicated label is a fact about
+//     the family's curriculum and `itemType` is a word.
+//  9. **`itemType`**, the legacy five and whatever an older build stored.
+// 10. **`unknown`**, which says so and offers the honest door.
 //
-// Steps 6 and 7 are in that order deliberately: a config is a record the family
+// Steps 7 and 9 are in that order deliberately: a config is a record the family
 // wrote, `itemType` is a string that may have come from a model.
 //
 // ── One door per row (`UX-361`, owner decision 2026-09-11) ──────────────────
@@ -466,26 +472,32 @@ export function resolveTodayRow(
   //     answerable even while the list is unread.
   if (item.itemType === TodayRowKind.Watch) return build(TodayRowKind.Watch, null)
 
-  // 2 · The workbook question, asked exactly as `useUnifiedCapture` asks it, so
-  //     the tell cannot promise something other than what the photo will do.
+  // 2 · The row's own WORKBOOK stamp. `workbookConfigId` is written by
+  //     `buildApplyChecklist` for a workbook and nothing else, and it is the
+  //     first thing the capture path reads, so this is the one workbook answer
+  //     that cannot disagree with the door.
   //
   //     **Including the completed filter, which is to say: without one.** Neither
   //     `findWorkbookConfigId` nor the capture path skips a finished program, so
   //     skipping it here would make the row read *Routine* while its photo went
-  //     to a workbook — the one disagreement this step exists to prevent. A
-  //     finished program is a separate question, and it belongs on the door
-  //     rather than on the label that describes it (`UX-399`).
+  //     to a workbook. A finished program is a separate question, and it belongs
+  //     on the door rather than on the label that describes it (`UX-399`).
   //
-  //     **The STAMP answers even when the document is not in hand** (Codex round
-  //     1, P2): `workbookConfigId` lives on the row, so the capture path resolves
-  //     it with no config list at all — and a row that reads *"No curriculum
-  //     row"* while its photo advances the workbook it names is the exact
-  //     contradiction this step exists to prevent, arriving through an unread
-  //     list. The position is simply absent until the document loads.
-  const workbookConfigId = item.workbookConfigId ?? findWorkbookConfigId(item, configs)
-  if (workbookConfigId) {
-    const workbook = configs.find((c) => c.id === workbookConfigId) ?? null
-    return build(TodayRowKind.Workbook, workbook, null, workbookConfigId)
+  //     **The stamp answers with no list in hand, but only while there is no
+  //     list** (Codex round 1 P2, narrowed by round 2 P2). An unread list cannot
+  //     contradict the stamp, so the ID alone is the honest answer and the
+  //     position is simply absent. Once the list has **settled** and the document
+  //     is not in it, the stamp is stale: `syncScanToConfig` returns
+  //     `target-missing` and saves ordinary evidence, so *Add page* would
+  //     advertise a curriculum action that cannot happen. That is a stale join,
+  //     and it says so.
+  if (item.workbookConfigId) {
+    const stampedWorkbook = configs.find((c) => c.id === item.workbookConfigId)
+    if (stampedWorkbook) return build(TodayRowKind.Workbook, stampedWorkbook)
+    if (!settled) {
+      return build(TodayRowKind.Workbook, null, null, item.workbookConfigId)
+    }
+    return build(TodayRowKind.Unknown, null, TodayRowUnknownReason.StaleJoin)
   }
 
   // An unread list cannot answer any of the questions below — and answering them
@@ -493,7 +505,25 @@ export function resolveTodayRow(
   // that may well be, permanently so on a failed read.
   if (!settled) return buildUnresolved(configsState)
 
-  // 3 · The stamped curriculum join. A stale stamp is its own answer.
+  // 3 · The stamped curriculum join, and it comes BEFORE the fuzzy workbook
+  //     match (Codex round 2, P1).
+  //
+  //     `buildApplyChecklist` stamps `activityConfigId` from the activity a
+  //     parent actually picked and **deliberately leaves `workbookConfigId`
+  //     unset** for a non-workbook. Asking `findWorkbookConfigId` first therefore
+  //     let a strand or a routine whose name fuzzily resembles a workbook —
+  //     `isSameWorkbook` matches on two shared words plus a subject — be
+  //     presented as a *Workbook* with an *Add page* door, on a row the parent
+  //     had chosen as something else. The row already told us what it is; a fuzzy
+  //     name match is not evidence against it.
+  //
+  //     **The residual is named rather than hidden**: `useUnifiedCapture` still
+  //     evaluates the same fuzzy fallback, so on such a row a *post-completion*
+  //     photo can still target that unrelated workbook. Preventing that stops a
+  //     `skillSnapshots.workingLevels` write, which is propose-and-confirm, so it
+  //     is `UX-403`'s second shape and not narrowed here. What this ordering does
+  //     fix is the reach `UX-363` added: with the kind resolved from the stamp,
+  //     no up-front photo door renders on those rows at all.
   if (item.activityConfigId) {
     const stamped = byId(item.activityConfigId)
     if (stamped) {
@@ -511,14 +541,28 @@ export function resolveTodayRow(
   // 5 · A Knowledge Mine row the planner wrote itself. No config exists for it.
   if (item.itemType === TodayRowKind.Evaluation) return build(TodayRowKind.Evaluation, null)
 
-  // 6 · The row's name, against every live config. One answer, or none.
+  // 6 · The FUZZY workbook match, for a row carrying no stamp at all — a legacy
+  //     row, or one the routine-text round trip stripped the join from
+  //     (`UX-402`). Here it is the capture path's own question and its own
+  //     answer, so the tell and the door agree by construction.
+  const fuzzyWorkbookId = findWorkbookConfigId(item, configs)
+  if (fuzzyWorkbookId) {
+    return build(
+      TodayRowKind.Workbook,
+      configs.find((c) => c.id === fuzzyWorkbookId) ?? null,
+      null,
+      fuzzyWorkbookId,
+    )
+  }
+
+  // 7 · The row's name, against every live config. One answer, or none.
   const { config: named, ambiguous } = configByName(item.label, configs)
   if (named) {
     const kind = kindFromItemType(named.type) ?? TodayRowKind.Activity
     return build(kind, named)
   }
 
-  // 7 · Ambiguity outranks what the row SAYS it is (Codex round 1, P2).
+  // 8 · Ambiguity outranks what the row SAYS it is (Codex round 1, P2).
   //
   //     Two live configs answering to one label is a fact about the family's
   //     curriculum; `itemType` on a model-planned row is a word. Letting the word
@@ -527,11 +571,11 @@ export function resolveTodayRow(
   //     word, on a name the app has just admitted it cannot resolve.
   if (ambiguous) return build(TodayRowKind.Unknown, null, TodayRowUnknownReason.Ambiguous)
 
-  // 8 · What the row says it is — a record of an intention, not of a config.
+  // 9 · What the row says it is — a record of an intention, not of a config.
   const stated = kindFromItemType(item.itemType)
   if (stated) return build(stated, null)
 
-  // 9 · Nothing answers. Say so, and offer the door that is honest.
+  // 10 · Nothing answers. Say so, and offer the door that is honest.
   return build(TodayRowKind.Unknown, null, TodayRowUnknownReason.NoMatch)
 }
 

@@ -331,6 +331,114 @@ describe('resolveTodayRow — an unsettled or failed configs read claims nothing
     expect(row.kind).toBe(TodayRowKind.Unknown)
     expect(row.unknownReason).toBe(TodayRowUnknownReason.NoMatch)
   })
+
+  // Codex round 2 (P2): the ID-only override is right while there is no list to
+  // contradict it, and wrong once there is — `syncScanToConfig` returns
+  // `target-missing`, so *Add page* would advertise a curriculum action that
+  // cannot happen.
+  it('a stamped workbook missing from a SETTLED list is a stale join, not a workbook', () => {
+    const row = resolveTodayRow(
+      item({ label: 'GATB Math (30m)', workbookConfigId: 'gone' }),
+      [config({ id: 'rt-1', name: 'Handwriting', type: ActivityType.Routine })],
+    )
+    expect(row.kind).toBe(TodayRowKind.Unknown)
+    expect(row.unknownReason).toBe(TodayRowUnknownReason.StaleJoin)
+    expect(row.configId).toBeNull()
+    expect(row.addDoor).toBe(TodayRowDoor.AddPhoto)
+  })
+})
+
+// ── The stamp outranks a fuzzy workbook name (Codex round 2, P1) ─────────────
+
+describe('resolveTodayRow — a picked activity is not overridden by a lookalike workbook', () => {
+  // `isSameWorkbook` matches on two shared words plus a matching subject, so a
+  // strand the parent chose can collide with a workbook they also own.
+  const configs: TodayRowConfigLike[] = [
+    {
+      id: 'wb-1', name: 'Story of the World History', type: ActivityType.Workbook,
+      scannable: true, subjectBucket: SubjectBucket.SocialStudies, currentPosition: 12,
+    },
+    {
+      id: 'st-1', name: 'Story of the World', type: ActivityType.Strand,
+      subjectBucket: SubjectBucket.SocialStudies, currentPosition: 3,
+    },
+  ]
+  const stamped = item({
+    label: 'Story of the World (30m)',
+    subjectBucket: SubjectBucket.SocialStudies,
+    activityConfigId: 'st-1',
+  })
+
+  it('the collision is real — the fuzzy matcher does claim this row', () => {
+    // A positive control for the two tests below: without it they would pass on
+    // a fixture where nothing was ever at risk.
+    expect(findWorkbookConfigId(stamped, configs)).toBe('wb-1')
+  })
+
+  it('resolves the STAMPED strand, not the lookalike workbook', () => {
+    const row = resolveTodayRow(stamped, configs)
+    expect(row.kind).toBe(TodayRowKind.Strand)
+    expect(row.configId).toBe('st-1')
+    expect(row.addDoor).toBe(TodayRowDoor.RecordSession)
+    // And therefore no up-front photo door, which is the reach UX-363 added.
+    expect(isPhotoDoor(row.addDoor)).toBe(false)
+  })
+
+  it('an unstamped row that only the WORKBOOK answers to still takes it', () => {
+    // Step 6 is the capture path's own question, asked its way, for the rows with
+    // no stamp and no exact name to prefer (UX-402's cohort).
+    const unstamped = item({
+      label: 'Story of the World History Lesson 12 (30m)',
+      subjectBucket: SubjectBucket.SocialStudies,
+    })
+    const row = resolveTodayRow(unstamped, configs)
+    expect(row.kind).toBe(TodayRowKind.Workbook)
+    expect(row.configId).toBe('wb-1')
+    expect(row.configId).toBe(findWorkbookConfigId(unstamped, configs))
+  })
+
+  it('an unstamped row the STRAND answers to exactly beats the fuzzy workbook', () => {
+    // Exact beats fuzzy: `activityMatchNames` + `nameKey` is an identity claim,
+    // `isSameWorkbook`'s two-shared-words rule is a resemblance.
+    const row = resolveTodayRow(
+      item({ label: 'Story of the World (30m)', subjectBucket: SubjectBucket.SocialStudies }),
+      configs,
+    )
+    expect(row.kind).toBe(TodayRowKind.Strand)
+    expect(row.configId).toBe('st-1')
+  })
+
+  // The divergence this creates, pinned so it cannot silently widen (UX-403).
+  //
+  // `useUnifiedCapture` evaluates the fuzzy fallback FIRST and unconditionally,
+  // so on these rows a post-completion photo still targets `wb-1` while the row
+  // correctly reads *Strand*. Preventing that stops a `skillSnapshots.workingLevels`
+  // write, which is propose-and-confirm, so it belongs to UX-403 and not here.
+  // What UX-363 does fix is the reach: the resolved kind gives these rows no
+  // up-front photo door, so the misroute is no easier to reach than before.
+  it('names EXACTLY the rows where the capture path would still disagree', () => {
+    const diverging = [
+      item({ label: 'Story of the World (30m)', subjectBucket: SubjectBucket.SocialStudies, activityConfigId: 'st-1' }),
+      item({ label: 'Story of the World (30m)', subjectBucket: SubjectBucket.SocialStudies }),
+    ]
+    for (const row of diverging) {
+      const resolved = resolveTodayRow(row, configs)
+      expect(resolved.kind).not.toBe(TodayRowKind.Workbook)
+      // The capture path WOULD have gone to the workbook — that is the residual.
+      expect(row.workbookConfigId ?? findWorkbookConfigId(row, configs)).toBe('wb-1')
+      // …and the row offers no photo door up front, which is what bounds it.
+      expect(isPhotoDoor(resolved.addDoor)).toBe(false)
+    }
+  })
+
+  it("an explicit workbook stamp still wins — it is the capture path's own first read", () => {
+    const row = resolveTodayRow(
+      item({ label: 'Story of the World (30m)', activityConfigId: 'st-1', workbookConfigId: 'wb-1' }),
+      configs,
+    )
+    expect(row.kind).toBe(TodayRowKind.Workbook)
+    expect(row.configId).toBe('wb-1')
+  })
 })
 
 // ── The property that matters: the tell cannot contradict the door ──────────
@@ -364,8 +472,10 @@ describe('resolveTodayRow — the workbook answer is the CAPTURE path answer', (
         expect(resolved.configId).toBe(captureTarget)
       } else if (resolved.kind !== TodayRowKind.Watch) {
         // A watch row never reaches the capture path's workbook branch — the
-        // checkbox routes to the player. Every other non-workbook row must have
-        // nothing for that branch to find.
+        // checkbox routes to the player. Every other non-workbook row in THIS
+        // fixture must have nothing for that branch to find; the one shape where
+        // an earlier step deliberately outranks the fuzzy matcher is pinned on
+        // its own, above, with UX-403's residual named.
         expect(captureTarget).toBeUndefined()
       }
     })
