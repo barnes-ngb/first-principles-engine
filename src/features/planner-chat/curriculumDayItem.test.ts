@@ -7,6 +7,8 @@ vi.mock('../../core/firebase/firestore', () => ({}))
 
 import { addCurriculumItemToPlan, buildCurriculumDraftItem, canPlanActivity } from './curriculumDayItem'
 import { buildApplyChecklist } from './applyWeekPlan'
+import { applyDayTypeToDay } from './plannerDayTypes'
+import { DayType } from '../../core/types/enums'
 
 const config: ActivityConfig = {
   id: 'selected', childId: 'c1', name: 'Reading', type: 'workbook', subjectBucket: 'Reading',
@@ -20,6 +22,31 @@ const input = { canEdit: true, familyId: 'f1', childId: 'c1', weekStart: '2026-0
 beforeEach(() => { addLive.mockReset().mockResolvedValue({ status: 'done' }) })
 
 describe('adding Curriculum to a day', () => {
+  it('keeps an addition when a Light day returns to Full', async () => {
+    const original = buildCurriculumDraftItem({ ...config, id: 'original' })
+    const full = { ...draft.days[0], items: [original] }
+    const light = applyDayTypeToDay(full, DayType.Light, [])
+    const result = await addCurriculumItemToPlan({ ...input, draft: { ...draft, days: [light] } })
+    const added = result.days[0].items.at(-1)!
+    const restored = applyDayTypeToDay(result.days[0], DayType.Normal, [])
+    expect(restored.items).toEqual([original, added])
+    expect(restored.timeBudgetMinutes).toBe(full.timeBudgetMinutes)
+    expect(light.setAsideItems).toEqual([original])
+    expect(addLive).not.toHaveBeenCalled()
+  })
+
+  it.each(['routine', 'app', 'activity'] as const)('preserves %s identity after Apply across duplicates and renames', type => {
+    const selected = { ...config, type, scannable: false }
+    const item = buildCurriculumDraftItem(selected)
+    const renamed = { ...selected, name: 'Renamed resource' }
+    const duplicate = { ...selected, id: 'other' }
+    const [row] = buildApplyChecklist([item], [duplicate, renamed], new Map())
+    expect(row.activityConfigId).toBe(selected.id)
+    expect(row.workbookConfigId).toBeUndefined()
+    expect(row.strandConfigId).toBeUndefined()
+    expect(row.estimatedMinutes).toBe(20)
+  })
+
   it('edits only the draft before Apply, preserving the selected ID and 20 minutes', async () => {
     const result = await addCurriculumItemToPlan(input)
     expect(addLive).not.toHaveBeenCalled()

@@ -294,6 +294,7 @@ export function buildApplyChecklist(
         : findStrandConfigId({ label: item.title }, activityConfigs)
     return {
       label: `${item.title} (${item.estimatedMinutes}m)`,
+      ...(item.activityConfigId ? { activityConfigId: item.activityConfigId } : {}),
       ...(strandConfigId ? { strandConfigId } : {}),
       completed: false,
       skillTags: item.skillTags,

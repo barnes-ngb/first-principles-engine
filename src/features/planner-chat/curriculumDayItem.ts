@@ -58,6 +58,11 @@ export async function addCurriculumItemToPlan(params: {
   return {
     ...draft,
     days: draft.days.map((existing, index) => index === dayIndex
-      ? { ...existing, items: [...existing.items, item] } : existing),
+      ? {
+        ...existing,
+        items: [...existing.items, item],
+        // Full restores this stash after a Light day; keep the parent's addition there too.
+        ...(existing.setAsideItems ? { setAsideItems: [...existing.setAsideItems, item] } : {}),
+      } : existing),
   }
 }
