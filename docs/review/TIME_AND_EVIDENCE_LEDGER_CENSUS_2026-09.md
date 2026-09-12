@@ -65,7 +65,7 @@ logs. No number, fold, rounding or stored row was changed by this run.
 ```
 source files scanned (non-test, src/ + functions/src/): 873
 surfaces naming a time or evidence collection: 60
-by role: {"WRITE":14,"READ":9,"BOTH":37}
+by role: {"WRITE":14,"READ":21,"BOTH":25}
 by collection: {"hours":16,"hoursAdjustments":7,"days":28,"artifacts":32}
 census rows: 60
 census problems: 0
@@ -92,6 +92,15 @@ consumers of the shared counting path: 6
 intent per call site is not derivable by a scan. What the derivation guarantees is
 **completeness** — no file touching the time record is absent from §5 — which is the
 property that is expensive to check by reading and cheap to check by machine.
+
+**The role rule was wrong in this census's first draft and Codex round 1 caught it.** A
+bare `\.(set|add|update|delete)\(` is the admin SDK's write shape *and* `Map`'s and
+`Set`'s, so `next.set(…)`, `byDate.set(…)` and `seen.add(…)` read as Firestore writes and
+three read-only surfaces were published as `BOTH` — a registry that passed its own
+invariant while carrying a wrong audit result, which is the worst failure a census can
+have. A method call now counts only on a receiver that **names a reference**
+(`…Ref` / `…Doc`, or `tx` / `transaction` / `batch`). That is a naming convention and not
+a type check, which §8 states as a limit rather than presenting as proof.
 
 `9 distinct date rules` is the figure the audit exists for. Two of them live on the
 functions side and cannot import the app's (`lastWeekKey`, `schoolYearStart`), one is a
@@ -148,14 +157,14 @@ no document.
 
 | File | Collections | Role | Fold / date rule | What it is |
 |---|---|---|---|---|
-| `functions/src/ai/chat.ts` | hours · days | BOTH | own — `schoolYearStart` (Aug 1) + its own minute sum | **`loadHoursSummary`: the one reader that counts its own way** (`UX-410`). `hours` only, `minutes` **plus** `hours*60`, unrounded, non-positives admitted. `loadEngagementSummary` / `loadWeekContext` read `days` for engagement and the week plan, not for minutes |
-| `functions/src/ai/contextSlices.ts` | days | BOTH | — (renders the `hoursProgress` slice) | Prints *“N hours of 1000 target (P% complete)”* into the **plan** and **shellyChat** prompts — a target and a percentage the surfaces are forbidden (`UX-410`). `dayToday` reads the day log for the checklist |
+| `functions/src/ai/chat.ts` | hours · days | READ | own — `schoolYearStart` (Aug 1) + its own minute sum | **`loadHoursSummary`: the one reader that counts its own way** (`UX-410`). `hours` only, `minutes` **plus** `hours*60`, unrounded, non-positives admitted. `loadEngagementSummary` / `loadWeekContext` read `days` for engagement and the week plan, not for minutes |
+| `functions/src/ai/contextSlices.ts` | days | READ | — (renders the `hoursProgress` slice) | Prints *“N hours of 1000 target (P% complete)”* into the **plan** and **shellyChat** prompts — a target and a percentage the surfaces are forbidden (`UX-410`). `dayToday` reads the day log for the checklist |
 | `functions/src/ai/evaluate.ts` | hours · days · artifacts | BOTH | `lastWeekKey` over `civilDateObjectInZone` (UX-263 / UX-266); **its own** minute sums for the prompt | **The weekly cron and its `generateWeeklyReviewNow` twin.** Reads the week's `hours` / `days` / `artifacts` for the narrative and writes the `weeklyReviews` document — including the `UX-212` position snapshot, lost when the Claude call throws (`UX-409`). It reads **no `hoursAdjustments` at all** and sums minutes two more ways of its own (`UX-410`). Writes no `hours` row |
-| `functions/src/ai/tasks/conundrum.ts` | days | BOTH | — (reads `days` for recent responses) | Reads the day log for conundrum history. No minutes |
-| `functions/src/ai/tasks/disposition.ts` | days | BOTH | — (reads `days` for engagement + notes) | Reads the day log for the disposition narrative. No minutes |
-| `functions/src/ai/tasks/monthlyReviewData.ts` | hours · hoursAdjustments · days · artifacts | BOTH | `collectHoursContributions` → `computeMonthHours` | The monthly review book's month figure — the shared path (ARCH-47 slice 4), and the reason the book stopped narrating a smaller month than the record |
-| `functions/src/ai/tasks/shellyChat.ts` | days · artifacts | BOTH | `civilDateObjectInZone` (UX-266) | Reads `days` + `artifacts` for the chat's day/evidence context. No minute fold |
-| `functions/src/ai/tasks/weeklyFocus.ts` | days | BOTH | — (reads `days` for the week's items) | Builds the week-focus prompt. No minutes |
+| `functions/src/ai/tasks/conundrum.ts` | days | READ | — (reads `days` for recent responses) | Reads the day log for conundrum history. No minutes |
+| `functions/src/ai/tasks/disposition.ts` | days | READ | — (reads `days` for engagement + notes) | Reads the day log for the disposition narrative. No minutes |
+| `functions/src/ai/tasks/monthlyReviewData.ts` | hours · hoursAdjustments · days · artifacts | READ | `collectHoursContributions` → `computeMonthHours` | The monthly review book's month figure — the shared path (ARCH-47 slice 4), and the reason the book stopped narrating a smaller month than the record |
+| `functions/src/ai/tasks/shellyChat.ts` | days · artifacts | READ | `civilDateObjectInZone` (UX-266) | Reads `days` + `artifacts` for the chat's day/evidence context. No minute fold |
+| `functions/src/ai/tasks/weeklyFocus.ts` | days | READ | — (reads `days` for the week's items) | Builds the week-focus prompt. No minutes |
 | `src/components/ArtifactGallery.tsx` | artifacts | READ | — (no range rule) | Reads evidence for display |
 | `src/core/data/seed.ts` | artifacts | BOTH | — (dev seed) | Dev-only seeding of demo artifacts. Not a door a parent can reach |
 | `src/core/firebase/migrateHoursAdjustments.ts` | hoursAdjustments | BOTH | — (whole collection, no range) | The DATA-09 one-shot stamp of unattributed adjustments to `'both'`. Run from Records on load; hours-neutral by construction |
@@ -173,23 +182,23 @@ no document.
 | `src/features/evaluate/useMasteryCheckoffs.ts` | days | READ | `toISOString().slice(0,10)` — **UTC** | Reads recent day logs for mastery check-offs. No minutes; the UTC date is a read bound, not a stored one |
 | `src/features/planner-chat/applyWeekPlan.ts` | days | BOTH | `dateKeyForDayPlan` over the chosen week | **WRITER.** The single Apply (FEAT-150): the Mon–Fri day writes, every one through `setDayLogGuarded`. Writes `plannedMinutes`, which the fold correctly ignores |
 | `src/features/planner-chat/PlannerChatPage.tsx` | days · artifacts | BOTH | `getPlanningWeekRange` → `planningWeekSelection` | **WRITER.** Live-day edits after Apply. Its `hoursPerDay` header figure is the routine's own unweighted total and is **not** a reading of the hours record (`UX-206`) |
-| `src/features/planner-chat/useAppliedWeekDays.ts` | days | BOTH | the resolved week's Mon–Fri keys | Reads the applied days back for the mirror view |
+| `src/features/planner-chat/useAppliedWeekDays.ts` | days | READ | the resolved week's Mon–Fri keys | Reads the applied days back for the mirror view |
 | `src/features/quest/useQuestSession.ts` | hours · days | BOTH | `todayKey()` for hours; **UTC** for the day write | **WRITER.** Knowledge Mine minutes (idle-aware, rounded up to 5) and a day-log check-off. The day-log half is dated in UTC — `UX-412` |
 | `src/features/records/ChapterResponsesTab.tsx` | artifacts | BOTH | — (no range rule) | Reads chapter-response artifacts |
 | `src/features/records/dataReviewExportLoader.ts` | hours · hoursAdjustments · days · artifacts | READ | `getSchoolYearRange()` + the shared fold in `dataReviewExport.logic` | The data-review export's reads. §5 folds the shared path and says so in its own prose |
 | `src/features/records/PortfolioPage.tsx` | artifacts | BOTH | `getMonthRange` | Reads a month of evidence for the portfolio |
 | `src/features/records/QuickAddHours.tsx` | hours | WRITE | the typed date — local | **WRITER.** Records' quick-add: typed minutes, the activity's subject, `notes` = the activity label, `assertAttributed` at the write |
 | `src/features/records/RecordsPage.tsx` | hours · hoursAdjustments · days · artifacts | BOTH | `getSchoolYearRange()` → `computeHoursSummary` | **WRITER and READER.** The compliance surface: the hours table, the subject split, the trend, the pack — and the historical-hours and manual-adjustment doors |
-| `src/features/settings/auditArtifactChildIds.ts` | artifacts | BOTH | — (whole collection survey) | Admin survey of artifact attribution |
+| `src/features/settings/auditArtifactChildIds.ts` | artifacts | READ | — (whole collection survey) | Admin survey of artifact attribution |
 | `src/features/settings/DevAdminTab.tsx` | days | BOTH | `getWeekRange()` for the Sunday sweep | **WRITER.** The admin Sunday cleanup deletes day logs through `deleteDayLogGuarded` |
-| `src/features/shelly-chat/useChatWeekDays.ts` | days | BOTH | `getWeekRange(now, 1)` — Monday-start | Reads the chat's week of days. **The one caller that starts its week on MONDAY**, because it is building a Mon–Fri card set, not counting a compliance week |
+| `src/features/shelly-chat/useChatWeekDays.ts` | days | READ | `getWeekRange(now, 1)` — Monday-start | Reads the chat's week of days. **The one caller that starts its week on MONDAY**, because it is building a Mon–Fri card set, not counting a compliance week |
 | `src/features/shelly-chat/useShellyChatFlows.ts` | days | BOTH | 14 days back, `toISOString().slice(0,10)` | Reads recent days for chat context; writes day edits through the guard |
-| `src/features/today/ExplorerMap.tsx` | days | BOTH | — (recent days) | Reads day logs for the kid map |
+| `src/features/today/ExplorerMap.tsx` | days | READ | — (recent days) | Reads day logs for the kid map |
 | `src/features/today/KidCaptureForm.tsx` | artifacts | WRITE | — (no range rule) | **WRITER.** A kid's captured artifact. No minutes |
 | `src/features/today/KidChapterPool.tsx` | artifacts | BOTH | — (no range rule) | Chapter answers as artifacts |
 | `src/features/today/KidConundrumResponse.tsx` | artifacts | WRITE | `toISOString().slice(0,10)` — **UTC** | **WRITER.** The conundrum answer's artifact. `useConundrumDoneToday`'s own header already records the local/UTC mismatch here |
 | `src/features/today/KidTeachBack.tsx` | artifacts | WRITE | — (no range rule) | **WRITER.** A teach-back artifact. No minutes |
-| `src/features/today/KidTodayView.tsx` | artifacts | BOTH | the selected date — local | The kid's list. Its quick-log chips write through `useUnifiedCapture` |
+| `src/features/today/KidTodayView.tsx` | artifacts | READ | the selected date — local | The kid's list. Its quick-log chips write through `useUnifiedCapture` |
 | `src/features/today/LessonVideoDialog.tsx` | hoursAdjustments | WRITE | the day's own date — local | **WRITER.** *Log watch time*: an `hoursAdjustments` row, `reason` = *“Watched video: <topic>”* |
 | `src/features/today/liveDayEdit.ts` | days | BOTH | the edited day's key — local | **WRITER.** Today's live day edits, all through `setDayLogGuarded`; mirrors the DATA-14 item↔block correspondence |
 | `src/features/today/TeachBackSection.tsx` | artifacts | WRITE | — (no range rule) | **WRITER.** The parent-side teach-back artifact |
@@ -321,7 +330,14 @@ Three shapes, hand-checked, stated rather than hidden:
    there is no shared hours writer: **every hours door calls `addDoc` itself.** That is
    itself worth noticing and is half of `UX-361`'s shape.
 2. **Which collection a `BOTH` file reads and which it writes.** Not derivable by a scan;
-   column 5 says it per file, by hand.
+   column 5 says it per file, by hand. And the write test is a **naming convention, not a
+   type check**: the admin SDK writes as `ref.set(…)` / `tx.set(…)` / `batch.delete(…)`,
+   whose method names are also `Map`'s and `Set`'s, so the receiver must be named like a
+   reference (`…Ref` / `…Doc`, or `tx` / `transaction` / `batch`). A write through a
+   differently-named receiver reads as a READ, and a `Map` called `docRef` would read as a
+   write. The first draft of this census had no receiver test at all and published three
+   read-only surfaces as `BOTH` (Codex round 1, P2) — which is the failure this limit is
+   stated to keep visible rather than the one it pretends to have closed.
 3. **A range query that silently excludes a document.** Every week and month read filters
    `where('date', …)`, and a `days` document with no `date` field cannot match — yet both
    `RecordsPage` and `useWeekHoursInputs` map results with

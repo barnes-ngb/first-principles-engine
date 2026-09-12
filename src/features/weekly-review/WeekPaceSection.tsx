@@ -5,7 +5,6 @@ import Typography from '@mui/material/Typography'
 import SectionCard from '../../components/SectionCard'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type { CurriculumSnapshot, WeeklyReview } from '../../core/types'
-import { formatDateYmd } from '../../core/utils/format'
 import {
   computeObservedCoverage,
   normalizeCurriculumSnapshot,
@@ -53,16 +52,21 @@ export interface WeekPaceSectionProps {
   /** True when that read failed — distinct from "there are none". */
   historyFailed: boolean
   /**
-   * Today, as `YYYY-MM-DD` — which of the two positions sentences is true
+   * Now, as an **instant** — which of the two positions sentences is true
    * depends on whether this week's overnight save has come due (UX-407).
+   *
+   * An instant rather than a date key, because the boundary is the cron's
+   * scheduled 00:15 America/Chicago and not the viewer's midnight (Codex round
+   * 1, P2): a date-only answer changes state at the wrong moment on every
+   * device that is not in Central, and fifteen minutes early on one that is.
    *
    * Passed in rather than read here so the page's ONE clock decides: UX-406's
    * selector, its default and this sentence all resolve from the same `now`,
-   * and a section that read its own would be a second answer to "what day is
+   * and a section that read its own would be a second answer to "what time is
    * it" on a page whose whole subject is which week you are looking at. The
    * default exists for the tests and for a caller that has no clock of its own.
    */
-  todayKey?: string
+  now?: Date
 }
 
 /**
@@ -100,13 +104,10 @@ function WeekPaceBody({
   history,
   historyLoading,
   historyFailed,
-  todayKey,
+  now,
 }: WeekPaceSectionProps) {
   const { totalMinutes, loading, error } = useWeekHours(familyId, childId, weekKey)
-  const resolvedTodayKey = useMemo(
-    () => todayKey ?? formatDateYmd(new Date()),
-    [todayKey],
-  )
+  const resolvedNow = useMemo(() => now ?? new Date(), [now])
 
   const current = useMemo(
     () => normalizeCurriculumSnapshot(review?.curriculumPositions),
@@ -176,7 +177,7 @@ function WeekPaceBody({
 
       {!reviewFailed && !reviewWasGenerated(review) && (
         <Typography variant="body2" color="text.secondary">
-          {positionsPendingLine(weekKey, resolvedTodayKey)}
+          {positionsPendingLine(weekKey, resolvedNow)}
         </Typography>
       )}
 

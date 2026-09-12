@@ -124,6 +124,9 @@ export const POSITIONS_PENDING_LINE =
  *   • the save is still ahead  → the promise, which is true;
  *   • the save was due and the document is not there → this line.
  *
+ * "Still ahead" is measured against the cron's own scheduled instant, not the
+ * viewer's calendar day — see {@link positionsPendingLine}.
+ *
  * It says what is observable and nothing about why. *"The cron didn't run"* is a
  * claim about a server this page has no information from — the run may have
  * thrown, the Claude call may have failed (in which case `generateReviewForChild`
@@ -137,23 +140,91 @@ export const POSITIONS_MISSING_LINE =
   'No workbook positions were saved for this week, so there’s no coverage rate to show. The hours and evidence above are read live and aren’t affected.'
 
 /**
- * Which of the two positions sentences is true for this week, today.
+ * The zone the overnight save is scheduled in, and the time it fires.
  *
- * The overnight save for a week runs after that week's Saturday has closed
- * (00:15 the following Sunday — UX-263), so the promise holds while that
- * Saturday is today or still ahead and not one day longer. The week's Saturday
- * is read from `weekRangeFromDateKey`, the same helper the page's own reads
- * resolve their range from, rather than by adding six days here — a second copy
+ * A mirror of `WEEKLY_REVIEW_SCHEDULE` in `functions/src/ai/evaluate.ts`
+ * (`"every sunday 00:15"`, `"America/Chicago"` — UX-263). It cannot be imported:
+ * that module pulls in `firebase-admin` and `firebase-functions`, and it is not
+ * in `functions/src/shared/`, the only directory both projects compile. So it is
+ * copied — and **pinned by a source scan** in `weekHours.test.ts`, which reads
+ * the Cloud Function's own constant and fails if these two drift. A hand-kept
+ * copy with nothing standing on it is the guard ARCH-47 exists to replace; a
+ * hand-kept copy with a test on it is what this repo does everywhere the project
+ * boundary makes one definition impossible (`lastWeekKey` / `lastCompletedSchoolWeekKey`
+ * are the precedent, pinned from both sides).
+ */
+export const REVIEW_SAVE_TIME_ZONE = 'America/Chicago'
+/** `HH:mm`, 24-hour, in {@link REVIEW_SAVE_TIME_ZONE}. */
+export const REVIEW_SAVE_DUE_TIME = '00:15'
+
+/** `YYYY-MM-DD` and `HH:mm` for an instant, as read in a given zone. */
+function civilPartsInZone(
+  instant: Date,
+  timeZone: string,
+): { date: string; time: string } {
+  // `en-CA` formats a date as `YYYY-MM-DD`, which is the key shape every date in
+  // this app is stored in, and `hourCycle: 'h23'` keeps midnight as `00` rather
+  // than `24`. A zone the runtime does not know throws, which the caller catches.
+  const date = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(instant)
+  const time = new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).format(instant)
+  return { date, time }
+}
+
+/** The day after a `YYYY-MM-DD` key. */
+function nextDay(dateKey: string): string {
+  const d = new Date(`${dateKey}T00:00:00`)
+  d.setDate(d.getDate() + 1)
+  const yyyy = d.getFullYear()
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${yyyy}-${mm}-${dd}`
+}
+
+/**
+ * Which of the two positions sentences is true for this week, right now.
+ *
+ * The overnight save for a week runs once that week's Saturday has closed —
+ * **00:15 on the following Sunday, in the family's zone** (UX-263) — so the
+ * promise holds until that instant and not a minute longer. The week's Saturday
+ * comes from `weekRangeFromDateKey`, the same helper the page's own reads
+ * resolve their range from, rather than from six days added here: a second copy
  * of that arithmetic is what produced UX-218.
  *
- * Both arguments are `YYYY-MM-DD`, which compare lexicographically in date
- * order. An unparseable week key falls back to the *promise* rather than to the
- * failure: the sentence that claims less is the safe one when we cannot tell
- * which week we are talking about.
+ * **The boundary is the cron's scheduled instant, not the browser's calendar
+ * day** (Codex round 1, P2). A date-only comparison against the viewer's local
+ * date changes state at *their* midnight: in Central that showed the failure
+ * sentence for the fifteen minutes before the cron was even due, a device set
+ * ahead of Central showed it hours early, and one behind kept promising a save
+ * that had already run. So `now` is an instant and both sides of the comparison
+ * are read in {@link REVIEW_SAVE_TIME_ZONE} — the answer is then the same on
+ * every device, which is what a records surface owes a reader.
+ *
+ * Two fallbacks, both to the sentence that claims less: an unparseable week key,
+ * and a runtime whose `Intl` cannot resolve the zone (old mobile browsers ship
+ * without the full tz database). Where we cannot tell which week or what time it
+ * is, the promise is the safe thing to say.
  */
-export function positionsPendingLine(weekKey: string, todayKey: string): string {
+export function positionsPendingLine(weekKey: string, now: Date): string {
   const saturday = weekRangeFromDateKey(weekKey).end
-  return todayKey <= saturday ? POSITIONS_PENDING_LINE : POSITIONS_MISSING_LINE
+  const dueDate = nextDay(saturday)
+  try {
+    const { date, time } = civilPartsInZone(now, REVIEW_SAVE_TIME_ZONE)
+    if (date < dueDate) return POSITIONS_PENDING_LINE
+    if (date === dueDate && time < REVIEW_SAVE_DUE_TIME) return POSITIONS_PENDING_LINE
+    return POSITIONS_MISSING_LINE
+  } catch {
+    return POSITIONS_PENDING_LINE
+  }
 }
 
 /**

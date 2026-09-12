@@ -102,22 +102,43 @@ export function namesCollection(code: string, collection: TimeCollection): boole
 }
 
 /**
- * The write verbs, INCLUDING this repo's own guarded day writers.
+ * The write verbs.
  *
- * `setDayLogGuarded` / `deleteDayLogGuarded` are load-bearing here: every write
- * to `days` routes through `today/dayWriteGuard.ts` (enforced by
- * `docs:check`'s own `[day-write-routing]` rule), so a file that calls one of
- * them and never names `setDoc` is a day-log WRITER — `watch/writeWatchItemToDay.ts`
- * being the clearest case, a file whose entire job is the write. Reading the raw
- * verbs alone would have classified four of this repo's day writers as readers.
+ * Three groups, and the third is narrow on purpose (Codex round 1, P2).
+ *
+ * 1. **The web SDK's own functions** — `addDoc` / `setDoc` / `updateDoc` /
+ *    `deleteDoc` / `writeBatch`. Unambiguous.
+ * 2. **This repo's guarded day writers** — every write to `days` routes through
+ *    `today/dayWriteGuard.ts` (enforced by `docs:check`'s own
+ *    `[day-write-routing]` rule), so a file that calls one of them and names no
+ *    SDK function is still a day-log WRITER. `watch/writeWatchItemToDay.ts` is
+ *    the clearest case, a file whose entire job is the write; without this group
+ *    four of this repo's day writers read as readers.
+ * 3. **The admin SDK's methods, on a Firestore RECEIVER.** The functions side
+ *    writes as `ref.set(…)`, `docRef.update(…)`, `tx.set(…)`, `batch.delete(…)`
+ *    — methods whose names are also `Map` and `Set` methods. A bare
+ *    `\.(set|add|update|delete)\(` therefore read `next.set(…)` in
+ *    `useAppliedWeekDays`, `byDate.set(…)` in `useChatWeekDays` and
+ *    `seen.add(…)` in `monthlyReviewData` as Firestore writes, and classified
+ *    three read-only surfaces as `BOTH` — a registry that passed its own
+ *    invariant while carrying a wrong audit result, which is the worst failure
+ *    a census can have. The receiver must now NAME a reference: anything ending
+ *    in `Ref` / `ref` / `Doc` / `doc`, or one of the three transaction-shaped
+ *    identifiers (`tx`, `transaction`, `batch`). It is a naming convention and
+ *    not a type check, so it is stated in §8 of the census as a limit rather
+ *    than presented as proof.
  */
-const WRITE_VERBS =
-  /\b(addDoc|setDoc|updateDoc|deleteDoc|writeBatch|setDayLogGuarded|deleteDayLogGuarded)\s*\(|\.\s*(set|update|add|delete)\s*\(/
+const WRITE_VERBS = [
+  /\b(addDoc|setDoc|updateDoc|deleteDoc|writeBatch)\s*\(/,
+  /\b(setDayLogGuarded|deleteDayLogGuarded|mergeDayLogGuarded)\s*\(/,
+  /\b(?:[A-Za-z_$][\w$]*)?(?:[Rr]ef|[Dd]oc)\s*\.\s*(?:set|update|delete|create)\s*\(/,
+  /\b(?:tx|transaction|batch)\s*\.\s*(?:set|update|delete|create)\s*\(/,
+]
 const READ_VERBS = /\b(getDocs|getDoc|onSnapshot)\s*\(|\.\s*get\s*\(\s*\)/
 
 /** Which role this file plays, from the verbs it uses. */
 export function deriveRole(code: string): Role {
-  const writes = WRITE_VERBS.test(code)
+  const writes = WRITE_VERBS.some((pattern) => pattern.test(code))
   const reads = READ_VERBS.test(code)
   // A candidate names a collection, so it does SOMETHING with it; with neither
   // verb visible the honest fallback is the one that claims least.

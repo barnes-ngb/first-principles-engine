@@ -162,9 +162,15 @@ describe('the guard fails closed', () => {
 
   it('reports a row whose derived cells have gone stale', () => {
     const first = rows[0]
+    // Both cells must actually CHANGE, or the test proves nothing about the one
+    // that did not — which is how this assertion first went green by accident,
+    // when Codex round 1's role fix happened to make `rows[0]` already `READ`.
+    const otherRole = first.role === Role.Read ? Role.Write : Role.Read
+    const otherCollections =
+      first.collections.join(' · ') === 'artifacts' ? ['hours'] : ['artifacts']
     const problems = censusProblems(surfaces, [
       ...rows.filter((r) => r.path !== first.path),
-      { ...first, role: 'READ', collections: ['artifacts'] },
+      { ...first, role: otherRole, collections: otherCollections },
     ])
     const kinds = problems.map((p) => p.kind).sort()
     expect(kinds).toContain('wrong-collections')

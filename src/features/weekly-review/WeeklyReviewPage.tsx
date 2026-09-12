@@ -25,7 +25,6 @@ import { db, weeklyReviewsCollection, weeklyReviewDocId } from '../../core/fireb
 import { useActiveChild, type UseActiveChildResult } from '../../core/hooks/useActiveChild'
 import type { PaceAdjustment, WeeklyReview } from '../../core/types'
 import { AdjustmentDecision, ReviewStatus } from '../../core/types/enums'
-import { formatDateYmd } from '../../core/utils/format'
 import { formatWeekShort } from '../../core/utils/dateKey'
 import { formatPlanningWeekLabel } from '../planner-chat/chatPlanner.logic'
 import {
@@ -162,7 +161,6 @@ function WeeklyReviewBody({ childContext, embedded }: { childContext: UseActiveC
     () => resolveReviewWeek(weekChoice, now),
     [weekChoice, now],
   )
-  const todayKey = useMemo(() => formatDateYmd(now), [now])
   // Named the FEAT-196 way — "Week of Aug 31–Sep 4", the school days themselves —
   // from the planner's own formatter rather than a second copy of it. The
   // Sun–Sat fallback covers an unparseable key, which that formatter reports as
@@ -391,7 +389,7 @@ function WeeklyReviewBody({ childContext, embedded }: { childContext: UseActiveC
               history={history}
               historyLoading={historyLoading}
               historyFailed={historyFailed}
-              todayKey={todayKey}
+              now={now}
             />
           </SectionErrorBoundary>
 

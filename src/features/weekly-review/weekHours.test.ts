@@ -1,9 +1,14 @@
 import { describe, expect, it } from 'vitest'
 
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+
 import {
   HOURS_SOURCE_CAPTION,
   POSITIONS_MISSING_LINE,
   POSITIONS_PENDING_LINE,
+  REVIEW_SAVE_DUE_TIME,
+  REVIEW_SAVE_TIME_ZONE,
   hoursLoggedLine,
   positionsPendingLine,
 } from './weekHours'
@@ -48,30 +53,56 @@ describe('hoursLoggedLine (UX-211)', () => {
 
 describe('positionsPendingLine', () => {
   // Week 2026-08-30 is Sun Aug 30 – Sat Sep 5. Its overnight save runs 00:15 on
-  // Sunday Sep 6, so the promise holds through Saturday and not one day longer.
+  // Sunday Sep 6 **America/Chicago** — the cron's own scheduled instant — so
+  // every fixture below is an absolute moment and the answers are the same
+  // whatever zone the runner is in.
   const WEEK = '2026-08-30'
+  /** CDT is UTC−5 in September, so 00:15 CT Sunday Sep 6 is 05:15Z. */
+  const DUE = new Date('2026-09-06T05:15:00Z')
+  const at = (iso: string) => new Date(iso)
 
   it('promises the overnight save while that Saturday is still ahead', () => {
-    for (const day of ['2026-08-30', '2026-09-02', '2026-09-04']) {
-      expect(positionsPendingLine(WEEK, day)).toBe(POSITIONS_PENDING_LINE)
+    for (const iso of ['2026-08-30T18:00:00Z', '2026-09-02T12:00:00Z', '2026-09-04T23:00:00Z']) {
+      expect(positionsPendingLine(WEEK, at(iso))).toBe(POSITIONS_PENDING_LINE)
     }
   })
 
   it('still promises it ON the Saturday — the day the sentence was written for', () => {
-    expect(positionsPendingLine(WEEK, '2026-09-05')).toBe(POSITIONS_PENDING_LINE)
+    // 1pm Central, and again at 11:30pm Central, both still Saturday there.
+    expect(positionsPendingLine(WEEK, at('2026-09-05T18:00:00Z'))).toBe(POSITIONS_PENDING_LINE)
+    expect(positionsPendingLine(WEEK, at('2026-09-06T04:30:00Z'))).toBe(POSITIONS_PENDING_LINE)
   })
 
-  it('stops promising it the moment the save was due', () => {
-    // Sunday Sep 6: the cron has fired or it has not, and either way "it will
-    // happen tonight" is no longer true.
-    expect(positionsPendingLine(WEEK, '2026-09-06')).toBe(POSITIONS_MISSING_LINE)
+  it('holds the promise through the fifteen minutes before the cron is due', () => {
+    // Codex round 1, P2: a date-only comparison flipped at the viewer's local
+    // midnight, so a Central reader saw the failure sentence for a quarter of an
+    // hour every Sunday BEFORE the save was even scheduled to run.
+    const oneMinuteBefore = new Date(DUE.getTime() - 60_000)
+    expect(positionsPendingLine(WEEK, oneMinuteBefore)).toBe(POSITIONS_PENDING_LINE)
+  })
+
+  it('stops promising it at the scheduled instant, not at anyone’s midnight', () => {
+    expect(positionsPendingLine(WEEK, DUE)).toBe(POSITIONS_MISSING_LINE)
+    expect(positionsPendingLine(WEEK, new Date(DUE.getTime() + 60_000))).toBe(
+      POSITIONS_MISSING_LINE,
+    )
+  })
+
+  it('gives the same answer on a device set ahead of Central and one behind', () => {
+    // The whole point of reading the boundary in the family's zone: the sentence
+    // is about the CRON, so it may not depend on where the reader is standing.
+    // 02:00 Sunday in Tokyo is still Saturday afternoon in Chicago; 22:00
+    // Saturday in Honolulu is Sunday 03:00 there — both before 00:15 CT Sunday.
+    expect(positionsPendingLine(WEEK, at('2026-09-05T17:00:00Z'))).toBe(POSITIONS_PENDING_LINE)
+    expect(positionsPendingLine(WEEK, at('2026-09-06T05:14:00Z'))).toBe(POSITIONS_PENDING_LINE)
+    expect(positionsPendingLine(WEEK, at('2026-09-06T05:16:00Z'))).toBe(POSITIONS_MISSING_LINE)
   })
 
   it('does not repeat a promise about a Saturday a week gone — the owner’s screen', () => {
-    // Friday 2026-09-11, 8:30pm, Review → Week, Lincoln. The page named
-    // Aug 31 – Sep 4 and told him its positions would be saved "once Saturday is
-    // over". That Saturday had passed six days earlier.
-    expect(positionsPendingLine(WEEK, '2026-09-11')).toBe(POSITIONS_MISSING_LINE)
+    // Friday 2026-09-11, 8:30pm Central. The page named Aug 31 – Sep 4 and told
+    // him its positions would be saved "once Saturday is over". That Saturday
+    // had passed six days earlier.
+    expect(positionsPendingLine(WEEK, at('2026-09-12T01:30:00Z'))).toBe(POSITIONS_MISSING_LINE)
   })
 
   it('claims nothing about why, and says the numbers above are unaffected', () => {
@@ -80,6 +111,36 @@ describe('positionsPendingLine', () => {
   })
 
   it('falls back to the promise for an unparseable week — the safer claim', () => {
-    expect(positionsPendingLine('not-a-week', '2026-09-11')).toBe(POSITIONS_PENDING_LINE)
+    expect(positionsPendingLine('not-a-week', at('2026-09-12T01:30:00Z'))).toBe(
+      POSITIONS_PENDING_LINE,
+    )
+  })
+})
+
+// ── The schedule this sentence mirrors ──────────────────────────────────────
+
+describe('the mirrored cron schedule stays in step with the Cloud Function', () => {
+  // `WEEKLY_REVIEW_SCHEDULE` cannot be imported here — `evaluate.ts` pulls in
+  // firebase-admin and firebase-functions and is not in `functions/src/shared/`,
+  // the one directory both projects compile. So it is read as SOURCE, which is
+  // this repo's standing answer where the project boundary makes one definition
+  // impossible: a hand-kept copy with a test on it, never a hand-kept copy alone.
+  const source = readFileSync(
+    join(import.meta.dirname, '..', '..', '..', 'functions', 'src', 'ai', 'evaluate.ts'),
+    'utf8',
+  )
+  const schedule =
+    /export const WEEKLY_REVIEW_SCHEDULE = \{([\s\S]*?)\} as const;/.exec(source)?.[1] ?? ''
+
+  it('finds the Cloud Function’s constant at all', () => {
+    expect(schedule).not.toBe('')
+  })
+
+  it('mirrors its time zone', () => {
+    expect(schedule).toContain(`"${REVIEW_SAVE_TIME_ZONE}"`)
+  })
+
+  it('mirrors the hour it fires', () => {
+    expect(schedule).toMatch(new RegExp(`sunday ${REVIEW_SAVE_DUE_TIME}`))
   })
 })
