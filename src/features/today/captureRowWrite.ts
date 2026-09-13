@@ -1,9 +1,9 @@
-import { doc, getDoc } from 'firebase/firestore'
+import { doc } from 'firebase/firestore'
 
 import { daysCollection } from '../../core/firebase/firestore'
-import type { ChecklistItem, DayLog } from '../../core/types'
+import type { ChecklistItem } from '../../core/types'
 import { dayLogDocId } from './daylog.model'
-import { checklistItemKey, updateDayLogGuarded } from './dayWriteGuard'
+import { checklistItemKey, patchDayChecklistGuarded } from './dayWriteGuard'
 
 /**
  * The capture's own write lane — `UX-404`.
@@ -31,19 +31,21 @@ import { checklistItemKey, updateDayLogGuarded } from './dayWriteGuard'
  * written. The arithmetic is pinned by test with a positive control.
  *
  * ── How ─────────────────────────────────────────────────────────────────────
- * Read the live document, find the row **by identity** (`checklistItemKey`, the
- * same notion `dayWriteGuard` uses and `liveDayEdit` resolves by — an index
- * captured when the camera opened can shift under a rollover or a concurrent
- * add), patch that row, and write through {@link updateDayLogGuarded} with
- * `checklist` alone. A Firestore array cannot be patched element-wise, so the
- * checklist is re-sent whole — but it is the checklist that was *just read*, and
- * `blocks`, `xpTotal`, `energy` and every other day-level field are not in the
- * payload at all.
+ * Find the row **by identity** (`checklistItemKey`, the same notion
+ * `dayWriteGuard` uses and `liveDayEdit` resolves by — an index captured when
+ * the camera opened can shift under a rollover or a concurrent add), patch that
+ * row, and write `checklist` alone. A Firestore array cannot be patched
+ * element-wise, so the checklist is re-sent whole; `blocks`, `xpTotal`, `energy`
+ * and every other day-level field are not in the payload at all.
  *
- * The guard runs in **enforcing** mode here, unlike the manual-edit lane: this
- * writer is purely additive on one row and can never legitimately drop a
- * completion, a minute or an evidence link, so a violation is a bug and should
- * throw rather than be logged past.
+ * **The read, the patch and the write are ONE transaction** (Codex round 1, P1),
+ * through `dayWriteGuard.patchDayChecklistGuarded`. A read-then-write leaves a
+ * window in which an edit lands and is then overwritten by an array rebuilt from
+ * the older snapshot — which is `UX-404`'s own defect with a shorter fuse, and
+ * the preservation guard cannot catch it (no entity disappears; only values go
+ * backwards on retained rows, which is deliberately allowed). So
+ * {@link patchChecklistRow} is **pure and re-runnable**: the transaction hands
+ * it whatever the checklist is on that attempt, and may call it more than once.
  *
  * The screen is not advanced from here. `onSnapshot` delivers what actually
  * landed, which is the whole point — advancing it from a stale in-memory
@@ -77,8 +79,73 @@ export type CaptureRowWriteOutcome =
   | { status: 'failed' }
 
 /**
- * Patch one row of a checklist by identity. Pure; returns `null` when the row is
- * not there, which the caller reports rather than guessing at a neighbour.
+ * What the caller knows about the row it opened the camera on, beyond its
+ * identity — used only to tell IDENTICAL rows apart. See
+ * {@link resolveCaptureRowIndex}.
+ */
+export interface CaptureRowHint {
+  /** The row's index when the capture started. Trusted only if it still matches. */
+  index?: number
+  /** Whether that row was ticked when the capture started. */
+  completed?: boolean
+}
+
+/**
+ * Which row this capture meant, when more than one answers to its identity
+ * (Codex round 1, P1).
+ *
+ * `checklistItemKey` falls back to `label::subject` for an id-less row, and a
+ * saved day really can hold two rows with the same one — `liveDayEdit`'s own
+ * header names the common way: `retainChecklistForApply` KEEPS a completed row
+ * and Apply then appends the freshly-planned one with the same title and
+ * duration. Taking the first match would attach this photo's evidence and
+ * workbook registration to the **older completed** row, overwriting its own
+ * evidence link.
+ *
+ * `liveDayEdit` breaks that tie by preferring the first **editable** row, which
+ * is right for an edit and wrong here: a capture is offered on a completed row
+ * too (`showPhotoDoor` allows `item.completed`), so "prefer incomplete" would
+ * send a post-completion photo to the wrong twin. This resolves it from what the
+ * caller actually knows instead:
+ *
+ *  1. **The index it started from, when that row still has this identity AND the
+ *     same completed state** — a validated index, not a bare one. Both halves
+ *     are needed: for twins the identity is by definition the same at every
+ *     index, so identity alone would let a shifted list land on the wrong one.
+ *  2. **A match in the same completed state**, when the index has shifted — the
+ *     retained completed twin and the freshly-planned one differ exactly there.
+ *  3. **The index it started from, on identity alone** — the case the state test
+ *     cannot cover: the row was ticked *during* the upload, so no match carries
+ *     the state the capture remembers, and the index is the better evidence.
+ *  4. **The first match**, when nothing narrows it; the twins are then alike in
+ *     every respect this can see.
+ *
+ * `-1` when the day no longer holds the row at all.
+ */
+export function resolveCaptureRowIndex(
+  rows: readonly ChecklistItem[],
+  itemKey: string,
+  hint: CaptureRowHint = {},
+): number {
+  const matches = (row: ChecklistItem) => checklistItemKey(row) === itemKey
+  const { index, completed } = hint
+  const atHint =
+    index != null && index >= 0 && index < rows.length && matches(rows[index]) ? index : -1
+  if (atHint >= 0 && (completed == null || !!rows[atHint].completed === completed)) {
+    return atHint
+  }
+  if (completed != null) {
+    const sameState = rows.findIndex((row) => matches(row) && !!row.completed === completed)
+    if (sameState >= 0) return sameState
+  }
+  if (atHint >= 0) return atHint
+  return rows.findIndex(matches)
+}
+
+/**
+ * Patch one row of a checklist by identity. **Pure and re-runnable** — the
+ * transaction calls it once per attempt — and `null` when the row is not there,
+ * which the caller reports rather than guessing at a neighbour.
  *
  * Every other row is returned **by reference** — untouched, not rebuilt — so a
  * completion, a grade note or an engagement flag written since the capture
@@ -88,9 +155,10 @@ export function patchChecklistRow(
   checklist: ChecklistItem[] | undefined,
   itemKey: string,
   patch: CaptureRowPatch,
+  hint: CaptureRowHint = {},
 ): ChecklistItem[] | null {
   const rows = checklist ?? []
-  const index = rows.findIndex((row) => checklistItemKey(row) === itemKey)
+  const index = resolveCaptureRowIndex(rows, itemKey, hint)
   if (index < 0) return null
   return rows.map((row, i) => (i === index ? { ...row, ...patch } : row))
 }
@@ -109,22 +177,21 @@ export async function writeCaptureRow(params: {
   /** {@link checklistItemKey} of the row the photo was taken for. */
   itemKey: string
   patch: CaptureRowPatch
+  /** Tells identical rows apart. See {@link resolveCaptureRowIndex}. */
+  hint?: CaptureRowHint
   /** Names the door in the guard's log line. */
   context: string
 }): Promise<CaptureRowWriteOutcome> {
-  const { familyId, childId, dateKey, itemKey, patch, context } = params
+  const { familyId, childId, dateKey, itemKey, patch, hint, context } = params
   try {
     const ref = doc(daysCollection(familyId), dayLogDocId(dateKey, childId))
-    const snap = await getDoc(ref)
-    if (!snap.exists()) return { status: 'refused', reason: 'no-day' }
-    const live = snap.data() as DayLog
-    const checklist = patchChecklistRow(live.checklist, itemKey, patch)
-    if (!checklist) return { status: 'refused', reason: 'row-gone' }
-    await updateDayLogGuarded(
+    const outcome = await patchDayChecklistGuarded(
       ref,
-      { checklist, updatedAt: new Date().toISOString() },
+      (checklist) => patchChecklistRow(checklist, itemKey, patch, hint),
       context,
     )
+    if (outcome === 'no-day') return { status: 'refused', reason: 'no-day' }
+    if (outcome === 'no-row') return { status: 'refused', reason: 'row-gone' }
     return { status: 'done' }
   } catch (err) {
     console.error('[captureRowWrite] could not link the capture to its row', err)

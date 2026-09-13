@@ -44,6 +44,11 @@ export interface UseActivityConfigsResult {
    * surfaces that do not have this hazard. A consumer that cares compares this
    * against the child it is rendering; `TodayPage` does, and treats a mismatch
    * as an unsettled read.
+   *
+   * The **error** path is the exception and does clear the list: a stamp saying
+   * *"this describes the new child"* over the old child's array is worse than no
+   * answer, and unlike the loading path there is no snapshot coming to replace it
+   * (Codex round 1, P2).
    */
   configsChildId: string | null
   addConfig: (data: NewActivityConfig) => Promise<void>
@@ -122,6 +127,18 @@ export function useActivityConfigs(childId: string): UseActivityConfigsResult {
         setError(err.message)
         // A failed read is still an answer ABOUT THIS CHILD: without this stamp a
         // consumer could not tell the failure from the previous child's success.
+        //
+        // **And the list is cleared with it** (Codex round 1, P2). Stamping alone
+        // relabelled the PREVIOUS child's snapshot as describing the new one, and
+        // the stamp is what `TodayPage` reads to decide the list is settled enough
+        // to hand on — so `TodayChecklist`'s direct consumers, which see no error
+        // flag at all (`findStrandConfigId`, the workbook lookups), drove buttons
+        // and targeting off the sibling's curriculum after a failed switch. There
+        // is nothing this hook knows about the new child, so it says nothing;
+        // `error` is what distinguishes that from an affirmative empty, and the
+        // surfaces that must not render an empty as a result read it.
+        configsRef.current = []
+        setConfigs([])
         setConfigsChildId(childId)
         setLoading(false)
       },

@@ -32,6 +32,8 @@ vi.mock('firebase/firestore', () => ({
   doc: vi.fn((col: { __key?: string } | undefined, id?: string) => ({
     __key: col?.__key ?? 'unknown',
     __id: id,
+    // `patchDayChecklistGuarded` takes the Firestore instance off the ref.
+    firestore: {},
   })),
   getDoc: vi.fn((ref: Ref) =>
     ref?.__key === 'days'
@@ -41,6 +43,21 @@ vi.mock('firebase/firestore', () => ({
         })
       : Promise.resolve({ exists: () => true, data: () => ({ conceptualBlocks: [] }) }),
   ),
+  runTransaction: vi.fn(async (_db: unknown, body: (tx: unknown) => Promise<unknown>) => {
+    const tx = {
+      get: (ref: Ref) =>
+        Promise.resolve({
+          exists: () => daysStore.has(ref.__id ?? ''),
+          data: () => daysStore.get(ref.__id ?? ''),
+        }),
+      update: (ref: Ref, data: Record<string, unknown>) => {
+      const id = ref.__id ?? ''
+        dayWrites.push({ id, data })
+        daysStore.set(id, { ...(daysStore.get(id) as DayLog), ...(data as Partial<DayLog>) })
+      },
+    }
+    return body(tx)
+  }),
   updateDoc: vi.fn((ref: Ref, data: Record<string, unknown>) => {
     if (ref?.__key === 'days') {
       const id = ref.__id ?? ''
@@ -56,6 +73,7 @@ vi.mock('firebase/firestore', () => ({
 vi.mock('../../core/firebase/firestore', () => ({
   artifactsCollection: vi.fn(() => ({ __key: 'artifacts' })),
   daysCollection: vi.fn(() => ({ __key: 'days' })),
+  db: {},
   skillSnapshotsCollection: vi.fn(() => ({ __key: 'skillSnapshots' })),
 }))
 

@@ -1,6 +1,7 @@
 import {
   deleteDoc,
   getDoc,
+  runTransaction,
   setDoc,
   updateDoc,
   type DocumentReference,
@@ -300,6 +301,56 @@ export async function updateDayLogGuarded(
   const after: DayShape = { ...(before ?? {}), ...partial }
   assertDayPreservation(before, after, context, opts)
   await updateDoc(ref, partial as Partial<DayLog>)
+}
+
+/** What a single-row checklist patch did, or why it did nothing. */
+export type ChecklistRowPatchOutcome = 'done' | 'no-day' | 'no-row'
+
+/**
+ * Patch ONE row of a day's checklist, atomically (`UX-404`, Codex round 1 P1).
+ *
+ * The other guarded writers read the document and then write, which leaves a
+ * window: an edit landing between the two is rebuilt from the older snapshot and
+ * overwritten by the array this one sends. For the writers above that window is
+ * a fraction of a second at the end of a synchronous handler. For the capture it
+ * was the whole point — the defect `UX-404` exists to close is a checkbox being
+ * reverted by a write composed before it — so closing it *most of the way* and
+ * calling it fixed would be the same bug with a shorter fuse.
+ *
+ * So: the read, the patch, the preservation assertion and the write are ONE
+ * `runTransaction` (the `migrateActivityConfigs` / `bootstrapLearnerModel`
+ * precedent). Firestore re-runs the body when the document changes underneath,
+ * so `patchChecklist` is handed the checklist as it stands on **that attempt**
+ * and must be pure — it is called more than once. The write is
+ * `checklist` + `updatedAt` only: `blocks`, `xpTotal` and every other day-level
+ * field are not in the payload at all.
+ *
+ * The guard runs **enforcing** here. A row patch is additive on one row and can
+ * never legitimately drop a completion, a minute or an evidence link, so a
+ * violation is a bug rather than the parent's authoritative edit.
+ *
+ * `patchChecklist` answers `null` when the day no longer holds the row it meant,
+ * which is a refusal and not an error — the caller says so rather than guessing
+ * at a neighbour.
+ */
+export async function patchDayChecklistGuarded(
+  ref: DocumentReference<DayLog>,
+  patchChecklist: (checklist: ChecklistItem[] | undefined) => ChecklistItem[] | null,
+  context: string,
+): Promise<ChecklistRowPatchOutcome> {
+  // The instance comes from the REF, not from an imported `db`: this module is
+  // the chokepoint every day write passes through, so pulling Firebase's
+  // initialisation in here would drag it into every consumer's test too.
+  return runTransaction(ref.firestore, async (tx) => {
+    const snap = await tx.get(ref)
+    if (!snap.exists()) return 'no-day'
+    const before = snap.data()
+    const checklist = patchChecklist(before.checklist)
+    if (!checklist) return 'no-row'
+    assertDayPreservation(before, { ...before, checklist }, context)
+    tx.update(ref, { checklist, updatedAt: new Date().toISOString() })
+    return 'done'
+  })
 }
 
 /**

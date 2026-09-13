@@ -63,9 +63,9 @@ logs. No number, fold, rounding or stored row was changed by this run.
 ## 3. The derived numbers
 
 ```
-source files scanned (non-test, src/ + functions/src/): 874
+source files scanned (non-test, src/ + functions/src/): 873
 surfaces naming a time or evidence collection: 61
-by role: {"WRITE":14,"READ":21,"BOTH":26}
+by role: {"WRITE":15,"READ":21,"BOTH":25}
 by collection: {"hours":16,"hoursAdjustments":7,"days":29,"artifacts":32}
 census rows: 61
 census problems: 0
@@ -200,7 +200,7 @@ no document.
 | `src/features/settings/DevAdminTab.tsx` | days | BOTH | `getWeekRange()` for the Sunday sweep | **WRITER.** The admin Sunday cleanup deletes day logs through `deleteDayLogGuarded` |
 | `src/features/shelly-chat/useChatWeekDays.ts` | days | READ | `getWeekRange(now, 1)` — Monday-start | Reads the chat's week of days. **The one caller that starts its week on MONDAY**, because it is building a Mon–Fri card set, not counting a compliance week |
 | `src/features/shelly-chat/useShellyChatFlows.ts` | days | BOTH | 14 days back, `toISOString().slice(0,10)` | Reads recent days for chat context; writes day edits through the guard |
-| `src/features/today/captureRowWrite.ts` | days | BOTH | the captured day's key — local | **WRITER.** The capture's own row-scoped lane (`UX-404`): reads the LIVE day, patches the one row the photo was taken for by `checklistItemKey`, and writes `checklist` alone through `updateDayLogGuarded` — so `blocks` and `xpTotal` are never in the payload. No minutes |
+| `src/features/today/captureRowWrite.ts` | days | WRITE | the captured day's key — local | **WRITER.** The capture's own row-scoped lane (`UX-404`): patches the one row the photo was taken for, resolved by `checklistItemKey`, and writes `checklist` alone. The read, the patch and the write are ONE transaction through `dayWriteGuard.patchDayChecklistGuarded`, so `blocks` and `xpTotal` are never in the payload and an edit landing mid-write is not overwritten. No minutes |
 | `src/features/today/ExplorerMap.tsx` | days | READ | — (recent days) | Reads day logs for the kid map |
 | `src/features/today/KidCaptureForm.tsx` | artifacts | WRITE | — (no range rule) | **WRITER.** A kid's captured artifact. No minutes |
 | `src/features/today/KidChapterPool.tsx` | artifacts | BOTH | — (no range rule) | Chapter answers as artifacts |
@@ -331,14 +331,15 @@ Three shapes, hand-checked, stated rather than hidden:
 
 1. **A write that reaches a collection through a helper in another file.** The scan is
    per file, so a module whose only Firestore verb lives in an imported writer is only
-   caught where the repo's own guarded writers are named. All **four** guarded day writers
+   caught where the repo's own guarded writers are named. All **five** guarded day writers
    (`setDayLogGuarded` / `updateDayLogGuarded` / `mergeDayLogGuarded` /
-   `deleteDayLogGuarded`) are in the write-verb list for exactly this reason — without them
+   `deleteDayLogGuarded` / `patchDayChecklistGuarded`) are in the write-verb list for exactly this reason — without them
    four of this repo's day writers read as readers, `watch/writeWatchItemToDay.ts` (a file
    whose entire job is the write) among them. `updateDayLogGuarded` was the one missing
    until `FIX-235`, and `UX-404`'s `captureRowWrite.ts` — a file whose entire job is also the
-   write — is the first that reaches `days` through it alone, so it published as a READER
-   until the rule was completed. There is no equivalent for `hours`, because
+   write — is the first that reaches `days` through a guarded writer alone, so it published as
+   a READER until the rule was completed; `patchDayChecklistGuarded` is that run's own new
+   writer and went in with it. There is no equivalent for `hours`, because
    there is no shared hours writer: **every hours door calls `addDoc` itself.** That is
    itself worth noticing and is half of `UX-361`'s shape.
 2. **Which collection a `BOTH` file reads and which it writes.** Not derivable by a scan;

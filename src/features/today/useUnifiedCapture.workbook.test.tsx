@@ -12,6 +12,8 @@ import type { TodayRowConfigLike } from './todayRowKind'
 const addDocCalls: { key: string; data: Record<string, unknown> }[] = []
 const updateDocCalls: Record<string, unknown>[] = []
 let addDocShouldThrow = false
+/** Force the row write to be refused, so its warning must be the last word. */
+let dayWriteShouldFail = false
 /** Reject only the first N addDoc calls, then succeed (batch primary-failure test). */
 let addDocThrowFirst = 0
 
@@ -36,6 +38,8 @@ vi.mock('firebase/firestore', () => ({
   doc: vi.fn((col: { __key?: string } | undefined, id?: string) => ({
     __key: col?.__key ?? 'unknown',
     __id: id,
+    // `patchDayChecklistGuarded` takes the Firestore instance off the ref.
+    firestore: {},
   })),
   getDoc: vi.fn((ref: Ref) =>
     ref?.__key === 'days'
@@ -45,8 +49,25 @@ vi.mock('firebase/firestore', () => ({
         })
       : Promise.resolve({ exists: () => false, data: () => ({}) }),
   ),
+  runTransaction: vi.fn(async (_db: unknown, body: (tx: unknown) => Promise<unknown>) => {
+    const tx = {
+      get: (ref: Ref) =>
+        Promise.resolve({
+          exists: () => daysStore.has(ref.__id ?? ''),
+          data: () => daysStore.get(ref.__id ?? ''),
+        }),
+      update: (ref: Ref, data: Record<string, unknown>) => {
+      if (dayWriteShouldFail) throw new Error('day write rejected')
+      const id = ref.__id ?? ''
+        dayWrites.push({ id, data })
+        daysStore.set(id, { ...(daysStore.get(id) as DayLog), ...(data as Partial<DayLog>) })
+      },
+    }
+    return body(tx)
+  }),
   updateDoc: vi.fn((ref: Ref, data: Record<string, unknown>) => {
     if (ref?.__key === 'days') {
+      if (dayWriteShouldFail) return Promise.reject(new Error('day write rejected'))
       const id = ref.__id ?? ''
       dayWrites.push({ id, data })
       daysStore.set(id, { ...(daysStore.get(id) as DayLog), ...(data as Partial<DayLog>) })
@@ -60,6 +81,7 @@ vi.mock('firebase/firestore', () => ({
 vi.mock('../../core/firebase/firestore', () => ({
   artifactsCollection: vi.fn(() => ({ __key: 'artifacts' })),
   daysCollection: vi.fn(() => ({ __key: 'days' })),
+  db: {},
   skillSnapshotsCollection: vi.fn(() => ({ __key: 'skillSnapshots' })),
 }))
 
@@ -191,6 +213,7 @@ beforeEach(() => {
   updateDocCalls.length = 0
   daysStore.clear()
   dayWrites.length = 0
+  dayWriteShouldFail = false
   addDocShouldThrow = false
   addDocThrowFirst = 0
   timeoutScans = false
@@ -899,5 +922,92 @@ describe('useUnifiedCapture — FEAT-141 content notes at capture', () => {
     expect(runScanMock).toHaveBeenCalledTimes(1) // no extra AI call for the note
     const artifact = addDocCalls.find((c) => c.key === 'artifacts')!
     expect(artifact.data.contentNote).toBe('GATB Math Lesson 12 — addition')
+  })
+})
+
+// ── Codex round 1 (P2): a failed row write must not be overwritten ──────────
+
+describe('useUnifiedCapture — the row-write warning is the last word', () => {
+  /** Stub `fetch` so the backfill loop can pull each page's photo back. */
+  function stubPhotoFetch() {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ blob: () => Promise.resolve(new Blob(['img'], { type: 'image/jpeg' })) }),
+    )
+  }
+
+  it('a workbook capture whose row write fails does NOT then claim it registered', async () => {
+    runScanMock.mockResolvedValue({ id: 'scan-1', results: worksheetResults })
+    syncScanToConfigMock.mockResolvedValue({
+      action: 'updated', configId: 'wb-math', configName: 'GATB Math', position: 12,
+    })
+    dayWriteShouldFail = true
+
+    const { result, onMessage } = setup({ workbookConfigId: 'wb-math' }, [matchingConfig])
+    await act(async () => {
+      await result.current.handleUnifiedCapture(file(), 0)
+    })
+
+    // There is ONE message slot, so an unconditional success right behind the
+    // warning replaced it with a claim the row does not support.
+    const last = onMessage.mock.calls.at(-1)![0] as { text: string; severity: string }
+    expect(last.severity).toBe('warning')
+    expect(last.text.toLowerCase()).toContain('photo saved')
+    expect(onMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ text: expect.stringContaining('Registered to') }),
+    )
+    // The photo itself really is saved — that half of the sentence is true.
+    expect(addDocCalls.some((c) => c.key === 'artifacts')).toBe(true)
+  })
+
+  it('an evidence capture whose row write fails does NOT then say "Work captured!"', async () => {
+    runScanMock.mockResolvedValue(null)
+    dayWriteShouldFail = true
+
+    const { result, onMessage } = setup({ /* no workbook */ })
+    await act(async () => {
+      await result.current.handleUnifiedCapture(file(), 0)
+    })
+
+    expect(onMessage).not.toHaveBeenCalledWith({ text: 'Work captured!', severity: 'success' })
+    const last = onMessage.mock.calls.at(-1)![0] as { severity: string }
+    expect(last.severity).toBe('warning')
+  })
+
+  it('POSITIVE CONTROL — with the row write landing, both messages are the success ones', async () => {
+    runScanMock.mockResolvedValue({ id: 'scan-1', results: worksheetResults })
+    syncScanToConfigMock.mockResolvedValue({
+      action: 'updated', configId: 'wb-math', configName: 'GATB Math', position: 12,
+    })
+
+    const { result, onMessage } = setup({ workbookConfigId: 'wb-math' }, [matchingConfig])
+    await act(async () => {
+      await result.current.handleUnifiedCapture(file(), 0)
+    })
+
+    expect(onMessage).toHaveBeenCalledWith({
+      text: 'Registered to GATB Math · Lesson 12', severity: 'success',
+    })
+  })
+
+  it('a backfill whose row write fails does NOT then report the registration', async () => {
+    stubPhotoFetch()
+    runScanMock.mockResolvedValue({ id: 'scan-b', results: worksheetResults })
+    syncScanToConfigMock.mockResolvedValue({
+      action: 'updated', configId: 'wb-math', configName: 'GATB Math', position: 12,
+    })
+    dayWriteShouldFail = true
+
+    const { result, onMessage } = setup({ workbookConfigId: 'wb-math' }, [matchingConfig])
+    await act(async () => {
+      await result.current.handleBackfillWorkbookScan(0, ['https://x/p1.jpg'])
+    })
+
+    const last = onMessage.mock.calls.at(-1)![0] as { severity: string }
+    expect(last.severity).toBe('warning')
+    expect(onMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ text: expect.stringContaining('Registered to') }),
+    )
+    vi.unstubAllGlobals()
   })
 })

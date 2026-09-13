@@ -47,6 +47,29 @@ describe('useActivityConfigs stamps the child its state describes', () => {
     expect(stamps.length).toBe(2)
   })
 
+  it('CLEARS the list on the error path rather than relabelling the old one', () => {
+    // Codex round 1 on `FIX-235` (P2): stamping alone said "this describes the
+    // new child" over the PREVIOUS child's array, and the stamp is what
+    // `TodayPage` reads to decide the list is settled enough to hand on — so
+    // `TodayChecklist`'s direct consumers, which see no error flag
+    // (`findStrandConfigId`, the workbook lookups), drove buttons and targeting
+    // off the sibling's curriculum after a failed switch. Unlike the loading
+    // path there is no snapshot coming to replace it.
+    const errorHandler = HOOK.slice(
+      HOOK.indexOf("console.error('[ActivityConfigs] Snapshot error:'"),
+      HOOK.indexOf('setConfigsChildId(childId)', HOOK.indexOf('Snapshot error')),
+    )
+    expect(errorHandler).toMatch(/configsRef\.current = \[\]/)
+    expect(errorHandler).toMatch(/setConfigs\(\[\]\)/)
+  })
+
+  it('does NOT clear on a plain child change — that would flash four other surfaces empty', () => {
+    // The exception is the error path and only the error path; the loading path
+    // is answered by the stamp, which is what `configsChildId` exists for.
+    const setEmpty = HOOK.match(/setConfigs\(\[\]\)/g) ?? []
+    expect(setEmpty.length).toBe(1)
+  })
+
   it('returns it, so a consumer can compare against the child on screen', () => {
     expect(HOOK).toMatch(/\n {4}configsChildId,\n/)
   })

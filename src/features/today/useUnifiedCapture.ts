@@ -286,13 +286,16 @@ export function useUnifiedCapture({
    * believing the row carries evidence it does not.
    */
   const linkCaptureToRow = useCallback(
-    async (item: ChecklistItem, patch: CaptureRowPatch, context: string) => {
+    async (item: ChecklistItem, index: number, patch: CaptureRowPatch, context: string) => {
       const outcome = await writeCaptureRow({
         familyId,
         childId,
         dateKey: today,
         itemKey: checklistItemKey(item),
         patch,
+        // Tells identical rows apart — a retained completed row and the fresh one
+        // Apply appended share an identity (Codex round 1, P1).
+        hint: { index, completed: !!item.completed },
         context,
       })
       const notice = captureRowWriteNotice(outcome)
@@ -379,8 +382,9 @@ export function useUnifiedCapture({
           const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, file, filename)
           await updateDoc(doc(artifactsCollection(familyId), docRef.id), { uri: downloadUrl })
 
-          await linkCaptureToRow(
+          const linked = await linkCaptureToRow(
             item,
+            index,
             {
               ...stampConfigId,
               evidenceArtifactId: docRef.id,
@@ -390,14 +394,21 @@ export function useUnifiedCapture({
             'today-capture:workbook',
           )
           onArtifactCreated?.({ ...artifact, id: docRef.id, uri: downloadUrl } as Artifact)
-          onMessage?.(
-            registration
-              ? {
-                  text: `Registered to ${registration.configName}${registration.position != null ? ` · Lesson ${registration.position}` : ''}`,
-                  severity: 'success',
-                }
-              : { text: 'Work captured!', severity: 'success' },
-          )
+          // Codex round 1 (P2): `linkCaptureToRow` has already said what went
+          // wrong, and there is ONE message slot — so an unconditional
+          // *"Registered to…"* right behind it replaced the warning with a claim
+          // that the row carries evidence it does not. The photo is saved either
+          // way, and that half is what the warning leads with.
+          if (linked) {
+            onMessage?.(
+              registration
+                ? {
+                    text: `Registered to ${registration.configName}${registration.position != null ? ` · Lesson ${registration.position}` : ''}`,
+                    severity: 'success',
+                  }
+                : { text: 'Work captured!', severity: 'success' },
+            )
+          }
           ok = true
         } catch (err) {
           console.error('[UnifiedCapture] Workbook capture failed:', {
@@ -468,8 +479,9 @@ export function useUnifiedCapture({
         const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, file, filename)
         await updateDoc(doc(artifactsCollection(familyId), docRef.id), { uri: downloadUrl })
 
-        await linkCaptureToRow(
+        const linked = await linkCaptureToRow(
           item,
+          index,
           {
             evidenceArtifactId: docRef.id,
             evidenceCollection: 'artifacts' as const,
@@ -478,7 +490,7 @@ export function useUnifiedCapture({
           'today-capture:evidence',
         )
         onArtifactCreated?.({ ...artifact, id: docRef.id, uri: downloadUrl } as Artifact)
-        onMessage?.({ text: 'Work captured!', severity: 'success' })
+        if (linked) onMessage?.({ text: 'Work captured!', severity: 'success' })
         // No scan analysis to show for artifacts — clear the index
         setScanItemIndex(null)
         // A kid never sees a scan result card he cannot read: the analysis
@@ -666,12 +678,16 @@ export function useUnifiedCapture({
         // backfill fetches and scans several photos, which takes longer than a
         // capture does — so writing the day as it stood when the button was
         // tapped is the same defect with a wider window.
-        await linkCaptureToRow(
+        const linked = await linkCaptureToRow(
           item,
+          index,
           { ...stampConfigId, workbookScanRegistration: lastRegistration, scanned: true },
           'today-capture:backfill',
         )
-        if (report) onMessage?.(report)
+        // Same rule as the capture (Codex round 1, P2): the report names a
+        // registration the row does not carry, so it must not stand over the
+        // sentence saying the row was not written.
+        if (linked && report) onMessage?.(report)
       } catch (err) {
         console.error('[UnifiedCapture] Backfill workbook scan failed:', err)
         // The photo is untouched by this path, so this is a warning too.

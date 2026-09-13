@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { captureRowWriteNotice, patchChecklistRow, writeCaptureRow } from './captureRowWrite'
+import {
+  captureRowWriteNotice,
+  patchChecklistRow,
+  resolveCaptureRowIndex,
+  writeCaptureRow,
+} from './captureRowWrite'
 import { dayLogDocId } from './daylog.model'
 import { findDayPreservationViolations } from './dayWriteGuard'
 import type { ChecklistItem, DayLog } from '../../core/types'
@@ -24,10 +29,20 @@ const daysStore = new Map<string, DayLog>()
 const updateDocCalls: { ref: Ref; data: Record<string, unknown> }[] = []
 let updateShouldThrow = false
 
+/**
+ * A transaction that can be made to see the document CHANGE between the read and
+ * the write — which is the race Codex round 1's P1 named and the reason the
+ * write is transactional at all. `contendOnce` mutates the store after the first
+ * `tx.get`, exactly as a concurrent tick would, and the fake re-runs the body.
+ */
+let contendOnce: (() => void) | null = null
+
 vi.mock('firebase/firestore', () => ({
   doc: vi.fn((col: { __key?: string } | undefined, id?: string) => ({
     __key: col?.__key ?? 'unknown',
     __id: id,
+    // `patchDayChecklistGuarded` takes the Firestore instance off the ref.
+    firestore: {},
   })),
   getDoc: vi.fn((ref: Ref) =>
     Promise.resolve({
@@ -35,14 +50,42 @@ vi.mock('firebase/firestore', () => ({
       data: () => daysStore.get(ref.__id ?? ''),
     }),
   ),
+  runTransaction: vi.fn(
+    async (_db: unknown, body: (tx: unknown) => Promise<unknown>) => {
+      for (let attempt = 0; attempt < 5; attempt++) {
+        let readAt: DayLog | undefined
+        const tx = {
+          get: (ref: Ref) => {
+            readAt = daysStore.get(ref.__id ?? '')
+            const contend = contendOnce
+            contendOnce = null
+            contend?.()
+            return Promise.resolve({
+              exists: () => readAt !== undefined,
+              data: () => readAt,
+            })
+          },
+          update: (ref: Ref, data: Record<string, unknown>) => {
+            if (updateShouldThrow) throw new Error('rejected')
+            const id = ref.__id ?? ''
+            // The real transaction aborts and re-runs when the document moved
+            // between the read and the commit. That retry is the whole fix.
+            if (daysStore.get(id) !== readAt) throw new Error('__retry__')
+            updateDocCalls.push({ ref, data })
+            daysStore.set(id, { ...(daysStore.get(id) as DayLog), ...(data as Partial<DayLog>) })
+          },
+        }
+        try {
+          return await body(tx)
+        } catch (err) {
+          if ((err as Error).message !== '__retry__') throw err
+        }
+      }
+      throw new Error('transaction exhausted retries')
+    },
+  ),
   setDoc: vi.fn(() => Promise.resolve()),
-  updateDoc: vi.fn((ref: Ref, data: Record<string, unknown>) => {
-    if (updateShouldThrow) return Promise.reject(new Error('rejected'))
-    updateDocCalls.push({ ref, data })
-    const id = ref.__id ?? ''
-    daysStore.set(id, { ...(daysStore.get(id) as DayLog), ...(data as Partial<DayLog>) })
-    return Promise.resolve()
-  }),
+  updateDoc: vi.fn(() => Promise.resolve()),
   deleteDoc: vi.fn(() => Promise.resolve()),
 }))
 
@@ -98,6 +141,7 @@ beforeEach(() => {
   daysStore.clear()
   updateDocCalls.length = 0
   updateShouldThrow = false
+  contendOnce = null
 })
 
 describe('patchChecklistRow', () => {
@@ -228,5 +272,91 @@ describe('writeCaptureRow — the capture writes only its own row', () => {
       // so first — `UX-351`'s rule: never report a lost photo that is not lost.
       expect(notice.toLowerCase()).toContain('photo saved')
     }
+  })
+})
+
+// ── Codex round 1, P1: identical rows ───────────────────────────────────────
+
+describe('resolveCaptureRowIndex — two rows can share one identity', () => {
+  // `retainChecklistForApply` keeps a completed row and Apply appends the
+  // freshly-planned one with the same title and duration, so `label::subject` is
+  // the same string for both. `liveDayEdit` documents this shape.
+  const twins = (): ChecklistItem[] => [
+    row({ label: 'Handwriting (15m)', completed: true, evidenceArtifactId: 'art-old' }),
+    row({ label: 'Handwriting (15m)', completed: false }),
+  ]
+  const KEY = 'Handwriting (15m)::'
+
+  it('takes the index the capture started from when it still holds that identity', () => {
+    expect(resolveCaptureRowIndex(twins(), KEY, { index: 1, completed: false })).toBe(1)
+    expect(resolveCaptureRowIndex(twins(), KEY, { index: 0, completed: true })).toBe(0)
+  })
+
+  it('falls back to the matching completed state when the list has shifted', () => {
+    const shifted = [row({ label: 'New row (5m)' }), ...twins()]
+    // The remembered index now points at a different row, so it is not trusted.
+    expect(resolveCaptureRowIndex(shifted, KEY, { index: 1, completed: false })).toBe(2)
+  })
+
+  it('POSITIVE CONTROL — the old first-match rule sends the fresh row to the completed twin', () => {
+    // What `patchChecklistRow` used to do. Written out so the assertions above
+    // are pinning a real difference: this is the row whose `art-old` evidence
+    // link the capture would have overwritten.
+    const rows = twins()
+    expect(rows.findIndex((r) => `${r.label}::${r.subjectBucket ?? ''}` === KEY)).toBe(0)
+    expect(resolveCaptureRowIndex(rows, KEY, { index: 1, completed: false })).toBe(1)
+  })
+
+  it('patches the resolved twin and leaves the other one alone', () => {
+    const next = patchChecklistRow(twins(), KEY, { evidenceArtifactId: 'art-new' }, {
+      index: 1,
+      completed: false,
+    })!
+    expect(next[0].evidenceArtifactId).toBe('art-old')
+    expect(next[1].evidenceArtifactId).toBe('art-new')
+  })
+
+  it('keeps the remembered row when it was TICKED during the upload', () => {
+    // No match then carries the state the capture remembers, so the state test
+    // cannot help and the validated index is the better evidence.
+    const ticked = [
+      row({ label: 'Handwriting (15m)', completed: true, evidenceArtifactId: 'art-old' }),
+      row({ label: 'Handwriting (15m)', completed: true }),
+    ]
+    expect(resolveCaptureRowIndex(ticked, KEY, { index: 1, completed: false })).toBe(1)
+  })
+
+  it('still answers -1 when the day holds no row with this identity', () => {
+    expect(resolveCaptureRowIndex(twins(), 'Gone::', { index: 1 })).toBe(-1)
+  })
+})
+
+// ── Codex round 1, P1: the write is atomic ──────────────────────────────────
+
+describe('writeCaptureRow — an edit landing mid-write is not overwritten', () => {
+  it('re-runs against the changed document rather than sending the older array', async () => {
+    daysStore.set(DAY_ID, dayAtCaptureStart())
+    // The parent ticks Handwriting after the transaction reads and before it
+    // commits. A read-then-write would rebuild `checklist` from the pre-tick copy
+    // and put the tick back; the transaction sees the document move and re-runs.
+    contendOnce = () => daysStore.set(DAY_ID, dayAfterTheTick())
+
+    const outcome = await writeCaptureRow({
+      familyId: FAMILY,
+      childId: CHILD,
+      dateKey: DATE,
+      itemKey: 'GATB Math (30m)::',
+      patch: { evidenceArtifactId: 'art-1' },
+      context: 'test',
+    })
+
+    expect(outcome).toEqual({ status: 'done' })
+    const stored = daysStore.get(DAY_ID)!
+    expect(stored.checklist![1].completed).toBe(true)
+    expect(stored.checklist![0].evidenceArtifactId).toBe('art-1')
+    // And the blocks/XP the tick produced are still there, because they were
+    // never in the payload.
+    expect(stored.blocks![0].actualMinutes).toBe(15)
+    expect(stored.xpTotal).toBe(10)
   })
 })
