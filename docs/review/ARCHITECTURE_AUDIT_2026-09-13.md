@@ -937,6 +937,12 @@ than asking for a fifth round:**
 
 ## 5-line summary
 
+`CODEX ROUND: open — do not merge yet` (PR #1847; PR #1845 already merged by the owner before this run's
+review protocol completed — see §5.4's note). **Rounds: PR #1845 — 3m41s, 4m39s, 4m31s (owner merged at
+the round-1 head, before rounds 2–3 landed); PR #1847 — 2m27s, then 4m7s (this PR's own two-round cap for
+a <500-line diff; round 2 raised two more real findings, both fixed in the last push, no third round
+asked per the cap).**
+
 **Baseline: GREEN** (root: 0 lint errors/3 pre-existing warnings, tsc clean, 9,530/9,531 tests passing +1
 skipped across 673 files; functions: clean lint/tsc, 1,441/1,441 tests across 64 files; build clean,
 bundle 4,573.26 kB/1,375.80 kB gzip, +210.27 kB/+74.32 kB gzip since 08-30; `npm audit` now 1 moderate
