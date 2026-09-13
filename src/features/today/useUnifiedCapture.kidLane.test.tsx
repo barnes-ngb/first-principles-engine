@@ -3,7 +3,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useUnifiedCapture } from './useUnifiedCapture'
 import type { ChecklistItem, DayLog } from '../../core/types'
-import type { WorkbookConfigLike } from '../../core/utils/workbookMatching'
+import { dayLogDocId } from './daylog.model'
+import { TodayRowConfigsState } from './todayRowKind'
+import type { TodayRowConfigLike } from './todayRowKind'
 
 // ── FEAT-184 / UX-151: two lanes, one gate ──────────────────────────────────
 //
@@ -14,22 +16,64 @@ import type { WorkbookConfigLike } from '../../core/utils/workbookMatching'
 // ── Firestore / storage boundary mocks ──────────────────────────────────────
 type WriteOp = { op: 'addDoc'; key: string; data: Record<string, unknown> } | { op: 'updateDoc'; data: Record<string, unknown> }
 const writes: WriteOp[] = []
+// UX-404: the day is a store, because the capture patches its own row on the
+// LIVE document rather than handing back the one it started with. Day writes are
+// kept OUT of `writes`, which stays the invariant-write snapshot these tests pin.
+const daysStore = new Map<string, DayLog>()
+const dayWrites: { id: string; data: Record<string, unknown> }[] = []
+
+type Ref = { __key?: string; __id?: string }
 
 vi.mock('firebase/firestore', () => ({
   addDoc: vi.fn((col: { __key: string }, data: Record<string, unknown>) => {
     writes.push({ op: 'addDoc', key: col.__key, data })
     return Promise.resolve({ id: `artifact-${writes.length}` })
   }),
-  doc: vi.fn((col: { __key?: string } | undefined) => ({ __key: col?.__key ?? 'unknown' })),
-  getDoc: vi.fn(() => Promise.resolve({ exists: () => true, data: () => ({ conceptualBlocks: [] }) })),
-  updateDoc: vi.fn((_ref: unknown, data: Record<string, unknown>) => {
-    writes.push({ op: 'updateDoc', data })
+  doc: vi.fn((col: { __key?: string } | undefined, id?: string) => ({
+    __key: col?.__key ?? 'unknown',
+    __id: id,
+    // `patchDayChecklistGuarded` takes the Firestore instance off the ref.
+    firestore: {},
+  })),
+  getDoc: vi.fn((ref: Ref) =>
+    ref?.__key === 'days'
+      ? Promise.resolve({
+          exists: () => daysStore.has(ref.__id ?? ''),
+          data: () => daysStore.get(ref.__id ?? ''),
+        })
+      : Promise.resolve({ exists: () => true, data: () => ({ conceptualBlocks: [] }) }),
+  ),
+  runTransaction: vi.fn(async (_db: unknown, body: (tx: unknown) => Promise<unknown>) => {
+    const tx = {
+      get: (ref: Ref) =>
+        Promise.resolve({
+          exists: () => daysStore.has(ref.__id ?? ''),
+          data: () => daysStore.get(ref.__id ?? ''),
+        }),
+      update: (ref: Ref, data: Record<string, unknown>) => {
+      const id = ref.__id ?? ''
+        dayWrites.push({ id, data })
+        daysStore.set(id, { ...(daysStore.get(id) as DayLog), ...(data as Partial<DayLog>) })
+      },
+    }
+    return body(tx)
+  }),
+  updateDoc: vi.fn((ref: Ref, data: Record<string, unknown>) => {
+    if (ref?.__key === 'days') {
+      const id = ref.__id ?? ''
+      dayWrites.push({ id, data })
+      daysStore.set(id, { ...(daysStore.get(id) as DayLog), ...(data as Partial<DayLog>) })
+    } else {
+      writes.push({ op: 'updateDoc', data })
+    }
     return Promise.resolve()
   }),
 }))
 
 vi.mock('../../core/firebase/firestore', () => ({
   artifactsCollection: vi.fn(() => ({ __key: 'artifacts' })),
+  daysCollection: vi.fn(() => ({ __key: 'days' })),
+  db: {},
   skillSnapshotsCollection: vi.fn(() => ({ __key: 'skillSnapshots' })),
 }))
 
@@ -115,34 +159,40 @@ function makeDayLog(item: Partial<ChecklistItem>): DayLog {
   return { checklist } as unknown as DayLog
 }
 
-function setup(item: Partial<ChecklistItem> = {}, configs: WorkbookConfigLike[] = []) {
-  const persistDayLogImmediate = vi.fn()
+const TODAY = '2026-09-03'
+const DAY_ID = dayLogDocId(TODAY, 'child-1')
+
+function setup(item: Partial<ChecklistItem> = {}, configs: TodayRowConfigLike[] = []) {
   const onMessage = vi.fn()
   const onArtifactCreated = vi.fn()
+  daysStore.set(DAY_ID, makeDayLog(item))
   const { result } = renderHook(() =>
     useUnifiedCapture({
       familyId: 'fam-1',
       childId: 'child-1',
       childName: 'London',
-      today: '2026-09-03',
+      today: TODAY,
       dayLog: makeDayLog(item),
-      persistDayLogImmediate,
       onMessage,
       onArtifactCreated,
       configs,
+      configsState: TodayRowConfigsState.Settled,
     }),
   )
-  return { result, persistDayLogImmediate, onMessage, onArtifactCreated }
+  return { result, onMessage, onArtifactCreated }
 }
 
-const matchingConfig: WorkbookConfigLike = { id: 'wb-math', name: 'GATB Math', type: 'workbook', scannable: true }
+const matchingConfig: TodayRowConfigLike = { id: 'wb-math', name: 'GATB Math', type: 'workbook', scannable: true }
 const file = () => new File(['x'], 'page.jpg', { type: 'image/jpeg' })
 
-const persistedItem = (persist: ReturnType<typeof vi.fn>) =>
-  (persist.mock.calls[0][0] as DayLog).checklist![0]
+/** The row as the capture wrote it to the live day. */
+const persistedItem = (): ChecklistItem =>
+  (dayWrites.at(-1)!.data.checklist as ChecklistItem[])[0]
 
 beforeEach(() => {
   writes.length = 0
+  daysStore.clear()
+  dayWrites.length = 0
   actor.isChildProfile = false
   runScanMock.mockReset()
   syncScanToConfigMock.mockReset()
@@ -152,34 +202,33 @@ beforeEach(() => {
   syncScanToConfigMock.mockResolvedValue({ action: 'updated', configId: 'wb-math', configName: 'GATB Math', position: 12 })
 })
 
-describe('parent lane — the write set is byte-for-byte what it was', () => {
-  it('a worksheet photo takes the SCANS path: config sync, skill map, blocker merge, scans evidence', async () => {
-    const { result, persistDayLogImmediate } = setup()
+describe('parent lane — UX-403: the curriculum route belongs to a workbook row', () => {
+  it('a worksheet photo on a row that resolves to NO workbook is evidence and nothing else', async () => {
+    // The row matches no config, so `resolveTodayRow` answers `unknown`. This
+    // case USED to take the classification path: an untargeted
+    // `syncScanToConfig` that fuzzy-matched the cover text and could create or
+    // advance a workbook, then `childSkillMaps` and
+    // `skillSnapshots.conceptualBlocks`, none of it confirmed. Owner decision
+    // (2026-09-13): a photo here writes the artifact and the day-log link.
+    const { result } = setup()
     await act(async () => {
       await result.current.handleUnifiedCapture(file(), 0)
     })
 
-    expect(syncScanToConfigMock).toHaveBeenCalledTimes(1)
-    expect(syncScanToConfigMock).toHaveBeenCalledWith('child-1', worksheetResults)
-    expect(updateSkillMapMock).toHaveBeenCalledTimes(1)
-    // The exact write set — the snapshot this test pins pre- and post-fix.
-    expect(writes).toEqual([
-      {
-        op: 'updateDoc',
-        data: expect.objectContaining({
-          conceptualBlocks: [expect.objectContaining({ id: 'blk-1' })],
-          blocksUpdatedAt: expect.any(String),
-        }),
-      },
-    ])
-    // No artifact: the scan doc IS the evidence on the parent lane.
-    expect(writes.some((w) => w.op === 'addDoc')).toBe(false)
-    expect(persistedItem(persistDayLogImmediate)).toMatchObject({
-      evidenceArtifactId: 'scan-9',
-      evidenceCollection: 'scans',
-      scanned: true,
+    expect(syncScanToConfigMock).not.toHaveBeenCalled() // activityConfigs + workingLevels + learnerModels
+    expect(updateSkillMapMock).not.toHaveBeenCalled() // childSkillMaps
+    expect(writes.filter((w) => w.op === 'updateDoc' && 'conceptualBlocks' in w.data)).toEqual([])
+    // The photo is kept — the one record this row can make.
+    expect(writes.some((w) => w.op === 'addDoc' && w.key === 'artifacts')).toBe(true)
+    expect(persistedItem()).toMatchObject({
+      evidenceArtifactId: 'artifact-1',
+      evidenceCollection: 'artifacts',
     })
-    expect(persistedItem(persistDayLogImmediate).pendingScanId).toBeUndefined()
+    // No `scanned` flag, no registration: nothing was registered.
+    expect(persistedItem().scanned).toBeUndefined()
+    expect(persistedItem().workbookScanRegistration).toBeUndefined()
+    // A parent's photo is not flagged for a parent to review.
+    expect(persistedItem().pendingScanId).toBeUndefined()
   })
 
   it('a workbook-linked item still takes the deterministic route (config pinned)', async () => {
@@ -189,6 +238,24 @@ describe('parent lane — the write set is byte-for-byte what it was', () => {
     })
     expect(syncScanToConfigMock).toHaveBeenCalledWith('child-1', worksheetResults, { targetConfigId: 'wb-math' })
   })
+
+  it('never reaches an UNTARGETED sync — the only curriculum call is a pinned one', async () => {
+    // The positive control for the rule: a `syncScanToConfig` call with no
+    // `targetConfigId` IS the fuzzy create-or-advance path, so its absence on
+    // every row is the property, not an incidental of this fixture.
+    for (const configs of [[], [matchingConfig]]) {
+      writes.length = 0
+      dayWrites.length = 0
+      syncScanToConfigMock.mockClear()
+      const { result } = setup({}, configs)
+      await act(async () => {
+        await result.current.handleUnifiedCapture(file(), 0)
+      })
+      for (const call of syncScanToConfigMock.mock.calls) {
+        expect(call[2]).toEqual({ targetConfigId: 'wb-math' })
+      }
+    }
+  })
 })
 
 describe('kid lane — the scan runs, the photo is kept, the invariant writes do not run', () => {
@@ -197,7 +264,7 @@ describe('kid lane — the scan runs, the photo is kept, the invariant writes do
   })
 
   it('a worksheet photo writes the artifact (+ description) and NOTHING to skillSnapshots / activityConfigs / learnerModels / childSkillMaps', async () => {
-    const { result, persistDayLogImmediate, onArtifactCreated, onMessage } = setup()
+    const { result, onArtifactCreated, onMessage } = setup()
     await act(async () => {
       await result.current.handleUnifiedCapture(file(), 0)
     })
@@ -220,12 +287,12 @@ describe('kid lane — the scan runs, the photo is kept, the invariant writes do
     expect(writes.filter((w) => w.op === 'updateDoc').map((w) => Object.keys(w.data))).toEqual([['uri']])
 
     // The item links the ARTIFACT, and carries the "review this" marker.
-    expect(persistedItem(persistDayLogImmediate)).toMatchObject({
+    expect(persistedItem()).toMatchObject({
       evidenceArtifactId: 'artifact-1',
       evidenceCollection: 'artifacts',
       pendingScanId: 'scan-9',
     })
-    expect(persistedItem(persistDayLogImmediate).scanned).toBeUndefined()
+    expect(persistedItem().scanned).toBeUndefined()
 
     // Warm and short; never a lesson number, never a scan result card.
     expect(onMessage).toHaveBeenCalledWith({ text: 'Work captured!', severity: 'success' })
@@ -233,26 +300,26 @@ describe('kid lane — the scan runs, the photo is kept, the invariant writes do
   })
 
   it('a workbook-linked item does NOT take the deterministic route for a kid — no position advance', async () => {
-    const { result, persistDayLogImmediate } = setup({}, [matchingConfig])
+    const { result } = setup({}, [matchingConfig])
     await act(async () => {
       await result.current.handleUnifiedCapture(file(), 0)
     })
     expect(syncScanToConfigMock).not.toHaveBeenCalled()
     expect(writes.some((w) => w.op === 'addDoc' && w.key === 'artifacts')).toBe(true)
     // Not stamped with a config either — that is lock-in's job on the parent lane.
-    expect(persistedItem(persistDayLogImmediate).workbookConfigId).toBeUndefined()
-    expect(persistedItem(persistDayLogImmediate).workbookScanRegistration).toBeUndefined()
+    expect(persistedItem().workbookConfigId).toBeUndefined()
+    expect(persistedItem().workbookScanRegistration).toBeUndefined()
   })
 
   it('a build photo (not a worksheet) keeps its description and carries no review marker', async () => {
     runScanMock.mockResolvedValue({ id: 'scan-10', childId: 'child-1', results: buildResults, action: 'pending' })
-    const { result, persistDayLogImmediate } = setup()
+    const { result } = setup()
     await act(async () => {
       await result.current.handleUnifiedCapture(file(), 0)
     })
     const artifactWrite = writes.find((w) => w.op === 'addDoc') as { data: Record<string, unknown> }
     expect(artifactWrite.data.contentNote).toBe('A Lego castle with a working drawbridge')
-    expect(persistedItem(persistDayLogImmediate).pendingScanId).toBeUndefined()
+    expect(persistedItem().pendingScanId).toBeUndefined()
     expect(syncScanToConfigMock).not.toHaveBeenCalled()
     expect(updateSkillMapMock).not.toHaveBeenCalled()
   })

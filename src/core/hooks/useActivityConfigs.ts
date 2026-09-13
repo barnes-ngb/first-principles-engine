@@ -26,6 +26,31 @@ export interface UseActivityConfigsResult {
   configs: ActivityConfig[]
   loading: boolean
   error: string | null
+  /**
+   * The child `configs` / `loading` / `error` currently DESCRIBE — `null` before
+   * the first snapshot of any child (UX-363, Codex round 2 P1).
+   *
+   * None of that state is reset when `childId` changes: the subscribe effect
+   * re-runs, but until its snapshot arrives `configs` still holds the previous
+   * child's list and `loading` is still `false`. A consumer reading those two
+   * fields alone therefore treats the **old** child's curriculum as settled fact
+   * about the **new** one — and on Today that is not cosmetic: a similarly named
+   * row resolves to the old child's workbook, a capture passes that id as
+   * `targetConfigId`, and `syncScanToConfig` loads it by id **without checking
+   * `childId`**, so the other boy's lesson count advances.
+   *
+   * Exposed rather than fixed by resetting the state, because clearing `configs`
+   * on every child change would flash an empty curriculum through four other
+   * surfaces that do not have this hazard. A consumer that cares compares this
+   * against the child it is rendering; `TodayPage` does, and treats a mismatch
+   * as an unsettled read.
+   *
+   * The **error** path is the exception and does clear the list: a stamp saying
+   * *"this describes the new child"* over the old child's array is worse than no
+   * answer, and unlike the loading path there is no snapshot coming to replace it
+   * (Codex round 1, P2).
+   */
+  configsChildId: string | null
   addConfig: (data: NewActivityConfig) => Promise<void>
   updateConfig: (id: string, updates: Partial<ActivityConfig>) => Promise<void>
   deleteConfig: (id: string) => Promise<void>
@@ -52,6 +77,8 @@ export function useActivityConfigs(childId: string): UseActivityConfigsResult {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [migrationDone, setMigrationDone] = useState(false)
+  // Which child the state above describes. See `configsChildId` on the result.
+  const [configsChildId, setConfigsChildId] = useState<string | null>(null)
   // Latest configs snapshot for writers that need to read existing docs
   // (e.g. type-aware guards) without re-creating their callbacks.
   const configsRef = useRef<ActivityConfig[]>([])
@@ -91,12 +118,28 @@ export function useActivityConfigs(childId: string): UseActivityConfigsResult {
           .sort((a, b) => a.sortOrder - b.sortOrder)
         configsRef.current = items
         setConfigs(items)
+        setConfigsChildId(childId)
         setLoading(false)
         setError(null)
       },
       (err) => {
         console.error('[ActivityConfigs] Snapshot error:', err)
         setError(err.message)
+        // A failed read is still an answer ABOUT THIS CHILD: without this stamp a
+        // consumer could not tell the failure from the previous child's success.
+        //
+        // **And the list is cleared with it** (Codex round 1, P2). Stamping alone
+        // relabelled the PREVIOUS child's snapshot as describing the new one, and
+        // the stamp is what `TodayPage` reads to decide the list is settled enough
+        // to hand on — so `TodayChecklist`'s direct consumers, which see no error
+        // flag at all (`findStrandConfigId`, the workbook lookups), drove buttons
+        // and targeting off the sibling's curriculum after a failed switch. There
+        // is nothing this hook knows about the new child, so it says nothing;
+        // `error` is what distinguishes that from an affirmative empty, and the
+        // surfaces that must not render an empty as a result read it.
+        configsRef.current = []
+        setConfigs([])
+        setConfigsChildId(childId)
         setLoading(false)
       },
     )
@@ -208,6 +251,7 @@ export function useActivityConfigs(childId: string): UseActivityConfigsResult {
     configs,
     loading,
     error,
+    configsChildId,
     addConfig,
     updateConfig,
     deleteConfig,

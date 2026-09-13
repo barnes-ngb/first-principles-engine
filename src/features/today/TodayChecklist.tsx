@@ -62,14 +62,15 @@ import { calculateXp } from './xp'
 import { doc, getDoc, updateDoc } from 'firebase/firestore'
 import { skillSnapshotsCollection } from '../../core/firebase/firestore'
 import { mergeBlock } from '../../core/utils/blockerLifecycle'
-import { findWorkbookConfigId } from '../../core/utils/workbookMatching'
 import { findStrandConfigId } from '../progress/strand'
 import type { WorkbookConfigLike } from '../../core/utils/workbookMatching'
 import {
+  captureMayRouteToCurriculum,
   isPhotoDoor,
   resolveTodayRow,
   TODAY_ROW_DOOR_LABEL,
-  TodayRowConfigsState,
+  todayRowConfigsState,
+  todayRowMineLink,
   TodayRowDoor,
 } from './todayRowKind'
 import type { TodayRowConfigLike } from './todayRowKind'
@@ -331,14 +332,10 @@ export default function TodayChecklist({
 }: TodayChecklistProps) {
   const navigate = useNavigate()
   // UX-363 / Codex round 1 (P2): a failed read is not an affirmative empty, and
-  // an unsettled one is not an answer either. `failed` is checked first — a read
-  // that errored is not still loading, and its sentence is the one that does not
-  // resolve on its own.
-  const configsState = configsFailed
-    ? TodayRowConfigsState.Failed
-    : configsLoading
-      ? TodayRowConfigsState.Loading
-      : TodayRowConfigsState.Settled
+  // an unsettled one is not an answer either. The precedence lives in
+  // `todayRowConfigsState` (UX-403), because the page and the capture hook ask
+  // the same question and a third copy is a third chance to get it backwards.
+  const configsState = todayRowConfigsState(configsLoading, configsFailed)
   const [editingPlan, setEditingPlan] = useState(false)
   const [addingItem, setAddingItem] = useState(false)
   const [newItemTitle, setNewItemTitle] = useState('')
@@ -973,6 +970,15 @@ export default function TodayChecklist({
             // post-completion capture it already had, so nothing is taken away.
             const showPhotoDoor =
               !item.evidenceArtifactId && (item.completed || isPhotoDoor(row.addDoor))
+            // UX-405: where this row's Start Mining door goes, or `null` when its
+            // door is not that one. Resolved from the row rather than from
+            // `itemType`, so the door the tell promised is the door that renders.
+            const mineLink = todayRowMineLink(row, item)
+            // UX-403: only a workbook row may reach the curriculum route, at every
+            // door that offers it — this one registers a stranded photo against a
+            // workbook, and asked the fuzzy question the resolver no longer asks
+            // first, so it could register a strand's photo against an unrelated one.
+            const mayRouteToCurriculum = captureMayRouteToCurriculum(row.kind)
 
             return (
               <Box key={index}>
@@ -1211,8 +1217,13 @@ export default function TodayChecklist({
                     {item.skipGuidance}
                   </Typography>
                 )}
-                {/* Scan-to-skip: prompt to scan lesson page when skip guidance says "check lesson" */}
-                {item.skipGuidance && /check lesson/i.test(item.skipGuidance) && !item.completed && (
+                {/* Scan-to-skip: prompt to scan lesson page when skip guidance says
+                    "check lesson". UX-403 — workbook rows only: this door reaches
+                    the untargeted `syncScanToConfig` and `childSkillMaps`, and its
+                    own condition is a sentence an AI wrote, which is no evidence
+                    that the row is a workbook. The premise is a workbook's too —
+                    there is no lesson to skip on a routine. */}
+                {mayRouteToCurriculum && item.skipGuidance && /check lesson/i.test(item.skipGuidance) && !item.completed && (
                   <Box sx={{ ml: 5, mt: 0.5 }}>
                     <Button
                       size="small"
@@ -1238,12 +1249,22 @@ export default function TodayChecklist({
                     </Button>
                   </Box>
                 )}
-                {/* Start Mining button for evaluation items */}
-                {item.itemType === 'evaluation' && item.link && !item.completed && (
+                {/* UX-405 — the evaluation door, and it is now reachable.
+                    It used to require `itemType === 'evaluation' && item.link`,
+                    while `DOOR_FOR_KIND` gave the kind the Start Mining door (and
+                    so suppressed the photo door) on the strength of the family's
+                    own config alone. A row resolved that way carries neither
+                    field — the routine-text round trip drops both (UX-402) — so
+                    it rendered a labelled row with nothing to tap. The door is
+                    now the resolved one, and `todayRowMineLink` owns where it
+                    goes: the row's own `link` when it has one, the Knowledge Mine
+                    otherwise. No `evaluationMode` is invented; nothing on a config
+                    could honestly produce one. */}
+                {mineLink && !item.completed && (
                   <Button
                     size="small"
                     variant="outlined"
-                    onClick={() => navigate(item.link!)}
+                    onClick={() => navigate(mineLink)}
                     sx={{
                       mt: 0.5,
                       ml: 5,
@@ -1459,7 +1480,8 @@ export default function TodayChecklist({
                 {(() => {
                   if (
                     !onBackfillWorkbookScan ||
-                    !(item.workbookConfigId || findWorkbookConfigId(item, configs)) ||
+                    !mayRouteToCurriculum ||
+                    !row.configId ||
                     item.workbookScanRegistration ||
                     item.evidenceCollection === 'scans'
                   ) {

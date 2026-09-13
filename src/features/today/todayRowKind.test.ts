@@ -1,14 +1,19 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  captureMayRouteToCurriculum,
   CONFIG_READ_FAILED_NOTE,
   CONFIG_READ_FAILED_TELL,
+  CURRICULUM_ROUTE_FOR_KIND,
   DOOR_FOR_KIND,
   isPhotoDoor,
+  KNOWLEDGE_MINE_ROUTE,
   resolveTodayRow,
   TODAY_ROW_DOOR_LABEL,
   TODAY_ROW_KIND_WORD,
   TODAY_ROW_UNKNOWN_NOTE,
+  todayRowConfigsState,
+  todayRowMineLink,
   TodayRowConfigsState,
   TodayRowDoor,
   TodayRowKind,
@@ -241,9 +246,16 @@ describe('resolveTodayRow — unknown says which kind of nothing it is', () => {
   // false — an unplaced row's photo takes the fuzzy classification path and may
   // create or advance a workbook. Narrowing that write is propose-and-confirm
   // (UX-403); the sentence was this run's to fix.
-  it('no note claims a photo changes nothing', () => {
+  it('every note says a photo changes nothing — and that is now TRUE (UX-403)', () => {
+    // This assertion is the inverse of the one it replaces, deliberately. Codex
+    // round 1 on `UX-363` caught the note claiming *"no lesson count moves"*
+    // while the classification path could create or advance a workbook, so the
+    // sentence was made honest and the narrowing was filed. `UX-403` is the
+    // owner's decision to make the narrowing, so the claim is the true one now —
+    // and it is asserted against the rule rather than against the wording.
+    expect(captureMayRouteToCurriculum(TodayRowKind.Unknown)).toBe(false)
     for (const note of Object.values(TODAY_ROW_UNKNOWN_NOTE)) {
-      expect(note).not.toMatch(/no lesson count moves|nothing (?:else )?moves|changes nothing/i)
+      expect(note).toMatch(/nothing else moves/i)
     }
   })
 
@@ -331,6 +343,114 @@ describe('resolveTodayRow — an unsettled or failed configs read claims nothing
     expect(row.kind).toBe(TodayRowKind.Unknown)
     expect(row.unknownReason).toBe(TodayRowUnknownReason.NoMatch)
   })
+
+  // Codex round 2 (P2): the ID-only override is right while there is no list to
+  // contradict it, and wrong once there is — `syncScanToConfig` returns
+  // `target-missing`, so *Add page* would advertise a curriculum action that
+  // cannot happen.
+  it('a stamped workbook missing from a SETTLED list is a stale join, not a workbook', () => {
+    const row = resolveTodayRow(
+      item({ label: 'GATB Math (30m)', workbookConfigId: 'gone' }),
+      [config({ id: 'rt-1', name: 'Handwriting', type: ActivityType.Routine })],
+    )
+    expect(row.kind).toBe(TodayRowKind.Unknown)
+    expect(row.unknownReason).toBe(TodayRowUnknownReason.StaleJoin)
+    expect(row.configId).toBeNull()
+    expect(row.addDoor).toBe(TodayRowDoor.AddPhoto)
+  })
+})
+
+// ── The stamp outranks a fuzzy workbook name (Codex round 2, P1) ─────────────
+
+describe('resolveTodayRow — a picked activity is not overridden by a lookalike workbook', () => {
+  // `isSameWorkbook` matches on two shared words plus a matching subject, so a
+  // strand the parent chose can collide with a workbook they also own.
+  const configs: TodayRowConfigLike[] = [
+    {
+      id: 'wb-1', name: 'Story of the World History', type: ActivityType.Workbook,
+      scannable: true, subjectBucket: SubjectBucket.SocialStudies, currentPosition: 12,
+    },
+    {
+      id: 'st-1', name: 'Story of the World', type: ActivityType.Strand,
+      subjectBucket: SubjectBucket.SocialStudies, currentPosition: 3,
+    },
+  ]
+  const stamped = item({
+    label: 'Story of the World (30m)',
+    subjectBucket: SubjectBucket.SocialStudies,
+    activityConfigId: 'st-1',
+  })
+
+  it('the collision is real — the fuzzy matcher does claim this row', () => {
+    // A positive control for the two tests below: without it they would pass on
+    // a fixture where nothing was ever at risk.
+    expect(findWorkbookConfigId(stamped, configs)).toBe('wb-1')
+  })
+
+  it('resolves the STAMPED strand, not the lookalike workbook', () => {
+    const row = resolveTodayRow(stamped, configs)
+    expect(row.kind).toBe(TodayRowKind.Strand)
+    expect(row.configId).toBe('st-1')
+    expect(row.addDoor).toBe(TodayRowDoor.RecordSession)
+    // And therefore no up-front photo door, which is the reach UX-363 added.
+    expect(isPhotoDoor(row.addDoor)).toBe(false)
+  })
+
+  it('an unstamped row that only the WORKBOOK answers to still takes it', () => {
+    // Step 6 is the capture path's own question, asked its way, for the rows with
+    // no stamp and no exact name to prefer (UX-402's cohort).
+    const unstamped = item({
+      label: 'Story of the World History Lesson 12 (30m)',
+      subjectBucket: SubjectBucket.SocialStudies,
+    })
+    const row = resolveTodayRow(unstamped, configs)
+    expect(row.kind).toBe(TodayRowKind.Workbook)
+    expect(row.configId).toBe('wb-1')
+    expect(row.configId).toBe(findWorkbookConfigId(unstamped, configs))
+  })
+
+  it('an unstamped row the STRAND answers to exactly beats the fuzzy workbook', () => {
+    // Exact beats fuzzy: `activityMatchNames` + `nameKey` is an identity claim,
+    // `isSameWorkbook`'s two-shared-words rule is a resemblance.
+    const row = resolveTodayRow(
+      item({ label: 'Story of the World (30m)', subjectBucket: SubjectBucket.SocialStudies }),
+      configs,
+    )
+    expect(row.kind).toBe(TodayRowKind.Strand)
+    expect(row.configId).toBe('st-1')
+  })
+
+  // The divergence this creates, pinned so it cannot silently widen (UX-403).
+  //
+  // `useUnifiedCapture` evaluates the fuzzy fallback FIRST and unconditionally,
+  // so on these rows a post-completion photo still targets `wb-1` while the row
+  // correctly reads *Strand*. Preventing that stops a `skillSnapshots.workingLevels`
+  // write, which is propose-and-confirm, so it belongs to UX-403 and not here.
+  // What UX-363 does fix is the reach: the resolved kind gives these rows no
+  // up-front photo door, so the misroute is no easier to reach than before.
+  it('names EXACTLY the rows where the capture path would still disagree', () => {
+    const diverging = [
+      item({ label: 'Story of the World (30m)', subjectBucket: SubjectBucket.SocialStudies, activityConfigId: 'st-1' }),
+      item({ label: 'Story of the World (30m)', subjectBucket: SubjectBucket.SocialStudies }),
+    ]
+    for (const row of diverging) {
+      const resolved = resolveTodayRow(row, configs)
+      expect(resolved.kind).not.toBe(TodayRowKind.Workbook)
+      // The capture path WOULD have gone to the workbook — that is the residual.
+      expect(row.workbookConfigId ?? findWorkbookConfigId(row, configs)).toBe('wb-1')
+      // …and the row offers no photo door up front, which is what bounds it.
+      expect(isPhotoDoor(resolved.addDoor)).toBe(false)
+    }
+  })
+
+  it("an explicit workbook stamp still wins — it is the capture path's own first read", () => {
+    const row = resolveTodayRow(
+      item({ label: 'Story of the World (30m)', activityConfigId: 'st-1', workbookConfigId: 'wb-1' }),
+      configs,
+    )
+    expect(row.kind).toBe(TodayRowKind.Workbook)
+    expect(row.configId).toBe('wb-1')
+  })
 })
 
 // ── The property that matters: the tell cannot contradict the door ──────────
@@ -364,8 +484,10 @@ describe('resolveTodayRow — the workbook answer is the CAPTURE path answer', (
         expect(resolved.configId).toBe(captureTarget)
       } else if (resolved.kind !== TodayRowKind.Watch) {
         // A watch row never reaches the capture path's workbook branch — the
-        // checkbox routes to the player. Every other non-workbook row must have
-        // nothing for that branch to find.
+        // checkbox routes to the player. Every other non-workbook row in THIS
+        // fixture must have nothing for that branch to find; the one shape where
+        // an earlier step deliberately outranks the fuzzy matcher is pinned on
+        // its own, above, with UX-403's residual named.
         expect(captureTarget).toBeUndefined()
       }
     })
@@ -411,5 +533,133 @@ describe('the kind and door tables are total and say something', () => {
       .not.toBe(TODAY_ROW_DOOR_LABEL[TodayRowDoor.AddPhoto])
     expect(DOOR_FOR_KIND[TodayRowKind.Workbook]).toBe(TodayRowDoor.AddPage)
     expect(DOOR_FOR_KIND[TodayRowKind.Routine]).toBe(TodayRowDoor.AddPhoto)
+  })
+})
+
+// ── UX-403: the curriculum route belongs to a workbook row and nothing else ──
+
+describe('captureMayRouteToCurriculum (UX-403, owner decision 2026-09-13)', () => {
+  it('is true for a workbook row and false for every other kind', () => {
+    // Named rather than counted: the table is short, and a named list is its own
+    // check — a recount goes stale the moment a kind is added.
+    expect(captureMayRouteToCurriculum(TodayRowKind.Workbook)).toBe(true)
+    for (const kind of [
+      TodayRowKind.Routine,
+      TodayRowKind.Formation,
+      TodayRowKind.Activity,
+      TodayRowKind.App,
+      TodayRowKind.Evaluation,
+      TodayRowKind.Strand,
+      TodayRowKind.Watch,
+      TodayRowKind.Unknown,
+      TodayRowKind.Unresolved,
+    ]) {
+      expect(captureMayRouteToCurriculum(kind)).toBe(false)
+    }
+  })
+
+  it('the table is TOTAL — every kind has an answer, and exactly one is yes', () => {
+    const kinds = Object.values(TodayRowKind)
+    for (const kind of kinds) {
+      expect(typeof CURRICULUM_ROUTE_FOR_KIND[kind]).toBe('boolean')
+    }
+    expect(kinds.filter((k) => CURRICULUM_ROUTE_FOR_KIND[k])).toEqual([TodayRowKind.Workbook])
+  })
+
+  it('the two kinds that CLAIM NOTHING are on the fail-closed side', () => {
+    // An unread curriculum list cannot tell us this is a workbook, and a row
+    // nothing answers to is not one. Both used to reach the classification path,
+    // which is where `UX-403` was found.
+    expect(captureMayRouteToCurriculum(TodayRowKind.Unresolved)).toBe(false)
+    expect(captureMayRouteToCurriculum(TodayRowKind.Unknown)).toBe(false)
+  })
+
+  it('the note on an unplaced row now says what is actually true', () => {
+    expect(UNPLACED_ROW_EVIDENCE_CLAUSE.toLowerCase()).toContain('nothing else moves')
+    // The claim `UX-363` had to withdraw — a photo filing itself on Curriculum —
+    // is gone, because the behaviour behind it is.
+    expect(UNPLACED_ROW_EVIDENCE_CLAUSE.toLowerCase()).not.toContain('curriculum')
+    for (const reason of Object.values(TodayRowUnknownReason)) {
+      expect(TODAY_ROW_UNKNOWN_NOTE[reason]).toContain(UNPLACED_ROW_EVIDENCE_CLAUSE)
+    }
+  })
+
+  it('a row that RESOLVES to a workbook is the one that may, whichever step got it there', () => {
+    const workbook = config({ id: 'wb-1', name: 'GATB Math', type: ActivityType.Workbook })
+    // By stamp…
+    expect(
+      captureMayRouteToCurriculum(
+        resolveTodayRow(item({ workbookConfigId: 'wb-1' }), [workbook]).kind,
+      ),
+    ).toBe(true)
+    // …and by the fuzzy fallback, for a row carrying no stamp at all.
+    expect(
+      captureMayRouteToCurriculum(
+        resolveTodayRow(item({ label: 'GATB Math (30m)' }), [workbook]).kind,
+      ),
+    ).toBe(true)
+    // But NOT a strand the parent picked whose name fuzzily resembles one —
+    // the round-2 P1, now also the rule the write reads.
+    const strand = config({ id: 'st-1', name: 'Story of the World', type: ActivityType.Strand })
+    const lookalike = config({
+      id: 'wb-2', name: 'Story of the World History', type: ActivityType.Workbook,
+    })
+    const row = item({ label: 'Story of the World (30m)', activityConfigId: 'st-1' })
+    expect(resolveTodayRow(row, [strand, lookalike]).kind).toBe(TodayRowKind.Strand)
+    expect(captureMayRouteToCurriculum(resolveTodayRow(row, [strand, lookalike]).kind)).toBe(false)
+    // POSITIVE CONTROL: the fuzzy matcher really does claim this row, so the
+    // assertion above is the ordering holding, not the matcher declining.
+    expect(findWorkbookConfigId(row, [strand, lookalike])).toBe('wb-2')
+  })
+})
+
+// ── UX-405: the evaluation door goes somewhere ──────────────────────────────
+
+describe('todayRowMineLink (UX-405)', () => {
+  const mineRow = (over: Partial<TodayRowConfigLike> = {}) =>
+    resolveTodayRow(
+      item({ label: 'Knowledge Mine (15m)', activityConfigId: 'ev-1' }),
+      [config({ id: 'ev-1', name: 'Knowledge Mine', type: ActivityType.Evaluation, ...over })],
+    )
+
+  it('a row resolved as an evaluation from a CONFIG gets the Mine, not nothing', () => {
+    const row = mineRow()
+    expect(row.kind).toBe(TodayRowKind.Evaluation)
+    expect(row.addDoor).toBe(TodayRowDoor.StartMining)
+    // The defect: this row carries no `itemType` and no `link` — the routine-text
+    // round trip drops both — so the old condition rendered no button at all
+    // while the door had already suppressed the photo.
+    expect(todayRowMineLink(row, {})).toBe(KNOWLEDGE_MINE_ROUTE)
+  })
+
+  it("a row that carries its own link keeps it", () => {
+    expect(todayRowMineLink(mineRow(), { link: '/quest?mode=fluency' })).toBe('/quest?mode=fluency')
+    // Whitespace is not a link.
+    expect(todayRowMineLink(mineRow(), { link: '   ' })).toBe(KNOWLEDGE_MINE_ROUTE)
+  })
+
+  it('every OTHER kind gets null, so the button cannot render on a row that is not this', () => {
+    for (const kind of Object.values(TodayRowKind)) {
+      if (kind === TodayRowKind.Evaluation) continue
+      expect(todayRowMineLink({ kind, addDoor: DOOR_FOR_KIND[kind] }, { link: '/quest' })).toBeNull()
+    }
+  })
+
+  it('no kind whose door is StartMining is left without a link — the whole finding', () => {
+    for (const kind of Object.values(TodayRowKind)) {
+      if (DOOR_FOR_KIND[kind] !== TodayRowDoor.StartMining) continue
+      expect(todayRowMineLink({ kind, addDoor: DOOR_FOR_KIND[kind] }, {})).toBeTruthy()
+    }
+  })
+})
+
+// ── The shared configs-state rule ───────────────────────────────────────────
+
+describe('todayRowConfigsState', () => {
+  it('a failed read is not still loading — failure wins, because it never resolves', () => {
+    expect(todayRowConfigsState(true, true)).toBe(TodayRowConfigsState.Failed)
+    expect(todayRowConfigsState(false, true)).toBe(TodayRowConfigsState.Failed)
+    expect(todayRowConfigsState(true, false)).toBe(TodayRowConfigsState.Loading)
+    expect(todayRowConfigsState(false, false)).toBe(TodayRowConfigsState.Settled)
   })
 })

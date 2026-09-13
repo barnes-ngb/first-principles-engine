@@ -130,7 +130,12 @@ export function namesCollection(code: string, collection: TimeCollection): boole
  */
 const WRITE_VERBS = [
   /\b(addDoc|setDoc|updateDoc|deleteDoc|writeBatch)\s*\(/,
-  /\b(setDayLogGuarded|deleteDayLogGuarded|mergeDayLogGuarded)\s*\(/,
+  // Every guarded day writer `dayWriteGuard.ts` exports. `updateDayLogGuarded`
+  // was missing until `UX-404` added the first file that reaches `days` through
+  // a guarded writer alone, and `patchDayChecklistGuarded` is that run's own new
+  // one — a rule that cannot see a writer classifies its callers as READERS, and
+  // a census claiming a write lane does not write is worse than no row.
+  /\b(setDayLogGuarded|updateDayLogGuarded|deleteDayLogGuarded|mergeDayLogGuarded|patchDayChecklistGuarded)\s*\(/,
   /\b(?:[A-Za-z_$][\w$]*)?(?:[Rr]ef|[Dd]oc)\s*\.\s*(?:set|update|delete|create)\s*\(/,
   /\b(?:tx|transaction|batch)\s*\.\s*(?:set|update|delete|create)\s*\(/,
 ]

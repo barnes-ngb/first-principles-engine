@@ -64,14 +64,14 @@ logs. No number, fold, rounding or stored row was changed by this run.
 
 ```
 source files scanned (non-test, src/ + functions/src/): 873
-surfaces naming a time or evidence collection: 60
-by role: {"WRITE":14,"READ":21,"BOTH":25}
-by collection: {"hours":16,"hoursAdjustments":7,"days":28,"artifacts":32}
-census rows: 60
+surfaces naming a time or evidence collection: 61
+by role: {"WRITE":15,"READ":21,"BOTH":25}
+by collection: {"hours":16,"hoursAdjustments":7,"days":29,"artifacts":32}
+census rows: 61
 census problems: 0
-date-rule call sites (9 distinct rules): 33
+date-rule call sites (9 distinct rules): 34
    13  getWeekRange
-    5  weekRangeFromDateKey
+    6  weekRangeFromDateKey
     4  weekKeyFromDate
     3  getWeekMonday
     2  getSchoolYearRange
@@ -87,6 +87,13 @@ consumers of the shared counting path: 6
        src/features/weekly-review/useWeekHours.ts
        src/features/weekly-review/weekBySubject.ts
 ```
+
+Re-derived by `npm run census:time-ledger` on 2026-09-13 and pasted, never retyped
+(`FIX-235`). Two things moved: `src/features/today/captureRowWrite.ts` is the new row-scoped
+day writer `UX-404` added, and the **date-rule** line was already stale on `main` — the script
+prints 34 call sites across 9 rules where the block said 33, because a sixth
+`weekRangeFromDateKey` call arrived after the census was written and nothing re-derived the
+prose. Exactly the failure the derived-numbers rule exists for, found by running it.
 
 `ROLE` is per **file**: a file that both reads and writes is `BOTH`, because read/write
 intent per call site is not derivable by a scan. What the derivation guarantees is
@@ -193,6 +200,7 @@ no document.
 | `src/features/settings/DevAdminTab.tsx` | days | BOTH | `getWeekRange()` for the Sunday sweep | **WRITER.** The admin Sunday cleanup deletes day logs through `deleteDayLogGuarded` |
 | `src/features/shelly-chat/useChatWeekDays.ts` | days | READ | `getWeekRange(now, 1)` — Monday-start | Reads the chat's week of days. **The one caller that starts its week on MONDAY**, because it is building a Mon–Fri card set, not counting a compliance week |
 | `src/features/shelly-chat/useShellyChatFlows.ts` | days | BOTH | 14 days back, `toISOString().slice(0,10)` | Reads recent days for chat context; writes day edits through the guard |
+| `src/features/today/captureRowWrite.ts` | days | WRITE | the captured day's key — local | **WRITER.** The capture's own row-scoped lane (`UX-404`): patches the one row the photo was taken for, resolved by `checklistItemKey`, and writes `checklist` alone. The read, the patch and the write are ONE transaction through `dayWriteGuard.patchDayChecklistGuarded`, so `blocks` and `xpTotal` are never in the payload and an edit landing mid-write is not overwritten. No minutes |
 | `src/features/today/ExplorerMap.tsx` | days | READ | — (recent days) | Reads day logs for the kid map |
 | `src/features/today/KidCaptureForm.tsx` | artifacts | WRITE | — (no range rule) | **WRITER.** A kid's captured artifact. No minutes |
 | `src/features/today/KidChapterPool.tsx` | artifacts | BOTH | — (no range rule) | Chapter answers as artifacts |
@@ -207,7 +215,7 @@ no document.
 | `src/features/today/useDayLog.ts` | days | BOTH | `getWeekRange(new Date())` (`UX-366`) | **WRITER.** The day document's read and its one write lane, `persistDayLogImmediate` (`UX-351`) |
 | `src/features/today/useRolloverUnchecked.ts` | days | READ | yesterday's key — local | Reads the previous day to roll unchecked items forward |
 | `src/features/today/useTodayMiningMinutes.ts` | hours | READ | one day, `hours` only | A cap, not a record: Knowledge Mine minutes for today, for the daily mining limit |
-| `src/features/today/useUnifiedCapture.ts` | artifacts | BOTH | the selected day — local | **WRITER.** The capture pipeline behind the card: the artifact, the scan, and FEAT-184's kid/parent lane split |
+| `src/features/today/useUnifiedCapture.ts` | artifacts | BOTH | the selected day — local | **WRITER.** The capture pipeline behind the card: the artifact, the scan, and FEAT-184's kid/parent lane split. Its day write goes through `captureRowWrite.ts` (`UX-404`), and only a row resolving to a **workbook** may reach the curriculum route at all (`UX-403`) |
 | `src/features/today/WeekFocusCard.tsx` | artifacts | WRITE | the week's key | **WRITER.** The conundrum's artifact |
 | `src/features/today/WeekRibbon.tsx` | days | READ | `getWeekRange(…, 1)` — Monday-start | `formatHoursChip`: progress through the week's **planned** checklist against a planned denominator. A different question, excluded from the agreement test **by name** (`UX-211`) |
 | `src/features/watch/useWatchHistory.ts` | days | READ | a rolling window back from today | Reads day logs for watch history |
@@ -323,10 +331,15 @@ Three shapes, hand-checked, stated rather than hidden:
 
 1. **A write that reaches a collection through a helper in another file.** The scan is
    per file, so a module whose only Firestore verb lives in an imported writer is only
-   caught where the repo's own guarded writers are named. `setDayLogGuarded` /
-   `deleteDayLogGuarded` are in the write-verb list for exactly this reason — without them
+   caught where the repo's own guarded writers are named. All **five** guarded day writers
+   (`setDayLogGuarded` / `updateDayLogGuarded` / `mergeDayLogGuarded` /
+   `deleteDayLogGuarded` / `patchDayChecklistGuarded`) are in the write-verb list for exactly this reason — without them
    four of this repo's day writers read as readers, `watch/writeWatchItemToDay.ts` (a file
-   whose entire job is the write) among them. There is no equivalent for `hours`, because
+   whose entire job is the write) among them. `updateDayLogGuarded` was the one missing
+   until `FIX-235`, and `UX-404`'s `captureRowWrite.ts` — a file whose entire job is also the
+   write — is the first that reaches `days` through a guarded writer alone, so it published as
+   a READER until the rule was completed; `patchDayChecklistGuarded` is that run's own new
+   writer and went in with it. There is no equivalent for `hours`, because
    there is no shared hours writer: **every hours door calls `addDoc` itself.** That is
    itself worth noticing and is half of `UX-361`'s shape.
 2. **Which collection a `BOTH` file reads and which it writes.** Not derivable by a scan;
