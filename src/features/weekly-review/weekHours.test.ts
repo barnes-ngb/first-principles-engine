@@ -11,7 +11,9 @@ import {
   REVIEW_SAVE_TIME_ZONE,
   hoursLoggedLine,
   msUntilPositionsDue,
+  narrativeFailed,
   positionsPendingLine,
+  reviewWasGenerated,
 } from './weekHours'
 
 describe('hoursLoggedLine (UX-211)', () => {
@@ -196,5 +198,43 @@ describe('msUntilPositionsDue', () => {
     const ms = msUntilPositionsDue('not-a-week', now)
     expect(positionsPendingLine('not-a-week', now)).toBe(POSITIONS_PENDING_LINE)
     if (ms !== null) expect(ms).toBeGreaterThan(0)
+  })
+})
+
+// ── UX-409: the fourth state ────────────────────────────────────────────────
+
+describe('narrativeFailed', () => {
+  it('is true for a week whose model call failed', () => {
+    expect(
+      narrativeFailed({ narrativeError: { message: '429 rate limit', at: 'x' } }),
+    ).toBe(true)
+  })
+
+  it('is false once a narrative lands — the run writes null, not a delete', () => {
+    expect(narrativeFailed({ narrativeError: null })).toBe(false)
+  })
+
+  it('is false on every review written before UX-409', () => {
+    expect(narrativeFailed({})).toBe(false)
+    expect(narrativeFailed(null)).toBe(false)
+  })
+
+  it('narrows structurally — this reads an unvalidated document', () => {
+    expect(narrativeFailed({ narrativeError: 'boom' } as never)).toBe(false)
+    expect(narrativeFailed({ narrativeError: { at: 'x' } } as never)).toBe(false)
+  })
+})
+
+describe('reviewWasGenerated counts the record, not the prose (UX-409)', () => {
+  it('is true for a week recorded before its narrative was asked for', () => {
+    // The positions ARE saved on a `snapshot-only` week — which is the only
+    // question this predicate gates. Whether the prose arrived has its own
+    // sentence.
+    expect(reviewWasGenerated({ status: 'snapshot-only' })).toBe(true)
+  })
+
+  it('is still false for a document a parent created by answering', () => {
+    expect(reviewWasGenerated({})).toBe(false)
+    expect(reviewWasGenerated(null)).toBe(false)
   })
 })

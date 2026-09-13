@@ -11,6 +11,12 @@ import { callClaude, logAiUsage } from "./chatTypes.js";
 import { modelForTask } from "./chat.js";
 import { synthesizeIfStale } from "./learnerSynthesis.js";
 import { civilDateObjectInZone } from "./familyClock.js";
+import { foldHoursForPrompt, hoursLoggedBlock, type HoursTotals } from "./promptHours.js";
+import type {
+  RawDayLog,
+  RawHoursAdjustment,
+  RawHoursEntry,
+} from "../shared/hoursContributions.js";
 
 // ── Types ───────────────────────────────────────────────────────
 
@@ -79,9 +85,67 @@ export interface WeeklyReviewDoc {
   /** The parent's answer to the week's one question (UX-214). Never written
    * here — only carried forward so a regenerate cannot delete it. */
   reflection?: Record<string, unknown>;
+  /** The week's counted minutes, folded through the shared rule (UX-409). */
+  hoursSummary?: WeekHoursDoc;
+  /**
+   * Why the narrative is missing or stale, when the model call or its parse
+   * failed (UX-409). `null` on a run whose narrative landed — a written `null`
+   * rather than a field delete, so the whole write stays a plain merge and this
+   * module needs no `FieldValue` (which its tests would then have to mock).
+   */
+  narrativeError?: NarrativeErrorDoc | null;
   model: string;
   usage: { inputTokens: number; outputTokens: number };
   createdAt: string;
+}
+
+/** What failed, and when. Never the model's own text — see `narrativeErrorDoc`. */
+export interface NarrativeErrorDoc {
+  message: string;
+  at: string;
+}
+
+/**
+ * The three `status` values this Cloud Function writes.
+ *
+ * `snapshot-only` is new with UX-409 and is what a week reads while its record
+ * exists and its narrative does not — either because the model call has not
+ * happened yet (the window between this run's two writes) or because it failed.
+ * The client mirrors these in `ReviewStatus`; the page reads the field as
+ * *"the weekly run wrote this week"* (`reviewWasGenerated`), which all three
+ * satisfy, and reads `narrativeError` for the narrower question.
+ */
+export const REVIEW_STATUS_SNAPSHOT_ONLY = "snapshot-only";
+export const REVIEW_STATUS_DRAFT = "draft";
+export const REVIEW_STATUS_NO_DATA = "no-data";
+
+/**
+ * The half of the document that owes the model nothing — written FIRST
+ * (UX-409). Every field here comes from a plain Firestore read or a pure fold.
+ */
+export interface WeeklyReviewRecord {
+  childId: string;
+  weekKey: string;
+  status?: string;
+  evidence: WeekEvidence;
+  hoursSummary: WeekHoursDoc;
+  curriculumPositions?: CurriculumSnapshotDoc;
+  reflection?: Record<string, unknown>;
+  createdAt: string;
+}
+
+/** The half that comes from the model — merged on afterwards, if it lands. */
+export interface WeeklyReviewNarrative {
+  status: string;
+  celebration: string;
+  summary: string;
+  wins: string[];
+  growthAreas: string[];
+  paceAdjustments: WeeklyReviewDoc["paceAdjustments"];
+  recommendations: string[];
+  energyPattern: string;
+  model: string;
+  usage: { inputTokens: number; outputTokens: number };
 }
 
 /**
@@ -126,20 +190,24 @@ interface ChildProfile {
   grade?: string;
 }
 
+/**
+ * What the prompt says about one day: how much of it was done, how it went, and
+ * what was captured.
+ *
+ * It carried a `minutesBySubject` until UX-410 — completed checklist items at
+ * their planned minutes, with no block-actuals rule — which made it the third of
+ * the three AI-side readers counting hours their own way. Minutes are now stated
+ * ONCE for the week, folded through the shared rule; this summary answers about
+ * completion and engagement, which is a different question and the one the
+ * per-day breakdown is for.
+ */
 interface DayLogSummary {
   date: string;
   totalItems: number;
   completedItems: number;
   engagement: Record<string, number>;
-  minutesBySubject: Record<string, number>;
   gradeResults: string[];
   evidenceCount: number;
-}
-
-interface HoursRecord {
-  minutes: number;
-  subjectBucket?: string;
-  date: string;
 }
 
 interface DailyPlanRecord {
@@ -241,7 +309,20 @@ export interface WeekContext {
   child: ChildProfile;
   weekKey: string;
   dayLogs: DayLogSummary[];
-  hours: HoursRecord[];
+  /**
+   * The same day documents, raw, so the week's minutes can be folded through
+   * the shared counting rule rather than re-derived here (UX-410). The summary
+   * above answers about completion; this is what answers about time.
+   */
+  dayLogDocs: RawDayLog[];
+  hours: RawHoursEntry[];
+  /**
+   * The week's `hoursAdjustments` — the third additive source, which this cron
+   * had never read at all (UX-410). Every correction and every *Log watch time*
+   * row was invisible to the prompt, and therefore to the monthly book built
+   * from it.
+   */
+  hoursAdjustments: RawHoursAdjustment[];
   dailyPlans: DailyPlanRecord[];
   missedDays: number;
   bookActivity: BookActivity[];
@@ -278,40 +359,35 @@ export async function assembleWeekContext(
     .where("date", "<=", weekEnd)
     .get();
 
-  const dayLogs: DayLogSummary[] = daysSnap.docs
-    .map((doc) => {
-      const d = doc.data();
-      if (d.childId !== childId) return null;
-      const checklist = (d.checklist ?? []) as Array<{
-        label: string; completed: boolean; engagement?: string;
-        subjectBucket?: string; estimatedMinutes?: number;
-        plannedMinutes?: number; gradeResult?: string;
-        evidenceArtifactId?: string;
-      }>;
+  // The child's raw day documents, kept whole (UX-410): the hours fold reads
+  // blocks and checklist items together under the DATA-14 partial-day rule, and
+  // a summary narrowed for the prompt cannot be folded back into minutes.
+  const dayLogDocs: RawDayLog[] = daysSnap.docs
+    .map((doc) => doc.data() as RawDayLog)
+    .filter((d) => d?.childId === childId);
 
-      const engagement: Record<string, number> = {};
-      const minutesBySubject: Record<string, number> = {};
-      const gradeResults: string[] = [];
-      let evidenceCount = 0;
+  const dayLogs: DayLogSummary[] = dayLogDocs.map((d) => {
+    const checklist = (Array.isArray(d.checklist) ? d.checklist : []) as Array<{
+      label: string; completed: boolean; engagement?: string;
+      gradeResult?: string; evidenceArtifactId?: string;
+    }>;
 
-      for (const item of checklist) {
-        if (item.engagement) engagement[item.engagement] = (engagement[item.engagement] ?? 0) + 1;
-        if (item.completed) {
-          const mins = item.estimatedMinutes ?? item.plannedMinutes ?? 0;
-          const bucket = item.subjectBucket ?? "Other";
-          minutesBySubject[bucket] = (minutesBySubject[bucket] ?? 0) + mins;
-        }
-        if (item.gradeResult) gradeResults.push(item.label + ": " + item.gradeResult);
-        if (item.evidenceArtifactId) evidenceCount++;
-      }
+    const engagement: Record<string, number> = {};
+    const gradeResults: string[] = [];
+    let evidenceCount = 0;
 
-      return {
-        date: d.date as string, totalItems: checklist.length,
-        completedItems: checklist.filter((i) => i.completed).length,
-        engagement, minutesBySubject, gradeResults, evidenceCount,
-      } as DayLogSummary;
-    })
-    .filter((d): d is DayLogSummary => d !== null);
+    for (const item of checklist) {
+      if (item.engagement) engagement[item.engagement] = (engagement[item.engagement] ?? 0) + 1;
+      if (item.gradeResult) gradeResults.push(item.label + ": " + item.gradeResult);
+      if (item.evidenceArtifactId) evidenceCount++;
+    }
+
+    return {
+      date: (d.date as string) ?? "", totalItems: checklist.length,
+      completedItems: checklist.filter((i) => i.completed).length,
+      engagement, gradeResults, evidenceCount,
+    } as DayLogSummary;
+  });
 
   // Load hours for the week
   const hoursSnap = await familyRef
@@ -321,14 +397,24 @@ export async function assembleWeekContext(
     .where("date", "<=", weekEnd)
     .get();
 
-  const hours: HoursRecord[] = hoursSnap.docs.map((doc) => {
-    const d = doc.data();
-    return {
-      minutes: d.minutes,
-      subjectBucket: d.subjectBucket,
-      date: d.date,
-    };
-  });
+  // Raw, not narrowed to `{minutes, subjectBucket, date}` as it used to be: the
+  // shared rule takes `minutes` ELSE `hours * 60`, and a mapping that dropped
+  // `hours` silently counted a timer-written row as zero (UX-410).
+  const hours: RawHoursEntry[] = hoursSnap.docs.map((doc) => doc.data() as RawHoursEntry);
+
+  // The third additive source, which this cron had never read (UX-410).
+  // Deliberately NOT filtered by `childId` in the query: DATA-09 counts an
+  // adjustment for this child when it is tagged to them *or to `'both'`*, and
+  // that is the fold's rule to apply, not a query's.
+  const adjSnap = await familyRef
+    .collection("hoursAdjustments")
+    .where("date", ">=", weekKey)
+    .where("date", "<=", weekEnd)
+    .get();
+
+  const hoursAdjustments: RawHoursAdjustment[] = adjSnap.docs.map(
+    (doc) => doc.data() as RawHoursAdjustment,
+  );
 
   // Load daily plans for the week
   const plansSnap = await familyRef
@@ -406,7 +492,9 @@ export async function assembleWeekContext(
     child,
     weekKey,
     dayLogs,
+    dayLogDocs,
     hours,
+    hoursAdjustments,
     dailyPlans,
     missedDays,
     bookActivity,
@@ -716,63 +804,195 @@ async function loadCurriculumSnapshot(
 }
 
 /**
- * Write the review, preserving the parent's answer (UX-214).
+ * The week's counted minutes, as recorded on the review document (UX-409).
  *
- * **The carry-forward is TRANSACTIONAL, and it has to be.** Every write path
- * here `.set()`s the WHOLE review document, so a regenerate deletes the
- * `reflection` unless it is carried forward — and a read-then-write pair does
- * not carry it forward safely. Two ways that pair loses a judgement a person
- * recorded:
- *
- *   1. the read FAILS transiently, and a `undefined` result is mistaken for a
- *      confirmed absence; and
- *   2. the read SUCCEEDS, and the parent taps *Save answer* in the moment
- *      between it and the write — the replacement then overwrites an answer
- *      that was saved after we looked.
- *
- * A transaction closes both: the reflection is read and the document written
- * inside one atomic unit, and Firestore retries the whole thing if the document
- * changed underneath. If the transaction cannot complete at all, the fallback is
- * a `merge` write — every field of the new review still lands, and a
- * `reflection` we never managed to see is left alone rather than deleted.
- *
- * The one residual on that fallback, stated rather than hidden: if the same run
- * ALSO failed to read the activity configs, a `curriculumPositions` snapshot
- * recorded earlier stays on the document. It is a real earlier reading, stamped
- * with the moment it was taken, and every consumer measures elapsed time from
- * that stamp — a slightly stale coverage line for one week is plainly the lesser
- * loss next to deleting a parent's judgement.
- *
- * Nothing here ever writes, changes or invents an answer.
+ * Stamped like {@link CurriculumSnapshotDoc}, and for the same reason: it is a
+ * reading taken at a moment, not a live answer. **No client reads it** — the
+ * Review page folds the hours live from `days` / `hours` / `hoursAdjustments`
+ * and always will, because a stored total and a live fold that disagree is a
+ * records surface lying to a parent (UX-211 / UX-219). What it is for is the
+ * server: it is what the narrative was written from, and — with the positions
+ * beside it — it is what makes "did the weekly run happen for this week" a
+ * question this repository can answer, which census §2 records that it could
+ * not.
  */
-async function writeReviewDoc(
+export interface WeekHoursDoc {
+  /** ISO timestamp of the moment the hours were folded. */
+  recordedAt: string;
+  weekKey: string;
+  totalMinutes: number;
+  minutesBySubject: Record<string, number>;
+}
+
+/**
+ * The week's minutes through the shared counting rule (UX-410) — the one answer
+ * both the prompt and the recorded summary read, so they cannot disagree.
+ */
+export function foldWeekHours(ctx: WeekContext): HoursTotals {
+  return foldHoursForPrompt(
+    ctx.dayLogDocs,
+    ctx.hours,
+    ctx.hoursAdjustments,
+    ctx.child.id,
+  );
+}
+
+/** {@link foldWeekHours}, stamped for the document. */
+function weekHoursDoc(ctx: WeekContext): WeekHoursDoc {
+  return {
+    recordedAt: new Date().toISOString(),
+    weekKey: ctx.weekKey,
+    ...foldWeekHours(ctx),
+  };
+}
+
+/**
+ * The week's RECORD — written before the model is called, and the whole of
+ * UX-409 (owner decision, 2026-09-13: *write the snapshot first, narrative
+ * second*).
+ *
+ * ── What went wrong ─────────────────────────────────────────────────────────
+ * `generateReviewForChild` used to call Claude FIRST and write the document
+ * only after that call returned. `runWeeklyReviewCycleForChild` catches the
+ * throw and logs it — so a rate limit, a missing secret, a parse failure or an
+ * outage wrote **nothing at all**, and lost two things of very different weight:
+ *
+ *   • the **narrative**, which is regenerable from the records and is only the
+ *     monthly book's raw material (UX-219); and
+ *   • the **`curriculumPositions` snapshot** (UX-212), which is not.
+ *     `ActivityConfig.currentPosition` is one mutable field with no history
+ *     anywhere in this repository, so once a week is gone nobody can ever say
+ *     where the workbooks stood on that date and UX-213's observed rate loses a
+ *     baseline permanently.
+ *
+ * It also made the audit's own question unanswerable: an absent document was
+ * consistent with *"the cron never fired"* and with *"it fired and failed"*
+ * (census §2). A record written before the risky step distinguishes them.
+ *
+ * ── The rules this write keeps ──────────────────────────────────────────────
+ * **1. It MERGES.** Every write from this module is now field-scoped, so the
+ * narrative already on a document survives a regenerate that fails — a
+ * whole-document `set` before the flaky step is UX-409's own class of defect,
+ * one step earlier. The parent's `reflection` is therefore safe by
+ * construction; the transactional carry-forward below is kept anyway, because a
+ * guard that is now redundant is not a guard worth deleting, and it is what
+ * makes the write correct if a whole-document payload is ever reintroduced.
+ *
+ * **2. The snapshot is create-only.** A manual regenerate months later must
+ * re-run the narrative WITHOUT re-stamping positions that have moved since: the
+ * snapshot is the record of that week, not of today. So a `curriculumPositions`
+ * already on file is left exactly as it is. The check and the write are one
+ * transaction, which is also what makes a second runner safe. The
+ * `activityConfigs` query stays OUTSIDE it — a Firestore transaction cannot run
+ * a collection query (the UX-231 / `bootstrapLearnerModel` precedent).
+ *
+ * **3. It never downgrades `status`.** A document that already carries one
+ * keeps it, so a failed regenerate leaves a previously generated week reading
+ * `draft` — which is true, the narrative is still there — with a
+ * `narrativeError` beside it saying the newer attempt failed.
+ *
+ * ── The fallback, and its one residual ──────────────────────────────────────
+ * If the transaction cannot complete at all, the payload is merged without a
+ * read. Two consequences, stated rather than hidden: a `curriculumPositions`
+ * already on file is overwritten by this run's reading (it carries its own
+ * `recordedAt`, and every consumer measures elapsed time from that stamp), and
+ * `status` may be set to `snapshot-only` over a `draft` the narrative write then
+ * restores. That is the same trade the previous fallback made and the same
+ * direction: on a path where we cannot read, record the reading we have rather
+ * than none.
+ */
+async function writeWeekRecord(
   db: Firestore,
   familyId: string,
   reviewDocId: string,
-  review: WeeklyReviewDoc,
+  record: WeeklyReviewRecord,
+  narrative?: WeeklyReviewNarrative,
 ): Promise<void> {
   const ref = db
     .collection(`families/${familyId}/weeklyReviews`)
     .doc(reviewDocId);
 
+  const build = (existing: Record<string, unknown> | undefined): Record<string, unknown> => {
+    const payload: Record<string, unknown> = { ...record, ...(narrative ?? {}) };
+    if (existing?.curriculumPositions !== undefined) {
+      delete payload.curriculumPositions;
+    }
+    if (payload.status === undefined) payload.status = REVIEW_STATUS_SNAPSHOT_ONLY;
+    const reflection = existing?.reflection;
+    if (reflection && typeof reflection === "object") payload.reflection = reflection;
+    return payload;
+  };
+
   try {
     await db.runTransaction(async (tx) => {
       const snap = await tx.get(ref);
-      const payload: WeeklyReviewDoc = { ...review };
-      delete payload.reflection;
-      const existing = snap.exists ? (snap.data() ?? {}).reflection : undefined;
-      if (existing && typeof existing === "object") {
-        payload.reflection = existing as Record<string, unknown>;
+      const existing = snap.exists ? (snap.data() ?? {}) : undefined;
+      const payload = build(existing);
+      if (existing?.status && typeof existing.status === "string" && !narrative) {
+        delete payload.status;
       }
-      tx.set(ref, payload);
+      tx.set(ref, payload, { merge: true });
     });
   } catch (err) {
     console.warn(
-      "[UX-214] Transactional review write failed; merging so any saved answer survives",
+      "[UX-409] Transactional week-record write failed; merging without a read",
       err,
     );
-    await ref.set(review, { merge: true });
+    await ref.set(build(undefined), { merge: true });
   }
+}
+
+/**
+ * Merge the narrative onto the record the run already wrote (UX-409).
+ *
+ * Field-scoped, so the snapshot, the hours summary and the parent's answer are
+ * not in the payload and cannot be touched. `narrativeError` is cleared to
+ * `null` on success rather than left standing — a stale explanation of a failure
+ * that has since been fixed is its own small lie.
+ */
+async function writeNarrative(
+  db: Firestore,
+  familyId: string,
+  reviewDocId: string,
+  narrative: WeeklyReviewNarrative,
+): Promise<void> {
+  await db
+    .collection(`families/${familyId}/weeklyReviews`)
+    .doc(reviewDocId)
+    .set({ ...narrative, narrativeError: null }, { merge: true });
+}
+
+/**
+ * Record that the narrative did not land, on the document that already holds
+ * this week's record (UX-409).
+ *
+ * The message is the app's own error text, never the model's reply — a reply can
+ * be unbounded and can echo the child's own page (`scanAnalysis`'s rule, UX-311)
+ * — and it is clamped, because this is a stored field a person's page will read
+ * about. It never throws: the run is already failing, and a failure to write the
+ * explanation must not replace the failure being explained.
+ */
+async function writeNarrativeFailure(
+  db: Firestore,
+  familyId: string,
+  reviewDocId: string,
+  err: unknown,
+): Promise<void> {
+  try {
+    await db
+      .collection(`families/${familyId}/weeklyReviews`)
+      .doc(reviewDocId)
+      .set({ narrativeError: narrativeErrorDoc(err) }, { merge: true });
+  } catch (writeErr) {
+    console.warn("[UX-409] Could not record the narrative failure", writeErr);
+  }
+}
+
+/** The stored shape of a narrative failure — clamped, and never model text. */
+export function narrativeErrorDoc(err: unknown): NarrativeErrorDoc {
+  const raw = err instanceof Error ? err.message : String(err ?? "Unknown error");
+  const message = raw.slice(0, 300);
+  return { message: message || "Unknown error", at: new Date().toISOString() };
 }
 
 export function buildEvaluationPrompt(ctx: WeekContext): string {
@@ -781,7 +1001,6 @@ export function buildEvaluationPrompt(ctx: WeekContext): string {
   let completedItems = 0;
   let totalEvidence = 0;
   const engagementTotals: Record<string, number> = {};
-  const subjectMinutes: Record<string, number> = {};
   const allGradeResults: string[] = [];
 
   const perDayBreakdown: string[] = [];
@@ -791,9 +1010,6 @@ export function buildEvaluationPrompt(ctx: WeekContext): string {
     totalEvidence += day.evidenceCount;
     for (const [eng, count] of Object.entries(day.engagement)) {
       engagementTotals[eng] = (engagementTotals[eng] ?? 0) + count;
-    }
-    for (const [subj, mins] of Object.entries(day.minutesBySubject)) {
-      subjectMinutes[subj] = (subjectMinutes[subj] ?? 0) + mins;
     }
     allGradeResults.push(...day.gradeResults);
 
@@ -805,17 +1021,21 @@ export function buildEvaluationPrompt(ctx: WeekContext): string {
     );
   }
 
-  // Summarize hours by subject
-  const hoursBySubject: Record<string, number> = {};
-  let totalMinutes = 0;
-  for (const h of ctx.hours) {
-    const key = h.subjectBucket ?? "Other";
-    hoursBySubject[key] = (hoursBySubject[key] ?? 0) + h.minutes;
-    totalMinutes += h.minutes;
-  }
-  const hoursSummary = Object.entries(hoursBySubject)
-    .map(([subject, mins]) => `  - ${subject}: ${mins} min`)
-    .join("\n");
+  // The week's minutes, ONCE, through the shared counting rule (UX-410).
+  //
+  // This used to be two separate claims, each with its own arithmetic: a
+  // `HOURS BY SUBJECT` block summing `ctx.hours` alone (no day logs, no
+  // adjustments — the cron never read that collection) and a *Subject time from
+  // checklists* block summing completed items at their planned minutes with no
+  // block-actuals rule. A day tracked on blocks therefore appeared in one, the
+  // other, or both, and the model was left to reconcile two numbers that were
+  // each wrong in a different direction. It writes the prose the monthly review
+  // book is built from (UX-219), so the error did not stop at the prompt.
+  const hoursBlock = hoursLoggedBlock(
+    "HOURS THIS WEEK",
+    "this week",
+    foldWeekHours(ctx),
+  );
 
   // Energy data from daily plans
   const energyCounts: Record<string, number> = {};
@@ -830,10 +1050,6 @@ export function buildEvaluationPrompt(ctx: WeekContext): string {
   const planTypeSummary = Object.entries(planTypeCounts)
     .map(([pt, count]) => `${pt}: ${count} days`)
     .join(", ");
-
-  const subjectSummary = Object.entries(subjectMinutes)
-    .map(([subj, mins]) => `  - ${subj}: ${mins} min`)
-    .join("\n");
 
   const engagementSummary = Object.entries(engagementTotals)
     .map(([eng, count]) => `${eng}: ${count}`)
@@ -851,12 +1067,9 @@ DATA PROVIDED:
 - Day logs recorded: ${ctx.dayLogs.length}
 - Checklist completion: ${completedItems}/${totalItems} items
 - Evidence artifacts captured: ${totalEvidence}
-- Subject time from checklists:
-${subjectSummary || "  (none)"}
 - Engagement feedback: ${engagementSummary || "no data"}
 ${allGradeResults.length > 0 ? `- Grade results:\n${allGradeResults.map((r) => `  - ${r}`).join("\n")}` : ""}
-- Hours logged: ${Math.round(totalMinutes / 60 * 10) / 10} hours (${totalMinutes} min)
-${hoursSummary || "  (none)"}
+${hoursBlock}
 - Energy states: ${energySummary || "no data"}
 - Plan types: ${planTypeSummary || "no data"}
 - Missed school days (Sun–Thu): ${ctx.missedDays}
@@ -1073,121 +1286,136 @@ export function hasAnyEvidence(ctx: WeekContext): boolean {
   return false;
 }
 
+/**
+ * Write this week's record, then ask the model for the narrative — **in that
+ * order** (UX-409, owner decision 2026-09-13).
+ *
+ * The order is the fix and it is asserted as an order: everything that owes the
+ * model nothing is read and written first, so a failure in the one flaky
+ * dependency costs only the one regenerable thing. See {@link writeWeekRecord}
+ * for what the first write guarantees.
+ *
+ * Still throws on a model failure, exactly as before — `runWeeklyReviewCycleForChild`
+ * logs it and `generateWeeklyReviewNow` turns it into an `HttpsError`. What has
+ * changed is that the week's record is on file by the time it does, and the
+ * document says why the narrative is missing.
+ */
 export async function generateReviewForChild(
   familyId: string,
   ctx: WeekContext,
   apiKey: string,
 ): Promise<WeeklyReviewDoc> {
-  // Skip AI call if there's no data for the week
-  if (!hasAnyEvidence(ctx)) {
-    const db = getFirestore();
-    const reviewDocId = `${ctx.weekKey}_${ctx.child.id}`;
-    // A week with nothing logged is exactly the week the rate exists to make
-    // visible, so the positions are recorded here too (UX-212).
-    const curriculumPositions = await loadCurriculumSnapshot(
-      db, familyId, ctx.child.id, ctx.weekKey,
-    );
-    const emptyReview: WeeklyReviewDoc = {
-      childId: ctx.child.id,
-      weekKey: ctx.weekKey,
-      status: "no-data",
-      celebration: `No activities were logged for ${ctx.child.name} this week. That's okay — every week is different.`,
-      summary: "No day logs, hours, books, or teach-backs were recorded. Use the Today page during the week to build up data for next week's review.",
-      wins: [],
-      growthAreas: [],
-      paceAdjustments: [],
-      recommendations: ["Try logging at least 3 days on the Today page this week for a more useful review."],
-      energyPattern: "No energy data recorded.",
-      evidence: { books: ctx.books, teachBacks: ctx.teachBacks },
-      model: "none",
-      usage: { inputTokens: 0, outputTokens: 0 },
-      createdAt: new Date().toISOString(),
-    };
-    if (curriculumPositions) emptyReview.curriculumPositions = curriculumPositions;
-    // `writeReviewDoc` carries any saved reflection forward transactionally.
-    await writeReviewDoc(db, familyId, reviewDocId, emptyReview);
-    return emptyReview;
-  }
-
-  const model = modelForTask("weeklyReview");
-
   const db = getFirestore();
-  const snapshotData = await loadSnapshotData(db, familyId, ctx.child.id);
-
-  // Shared context slices (skillSnapshot, recentHistoryByDomain, recentScans,
-  // activityConfigs, wordMastery, dadLabReports) — augments the week-scoped
-  // dayLog/hours/plans data from assembleWeekContext with the child-level
-  // skill/progression context the review previously lacked.
-  const sharedSections = await buildContextForTask("weeklyReview", {
-    db,
-    familyId,
-    childId: ctx.child.id,
-    childData: { name: ctx.child.name, grade: ctx.child.grade },
-    snapshotData,
-  });
-
-  const systemPrompt = [...sharedSections, WEEKLY_REVIEW_ADDENDUM].join("\n\n");
-
-  const userPrompt = buildEvaluationPrompt(ctx);
-
-  const result = await callClaude({
-    apiKey,
-    model,
-    maxTokens: 2048,
-    systemPrompt,
-    messages: [{ role: "user", content: userPrompt }],
-  });
-
-  const payload = parseReviewResponse(result.text);
-
-  const usage = {
-    inputTokens: result.inputTokens,
-    outputTokens: result.outputTokens,
-  };
-
-  // Store review in Firestore
-  const reviewData: WeeklyReviewDoc = {
-    childId: ctx.child.id,
-    weekKey: ctx.weekKey,
-    status: "draft",
-    celebration: payload.celebration,
-    summary: payload.summary,
-    wins: payload.wins,
-    growthAreas: payload.growthAreas,
-    paceAdjustments: payload.paceAdjustments.map((a, i) => ({
-      ...a, id: a.id || `adj-${i}`, decision: "pending",
-    })),
-    recommendations: payload.recommendations,
-    energyPattern: payload.energyPattern,
-    evidence: { books: ctx.books, teachBacks: ctx.teachBacks },
-    model,
-    usage,
-    createdAt: new Date().toISOString(),
-  };
-
   const reviewDocId = `${ctx.weekKey}_${ctx.child.id}`;
 
-  // Additive, and it cannot stop a review being written (UX-212): the position
-  // snapshot is the only record of where the workbooks stood this week. The
-  // parent's answer is carried forward inside `writeReviewDoc`'s transaction,
-  // because this write replaces the whole document (UX-214).
+  // ── 1. The record: the week's own facts, before anything can fail ─────────
+  //
+  // `loadCurriculumSnapshot` never throws (a snapshot is additive evidence and
+  // must not stop a review being written) and the hours are a pure fold, so this
+  // half has no failure mode of its own. A week with nothing logged is recorded
+  // exactly like any other — it is precisely the week UX-213's rate exists to
+  // make visible.
   const curriculumPositions = await loadCurriculumSnapshot(
     db, familyId, ctx.child.id, ctx.weekKey,
   );
-  if (curriculumPositions) reviewData.curriculumPositions = curriculumPositions;
+  const record: WeeklyReviewRecord = {
+    childId: ctx.child.id,
+    weekKey: ctx.weekKey,
+    evidence: { books: ctx.books, teachBacks: ctx.teachBacks },
+    hoursSummary: weekHoursDoc(ctx),
+    createdAt: new Date().toISOString(),
+  };
+  if (curriculumPositions) record.curriculumPositions = curriculumPositions;
 
-  await writeReviewDoc(db, familyId, reviewDocId, reviewData);
+  // A week with no evidence needs no model call, so its narrative is known now
+  // and rides the record's own write — one document, one write, as before.
+  if (!hasAnyEvidence(ctx)) {
+    const narrative = noDataNarrative(ctx);
+    await writeWeekRecord(db, familyId, reviewDocId, record, narrative);
+    return { ...record, ...narrative } as WeeklyReviewDoc;
+  }
+
+  await writeWeekRecord(db, familyId, reviewDocId, record);
+
+  // ── 2. The narrative: the half that can fail ──────────────────────────────
+  const model = modelForTask("weeklyReview");
+  let narrative: WeeklyReviewNarrative;
+  try {
+    const snapshotData = await loadSnapshotData(db, familyId, ctx.child.id);
+
+    // Shared context slices (skillSnapshot, recentHistoryByDomain, recentScans,
+    // activityConfigs, wordMastery, dadLabReports) — augments the week-scoped
+    // dayLog/hours/plans data from assembleWeekContext with the child-level
+    // skill/progression context the review previously lacked.
+    const sharedSections = await buildContextForTask("weeklyReview", {
+      db,
+      familyId,
+      childId: ctx.child.id,
+      childData: { name: ctx.child.name, grade: ctx.child.grade },
+      snapshotData,
+    });
+
+    const result = await callClaude({
+      apiKey,
+      model,
+      maxTokens: 2048,
+      systemPrompt: [...sharedSections, WEEKLY_REVIEW_ADDENDUM].join("\n\n"),
+      messages: [{ role: "user", content: buildEvaluationPrompt(ctx) }],
+    });
+
+    const payload = parseReviewResponse(result.text);
+
+    narrative = {
+      status: REVIEW_STATUS_DRAFT,
+      celebration: payload.celebration,
+      summary: payload.summary,
+      wins: payload.wins,
+      growthAreas: payload.growthAreas,
+      paceAdjustments: payload.paceAdjustments.map((a, i) => ({
+        ...a, id: a.id || `adj-${i}`, decision: "pending",
+      })),
+      recommendations: payload.recommendations,
+      energyPattern: payload.energyPattern,
+      model,
+      usage: {
+        inputTokens: result.inputTokens,
+        outputTokens: result.outputTokens,
+      },
+    };
+  } catch (err) {
+    // The record stands; say on it why the narrative does not.
+    await writeNarrativeFailure(db, familyId, reviewDocId, err);
+    throw err;
+  }
+
+  await writeNarrative(db, familyId, reviewDocId, narrative);
 
   // Log AI usage
   await logAiUsage(db, familyId, {
     childId: ctx.child.id,
     taskType: "weeklyReview",
     model,
-    inputTokens: usage.inputTokens,
-    outputTokens: usage.outputTokens,
+    inputTokens: narrative.usage.inputTokens,
+    outputTokens: narrative.usage.outputTokens,
   });
 
-  return reviewData;
+  return { ...record, ...narrative } as WeeklyReviewDoc;
+}
+
+/** The narrative for a week with nothing logged — no model call, no cost. */
+function noDataNarrative(ctx: WeekContext): WeeklyReviewNarrative {
+  return {
+    status: REVIEW_STATUS_NO_DATA,
+    celebration: `No activities were logged for ${ctx.child.name} this week. That's okay — every week is different.`,
+    summary: "No day logs, hours, books, or teach-backs were recorded. Use the Today page during the week to build up data for next week's review.",
+    wins: [],
+    growthAreas: [],
+    paceAdjustments: [],
+    recommendations: ["Try logging at least 3 days on the Today page this week for a more useful review."],
+    energyPattern: "No energy data recorded.",
+    model: "none",
+    usage: { inputTokens: 0, outputTokens: 0 },
+  };
 }
 
 // ── On-demand callable (Generate Now) ───────────────────────────

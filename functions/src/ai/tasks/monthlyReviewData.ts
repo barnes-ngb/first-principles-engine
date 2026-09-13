@@ -489,11 +489,28 @@ export async function loadWeeklyReviewsForMonth(
     const weekEnd = addDays(weekKey, 6);
     if (weekEnd < start || weekKey > end) continue;
 
+    // A week's RECORD is not a week's NARRATIVE (UX-409). Since the weekly cron
+    // writes the positions and hours BEFORE it calls the model, a week whose
+    // model call failed — or whose record was written seconds ago and whose
+    // narrative is still in flight — leaves a document with no prose on it. The
+    // book's prompt maps every row it is handed, so such a row would arrive as
+    // `- 2026-08-30: ` and nothing else. Skipped here rather than in the
+    // formatter, so `weeklyReviewIds` does not claim it as a source either. This
+    // is the same rule `formatRecentWeeklyReviews` has always applied.
+    const celebration = String(d.celebration ?? "");
+    const summary = String(d.summary ?? "");
+    const hasNarrative =
+      celebration.trim() !== "" ||
+      summary.trim() !== "" ||
+      (Array.isArray(d.wins) && d.wins.length > 0) ||
+      (Array.isArray(d.growthAreas) && d.growthAreas.length > 0);
+    if (!hasNarrative) continue;
+
     reviews.push({
       id: doc.id,
       weekKey,
-      celebration: String(d.celebration ?? ""),
-      summary: String(d.summary ?? ""),
+      celebration,
+      summary,
       wins: Array.isArray(d.wins) ? d.wins.map(String) : [],
       growthAreas: Array.isArray(d.growthAreas) ? d.growthAreas.map(String) : [],
       recommendations: Array.isArray(d.recommendations)

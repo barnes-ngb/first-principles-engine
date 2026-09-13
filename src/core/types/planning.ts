@@ -1120,6 +1120,24 @@ export interface WeekReflection {
   answeredAt: string
 }
 
+/** The week's counted minutes, as the weekly run recorded them (UX-409). */
+export interface WeekHoursSummary {
+  /** ISO timestamp of the moment the hours were folded. */
+  recordedAt: string
+  weekKey: string
+  totalMinutes: number
+  minutesBySubject: Record<string, number>
+}
+
+/**
+ * What stopped this week's narrative, and when (UX-409). The app's own error
+ * text, never the model's reply.
+ */
+export interface WeekNarrativeError {
+  message: string
+  at: string
+}
+
 export interface WeeklyReview {
   id?: string
   childId: string
@@ -1156,6 +1174,22 @@ export interface WeeklyReview {
   curriculumPositions?: CurriculumSnapshot
   /** The parent's answer to the week's one question (UX-214). */
   reflection?: WeekReflection
+  /**
+   * The week's counted minutes as the weekly run folded them (UX-409).
+   *
+   * **Deliberately read by nothing on this page.** *Hours and Coverage* folds
+   * the hours live from `days` / `hours` / `hoursAdjustments` and always will —
+   * a stored total and a live fold that disagree is a records surface lying to a
+   * parent. This field is the server's own record of what the narrative was
+   * written from, and, beside `curriculumPositions`, what makes *"did the weekly
+   * run happen for this week"* answerable at all.
+   */
+  hoursSummary?: WeekHoursSummary
+  /**
+   * Why this week's narrative is missing or stale (UX-409). `null` once one
+   * lands. Absent on every review written before UX-409.
+   */
+  narrativeError?: WeekNarrativeError | null
   reviewedAt?: string
   createdAt?: string
   updatedAt?: string

@@ -13,6 +13,8 @@ import {
   HISTORY_UNAVAILABLE_LINE,
   HOURS_SOURCE_CAPTION,
   HOURS_UNAVAILABLE_LINE,
+  NARRATIVE_FAILED_LINE,
+  narrativeFailed,
   REVIEW_UNAVAILABLE_LINE,
   hoursLoggedLine,
   msUntilPositionsDue,
@@ -226,6 +228,20 @@ function WeekPaceBody({
       {!reviewFailed && !reviewWasGenerated(review) && (
         <Typography variant="body2" color="text.secondary">
           {positionsPendingLine(weekKey, clock)}
+        </Typography>
+      )}
+
+      {/*
+        The fourth state (UX-409): the run reached this week and recorded it,
+        and the MODEL half failed. It is not one of the three above — those
+        answer *were the positions saved*, and here they were. It rides beside
+        them rather than replacing one, because both can be true at once: a week
+        can have no positioned workbook (silent above) and still have lost its
+        narrative.
+      */}
+      {!reviewFailed && narrativeFailed(review) && (
+        <Typography variant="body2" color="text.secondary">
+          {NARRATIVE_FAILED_LINE}
         </Typography>
       )}
 

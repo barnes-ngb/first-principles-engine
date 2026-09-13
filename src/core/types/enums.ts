@@ -303,8 +303,22 @@ export const DayType = {
 } as const
 export type DayType = (typeof DayType)[keyof typeof DayType]
 
+/**
+ * A weekly review's stored `status`.
+ *
+ * `SnapshotOnly` and `NoData` are what the Cloud Function writes and are named
+ * here so the union is the truth rather than half of it: `no-data` has been
+ * written by `evaluate.ts`'s empty-week path since the feature shipped and was
+ * missing from this list, and `snapshot-only` arrived with UX-409 — the week's
+ * record is on file and its narrative is not, either because the model call has
+ * not happened yet or because it failed. The page reads the field as *"the
+ * weekly run wrote this week"* (`reviewWasGenerated`), which all of these
+ * satisfy, and reads `narrativeError` for the narrower question.
+ */
 export const ReviewStatus = {
+  SnapshotOnly: 'snapshot-only',
   Draft: 'draft',
+  NoData: 'no-data',
   Pending: 'pending',
   Reviewed: 'reviewed',
   Applied: 'applied',

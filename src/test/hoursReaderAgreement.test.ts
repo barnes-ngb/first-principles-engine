@@ -21,6 +21,15 @@
  *
  * ── What agreement means, and what it does not ──────────────────────────────
  *
+ * **`FIX-236` closed the census's Part B finding**, so the three AI-side readers
+ * that used to count their own way are now folded through the shared rule and
+ * are asserted here beside the eight that always were: `loadHoursSummary`'s own
+ * fold (the `hoursProgress` slice read by **plan** and **shellyChat**), the
+ * weekly-review prompt's hours block, and the hours summary that prompt's run
+ * records onto the `weeklyReviews` document. The positive control below is the
+ * arithmetic that reader USED to perform — kept, because a guard whose control
+ * is deleted once the defect is fixed cannot catch its return.
+ *
  * It means: given the same `days` / `hours` / `hoursAdjustments` documents for
  * one child, the counted minutes are identical. It does NOT mean every surface
  * shows the same figure on screen — several deliberately answer a different
@@ -46,10 +55,18 @@
 
 import { describe, expect, it } from 'vitest'
 
+import { foldWeekHours } from '../../functions/src/ai/evaluate'
+import type { WeekContext } from '../../functions/src/ai/evaluate'
+import { foldHoursForPrompt } from '../../functions/src/ai/promptHours'
 import { computeMonthHours } from '../../functions/src/ai/tasks/monthlyHours'
 import {
   collectHoursContributions,
   entryMinutes as sharedEntryMinutes,
+} from '../../functions/src/shared/hoursContributions'
+import type {
+  RawDayLog,
+  RawHoursAdjustment,
+  RawHoursEntry,
 } from '../../functions/src/shared/hoursContributions'
 import type {
   DayLog,
@@ -322,11 +339,70 @@ const READERS: Reader[] = [
     read: () =>
       computeMonthHours(DAY_LOGS, HOURS_ENTRIES, ADJUSTMENTS, CHILD).totalMinutes,
   },
+  // ── The three the census found counting their own way (FIX-236 / UX-410) ──
+  //
+  // None of these is read by a person directly; all three are told to a model
+  // that writes prose a person reads, and the weekly one is the monthly book's
+  // raw material (UX-219). Their Firestore reads are theirs; what is asserted
+  // here is the fold, which is the part that used to differ.
+  {
+    surface: 'AI context slice hoursProgress (plan + shellyChat)',
+    fold: 'collectHoursContributions → summarizeHoursContributions',
+    read: () =>
+      foldHoursForPrompt(DAY_LOGS, HOURS_ENTRIES, ADJUSTMENTS, CHILD).totalMinutes,
+  },
+  {
+    surface: 'Weekly-review prompt → HOURS THIS WEEK (functions: foldWeekHours)',
+    fold: 'collectHoursContributions → summarizeHoursContributions',
+    read: () => foldWeekHours(WEEK_CONTEXT).totalMinutes,
+  },
+  {
+    surface: 'weeklyReviews.hoursSummary (the week’s recorded minutes)',
+    fold: 'foldWeekHours',
+    // Written onto the document by the same fold the prompt reads, so the
+    // record and the prose can never state two different weeks.
+    read: () =>
+      Object.values(foldWeekHours(WEEK_CONTEXT).minutesBySubject).reduce(
+        (sum, minutes) => sum + minutes,
+        0,
+      ),
+  },
 ]
 
 /**
- * The arithmetic `functions/src/ai/chat.ts loadHoursSummary` performs, written
- * out — the census's Part B finding and this suite's positive control.
+ * The same three arrays, as the weekly cron hands them to its own fold.
+ *
+ * `WeekContext` is the Cloud Function's shape; everything here is the fixture
+ * above, so a disagreement between this reader and the eight app-side ones is a
+ * disagreement about the RULE and not about the data.
+ */
+const WEEK_CONTEXT = {
+  child: { id: CHILD, name: 'Lincoln' },
+  weekKey: WEEK_START,
+  dayLogs: [],
+  dayLogDocs: DAY_LOGS as unknown as RawDayLog[],
+  hours: HOURS_ENTRIES as unknown as RawHoursEntry[],
+  hoursAdjustments: ADJUSTMENTS as unknown as RawHoursAdjustment[],
+  dailyPlans: [],
+  missedDays: 0,
+  bookActivity: [],
+  books: {
+    booksCreated: [],
+    booksCompleted: [],
+    readingSessions: { count: 0, totalMinutes: 0, booksRead: [] },
+  },
+  teachBacks: { count: 0, bySubject: {}, audioCount: 0, textCount: 0, examples: [] },
+} as WeekContext
+
+/**
+ * The arithmetic `functions/src/ai/chat.ts loadHoursSummary` USED to perform,
+ * written out — the census's Part B finding, fixed by `FIX-236`, and still this
+ * suite's positive control.
+ *
+ * It is kept precisely because the defect is gone: a control deleted when its
+ * defect is fixed cannot catch the defect coming back, and this shape (count the
+ * `hours` collection and call it the family's hours) is the one a future reader
+ * will reach for again.
  *
  * Four differences from the rule, each of which changes the answer on the
  * fixture above: it reads `hours` documents only (no day logs, no adjustments),
@@ -395,7 +471,7 @@ describe('every reader of a child’s week reports the same counted minutes', ()
 
   it('FAILS CLOSED on a reader with its own arithmetic', () => {
     const drifted: Reader = {
-      surface: 'AI context slice (loadHoursSummary) — the census’s Part B finding',
+      surface: 'AI context slice (loadHoursSummary) — the shape FIX-236 removed',
       fold: 'its own',
       read: DRIFTED_READER,
     }
