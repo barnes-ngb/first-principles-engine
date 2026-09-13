@@ -356,9 +356,7 @@ describe("the record is written BEFORE the model is called (UX-409)", () => {
     ).rejects.toThrow();
 
     const last = state.writes[state.writes.length - 1].data;
-    expect(last.narrativeError).toMatchObject({
-      message: "Missing CLAUDE_API_KEY secret",
-    });
+    expect(last.narrativeError).toMatchObject({ reason: "call-failed" });
     // The explanation is merged on; it carries no narrative and no record fields.
     expect(last).not.toHaveProperty("curriculumPositions");
     expect(state.writes[state.writes.length - 1].options).toEqual({ merge: true });
@@ -478,5 +476,128 @@ describe("the week's counted minutes are recorded with it (UX-409 / UX-410)", ()
       totalMinutes: 80,
       minutesBySubject: { Reading: 20, Math: 45, Science: 15 },
     });
+  });
+});
+
+describe("round 1 — three things the first cut got wrong", () => {
+  it("P1 — a week whose only record is an adjustment is NOT an empty week", async () => {
+    // `hoursAdjustments` only reached this cron in the same change, so the
+    // question could not be asked before. A *Log watch time* row is a real hour
+    // of a child's week; storing a positive `hoursSummary` beside prose reading
+    // "No day logs, hours, books, or teach-backs were recorded" is one document
+    // contradicting itself.
+    const adjustmentOnly: WeekContext = {
+      ...emptyWeek,
+      hoursAdjustments: [
+        { childId: "lincoln", minutes: 25, subjectBucket: "Science", date: "2026-09-01" },
+      ],
+    };
+
+    await generateReviewForChild("fam-1", adjustmentOnly, "key");
+
+    expect(state.claudeCalledAt).not.toBeNull();
+    expect(state.writes[0].data.status).toBe("snapshot-only");
+    expect(state.writes[0].data.hoursSummary).toMatchObject({ totalMinutes: 25 });
+    const narrativeWrite = state.writes.find((w) => "celebration" in w.data)!;
+    expect(narrativeWrite.data.status).toBe("draft");
+  });
+
+  it("P1 — but his BROTHER's adjustment is not evidence about him", async () => {
+    const siblingOnly: WeekContext = {
+      ...emptyWeek,
+      hoursAdjustments: [
+        { childId: "london", minutes: 90, subjectBucket: "Reading", date: "2026-09-01" },
+      ],
+    };
+
+    await generateReviewForChild("fam-1", siblingOnly, "key");
+
+    expect(state.claudeCalledAt).toBeNull();
+    expect(state.written?.status).toBe("no-data");
+    expect(state.written?.hoursSummary).toMatchObject({ totalMinutes: 0 });
+  });
+
+  it("P1 — a family-wide ('both') adjustment IS his", async () => {
+    await generateReviewForChild("fam-1", {
+      ...emptyWeek,
+      hoursAdjustments: [
+        { childId: "both", minutes: 60, subjectBucket: "Science", date: "2026-09-01" },
+      ],
+    }, "key");
+    expect(state.claudeCalledAt).not.toBeNull();
+  });
+
+  it("P2 — an empty-week rerun never writes over a generated narrative", async () => {
+    // The queries move: `summarizeBooksWeek` keys on `updatedAt`, so a week whose
+    // only evidence was one book stops reporting it the moment somebody touches
+    // that book again. Rerunning then reached the no-data path.
+    state.existingDoc = { status: "draft", celebration: "He read a whole chapter." };
+
+    await generateReviewForChild("fam-1", emptyWeek, "key");
+
+    expect(state.writes).toHaveLength(1);
+    expect(state.writes[0].data).not.toHaveProperty("status");
+    expect(state.writes[0].data).not.toHaveProperty("celebration");
+    expect(state.writes[0].data).not.toHaveProperty("summary");
+    // …and the record half still lands, which is the point of writing it first.
+    expect(state.writes[0].data.hoursSummary).toBeDefined();
+  });
+
+  it("P2 — a week that only ever had a record DOES get the empty-week prose", async () => {
+    // `snapshot-only` carries no narrative anybody could lose, so the no-data
+    // write is an upgrade rather than a downgrade.
+    state.existingDoc = { status: "snapshot-only" };
+
+    await generateReviewForChild("fam-1", emptyWeek, "key");
+
+    expect(state.writes[0].data.status).toBe("no-data");
+    expect(state.writes[0].data.celebration).toMatch(/No activities were logged/);
+  });
+
+  it("P2 — nor does it write over a week the parent already reviewed", async () => {
+    state.existingDoc = { status: "applied", celebration: "x" };
+    await generateReviewForChild("fam-1", emptyWeek, "key");
+    expect(state.writes[0].data).not.toHaveProperty("status");
+  });
+
+  it("P2 — the stored explanation can never carry the model's own text", async () => {
+    // `parseReviewResponse` lets a JSON.parse SyntaxError propagate, and Node
+    // quotes an excerpt of the rejected input in it — the rejected input being
+    // the model's reply, which can echo the child's page (UX-311's rule).
+    state.claude = () => ({
+      text: '{"celebration": "Lincoln wrote SECRET-PAGE-TEXT and then',
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+
+    await expect(
+      generateReviewForChild("fam-1", loggedWeek, "key"),
+    ).rejects.toThrow();
+
+    const stored = state.writes[state.writes.length - 1].data.narrativeError as {
+      message: string;
+      reason: string;
+    };
+    expect(stored.reason).toBe("unreadable-reply");
+    expect(JSON.stringify(stored)).not.toMatch(/SECRET-PAGE-TEXT/);
+    expect(stored.message).toBe(
+      "The weekly review reply could not be read as a review.",
+    );
+  });
+
+  it("P2 — and it tells the two failures apart", async () => {
+    state.claude = () => {
+      throw new Error("429 rate limit");
+    };
+    await expect(
+      generateReviewForChild("fam-1", loggedWeek, "key"),
+    ).rejects.toThrow();
+
+    const stored = state.writes[state.writes.length - 1].data.narrativeError as {
+      message: string;
+      reason: string;
+    };
+    expect(stored.reason).toBe("call-failed");
+    expect(JSON.stringify(stored)).not.toMatch(/429/);
   });
 });

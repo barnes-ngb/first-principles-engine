@@ -12,6 +12,7 @@ import { modelForTask } from "./chat.js";
 import { synthesizeIfStale } from "./learnerSynthesis.js";
 import { civilDateObjectInZone } from "./familyClock.js";
 import { foldHoursForPrompt, hoursLoggedBlock, type HoursTotals } from "./promptHours.js";
+import { ADJUSTMENT_BOTH } from "../shared/hoursContributions.js";
 import type {
   RawDayLog,
   RawHoursAdjustment,
@@ -102,6 +103,8 @@ export interface WeeklyReviewDoc {
 /** What failed, and when. Never the model's own text — see `narrativeErrorDoc`. */
 export interface NarrativeErrorDoc {
   message: string;
+  /** Which of the two failures this was — app-owned, like the message. */
+  reason: NarrativeFailureReason;
   at: string;
 }
 
@@ -118,6 +121,19 @@ export interface NarrativeErrorDoc {
 export const REVIEW_STATUS_SNAPSHOT_ONLY = "snapshot-only";
 export const REVIEW_STATUS_DRAFT = "draft";
 export const REVIEW_STATUS_NO_DATA = "no-data";
+
+/**
+ * The statuses an empty-week rerun may write over.
+ *
+ * Neither of these carries a narrative somebody could lose: `snapshot-only` is a
+ * record whose prose never arrived, and `no-data` is the empty-week prose
+ * itself. Everything else — `draft`, and the `reviewed` / `applied` the page
+ * writes — means a real narrative is on file, and it stands.
+ */
+const REPLACEABLE_REVIEW_STATUSES = new Set<string>([
+  REVIEW_STATUS_SNAPSHOT_ONLY,
+  REVIEW_STATUS_NO_DATA,
+]);
 
 /**
  * The half of the document that owes the model nothing — written FIRST
@@ -893,13 +909,15 @@ function weekHoursDoc(ctx: WeekContext): WeekHoursDoc {
  *
  * ── The fallback, and its one residual ──────────────────────────────────────
  * If the transaction cannot complete at all, the payload is merged without a
- * read. Two consequences, stated rather than hidden: a `curriculumPositions`
+ * read. Three consequences, stated rather than hidden: a `curriculumPositions`
  * already on file is overwritten by this run's reading (it carries its own
- * `recordedAt`, and every consumer measures elapsed time from that stamp), and
+ * `recordedAt`, and every consumer measures elapsed time from that stamp),
  * `status` may be set to `snapshot-only` over a `draft` the narrative write then
- * restores. That is the same trade the previous fallback made and the same
- * direction: on a path where we cannot read, record the reading we have rather
- * than none.
+ * restores, and — because the never-downgrade check below reads the document —
+ * an empty-week rerun on that path can write the no-data prose over a generated
+ * week. All three are the same trade the previous fallback made and in the same
+ * direction (that path replaced the WHOLE document unconditionally): where we
+ * cannot read, record the reading we have rather than none.
  */
 async function writeWeekRecord(
   db: Firestore,
@@ -913,11 +931,33 @@ async function writeWeekRecord(
     .doc(reviewDocId);
 
   const build = (existing: Record<string, unknown> | undefined): Record<string, unknown> => {
-    const payload: Record<string, unknown> = { ...record, ...(narrative ?? {}) };
+    const existingStatus =
+      typeof existing?.status === "string" && existing.status
+        ? existing.status
+        : undefined;
+    // A week that already generated a real narrative keeps it, and the
+    // empty-week prose never lands on top of it (Codex round 1, P2). The
+    // no-data path is reached whenever THIS run's queries found nothing, and
+    // those queries move: `summarizeBooksWeek` keys on `updatedAt`, so a week
+    // whose only evidence was one book stops reporting that book the moment
+    // somebody touches it again. Rerunning such a week used to merge
+    // `status: 'no-data'` and *"No activities were logged"* over prose written
+    // when the evidence was still visible — a downgrade in fact as well as in
+    // status, which is exactly what rule 3 says cannot happen.
+    const standingNarrative =
+      existingStatus !== undefined && !REPLACEABLE_REVIEW_STATUSES.has(existingStatus);
+
+    const payload: Record<string, unknown> = { ...record };
+    if (narrative && !standingNarrative) Object.assign(payload, narrative);
     if (existing?.curriculumPositions !== undefined) {
       delete payload.curriculumPositions;
     }
-    if (payload.status === undefined) payload.status = REVIEW_STATUS_SNAPSHOT_ONLY;
+    // `snapshot-only` is stamped only where there is no status at all. A
+    // narrative brings its own, and it may raise `snapshot-only` → `no-data`;
+    // nothing here ever lowers one.
+    if (payload.status === undefined && existingStatus === undefined) {
+      payload.status = REVIEW_STATUS_SNAPSHOT_ONLY;
+    }
     const reflection = existing?.reflection;
     if (reflection && typeof reflection === "object") payload.reflection = reflection;
     return payload;
@@ -927,11 +967,7 @@ async function writeWeekRecord(
     await db.runTransaction(async (tx) => {
       const snap = await tx.get(ref);
       const existing = snap.exists ? (snap.data() ?? {}) : undefined;
-      const payload = build(existing);
-      if (existing?.status && typeof existing.status === "string" && !narrative) {
-        delete payload.status;
-      }
-      tx.set(ref, payload, { merge: true });
+      tx.set(ref, build(existing), { merge: true });
     });
   } catch (err) {
     console.warn(
@@ -966,33 +1002,58 @@ async function writeNarrative(
  * Record that the narrative did not land, on the document that already holds
  * this week's record (UX-409).
  *
- * The message is the app's own error text, never the model's reply — a reply can
- * be unbounded and can echo the child's own page (`scanAnalysis`'s rule, UX-311)
- * — and it is clamped, because this is a stored field a person's page will read
- * about. It never throws: the run is already failing, and a failure to write the
- * explanation must not replace the failure being explained.
+ * It never throws: the run is already failing, and a failure to write the
+ * explanation must not replace the failure being explained. The thrown error is
+ * re-thrown by the caller and reaches the function's logs unchanged — that is
+ * where an operator diagnoses one.
  */
 async function writeNarrativeFailure(
   db: Firestore,
   familyId: string,
   reviewDocId: string,
-  err: unknown,
+  reason: NarrativeFailureReason,
 ): Promise<void> {
   try {
     await db
       .collection(`families/${familyId}/weeklyReviews`)
       .doc(reviewDocId)
-      .set({ narrativeError: narrativeErrorDoc(err) }, { merge: true });
+      .set({ narrativeError: narrativeErrorDoc(reason) }, { merge: true });
   } catch (writeErr) {
     console.warn("[UX-409] Could not record the narrative failure", writeErr);
   }
 }
 
-/** The stored shape of a narrative failure — clamped, and never model text. */
-export function narrativeErrorDoc(err: unknown): NarrativeErrorDoc {
-  const raw = err instanceof Error ? err.message : String(err ?? "Unknown error");
-  const message = raw.slice(0, 300);
-  return { message: message || "Unknown error", at: new Date().toISOString() };
+/**
+ * Why a narrative did not land — the app's OWN words, chosen from this table and
+ * never copied off an exception (Codex round 1, P2).
+ *
+ * The first cut stored `err.message`, clamped, which looked safe and was not:
+ * `parseReviewResponse` lets a `JSON.parse` `SyntaxError` propagate, and current
+ * Node builds quote an excerpt of the rejected input in that message. The
+ * rejected input is the MODEL'S REPLY — unbounded, and capable of echoing the
+ * child's own page, which is precisely why `scanAnalysis` (UX-311) keeps model
+ * text on the scan record and off every screen and sink. So the field's contract
+ * ("never the model's text") is now structural rather than a promise: the only
+ * strings this module can write into it are the two below.
+ *
+ * `reason` rides along because it is app-owned too, and it makes the operator's
+ * question answerable from the record rather than only from the logs.
+ */
+export const NARRATIVE_FAILURE_MESSAGES = {
+  "call-failed":
+    "The weekly review could not be generated. The function's logs have the cause.",
+  "unreadable-reply":
+    "The weekly review reply could not be read as a review.",
+} as const;
+export type NarrativeFailureReason = keyof typeof NARRATIVE_FAILURE_MESSAGES;
+
+/** The stored shape of a narrative failure. Never model text, by construction. */
+export function narrativeErrorDoc(reason: NarrativeFailureReason): NarrativeErrorDoc {
+  return {
+    message: NARRATIVE_FAILURE_MESSAGES[reason],
+    reason,
+    at: new Date().toISOString(),
+  };
 }
 
 export function buildEvaluationPrompt(ctx: WeekContext): string {
@@ -1265,15 +1326,42 @@ export function parseReviewResponse(text: string): ReviewPayload {
 // ── Generate review for one child ───────────────────────────────
 
 /**
+ * The child's `hoursAdjustments` for this week, under DATA-09 attribution.
+ *
+ * Tagged to them, or to `'both'` — the fold's own rule, read from the fold's own
+ * constant rather than restated, so the evidence check and the counting rule can
+ * never disagree about whose week this is.
+ */
+function attributedAdjustments(ctx: WeekContext): RawHoursAdjustment[] {
+  return ctx.hoursAdjustments.filter(
+    (a) => a?.childId === ctx.child.id || a?.childId === ADJUSTMENT_BOTH,
+  );
+}
+
+/**
  * Has-any-evidence check for the empty-week guard.
  *
  * Books and teach-backs count as evidence even when no checklist items
  * were completed — a week of creative output + teach-back moments still
  * warrants a review.
+ *
+ * **`hoursAdjustments` counts too, since UX-410 (Codex round 1, P1).** The week
+ * context had never carried that collection, so the question could not be asked;
+ * now that it does, a week whose only record is an adjustment — a correction, or
+ * the *Log watch time* row, which is a real hour of a child's week — would
+ * otherwise have stored a POSITIVE `hoursSummary` beside a narrative reading
+ * *"No day logs, hours, books, or teach-backs were recorded"*, a document
+ * contradicting itself on the same write. The adjustment also never reached the
+ * model, so the month's book would not have mentioned it either.
+ *
+ * A zero-minute adjustment still counts, exactly as a zero-minute `hours` entry
+ * always has on the line above: the question here is whether anything happened
+ * that week, not how much.
  */
 export function hasAnyEvidence(ctx: WeekContext): boolean {
   if (ctx.dayLogs.length > 0) return true;
   if (ctx.hours.length > 0) return true;
+  if (attributedAdjustments(ctx).length > 0) return true;
   const b = ctx.books;
   if (
     b.booksCreated.length > 0 ||
@@ -1339,7 +1427,12 @@ export async function generateReviewForChild(
 
   // ── 2. The narrative: the half that can fail ──────────────────────────────
   const model = modelForTask("weeklyReview");
-  let narrative: WeeklyReviewNarrative;
+
+  // The call and the PARSE are separated so the document can say which failed
+  // in the app's own words, and — the reason it matters — so a `SyntaxError`
+  // carrying an excerpt of the model's reply never reaches a stored field
+  // (Codex round 1, P2).
+  let result: Awaited<ReturnType<typeof callClaude>>;
   try {
     const snapshotData = await loadSnapshotData(db, familyId, ctx.child.id);
 
@@ -1355,14 +1448,21 @@ export async function generateReviewForChild(
       snapshotData,
     });
 
-    const result = await callClaude({
+    result = await callClaude({
       apiKey,
       model,
       maxTokens: 2048,
       systemPrompt: [...sharedSections, WEEKLY_REVIEW_ADDENDUM].join("\n\n"),
       messages: [{ role: "user", content: buildEvaluationPrompt(ctx) }],
     });
+  } catch (err) {
+    // The record stands; say on it why the narrative does not.
+    await writeNarrativeFailure(db, familyId, reviewDocId, "call-failed");
+    throw err;
+  }
 
+  let narrative: WeeklyReviewNarrative;
+  try {
     const payload = parseReviewResponse(result.text);
 
     narrative = {
@@ -1383,8 +1483,7 @@ export async function generateReviewForChild(
       },
     };
   } catch (err) {
-    // The record stands; say on it why the narrative does not.
-    await writeNarrativeFailure(db, familyId, reviewDocId, err);
+    await writeNarrativeFailure(db, familyId, reviewDocId, "unreadable-reply");
     throw err;
   }
 

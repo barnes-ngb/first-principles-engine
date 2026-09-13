@@ -1130,11 +1130,18 @@ export interface WeekHoursSummary {
 }
 
 /**
- * What stopped this week's narrative, and when (UX-409). The app's own error
- * text, never the model's reply.
+ * What stopped this week's narrative, and when (UX-409).
+ *
+ * **The app's own words, by construction** — the Cloud Function chooses both
+ * fields from a two-entry table and never copies an exception's message
+ * (a `JSON.parse` `SyntaxError` quotes an excerpt of what it rejected, and what
+ * it rejected is the model's reply). Rendered by nothing: a rate limit is an
+ * operator's sentence, not a parent's.
  */
 export interface WeekNarrativeError {
   message: string
+  /** `'call-failed'` or `'unreadable-reply'`. Absent on the first writes. */
+  reason?: string
   at: string
 }
 
