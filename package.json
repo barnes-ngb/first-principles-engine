@@ -16,6 +16,7 @@
     "docs:check": "node scripts/check-docs-alignment.mjs",
     "docs:fix": "node scripts/check-docs-alignment.mjs --fix",
     "docs:ledger-sweep": "cross-env LEDGER_HISTORY_SWEEP=1 vitest run scripts/check-docs-alignment.test.mjs -t \"PROBE\"",
+    "census:arch-audit": "tsx scripts/architectureAuditCensus.ts",
     "census:child-switch": "tsx scripts/childSwitchCensus.ts",
     "census:finding-tags": "tsx scripts/findingTagCensus.ts",
     "census:today": "tsx scripts/todaySurfaceCensus.ts",
