@@ -1,27 +1,30 @@
 import { useCallback, useState } from 'react'
 import { addDoc, doc, getDoc, updateDoc } from 'firebase/firestore'
 
-import { artifactsCollection, skillSnapshotsCollection } from '../../core/firebase/firestore'
+import { artifactsCollection } from '../../core/firebase/firestore'
 import { generateFilename, uploadArtifactFile } from '../../core/firebase/upload'
 import { useScan } from '../../core/hooks/useScan'
 import { ScanDoor } from '../../core/hooks/scanFailureNote'
 import { useScanToActivityConfig } from '../../core/hooks/useScanToActivityConfig'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
-import { updateSkillMapFromFindings } from '../../core/curriculum/updateSkillMapFromFindings'
-import type { Artifact, ConceptualBlock, DayLog, ScanRecord, SkillSnapshot, WorksheetScanResult } from '../../core/types'
+import type { Artifact, ChecklistItem, DayLog, ScanRecord, WorksheetScanResult } from '../../core/types'
 import { isWorksheetScan } from '../../core/types/planning'
 import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
 import type { ScanConfigResult } from '../../core/hooks/useScanToActivityConfig'
-import { autoCompleteBypassedItems } from './scanAdvance'
-import { mergeBlock } from '../../core/utils/blockerLifecycle'
-import { detectBlockersFromScan } from './scanBlocker'
 import { downscaleImage } from '../../core/utils/downscaleImage'
 import { deriveScanContentNote, pickArtifactContentNote } from '../../core/utils/contentNote'
 import type { CaptureContext } from '../../core/utils/contentNote'
 import { withTimeout, UploadTimeoutError } from '../foundations-review/uploadTimeout'
-import { findWorkbookConfigId } from '../../core/utils/workbookMatching'
-import type { WorkbookConfigLike } from '../../core/utils/workbookMatching'
 import { batchExtraSummary } from './unifiedCaptureBatch'
+import { captureRowWriteNotice, writeCaptureRow } from './captureRowWrite'
+import type { CaptureRowPatch } from './captureRowWrite'
+import { checklistItemKey } from './dayWriteGuard'
+import {
+  captureMayRouteToCurriculum,
+  resolveTodayRow,
+  TodayRowConfigsState,
+} from './todayRowKind'
+import type { TodayRowConfigLike } from './todayRowKind'
 import { buildWorkbookScanReport } from './workbookScanReport'
 import type { CaptureMessage, WorkbookPageOutcome } from './workbookScanReport'
 
@@ -33,8 +36,16 @@ export interface UseUnifiedCaptureOptions {
   childId: string
   childName: string
   today: string
+  /**
+   * The day as the SCREEN has it — read for the row a capture was started on,
+   * and for nothing else.
+   *
+   * It is not what gets written. A capture takes seconds to compress, scan and
+   * upload, and this document is the one that existed when the camera opened; the
+   * write re-reads the live document and patches one row (`UX-404`, see
+   * `captureRowWrite.ts`).
+   */
   dayLog: DayLog | null
-  persistDayLogImmediate: (updated: DayLog) => void
   /**
    * Callback when a snack/toast message should be shown. `warning` (FEAT-136)
    * is the severity for a failed workbook read whose photo is safely saved —
@@ -44,13 +55,23 @@ export interface UseUnifiedCaptureOptions {
   /** Callback when a new artifact is created (for updating local artifact lists). */
   onArtifactCreated?: (artifact: Artifact) => void
   /**
-   * FEAT-62 (legacy-item fallback): the child's scannable workbook configs, used
-   * to resolve a `workbookConfigId` for legacy/unstamped items via the same
-   * name/subject fuzzy match as lock-in. When a photo capture or backfill resolves
-   * a config this way, the id is stamped onto the item so the resolution is
-   * permanent — exactly what lock-in would have done. Absent → no fallback.
+   * The child's live `activityConfigs` — what the row is resolved against.
+   *
+   * Read through `resolveTodayRow`, the SAME function the checklist's tell and
+   * door read (`UX-403`), so the label on the button and the record the photo
+   * makes cannot disagree. Absent → nothing resolves, which is the fail-closed
+   * answer: evidence only.
    */
-  configs?: WorkbookConfigLike[]
+  configs?: TodayRowConfigLike[]
+  /**
+   * Whether `configs` can be believed yet.
+   *
+   * **Defaults to `Loading`, not `Settled`** — a caller that did not say cannot
+   * be believed, and an empty list read as settled is the exact shape of the
+   * round-2 P1 this hook was on the receiving end of. A caller with a real read
+   * passes `todayRowConfigsState(loading, failed)`.
+   */
+  configsState?: TodayRowConfigsState
 }
 
 export interface UseUnifiedCaptureResult {
@@ -124,6 +145,26 @@ export interface UseUnifiedCaptureResult {
  * Today shows "Review this" on the same expandable analysis chip it already
  * had. One boolean decides the lane; the five writes sit behind it together
  * rather than behind five doors (the FEAT-167 lesson).
+ *
+ * **A second gate beside it (`UX-403`, owner decision 2026-09-13): the
+ * curriculum route belongs to a workbook row and nothing else.** The row is
+ * resolved through `resolveTodayRow` — the same function the checklist's tell
+ * and door read — and {@link captureMayRouteToCurriculum} decides whether the
+ * page may reach `syncScanToConfig` at all. On every other kind a photo is
+ * evidence: the `artifacts` document and the day-log link, nothing more. That
+ * ended the classification path this hook used to fall through to, which
+ * fuzzy-matched the cover text across the child's workbooks and could **create
+ * or advance one**, then write `childSkillMaps` and
+ * `skillSnapshots.conceptualBlocks` and auto-complete other rows — none of it
+ * confirmed, all of it under a button reading *Add a photo*. Creating a
+ * curriculum row from an unidentified page is still a thing the app does; it is
+ * the Curriculum tab's own staging door, where it is confirmed (`UX-315`).
+ *
+ * **And the write is row-scoped (`UX-404`).** No path here hands back a whole
+ * `dayLog` composed at capture time; each patches its own row on the live
+ * document through `captureRowWrite.ts`. A box ticked while the upload ran used
+ * to be un-ticked by the photo landing, taking its block's `actualMinutes` and
+ * the day's `xpTotal` with it.
  */
 export function useUnifiedCapture({
   familyId,
@@ -131,10 +172,10 @@ export function useUnifiedCapture({
   childName,
   today,
   dayLog,
-  persistDayLogImmediate,
   onMessage,
   onArtifactCreated,
   configs = [],
+  configsState = TodayRowConfigsState.Loading,
 }: UseUnifiedCaptureOptions): UseUnifiedCaptureResult {
   const { scan: runScan, recordAction: recordScanAction, scanResult, scanning: scanLoading, error: scanError, clearScan } = useScan(ScanDoor.Capture)
   const { syncScanToConfig } = useScanToActivityConfig()
@@ -233,30 +274,66 @@ export function useUnifiedCapture({
     [runScan, syncScanToConfig, familyId, childId, clearScan],
   )
 
+  /**
+   * Link a capture to the row it was taken for, on the LIVE document.
+   *
+   * `UX-404`: every path below used to hand `persistDayLogImmediate` a whole
+   * `dayLog` rebuilt from the snapshot the capture started with, so an edit made
+   * during the upload was written back to what it had been. This patches the one
+   * row, by identity, on the document as it stands now — see
+   * `captureRowWrite.ts`. A failure is reported rather than swallowed: the photo
+   * is already saved by the time this runs, and silence would leave the parent
+   * believing the row carries evidence it does not.
+   */
+  const linkCaptureToRow = useCallback(
+    async (item: ChecklistItem, patch: CaptureRowPatch, context: string) => {
+      const outcome = await writeCaptureRow({
+        familyId,
+        childId,
+        dateKey: today,
+        itemKey: checklistItemKey(item),
+        patch,
+        context,
+      })
+      const notice = captureRowWriteNotice(outcome)
+      if (notice) onMessage?.({ text: notice, severity: 'warning' })
+      return outcome.status === 'done'
+    },
+    [familyId, childId, today, onMessage],
+  )
+
   const handleUnifiedCapture = useCallback(
     async (file: File, index: number): Promise<boolean> => {
       if (!dayLog?.checklist) return false
       const item = dayLog.checklist[index]
+      if (!item) return false
       setScanItemIndex(index)
 
-      // ── FEAT-62: workbook-linked items take the deterministic route ──
-      // The photo becomes an artifact (evidence, as today) AND registers as a
-      // scan against the stamped workbook. Capture succeeds even if analysis
-      // fails; a plain artifact remains. Non-workbook items fall through to the
-      // unchanged classification-based path below.
+      // ── Which route may this photo take? (`UX-403`, owner decision) ──
       //
-      // Legacy-item fallback: an unstamped item (planned before lock-in) resolves
-      // its config via the same name/subject fuzzy match. When it resolves, we
-      // stamp `workbookConfigId` onto the item below so the resolution is
-      // permanent — exactly what lock-in would have done.
-      // A kid never takes the deterministic route: its whole point is advancing
-      // the workbook's position, which is an `activityConfigs` write. His photo
-      // falls through to the classification path, where the same gate keeps it
-      // an artifact (FEAT-184 / UX-151).
-      const resolvedConfigId = invariantWritesAllowed
-        ? (item.workbookConfigId ?? findWorkbookConfigId(item, configs))
-        : undefined
-      const stampConfigId = !item.workbookConfigId && resolvedConfigId ? { workbookConfigId: resolvedConfigId } : {}
+      // One question, asked of `resolveTodayRow` — the same function that chose
+      // the tell and the door the parent just tapped, so the button, the label
+      // and the record cannot disagree. Only a row that resolves to a **workbook**
+      // may reach the curriculum route; everything else is evidence.
+      //
+      // This is also where the round-2 residual closes. The old expression here
+      // was `item.workbookConfigId ?? findWorkbookConfigId(item, configs)`, and
+      // `findWorkbookConfigId` matches on two shared words plus a subject — so a
+      // strand named *Story of the World*, on a family that also owns *Story of
+      // the World History*, read as a Strand on screen while its photo advanced
+      // the workbook. `resolveTodayRow` resolves the parent's own stamp first, so
+      // the fuzzy fallback is now reached only by a row that carries no stamp at
+      // all, and it is reached by BOTH the door and the write or by neither.
+      //
+      // A kid never routes to curriculum: advancing a position is an
+      // `activityConfigs` write and a six-year-old's photo proposes nothing
+      // (FEAT-184 / UX-151).
+      const row = resolveTodayRow(item, configs, configsState)
+      const curriculumRouteAllowed =
+        invariantWritesAllowed && captureMayRouteToCurriculum(row.kind)
+      const resolvedConfigId = curriculumRouteAllowed ? row.configId : null
+      const stampConfigId =
+        !item.workbookConfigId && resolvedConfigId ? { workbookConfigId: resolvedConfigId } : {}
       // FEAT-141: what the app already knows at capture time, handed to the same
       // analysis call that was going to run anyway (never a second one).
       const captureContext: CaptureContext = {
@@ -302,20 +379,16 @@ export function useUnifiedCapture({
           const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, file, filename)
           await updateDoc(doc(artifactsCollection(familyId), docRef.id), { uri: downloadUrl })
 
-          const updatedChecklist = (dayLog.checklist ?? []).map((ci, i) =>
-            i === index
-              ? {
-                  ...ci,
-                  ...stampConfigId,
-                  evidenceArtifactId: docRef.id,
-                  evidenceCollection: 'artifacts' as const,
-                  ...(registration
-                    ? { workbookScanRegistration: registration, scanned: true }
-                    : {}),
-                }
-              : ci,
+          await linkCaptureToRow(
+            item,
+            {
+              ...stampConfigId,
+              evidenceArtifactId: docRef.id,
+              evidenceCollection: 'artifacts' as const,
+              ...(registration ? { workbookScanRegistration: registration, scanned: true } : {}),
+            },
+            'today-capture:workbook',
           )
-          persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
           onArtifactCreated?.({ ...artifact, id: docRef.id, uri: downloadUrl } as Artifact)
           onMessage?.(
             registration
@@ -340,30 +413,14 @@ export function useUnifiedCapture({
         return ok
       }
 
-      // ── UX-363 / Codex round 1 (P1) — WHY THIS PATH IS UNCHANGED. ──
+      // ── EVIDENCE. The only other thing a row capture does (`UX-403`). ──
       //
-      // Below this point a NON-workbook row's photo takes the classification
-      // path, which calls `syncScanToConfig` with no target: it fuzzy-matches by
-      // name and may **create** a workbook config or advance one, then writes
-      // `childSkillMaps`, merges `skillSnapshots.conceptualBlocks` and
-      // auto-completes bypassed rows. Codex round 1 was right that a door
-      // labelled *Add a photo* should not do that — a photo taken under
-      // *Handwriting* can move an unrelated workbook.
-      //
-      // It is **not fixed here, and not because it is small.** The fix is to stop
-      // writing `activityConfigs`, `childSkillMaps` and
-      // `skillSnapshots.conceptualBlocks` on this path, and `skillSnapshots` is on
-      // `CLAUDE.md`'s never-silently-change list: *"Changes touching these are
-      // proposed and stop for a human decision."* Narrowing a write is still
-      // changing it, and this one also decides whether a scanned page can create
-      // a curriculum row at all — the door `UX-315` is separately weighing. So it
-      // is filed as **UX-403** with the proposal written out, and what `UX-363`
-      // fixes instead is the part that was genuinely its own: the row's note no
-      // longer claims *"no lesson count moves"*, because that sentence was false.
-      //
-      // The reach `UX-363` added is immaterial to the hazard: the same photo on
-      // the same row took the same path the moment the box was ticked, which is
-      // one tap earlier than before, not a new capability.
+      // The scan still runs — FEAT-141's one-line description is worth having on
+      // every photo, and it is the same paid call that was going to happen — but
+      // its analysis reaches no record of the child's beyond the artifact it
+      // describes. There is no longer a branch here that hands the page to
+      // `syncScanToConfig` untargeted: a row that may do that took the route
+      // above, and a row that may not is the whole of the owner's decision.
       try {
         // 1. Try the scan pipeline (AI vision analysis)
         const record = await runScan(file, familyId, childId, captureContext)
@@ -371,148 +428,62 @@ export function useUnifiedCapture({
           clearScan()
         }
 
-        // 2. Route based on scan result
+        // 2. Did the page read as a curriculum page? This no longer decides a
+        //    write — it decides whether a KID's photo is flagged for a parent to
+        //    look at (FEAT-184 / UX-151's `pendingScanId`).
         const isCurriculumScan =
           record?.results &&
           record.results.pageType !== 'certificate' &&
           ['worksheet', 'textbook', 'test'].includes(record.results.pageType)
 
-        if (isCurriculumScan && record?.results && record.id && invariantWritesAllowed) {
-          // ── SCANS path: curriculum evidence (parent actor only) ──
-          let configResult: ScanConfigResult = { action: 'none' }
-          try {
-            configResult = await syncScanToConfig(childId, record.results as WorksheetScanResult)
-            if (configResult.action === 'created') {
-              onMessage?.({ text: `New workbook added: ${configResult.configName}`, severity: 'success' })
-            } else if (configResult.action === 'updated' && configResult.position) {
-              onMessage?.({ text: `Updated ${configResult.configName} to lesson ${configResult.position}`, severity: 'success' })
-            } else {
-              onMessage?.({ text: 'Work captured!', severity: 'success' })
-            }
-          } catch (err) {
-            console.error('[UnifiedCapture] Failed to sync scan to config:', err)
-            onMessage?.({ text: 'Work captured!', severity: 'success' })
-          }
-
-          // Feed scan skills into the Learning Map (non-blocking)
-          const skills = (record.results as WorksheetScanResult).skillsTargeted
-          if (skills.length > 0) {
-            try {
-              const findings = skills.map((s) => ({
-                skill: s.skill,
-                status: (s.alignsWithSnapshot === 'ahead' ? 'mastered' : 'emerging') as 'mastered' | 'emerging',
-                evidence: `Workbook scan: ${s.skill} (${s.level})`,
-                testedAt: new Date().toISOString(),
-              }))
-              await updateSkillMapFromFindings(familyId, childId, findings)
-            } catch (err) {
-              console.warn('[UnifiedCapture] Failed to update skill map (non-blocking):', err)
-            }
-          }
-
-          // Phase 1: write blockers for challenging / too-hard scans (non-blocking).
-          try {
-            const detected = detectBlockersFromScan(record.results as WorksheetScanResult, {
-              scanId: record.id,
-            })
-            if (detected.length > 0) {
-              const snapshotRef = doc(skillSnapshotsCollection(familyId), childId)
-              const snapshotSnap = await getDoc(snapshotRef)
-              const existing: Partial<SkillSnapshot> = snapshotSnap.exists() ? snapshotSnap.data() : {}
-              let merged: ConceptualBlock[] = existing.conceptualBlocks ?? []
-              for (const b of detected) {
-                if (!b.id) continue
-                merged = mergeBlock(merged, b as Parameters<typeof mergeBlock>[1])
-              }
-              await updateDoc(snapshotRef, {
-                conceptualBlocks: JSON.parse(JSON.stringify(merged)),
-                blocksUpdatedAt: new Date().toISOString(),
-              })
-            }
-          } catch (err) {
-            console.warn('[UnifiedCapture] Failed to merge scan blockers (non-blocking):', err)
-          }
-
-          // Link scan doc to checklist item
-          let updatedChecklist = (dayLog.checklist ?? []).map((ci, i) =>
-            i === index
-              ? { ...ci, evidenceArtifactId: record!.id!, evidenceCollection: 'scans' as const, scanned: true }
-              : ci,
-          )
-
-          // Auto-complete bypassed checklist items when scan advances position
-          if (configResult.position != null) {
-            const wsResult = record.results as WorksheetScanResult
-            const recommendation = isWorksheetScan(wsResult) ? wsResult.recommendation : undefined
-            const autoCompleted = autoCompleteBypassedItems(
-              updatedChecklist,
-              index,
-              configResult.configId,
-              configResult.position,
-              recommendation,
-            )
-            if (autoCompleted) {
-              updatedChecklist = autoCompleted
-            }
-          }
-
-          persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
-        } else {
-          // ── ARTIFACTS path: non-curriculum or scan failed ──
-          //
-          // FEAT-141: this is the pass Nathan's "analyze every image" rides on.
-          // It already ran above; all that is new is KEEPING its one-line
-          // description. A failed/timed-out/unreadable pass leaves `record`
-          // (or its results) empty, `contentNote` undefined, and the artifact
-          // write below completely unchanged — the capture never depends on it.
-          const contentNote = pickArtifactContentNote(record?.results)
-          // FEAT-184 / UX-151: a KID's photo that read as a curriculum page
-          // lands here too — kept as his own artifact, with the description —
-          // and the scan doc it already wrote is left for a parent to look at.
-          // A parent never reaches this line with a curriculum scan.
-          const pendingScanId =
-            !invariantWritesAllowed && isCurriculumScan && record?.id ? record.id : undefined
-          const artifact = {
-            childId,
-            title: `${item.label.replace(/\s*\(\d+m\)/, '')} — ${childName}'s work`,
-            type: EvidenceType.Photo,
-            dayLogId: today,
-            createdAt: new Date().toISOString(),
-            ...(contentNote ? { contentNote } : {}),
-            tags: {
-              engineStage: EngineStage.Build,
-              domain: '',
-              subjectBucket: item.subjectBucket ?? SubjectBucket.Other,
-              location: 'Home',
-              planItem: item.label,
-            },
-          }
-          const docRef = await addDoc(artifactsCollection(familyId), artifact)
-          const ext = file.name.split('.').pop() ?? 'jpg'
-          const filename = generateFilename(ext)
-          const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, file, filename)
-          await updateDoc(doc(artifactsCollection(familyId), docRef.id), { uri: downloadUrl })
-
-          // Link artifact to checklist item
-          const updatedChecklist = (dayLog.checklist ?? []).map((ci, i) =>
-            i === index
-              ? {
-                  ...ci,
-                  evidenceArtifactId: docRef.id,
-                  evidenceCollection: 'artifacts' as const,
-                  ...(pendingScanId ? { pendingScanId } : {}),
-                }
-              : ci,
-          )
-          persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
-          onArtifactCreated?.({ ...artifact, id: docRef.id, uri: downloadUrl } as Artifact)
-          onMessage?.({ text: 'Work captured!', severity: 'success' })
-          // No scan analysis to show for artifacts — clear the index
-          setScanItemIndex(null)
-          // A kid never sees a scan result card he cannot read: the analysis
-          // stays on the scan doc for the parent, not in this hook's state.
-          if (!invariantWritesAllowed) clearScan()
+        // FEAT-141: this is the pass Nathan's "analyze every image" rides on.
+        // It already ran above; all that is new is KEEPING its one-line
+        // description. A failed/timed-out/unreadable pass leaves `record`
+        // (or its results) empty, `contentNote` undefined, and the artifact
+        // write below completely unchanged — the capture never depends on it.
+        const contentNote = pickArtifactContentNote(record?.results)
+        // A kid's photo that read as a curriculum page is kept as his own
+        // artifact, with the description, and the scan doc it already wrote is
+        // left for a parent to look at on the "Review this" chip.
+        const pendingScanId =
+          !invariantWritesAllowed && isCurriculumScan && record?.id ? record.id : undefined
+        const artifact = {
+          childId,
+          title: `${item.label.replace(/\s*\(\d+m\)/, '')} — ${childName}'s work`,
+          type: EvidenceType.Photo,
+          dayLogId: today,
+          createdAt: new Date().toISOString(),
+          ...(contentNote ? { contentNote } : {}),
+          tags: {
+            engineStage: EngineStage.Build,
+            domain: '',
+            subjectBucket: item.subjectBucket ?? SubjectBucket.Other,
+            location: 'Home',
+            planItem: item.label,
+          },
         }
+        const docRef = await addDoc(artifactsCollection(familyId), artifact)
+        const ext = file.name.split('.').pop() ?? 'jpg'
+        const filename = generateFilename(ext)
+        const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, file, filename)
+        await updateDoc(doc(artifactsCollection(familyId), docRef.id), { uri: downloadUrl })
+
+        await linkCaptureToRow(
+          item,
+          {
+            evidenceArtifactId: docRef.id,
+            evidenceCollection: 'artifacts' as const,
+            ...(pendingScanId ? { pendingScanId } : {}),
+          },
+          'today-capture:evidence',
+        )
+        onArtifactCreated?.({ ...artifact, id: docRef.id, uri: downloadUrl } as Artifact)
+        onMessage?.({ text: 'Work captured!', severity: 'success' })
+        // No scan analysis to show for artifacts — clear the index
+        setScanItemIndex(null)
+        // A kid never sees a scan result card he cannot read: the analysis
+        // stays on the scan doc for the parent, not in this hook's state.
+        if (!invariantWritesAllowed) clearScan()
         return true
       } catch (err) {
         console.error('[UnifiedCapture] Capture failed:', {
@@ -526,7 +497,7 @@ export function useUnifiedCapture({
         return false
       }
     },
-    [runScan, clearScan, familyId, childId, childName, today, dayLog, persistDayLogImmediate, syncScanToConfig, onMessage, onArtifactCreated, analyzeWorkbookPage, configs, invariantWritesAllowed],
+    [runScan, clearScan, familyId, childId, childName, today, dayLog, linkCaptureToRow, onMessage, onArtifactCreated, analyzeWorkbookPage, configs, configsState, invariantWritesAllowed],
   )
 
   /**
@@ -627,9 +598,14 @@ export function useUnifiedCapture({
       if (!dayLog?.checklist) return
       const item = dayLog.checklist[index]
       if (!item) return
-      // Legacy-item fallback: resolve an unstamped item's config via name/subject
-      // match, then stamp it below so the resolution is permanent.
-      const resolvedConfigId = item.workbookConfigId ?? findWorkbookConfigId(item, configs)
+      // The SAME question the capture asks, and the same answer (`UX-403`): only
+      // a row that resolves to a workbook may register a page against one. The
+      // old expression here was the bare fuzzy fallback, so this button could
+      // advance an unrelated workbook from a strand's photo — the round-2
+      // defect on a third door.
+      const row = resolveTodayRow(item, configs, configsState)
+      const resolvedConfigId =
+        invariantWritesAllowed && captureMayRouteToCurriculum(row.kind) ? row.configId : null
       if (!resolvedConfigId) return
       const stampConfigId = !item.workbookConfigId ? { workbookConfigId: resolvedConfigId } : {}
       setScanItemIndex(index)
@@ -686,10 +662,15 @@ export function useUnifiedCapture({
           if (report) onMessage?.(report)
           return
         }
-        const updatedChecklist = (dayLog.checklist ?? []).map((ci, i) =>
-          i === index ? { ...ci, ...stampConfigId, workbookScanRegistration: lastRegistration, scanned: true } : ci,
+        // `UX-404`: the registration lands on this row of the LIVE document. A
+        // backfill fetches and scans several photos, which takes longer than a
+        // capture does — so writing the day as it stood when the button was
+        // tapped is the same defect with a wider window.
+        await linkCaptureToRow(
+          item,
+          { ...stampConfigId, workbookScanRegistration: lastRegistration, scanned: true },
+          'today-capture:backfill',
         )
-        persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
         if (report) onMessage?.(report)
       } catch (err) {
         console.error('[UnifiedCapture] Backfill workbook scan failed:', err)
@@ -699,7 +680,7 @@ export function useUnifiedCapture({
         setScanItemIndex(null)
       }
     },
-    [dayLog, familyId, analyzeWorkbookPage, persistDayLogImmediate, onMessage, configs],
+    [dayLog, familyId, analyzeWorkbookPage, linkCaptureToRow, onMessage, configs, configsState, invariantWritesAllowed],
   )
 
   return {

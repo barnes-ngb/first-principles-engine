@@ -192,6 +192,74 @@ export const DOOR_FOR_KIND: Record<TodayRowKind, TodayRowDoor> = {
 }
 
 /**
+ * May a photo taken on a row of this kind reach the CURRICULUM route?
+ *
+ * **The owner's decision on `UX-403` (2026-09-13): workbook rows only.**
+ *
+ * The curriculum route is `useUnifiedCapture`'s classification path — it hands
+ * the page to `syncScanToConfig` with no target, which fuzzy-matches the cover
+ * text across the child's workbooks and **creates or advances one**, then writes
+ * `childSkillMaps` (`updateSkillMapFromFindings`) and
+ * `skillSnapshots.conceptualBlocks` (`detectBlockersFromScan`), and
+ * auto-completes other rows. None of that was confirmed, and none of it was ever
+ * what a door reading *Add a photo* said it would do: a page photographed under
+ * *Handwriting* could move a workbook the row has nothing to do with.
+ *
+ * So a `Record<TodayRowKind, boolean>`, the `UX-204` rail: a new kind cannot
+ * arrive without somebody deciding whether a photo on it may write the family's
+ * curriculum. Exactly one entry is `true`, and it is the kind whose whole
+ * definition is *this row is a workbook page, and the photo advances its lesson
+ * count*. Everything else — including the two that claim nothing
+ * ({@link TodayRowKind.Unresolved}, {@link TodayRowKind.Unknown}) — is evidence
+ * only, which is the fail-closed direction: an unread curriculum list cannot
+ * tell us this is a workbook, and a row nothing answers to is not one.
+ *
+ * This is a **narrowing of two propose-and-confirm rails** and is made on the
+ * owner's decision above, nothing wider: the writes themselves are untouched,
+ * and the Curriculum tab's own scan doors (`UX-315`) still reach all of them.
+ *
+ * Read by the write (`useUnifiedCapture`) and by every door that offers it
+ * (`TodayChecklist`), so the tell, the button and the record cannot disagree —
+ * the same discipline that made {@link DOOR_FOR_KIND} one table.
+ */
+export const CURRICULUM_ROUTE_FOR_KIND: Record<TodayRowKind, boolean> = {
+  [TodayRowKind.Workbook]: true,
+  [TodayRowKind.Routine]: false,
+  [TodayRowKind.Formation]: false,
+  [TodayRowKind.Activity]: false,
+  [TodayRowKind.App]: false,
+  [TodayRowKind.Evaluation]: false,
+  [TodayRowKind.Strand]: false,
+  [TodayRowKind.Watch]: false,
+  [TodayRowKind.Unknown]: false,
+  [TodayRowKind.Unresolved]: false,
+}
+
+/** {@link CURRICULUM_ROUTE_FOR_KIND}, as the one question every caller asks. */
+export function captureMayRouteToCurriculum(kind: TodayRowKind): boolean {
+  return CURRICULUM_ROUTE_FOR_KIND[kind] === true
+}
+
+/**
+ * Whether a caller's curriculum list can be believed yet, from the two flags
+ * `useActivityConfigs` actually hands out.
+ *
+ * One definition, because three surfaces now ask it — the checklist, the page,
+ * and the capture hook — and a surface that got the precedence backwards would
+ * render *"checking"* over a read that had failed and will never resolve.
+ * `failed` is checked first: a read that errored is not still loading, and its
+ * sentence is the one that does not resolve on its own.
+ */
+export function todayRowConfigsState(
+  loading: boolean,
+  failed: boolean,
+): TodayRowConfigsState {
+  if (failed) return TodayRowConfigsState.Failed
+  if (loading) return TodayRowConfigsState.Loading
+  return TodayRowConfigsState.Settled
+}
+
+/**
  * What a parent calls each door.
  *
  * `Add page` against `Add a photo` is the sentence this run is really adding to
@@ -260,20 +328,26 @@ export type TodayRowUnknownReason =
 /**
  * What the capture door on an unplaced row actually does — one clause, shared.
  *
- * **Codex round 1 (P1) caught the first draft of these notes claiming *"no lesson
- * count moves"*, and it was false.** A photo on a row the app cannot place takes
- * `useUnifiedCapture`'s classification path, which fuzzy-matches the page by
- * name and may create or advance a workbook (and does say so, in its own snack).
- * Narrowing that write is a `skillSnapshots` / `activityConfigs` change and
- * therefore propose-and-confirm — filed as `UX-403`, with the proposal, rather
- * than made here. What was this run's to fix is the sentence, so the sentence now
- * says what happens.
+ * **This sentence has now been wrong in both directions, which is why it is one
+ * constant and not three.** `UX-363`'s first draft claimed *"no lesson count
+ * moves"* and Codex round 1 was right that it was false: a photo on an unplaced
+ * row took `useUnifiedCapture`'s classification path, which fuzzy-matched the
+ * page by name and could create or advance an unrelated workbook. That run could
+ * only fix the sentence, because narrowing the write crossed a
+ * propose-and-confirm rail — so it said what actually happened and filed the
+ * narrowing as `UX-403`.
+ *
+ * `UX-403` is the owner's decision (2026-09-13): **curriculum route on workbook
+ * rows only.** A row that does not resolve to {@link TodayRowKind.Workbook}
+ * writes an `artifacts` document and the day-log link and nothing else — see
+ * {@link captureMayRouteToCurriculum}, which is the rule both the door and the
+ * write now read. So the original sentence is finally the true one.
  *
  * One clause, appended to all three reasons, so no note can drift from another
  * about the same door.
  */
 export const UNPLACED_ROW_EVIDENCE_CLAUSE =
-  'A photo saves as evidence here; if it reads as a workbook page, the app files it on Curriculum and says which.'
+  'A photo saves as evidence here and nothing else moves.'
 
 /**
  * The one line the row shows when there is nowhere on Today to add to it.
@@ -582,4 +656,38 @@ export function resolveTodayRow(
 /** Does this row's door put a photo on it? The two capture doors, named once. */
 export function isPhotoDoor(door: TodayRowDoor): boolean {
   return door === TodayRowDoor.AddPage || door === TodayRowDoor.AddPhoto
+}
+
+/** Where the Knowledge Mine lives. One route, named once (`router.tsx`). */
+export const KNOWLEDGE_MINE_ROUTE = '/quest'
+
+/**
+ * Where an `evaluation` row's *Start Mining* door goes — `UX-405`.
+ *
+ * **The defect was a labelled row with nothing to tap.** `DOOR_FOR_KIND` gives
+ * {@link TodayRowKind.Evaluation} the {@link TodayRowDoor.StartMining} door,
+ * which suppresses the photo door; but the button that renders it required
+ * `item.itemType === 'evaluation' && item.link`, and a row that resolved to
+ * `evaluation` from the family's own **config** carries neither — the ordinary
+ * planner path round-trips through routine prose and drops both (`UX-402`). So
+ * the row read *Quest* and offered no door at all.
+ *
+ * The fix is the destination, not a guess. `evaluationMode` is a **targeting
+ * hint** for `useQuestSession`'s completion match, and there is nothing on an
+ * `ActivityConfig` that could honestly produce one — so none is invented. The
+ * *route* needs no inference: the kind already means *this row is a Knowledge
+ * Mine quest*, and the Mine is at one address. A row that carries its own `link`
+ * keeps it (a planner row may point at a specific quest); everything else opens
+ * the Mine, exactly as the Hero Hub tile does.
+ *
+ * Returns `null` for every other kind, so the caller cannot render the button on
+ * a row whose door is not this one.
+ */
+export function todayRowMineLink(
+  row: Pick<TodayRow, 'kind' | 'addDoor'>,
+  item: Pick<ChecklistItem, 'link'>,
+): string | null {
+  if (row.addDoor !== TodayRowDoor.StartMining) return null
+  const link = item.link?.trim()
+  return link ? link : KNOWLEDGE_MINE_ROUTE
 }

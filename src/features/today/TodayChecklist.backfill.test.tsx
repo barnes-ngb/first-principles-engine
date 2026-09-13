@@ -100,9 +100,33 @@ describe('TodayChecklist — FEAT-62 legacy-item backfill button', () => {
     expect(backfillButton()).toBeNull()
   })
 
-  it('still renders the button for a stamped item (characterization — no configs needed)', () => {
-    renderChecklist(makeItem({ workbookConfigId: 'wb-math' }), [])
+  it('renders the button for a stamped item whose config the list HOLDS', () => {
+    renderChecklist(makeItem({ workbookConfigId: 'wb-math' }), [matchingConfig])
     expect(backfillButton()).not.toBeNull()
+  })
+
+  it('renders NO button for a stamped item the SETTLED list does not hold — a stale join', () => {
+    // Was a characterization that the stamp alone sufficed. It no longer does,
+    // and deliberately: a stamp missing from a settled list is stale (Codex
+    // round 2 on `UX-363`, P2), `syncScanToConfig` would answer `target-missing`,
+    // and the button would advertise a registration that cannot happen.
+    renderChecklist(makeItem({ workbookConfigId: 'wb-math' }), [])
+    expect(backfillButton()).toBeNull()
+  })
+
+  it('renders NO button on a STRAND whose name fuzzily resembles a workbook (UX-403)', () => {
+    // The round-2 P1 on a third door. `findWorkbookConfigId` claims this row —
+    // two shared words plus a subject — so before the resolver answered first,
+    // one tap here registered a strand's photo against an unrelated workbook and
+    // advanced its lesson count.
+    renderChecklist(
+      makeItem({ label: 'Story of the World (30m)', activityConfigId: 'st-1' }),
+      [
+        { id: 'st-1', name: 'Story of the World', type: 'strand' },
+        { id: 'wb-2', name: 'Story of the World History', type: 'workbook', scannable: true },
+      ] as WorkbookConfigLike[],
+    )
+    expect(backfillButton()).toBeNull()
   })
 })
 

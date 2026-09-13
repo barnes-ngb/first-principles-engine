@@ -33,7 +33,15 @@ export type ScanConfigNoneReason =
   | 'no-family'
   /** The page read fine but named no curriculum and no subject — nothing to register against. */
   | 'no-curriculum-detected'
-  /** A `targetConfigId` was pinned but that activity config no longer exists. */
+  /**
+   * A `targetConfigId` was pinned but it does not name a config this child's
+   * scan may write — it is gone, or it belongs to the other child (`UX-403`).
+   *
+   * One reason for both, deliberately: the outcome and the advice are identical
+   * (nothing was written, and retaking the photo cannot help), and the caller's
+   * message for it — *"that workbook isn't there any more"* — is as true of a
+   * join pointing at somebody else's document as of one pointing at none.
+   */
   | 'target-missing'
 
 export interface ScanConfigResult {
@@ -86,7 +94,22 @@ export function useScanToActivityConfig() {
         const targetSnap = await getDoc(targetRef)
         if (targetSnap.exists()) {
           const data = targetSnap.data() as ActivityConfig
-          existing = { id: targetSnap.id, ref: targetSnap.ref, data: () => data }
+          // UX-403: the target must be THIS child's row. The id path skipped the
+          // `childId` filter the fuzzy path has always applied, so a stale join —
+          // a stamp left on a row while the header was on the other boy, which is
+          // exactly what `useActivityConfigs` not resetting its state produced —
+          // advanced the sibling's lesson count from this child's photo. A
+          // mismatch leaves `existing` null, and a pinned target that resolves to
+          // nothing bails below without creating anything.
+          const owner = data.childId
+          if (owner === childId || owner === 'both') {
+            existing = { id: targetSnap.id, ref: targetSnap.ref, data: () => data }
+          } else {
+            console.warn(
+              '[ScanToConfig] refusing a pinned target that belongs to another child',
+              { targetConfigId: options.targetConfigId },
+            )
+          }
         }
       } else {
         const configsSnap = await getDocs(

@@ -113,6 +113,12 @@ import { selectTodayDayBanner } from './unappliedDraft'
 import { useUnifiedCapture } from './useUnifiedCapture'
 import SectionErrorBoundary from '../../components/SectionErrorBoundary'
 import DraftReadyCard from '../monthly-review/DraftReadyCard'
+import { captureRowWriteNotice, writeCaptureRow } from './captureRowWrite'
+import {
+  captureMayRouteToCurriculum,
+  resolveTodayRow,
+  todayRowConfigsState,
+} from './todayRowKind'
 import WeekFocusCard from './WeekFocusCard'
 import WeekRibbon from './WeekRibbon'
 import WorkshopGameCards from './WorkshopGameCards'
@@ -240,6 +246,13 @@ export default function TodayPage() {
   const activityConfigsSettled = activityConfigsChildId === selectedChildId
   const activityConfigs = activityConfigsSettled ? rawActivityConfigs : EMPTY_ACTIVITY_CONFIGS
   const activityConfigsLoading = rawActivityConfigsLoading || !activityConfigsSettled
+  // UX-403: the page, the checklist and the capture hook all resolve a row
+  // against this one state. `todayRowConfigsState` owns the precedence (a failed
+  // read is not still loading) so a third surface cannot get it backwards.
+  const activityConfigsState = todayRowConfigsState(
+    activityConfigsLoading,
+    !!activityConfigsError,
+  )
 
   const [strandSessionId, setStrandSessionId] = useState<string | null>(null)
   const [strandSessionSaving, setStrandSessionSaving] = useState(false)
@@ -647,10 +660,10 @@ export default function TodayPage() {
     childName: activeChild?.name ?? 'Student',
     today,
     dayLog,
-    persistDayLogImmediate,
     onMessage: setSnackMessage,
     onArtifactCreated: (artifact) => setTodayArtifacts((prev) => [artifact, ...prev]),
     configs: activityConfigs,
+    configsState: activityConfigsState,
   })
 
   const { chat: aiChat } = useAI()
@@ -1049,11 +1062,25 @@ export default function TodayPage() {
   }, [dayLog, selectedChildId, activeChild, todaySnapshot, weekFocus, aiChat, familyId, setSnackMessage])
 
   // --- Pre-completion scan handler (for "should I skip?" advice) ---
+  //
+  // UX-403 — **the same rule as the capture, because this is the same route.**
+  // This door hands the page to an untargeted `syncScanToConfig` (which
+  // fuzzy-matches the cover text and may create or advance a workbook) and then
+  // writes `childSkillMaps`, with no confirm. Its button renders on any row whose
+  // AI-written `skipGuidance` says *check lesson*, which is not a claim that the
+  // row is a workbook — so on the owner's decision it is gated on the same
+  // resolved kind, at the write as well as at the button. A row that is not a
+  // workbook still gets the scan and its advice, and is still stamped `scanned`;
+  // what it no longer does is write the family's curriculum.
   const handlePreCompletionScan = useCallback(async (file: File, index: number) => {
     setScanItemIndex(index)
+    const item = dayLog?.checklist?.[index]
+    const curriculumRouteAllowed = !!item && captureMayRouteToCurriculum(
+      resolveTodayRow(item, activityConfigs, activityConfigsState).kind,
+    )
     const record = await runScan(file, familyId, selectedChildId)
 
-    if (record?.results && record.results.pageType !== 'certificate') {
+    if (curriculumRouteAllowed && record?.results && record.results.pageType !== 'certificate') {
       try {
         const result = await syncScanToConfig(selectedChildId, record.results)
         if (result.action === 'created') {
@@ -1092,13 +1119,22 @@ export default function TodayPage() {
       }
     }
 
-    if (record?.results && dayLog?.checklist) {
-      const updatedChecklist = (dayLog.checklist ?? []).map((ci, i) =>
-        i === index ? { ...ci, scanned: true } : ci,
-      )
-      persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
+    // UX-404, same class as the capture's: `dayLog` here is the document as it
+    // stood before an AI scan call that takes seconds, so writing it whole put
+    // back every edit made in between. One row, on the live document.
+    if (record?.results && item) {
+      const outcome = await writeCaptureRow({
+        familyId,
+        childId: selectedChildId,
+        dateKey: today,
+        itemKey: checklistItemKey(item),
+        patch: { scanned: true },
+        context: 'today-pre-completion-scan',
+      })
+      const notice = captureRowWriteNotice(outcome)
+      if (notice) setSnackMessage({ text: notice, severity: 'warning' })
     }
-  }, [runScan, familyId, selectedChildId, syncScanToConfig, setSnackMessage, dayLog, persistDayLogImmediate, setScanItemIndex])
+  }, [runScan, familyId, selectedChildId, syncScanToConfig, setSnackMessage, dayLog, setScanItemIndex, today, activityConfigs, activityConfigsState])
 
   const handleScanAddToPlan = useCallback(() => {
     if (!scanResult?.results || scanItemIndex == null || !dayLog?.checklist) return
