@@ -12,6 +12,12 @@ import {
   levelStretchPhrase,
   normalizeLevelStretch,
 } from "./storyDecodability.js";
+import { foldHoursForPrompt, type HoursTotals } from "./promptHours.js";
+import type {
+  RawDayLog,
+  RawHoursAdjustment,
+  RawHoursEntry,
+} from "../shared/hoursContributions.js";
 
 // ── Request / Response types ────────────────────────────────────
 
@@ -244,28 +250,63 @@ export async function loadWeekContext(
   };
 }
 
-/** Load hours logged since school year start and sum total minutes. */
+/**
+ * The child's counted minutes since the school year started — **through the
+ * shared fold** (UX-410).
+ *
+ * This reader used to count its own way, and it was the census's Part B finding
+ * and its agreement test's positive control: `hours` documents ALONE (no day
+ * logs, no adjustments), adding `minutes` **and** `hours * 60` where the rule
+ * takes minutes *else* hours, unrounded, non-positive entries admitted. Four
+ * differences from the rule, each of which changes the answer — and the answer
+ * is read into the **plan** and **shellyChat** prompts, so a model was told a
+ * number no surface in the app would show.
+ *
+ * It now reads the same THREE additive sources the Records page reads — day
+ * logs, hours entries and adjustments — and folds them through
+ * `collectHoursContributions`. That costs two more range queries per prompt
+ * build; a fourth definition of the family's hours costs more.
+ *
+ * The adjustments query is deliberately **not** filtered by `childId` in
+ * Firestore: DATA-09 attribution counts an adjustment for this child when it is
+ * tagged to them **or to `'both'`**, and that is the fold's rule to apply, not a
+ * query's. Every other source is filtered at the query and again in the fold.
+ *
+ * The school-year boundary here (Aug 1) still differs from the app's own
+ * (`getSchoolYearRange`, July 1) — filed as `UX-411` and deliberately untouched:
+ * this row is about the counting rule, and moving a year boundary moves a number
+ * on a records surface.
+ */
 export async function loadHoursSummary(
   db: Firestore,
   familyId: string,
   childId: string,
-): Promise<{ totalMinutes: number }> {
+): Promise<HoursTotals> {
   const startDate = schoolYearStart(new Date());
 
-  const snap = await db
-    .collection(`families/${familyId}/hours`)
-    .where("childId", "==", childId)
-    .where("date", ">=", startDate)
-    .get();
+  const [hoursSnap, daysSnap, adjSnap] = await Promise.all([
+    db
+      .collection(`families/${familyId}/hours`)
+      .where("childId", "==", childId)
+      .where("date", ">=", startDate)
+      .get(),
+    db
+      .collection(`families/${familyId}/days`)
+      .where("childId", "==", childId)
+      .where("date", ">=", startDate)
+      .get(),
+    db
+      .collection(`families/${familyId}/hoursAdjustments`)
+      .where("date", ">=", startDate)
+      .get(),
+  ]);
 
-  let totalMinutes = 0;
-  for (const doc of snap.docs) {
-    const data = doc.data() as { minutes?: number; hours?: number };
-    totalMinutes += data.minutes || 0;
-    if (data.hours) totalMinutes += data.hours * 60;
-  }
-
-  return { totalMinutes };
+  return foldHoursForPrompt(
+    daysSnap.docs.map((d) => d.data() as RawDayLog),
+    hoursSnap.docs.map((d) => d.data() as RawHoursEntry),
+    adjSnap.docs.map((d) => d.data() as RawHoursAdjustment),
+    childId,
+  );
 }
 
 /** Load engagement data from recent day logs (last 14 days). */

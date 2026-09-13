@@ -11,6 +11,7 @@ import {
   loadWordMasterySummary,
 } from "./chat.js";
 import type { DraftBookInfo } from "./chat.js";
+import { hoursLoggedBlock, type HoursTotals } from "./promptHours.js";
 import { loadRecentEvalContext, loadRecentEvalHistoryByDomain, formatEvalHistoryByDomain } from "./chatTypes.js";
 import { getGatbProgress } from "./data/gatbCurriculum.js";
 import { buildLearnerModelSlice } from "./tasks/learnerModelSlice.js";
@@ -607,13 +608,23 @@ export async function buildContextForTask(
     sections.push(lines.join("\n"));
   }
 
-  // Hours progress
+  // Hours logged — a number, never a target (UX-410).
+  //
+  // This block used to read `HOURS PROGRESS: Hours logged this year: N hours of
+  // 1000 target (P% complete)`. Two things were wrong with it and only one was
+  // arithmetic. The number came from a reader that counted its own way
+  // (`loadHoursSummary`, now folded through the shared rule); and the sentence
+  // asserted a **target and a percentage** into the plan and shellyChat prompts,
+  // on a product whose owner decision reads *"when we move to Texas hours
+  // aren't the goal"* and whose every hours surface states a number and nothing
+  // else (UX-211). A model told a percentage repeats it to a parent in prose.
+  //
+  // The heading moved with the claim: *progress* is toward something.
   if (sliceData.has("hoursProgress")) {
-    const { totalMinutes } = sliceData.get("hoursProgress") as { totalMinutes: number };
-    const hoursTarget = 1000;
-    const totalHours = Math.round(totalMinutes / 60);
-    const pct = Math.round((totalMinutes / (hoursTarget * 60)) * 100);
-    sections.push(`HOURS PROGRESS:\nHours logged this year: ${totalHours} hours of ${hoursTarget} target (${pct}% complete)`);
+    const totals = sliceData.get("hoursProgress") as HoursTotals;
+    sections.push(
+      hoursLoggedBlock("HOURS LOGGED", "so far this school year", totals),
+    );
   }
 
   // Engagement — use compressed summary for non-chat tasks
