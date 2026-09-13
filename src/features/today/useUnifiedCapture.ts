@@ -77,9 +77,16 @@ export interface UseUnifiedCaptureOptions {
 export interface UseUnifiedCaptureResult {
   /**
    * Run the unified capture pipeline for a checklist item. Resolves `true` when
-   * the photo was captured (evidence linked / registered), `false` when it
-   * failed and its own error toast was shown — the batch handler (FEAT-108)
-   * reads this so it never masks a lost primary photo with a success toast.
+   * the photo was captured **and linked to its row**, `false` when either half
+   * failed and its own message was shown — the batch handler (FEAT-108) reads
+   * this so it never masks a lost primary photo, or an unlinked one, with a
+   * success toast.
+   *
+   * A refused ROW WRITE counts as a failure here (Codex round 2, P2) even
+   * though the artifact was saved: the extras of a batch attach to the item by
+   * `tags.planItem` alone, and the batch's own summary would overwrite the
+   * sentence saying the row carries nothing. The warning has already been
+   * shown, so the caller reports nothing further.
    */
   handleUnifiedCapture: (file: File, index: number) => Promise<boolean>
   /**
@@ -409,7 +416,10 @@ export function useUnifiedCapture({
                 : { text: 'Work captured!', severity: 'success' },
             )
           }
-          ok = true
+          // An unlinked primary is a failed capture as far as the BATCH is
+          // concerned (Codex round 2, P2): its extras would save against a row
+          // the photo never reached, and its summary would replace the warning.
+          ok = linked
         } catch (err) {
           console.error('[UnifiedCapture] Workbook capture failed:', {
             childId,
@@ -496,7 +506,9 @@ export function useUnifiedCapture({
         // A kid never sees a scan result card he cannot read: the analysis
         // stays on the scan doc for the parent, not in this hook's state.
         if (!invariantWritesAllowed) clearScan()
-        return true
+        // Same rule as the workbook branch: the batch must not build on a
+        // primary photo that never reached its row (Codex round 2, P2).
+        return linked
       } catch (err) {
         console.error('[UnifiedCapture] Capture failed:', {
           childId,

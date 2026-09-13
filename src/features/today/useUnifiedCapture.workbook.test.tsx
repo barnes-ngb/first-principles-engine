@@ -990,6 +990,40 @@ describe('useUnifiedCapture — the row-write warning is the last word', () => {
     })
   })
 
+  it('the BATCH aborts when the primary photo never reached its row', async () => {
+    // Codex round 2 (P2): suppressing the success message was not enough — the
+    // branch still returned `true`, so the batch saved photos 2..N and its
+    // summary toast replaced the warning, leaving extra artifacts attached to
+    // the item by `tags.planItem` alone.
+    runScanMock.mockResolvedValue(null)
+    dayWriteShouldFail = true
+
+    const { result, onMessage } = setup({ /* no workbook */ })
+    await act(async () => {
+      await result.current.handleUnifiedCaptureBatch([file(), file(), file()], 0)
+    })
+
+    // Photo #1 saved; the extras did not.
+    expect(addDocCalls.filter((c) => c.key === 'artifacts')).toHaveLength(1)
+    expect(onMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ text: expect.stringContaining('more page') }),
+    )
+    const last = onMessage.mock.calls.at(-1)![0] as { severity: string }
+    expect(last.severity).toBe('warning')
+  })
+
+  it('POSITIVE CONTROL — with the row write landing, the batch saves the extras', async () => {
+    runScanMock.mockResolvedValue(null)
+
+    const { result, onMessage } = setup({ /* no workbook */ })
+    await act(async () => {
+      await result.current.handleUnifiedCaptureBatch([file(), file(), file()], 0)
+    })
+
+    expect(addDocCalls.filter((c) => c.key === 'artifacts')).toHaveLength(3)
+    expect(onMessage).toHaveBeenCalledWith({ text: '+2 more pages saved', severity: 'success' })
+  })
+
   it('a backfill whose row write fails does NOT then report the registration', async () => {
     stubPhotoFetch()
     runScanMock.mockResolvedValue({ id: 'scan-b', results: worksheetResults })

@@ -1129,6 +1129,11 @@ export default function TodayPage() {
         dateKey: today,
         itemKey: checklistItemKey(item),
         patch: { scanned: true },
+        // The duplicate-row hint the capture paths pass (Codex round 2, P2).
+        // Apply retains a completed row and appends a fresh one with the same
+        // label and subject, so without it `scanned: true` lands on the older
+        // completed twin rather than the row whose page was just scanned.
+        hint: { index, completed: !!item.completed },
         context: 'today-pre-completion-scan',
       })
       const notice = captureRowWriteNotice(outcome)
