@@ -6,6 +6,8 @@ import {
   CONFIG_READ_FAILED_TELL,
   CURRICULUM_ROUTE_FOR_KIND,
   DOOR_FOR_KIND,
+  DOOR_REQUIRES_CONFIG,
+  resolveAddDoor,
   isPhotoDoor,
   KNOWLEDGE_MINE_ROUTE,
   resolveTodayRow,
@@ -661,5 +663,71 @@ describe('todayRowConfigsState', () => {
     expect(todayRowConfigsState(false, true)).toBe(TodayRowConfigsState.Failed)
     expect(todayRowConfigsState(true, false)).toBe(TodayRowConfigsState.Loading)
     expect(todayRowConfigsState(false, false)).toBe(TodayRowConfigsState.Settled)
+  })
+})
+
+// ── Codex round 4: a door may not promise a record it cannot make ───────────
+
+describe('a door that needs a curriculum row does not render without one', () => {
+  it('a settled row asserting itemType workbook, with nothing behind it, offers the PHOTO', () => {
+    // Step 9 answers from the row's own `itemType` — "a record of an intention,
+    // not of a config" — and an AI plan may emit `workbook`. With no stamp and no
+    // name match the kind is `Workbook` with a **null** `configId`, so *Add page*
+    // promised a lesson advance that `useUnifiedCapture` would never make.
+    const row = resolveTodayRow(
+      item({ label: 'Nothing answers to this (20m)', itemType: 'workbook' }),
+      [config({ id: 'other', name: 'Handwriting', type: ActivityType.Routine })],
+    )
+    expect(row.kind).toBe(TodayRowKind.Workbook)
+    expect(row.configId).toBeNull()
+    expect(row.addDoor).toBe(TodayRowDoor.AddPhoto)
+    // POSITIVE CONTROL: the same assertion WITH a config behind it still says Add page.
+    const bound = resolveTodayRow(
+      item({ label: 'GATB Math (30m)', itemType: 'workbook' }),
+      [config({ id: 'wb-1', name: 'GATB Math', type: ActivityType.Workbook })],
+    )
+    expect(bound.addDoor).toBe(TodayRowDoor.AddPage)
+  })
+
+  it('the STRAND half, which was latent and lost the door entirely', () => {
+    // `Record a session` is already gated on a resolvable `findStrandConfigId`,
+    // so a config-less strand row rendered no door at all — `UX-405`'s finding on
+    // a second kind. The photo is the one record it can still make.
+    const row = resolveTodayRow(
+      item({ label: 'Nothing answers to this (20m)', itemType: 'strand' }),
+      [],
+    )
+    expect(row.kind).toBe(TodayRowKind.Strand)
+    expect(row.configId).toBeNull()
+    expect(row.addDoor).toBe(TodayRowDoor.AddPhoto)
+  })
+
+  it('an UNSETTLED list keeps Add page on a stamped row — the id is the target', () => {
+    // The stamp is on the row, so the capture path can act on it with no list in
+    // hand. Narrowing here would take the door away from the one case that works.
+    const row = resolveTodayRow(
+      item({ workbookConfigId: 'wb-1' }),
+      [],
+      TodayRowConfigsState.Loading,
+    )
+    expect(row.configId).toBe('wb-1')
+    expect(row.addDoor).toBe(TodayRowDoor.AddPage)
+  })
+
+  it('the requires-a-config table is TOTAL, and names exactly the two record doors', () => {
+    for (const door of Object.values(TodayRowDoor)) {
+      expect(typeof DOOR_REQUIRES_CONFIG[door]).toBe('boolean')
+    }
+    expect(Object.values(TodayRowDoor).filter((d) => DOOR_REQUIRES_CONFIG[d]))
+      .toEqual([TodayRowDoor.AddPage, TodayRowDoor.RecordSession])
+  })
+
+  it('every kind falls back to a door it can actually offer', () => {
+    for (const kind of Object.values(TodayRowKind)) {
+      const withConfig = resolveAddDoor(kind, 'cfg-1')
+      const without = resolveAddDoor(kind, null)
+      expect(withConfig).toBe(DOOR_FOR_KIND[kind])
+      expect(DOOR_REQUIRES_CONFIG[without]).toBe(false)
+    }
   })
 })

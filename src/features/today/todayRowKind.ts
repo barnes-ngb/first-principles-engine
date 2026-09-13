@@ -260,6 +260,51 @@ export function todayRowConfigsState(
 }
 
 /**
+ * Does this door need a curriculum row behind it to do anything?
+ *
+ * A `Record<TodayRowDoor, boolean>`, the `UX-204` rail again: a new door must
+ * declare whether it can act with no config resolved.
+ *
+ * **The two that need one both promise a record that lives on a config** — *Add
+ * page* advances `currentPosition`, *Record a session* increments a strand's
+ * count — so offering either with nothing behind it is a button that cannot keep
+ * its word. Codex round 4 caught the workbook half: step 9 answers from the row's
+ * own `itemType`, which is *a record of an intention, not of a config*, so a
+ * settled row asserting `workbook` with no stamp and no name match resolved to
+ * `Workbook` with a **null** `configId` — and `TodayChecklist` drew *Add page*
+ * while `useUnifiedCapture` took the evidence branch and no lesson moved.
+ *
+ * The strand half was latent and is worse in the other direction: its button is
+ * already gated on a resolvable `findStrandConfigId`, so a config-less strand row
+ * rendered *no door at all* — `UX-405`'s finding on a second kind.
+ */
+export const DOOR_REQUIRES_CONFIG: Record<TodayRowDoor, boolean> = {
+  [TodayRowDoor.AddPage]: true,
+  [TodayRowDoor.RecordSession]: true,
+  // The photo needs nothing; the Mine is at a fixed route (`UX-405`); a watch
+  // row carries its own `watchVideoId` and is not a curriculum row at all.
+  [TodayRowDoor.AddPhoto]: false,
+  [TodayRowDoor.StartMining]: false,
+  [TodayRowDoor.Watch]: false,
+}
+
+/**
+ * The door a row can actually offer: its kind's door, or the plain photo when
+ * that door needs a curriculum row and none resolved.
+ *
+ * The photo is the right fallback for both — it is the one record such a row
+ * *can* make, and taking it away would be the `UX-363` mistake of leaving a
+ * labelled row with nothing to tap.
+ */
+export function resolveAddDoor(
+  kind: TodayRowKind,
+  configId: string | null,
+): TodayRowDoor {
+  const door = DOOR_FOR_KIND[kind]
+  return DOOR_REQUIRES_CONFIG[door] && !configId ? TodayRowDoor.AddPhoto : door
+}
+
+/**
  * What a parent calls each door.
  *
  * `Add page` against `Add a photo` is the sentence this run is really adding to
@@ -495,11 +540,15 @@ function build(
 ): TodayRow {
   const where = positionPhrase(kind, config)
   const word = TODAY_ROW_KIND_WORD[kind]
+  const configId = config?.id ?? configIdOverride
   return {
     kind,
-    configId: config?.id ?? configIdOverride,
+    configId,
     tell: where ? `${word} · ${where}` : word,
-    addDoor: DOOR_FOR_KIND[kind],
+    // The KIND is the row's own claim and stands; the DOOR is a promise about a
+    // record, so it narrows when there is no curriculum row to make one on
+    // (Codex round 4 — see `DOOR_REQUIRES_CONFIG`).
+    addDoor: resolveAddDoor(kind, configId),
     unknownReason,
     note: unknownReason ? TODAY_ROW_UNKNOWN_NOTE[unknownReason] : null,
   }

@@ -245,6 +245,28 @@ describe('TodayChecklist — the evaluation row has a door again (UX-405)', () =
   })
 })
 
+describe('TodayChecklist — an unbound workbook assertion promises nothing (round 4)', () => {
+  it('offers Add a photo, not Add page, when nothing answers to the row', () => {
+    renderRow(item({ label: 'Nothing answers to this (20m)', itemType: 'workbook' }))
+    expect(screen.queryByRole('button', { name: /^add page$/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /add a photo/i })).not.toBeNull()
+  })
+
+  it('and offers no curriculum door either — there is nothing to advance', () => {
+    renderRow(item({
+      label: 'Nothing answers to this (20m)',
+      itemType: 'workbook',
+      skipGuidance: 'Check lesson 12 before you start',
+    }))
+    expect(screen.queryByRole('button', { name: /scan lesson to check/i })).toBeNull()
+  })
+
+  it('POSITIVE CONTROL — the same assertion over a real config still says Add page', () => {
+    renderRow(item({ label: 'GATB Math (30m)', itemType: 'workbook', subjectBucket: SubjectBucket.Math }))
+    expect(screen.queryByRole('button', { name: /^add page$/i })).not.toBeNull()
+  })
+})
+
 describe('TodayChecklist — the curriculum doors belong to a workbook row (UX-403)', () => {
   const guided = (over: Partial<ChecklistItem> = {}) =>
     item({ skipGuidance: 'Check lesson 12 before you start', ...over })
