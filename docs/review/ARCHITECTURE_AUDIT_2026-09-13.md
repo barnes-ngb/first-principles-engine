@@ -180,15 +180,47 @@ call. Recommend a first decomposition read next cycle now that it's in the table
 cycle given the window size, but the file does not appear in the window's diff (`git diff fc93f35..HEAD
 --stat -- src/features/avatar/AvatarThumbnail.tsx` is empty), so the 07-19 finding stands unmoved.
 
-**Codex round-2 finding, addressed: the prompt's own ask — name the heaviest imports, the routes that
-pull them, and a concrete split with an estimated reduction — done properly this cycle, with one number
-actually measured rather than guessed.**
+**Codex round-2 finding, addressed twice over: the prompt's own ask — name the heaviest imports, the
+routes that pull them, and a concrete split with an estimated reduction — done properly this cycle, and
+the FIRST attempt's own ranking method was then itself corrected on round 2 of PR #1847.**
 
-**The two heaviest static dependencies in the main chunk, by source size and by what pulls them in:**
-`three` (28MB on disk) and `jspdf` (29MB on disk). They are import-blocked very differently, which is
-why one has a concrete fix here and the other doesn't yet:
+**Codex round 2 (PR #1847) correctly rejected `du -sh node_modules/<pkg>` as the ranking method** — raw
+installed-package disk size includes source maps, docs, and code tree-shaking removes, so it does not
+reflect what actually lands in the bundle (this repo's own `@mui/icons-material`, 175MB installed, proves
+the point directly — see below). **Re-measured properly**: a throwaway `rollup-plugin-visualizer` run
+(`npm install --no-save rollup-plugin-visualizer`, wired into `vite.config.ts` temporarily, one build,
+parsed its raw per-module JSON for actual rendered size grouped by top-level package, then `git checkout
+-- vite.config.ts` and `npm uninstall --no-save` — no committed change, same "write it up, don't do it"
+rule as the jsPDF experiment below) gives the real ranking, by bytes actually included in the built
+output:
 
-- **`three` cannot be route-split without first fixing `ARCH-08`.** It's imported by 23 files, but the
+```
+  APP SOURCE (all of src/, combined)  4,573.4 kB   ← the app's own code outweighs any single dependency
+  @firebase/firestore                   976.2 kB   ← actually the heaviest THIRD-PARTY dependency
+  three                                 926.1 kB   ← second, not first as this section first assumed
+  @mui/material                         660.7 kB
+  react-dom                             548.2 kB
+  html2canvas                           400.7 kB   ← already its own async chunk (Step 0's build output)
+  jspdf                                 335.2 kB   ← sixth by actual weight, not "the" heaviest
+  @firebase/auth                        268.6 kB
+  react-router                          220.1 kB
+  @mui/icons-material                    38.8 kB   ← 175MB installed; tree-shaking works exactly as intended
+```
+
+**This changes the finding's framing, not its recommendation.** `firestore`/`three`/`@mui/material`/
+`react-dom` are the four heaviest third-party pieces and **all four are foundational** — used across
+nearly every route (Firestore for all data access, MUI for the whole design system, React DOM for
+everything) — so none is a route-level `React.lazy` candidate; splitting any of them would need either a
+genuinely route-scoped feature within the package (not the case here) or the kind of manual-chunking
+strategy the prompt asks to be *proposed*, not attempted, in this pass. `three`'s ARCH-08 blocker (below)
+still holds regardless of its exact rank. **`jspdf` remains the concrete, low-risk recommendation** — not
+because it is the heaviest dependency (it measurably isn't), but because it is the only one of the top
+six cleanly scoped to a handful of non-critical-path leaf call sites rather than woven through the whole
+app, which is what makes a point-of-use split both safe and worth the two-file change. The measured
+number below is unaffected by the ranking correction — it was produced by a separate, independent
+before/after build, not derived from the visualizer run.
+
+**`three` cannot be route-split without first fixing `ARCH-08`, whatever its exact rank.** It's imported by 23 files, but the
   one that matters is `AvatarThumbnail.tsx` — mounted in `AppShell.tsx`'s always-visible nav chrome, not
   behind any route. Wrapping `MyAvatarPage`/`VoxelCharacter`/the `voxel/` module tree in `React.lazy()`
   would not remove `three` from the initial bundle, because `AppShell` (which renders on every route)
@@ -280,13 +312,23 @@ blocks (lines 188, 252) with no test exercising either the happy path or a failu
 missing coverage on real logic, not untestable shell** — `planner` moves out of the "genuinely
 untestable" group.
 
-That leaves **four** genuinely untestable UI shells (re-verified, not just asserted): `auth`
-(`LoginPage.tsx` — the route-guard wrapper), `login` (`ProfileSelectPage.tsx` — profile selection),
-`not-found` (`NotFoundPage.tsx` — the 404 page), and `ui-preview` (`UiPreviewPage.tsx` — the dev-only,
-unlinked-from-nav component gallery `CLAUDE.md` names as exactly that). Each is presentational-only or a
-thin wrapper with no branching logic of its own — genuinely different in kind from `TeachHelperDialog.tsx`,
-not merely smaller. **Recommend `TeachHelperDialog.tsx`'s AI-call/error-branch paths as a `TEST-04`-style
-follow-up candidate**, alongside `workshop`'s ratio gap below.
+**Codex round-2 finding, addressed: `auth` was also misclassified, the same way `planner` was.**
+`CLAUDE.md`'s one-line description of the directory ("Auth guard route wrapper") was taken as a
+description of the file inside it without reading the file — `LoginPage.tsx` is 108L with real
+`useState`-driven form state (email/password/mode), an async `handleSubmit` that branches on
+`mode === 'create' && user?.isAnonymous` (sign-in vs. anonymous-account upgrade), input validation, and a
+`catch` mapping auth errors to copy via `getAuthErrorMessage` — none of it exercised by any test
+(`grep -rl "LoginPage" src --include=*.test.tsx` → zero hits). **Reclassified alongside
+`TeachHelperDialog.tsx`**: real logic with zero coverage, not a shell.
+
+That leaves **three** genuinely untestable UI shells, each checked directly this round rather than
+asserted from its directory's one-line description: `login` (`ProfileSelectPage.tsx`, 251L but a static
+`profiles` config array rendered as cards with one unconditional `onClick={() => selectProfile(p.id)}` —
+no state, no async, no branching), `not-found` (`NotFoundPage.tsx`, 27L, one `Button` calling `navigate`)
+and `ui-preview` (`UiPreviewPage.tsx` — the dev-only, unlinked-from-nav component gallery `CLAUDE.md`
+names as exactly that; no `useState`/`catch`/async function in the file). **Recommend
+`LoginPage.tsx`'s branch/error paths and `TeachHelperDialog.tsx`'s AI-call/error-branch paths together as
+one `TEST-04`-style follow-up**, alongside `workshop`'s ratio gap below.
 
 The more useful number from the same census is the **ratio**, not just the zero/non-zero split, since a
 directory with a handful of test files against dozens of source files is a coverage gap the "0 files"
@@ -869,6 +911,27 @@ against this report, spanning both PRs.
    also imports and calls `printStickerSheet` (line 421), so Settings is a fourth call site alongside the
    three Books ones. Corrected; the measured point-of-use split is unaffected since it covers every
    caller of the two leaf modules regardless of how many routes reach them.
+
+**Round 4 (PR #1847) — two more findings, both addressed. This round is at PR #1847's own cap (diff was
+< 500 lines at open → two-round limit), so this PR's summary reads `open — do not merge yet` below rather
+than asking for a fifth round:**
+
+1. **`auth`'s `LoginPage.tsx` was misclassified as an untestable shell, the same mistake `planner` made
+   in round 2** — its directory's one-line `CLAUDE.md` description ("Auth guard route wrapper") was read
+   as a description of the file rather than checked against it. The file is 108L with real form state,
+   an async submit that branches sign-in vs. anonymous-account upgrade, validation, and error handling —
+   zero tests reference it. Reclassified alongside `TeachHelperDialog.tsx`; §1.6's "untestable shell"
+   count corrected from four to three, with the remaining three (`login`/`not-found`/`ui-preview`) each
+   individually re-checked this round (not just re-asserted) to confirm they hold.
+2. **The bundle section's "heaviest dependency" ranking used installed `node_modules` disk size**, which
+   Codex correctly flagged as unreliable (tree-shaking, source maps, docs all skew it — this repo's own
+   `@mui/icons-material` proves it: 175MB installed, 38.8 kB actually bundled). Re-measured with a real,
+   reverted `rollup-plugin-visualizer` build: the actual heaviest third-party dependency is
+   `@firebase/firestore` (976.2 kB), not `three` (926.1 kB, now second) — and `jspdf` (335.2 kB) is sixth,
+   not first. §1.5 rewritten with the real ranking; the recommendation is unchanged (`jspdf`'s virtue was
+   always that it's cleanly scoped to a few leaf call sites, not that it was the single heaviest import),
+   and the separately-measured −393.20 kB reduction number is unaffected, since it came from an
+   independent before/after build rather than from the ranking method.
 
 ---
 
