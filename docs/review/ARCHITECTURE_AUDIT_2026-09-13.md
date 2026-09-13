@@ -196,11 +196,18 @@ why one has a concrete fix here and the other doesn't yet:
   not a separate item** — until `AvatarThumbnail` stops importing `three` directly (a static 2D icon or a
   cached render in nav chrome, deferring the live 3D character to the Avatar route itself), no route-level
   split can remove this dependency, however the routes are split.
-- **`jspdf` has no such blocker, and the number below is measured, not estimated.** It is imported by
-  exactly two leaf modules, `src/features/books/printBook.ts` and `printStickerSheet.ts`, both reached
-  only from Books' print actions (a button press, not page load) — `router.tsx` has **zero** `React.lazy`
-  calls anywhere (`grep -c "React.lazy\|lazy(" src/app/router.tsx` → 0), so today `jspdf`'s full weight
-  loads for every visitor regardless of whether they ever print anything. **This audit ran the experiment
+- **`jspdf` has no such blocker, and the number below is measured, not estimated.** It is defined by
+  exactly two leaf modules, `src/features/books/printBook.ts` and `printStickerSheet.ts`, but reached
+  from **four** call sites, not the "Books only" this audit first assumed — **Codex round 2 correctly
+  caught the gap**: `grep -rln "from.*printBook'\|from.*printStickerSheet'" src` returns
+  `BookReaderPage.tsx`, `BookEditorPage.tsx`, `BookshelfPage.tsx` (Books, as expected) **and
+  `src/features/settings/StickerLibraryTab.tsx`** (Settings → sticker library, `printStickerSheet` called
+  at line 421). All four are still button-press actions, not page-load — `router.tsx` has **zero**
+  `React.lazy` calls anywhere (`grep -c "React.lazy\|lazy(" src/app/router.tsx` → 0), so today `jspdf`'s
+  full weight loads for every visitor regardless of whether they ever print anything, on **either** route,
+  not just Books. The point-of-use dynamic-import fix (below) is unaffected by this correction — a
+  dynamic import at the two constructor call sites covers every caller, Books or Settings, since the
+  split lives inside the leaf modules themselves, not at each call site. **This audit ran the experiment
   directly** (converting both files' top-level `import { jsPDF } from 'jspdf'` to a point-of-use
   `const { jsPDF } = await import('jspdf')` inside the one function in each that constructs a `jsPDF`
   instance, building, measuring, then reverting via `git checkout` — no committed change, per the
@@ -809,9 +816,18 @@ of `collectHoursContributions`/`computeHoursSummary`.
   in direct answer to this PR's own Codex round 1 (findings 1–3 below), so the next cycle inherits a
   script rather than an ad hoc pipeline.
 
-### 5.4 Codex rounds on this PR (#1845)
+### 5.4 Codex rounds
 
-**Round 1 — four findings, all addressed:**
+**Rounds 1–2 ran on PR #1845.** The owner merged #1845 at the round-1 head (14:38:53 UTC, right after
+round 1 completed and before round 2 had a chance to run or be addressed) — their prerogative as the
+repo owner, and this report's own text below was written to answer round 2's findings regardless. Per
+this branch's own operating rule (*"a merged PR is never touched again by the run that opened it; a fix
+that is still needed goes on a new branch and PR"*), the round-2 fixes landed on a fresh branch + PR
+(**#1847**) restarted from the merged `main`, and **round 3 ran there** (not on #1845, which stayed
+closed). All numbering below (round 1 / round 2 / round 3) reflects the logical sequence of findings
+against this report, spanning both PRs.
+
+**Round 1 (PR #1845) — four findings, all addressed:**
 
 1. **Derive the file-size census with a committed script**, not an ad hoc `find | wc` pipeline — closed
    by `scripts/architectureAuditCensus.ts` (§5.3); §1.1 now cites it directly.
@@ -823,7 +839,7 @@ of `collectHoursContributions`/`computeHoursSummary`.
    §2.1 rewritten with the complete re-run against the decision doc's own Authority table, which surfaced
    a genuine new finding (`DOC-26` — the table is missing a seventh, now-real dimension, `learnerModels`).
 
-**Round 2 — four more findings, all addressed:**
+**Round 2 (PR #1845) — four more findings, all addressed:**
 
 1. **`planner`'s `TeachHelperDialog.tsx` was wrongly classified as an untestable shell** — round 1's fix
    asserted it was "already exercised through its callers' own tests" without checking; it isn't (zero
@@ -838,6 +854,21 @@ of `collectHoursContributions`/`computeHoursSummary`.
    measured number: a throwaway, reverted experiment (dynamic-importing `jspdf` at its two call sites)
    shows a **−393.20 kB / −128.78 kB gzip** reduction to the main chunk, plus an explanation of why
    `three` needs `ARCH-08` resolved first before any route split can remove it.
+
+**Round 3 (PR #1847) — two findings, both addressed:**
+
+1. **A real bug in `scripts/architectureAuditCensus.ts` itself**: the three new round-2 census sections
+   (`ARCH-06`, `ARCH-43`, `CHAT_TASKS`) were placed *after* the script's early `process.exit(0)` for a
+   no-`--base` invocation, so the plain `npm run census:arch-audit` this report's own §1.7/§1.9/Step 3
+   tell a reader to run never actually printed them. Moved all three sections before the `--base` check;
+   `npm run census:arch-audit` (no flag) now prints every unconditional section, `--base=<ref>` adds the
+   drift sweep on top — verified both invocations produce byte-identical numbers to what round 2 already
+   put in the report.
+2. **The bundle section's jsPDF route survey undercounted its own callers** — §1.5 said `printBook`/
+   `printStickerSheet` were "reached only from Books' print actions"; `src/features/settings/StickerLibraryTab.tsx`
+   also imports and calls `printStickerSheet` (line 421), so Settings is a fourth call site alongside the
+   three Books ones. Corrected; the measured point-of-use split is unaffected since it covers every
+   caller of the two leaf modules regardless of how many routes reach them.
 
 ---
 

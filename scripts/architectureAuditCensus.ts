@@ -122,42 +122,6 @@ for (const f of zeroTest) console.log(`  ${f.name}  (${f.sourceFiles} source fil
 console.log('all feature directories, source/test file counts:')
 for (const f of featureCounts) console.log(`  ${f.name.padEnd(28)} src=${f.sourceFiles}  test=${f.testFiles}`)
 
-const baseArg = process.argv.find((a) => a.startsWith('--base='))
-if (!baseArg) {
-  console.log(
-    '\n(no --base given — pass e.g. `--base=<sha>` for the >150L drift-since-last-audit sweep)',
-  )
-  process.exit(0)
-}
-const base = baseArg.slice('--base='.length)
-
-// `--numstat` on a rename/new/deleted file reports one row per path; a plain
-// modification reports (insertions, deletions) for the same path both sides,
-// so net delta = insertions - deletions is exactly the file's line-count
-// change over the range, without a per-file `git show | wc -l` round trip.
-const numstat = execFileSync(
-  'git',
-  ['diff', '--numstat', `${base}..HEAD`, '--', ...SCAN_DIRS],
-  { cwd: ROOT, encoding: 'utf8' },
-)
-
-const deltas: { path: string; delta: number }[] = []
-for (const line of numstat.split('\n')) {
-  if (!line.trim()) continue
-  const [insStr, delStr, path] = line.split('\t')
-  if (!isSourceFile(path)) continue
-  if (insStr === '-' || delStr === '-') continue // binary, skip
-  const delta = Number(insStr) - Number(delStr)
-  if (Math.abs(delta) > DRIFT_THRESHOLD) deltas.push({ path, delta })
-}
-deltas.sort((a, b) => b.delta - a.delta)
-
-console.log(`\nsource-tree diff base: ${base}`)
-console.log(`files with |net line delta| > ${DRIFT_THRESHOLD}L since base: ${deltas.length}`)
-for (const d of deltas) {
-  console.log(`  ${d.delta >= 0 ? '+' : ''}${d.delta.toString().padStart(6)}  ${d.path}`)
-}
-
 // ── ARCH-06 — WorkbookConfig → ActivityConfig migration ─────────────────────
 // Whole-word matches, both source and test files (matching the CLAUDE.md
 // tech-debt line's own long-standing methodology, so the ratio stays
@@ -223,3 +187,40 @@ const chatTasksSource = readFileSync(chatTasksPath, 'utf8')
 const registryMatch = chatTasksSource.match(/CHAT_TASKS[^{]*\{([\s\S]*?)^}/m)
 const taskKeys = registryMatch ? registryMatch[1].match(/^\s*[a-zA-Z]+:/gm) : null
 console.log(`\nCHAT_TASKS registry size (functions/src/ai/tasks/index.ts): ${taskKeys?.length ?? 'parse failed'}`)
+
+// ── Drift sweep (requires --base) ────────────────────────────────────────────
+const baseArg = process.argv.find((a) => a.startsWith('--base='))
+if (!baseArg) {
+  console.log(
+    '\n(no --base given — pass e.g. `--base=<sha>` for the >150L drift-since-last-audit sweep)',
+  )
+  process.exit(0)
+}
+const base = baseArg.slice('--base='.length)
+
+// `--numstat` on a rename/new/deleted file reports one row per path; a plain
+// modification reports (insertions, deletions) for the same path both sides,
+// so net delta = insertions - deletions is exactly the file's line-count
+// change over the range, without a per-file `git show | wc -l` round trip.
+const numstat = execFileSync(
+  'git',
+  ['diff', '--numstat', `${base}..HEAD`, '--', ...SCAN_DIRS],
+  { cwd: ROOT, encoding: 'utf8' },
+)
+
+const deltas: { path: string; delta: number }[] = []
+for (const line of numstat.split('\n')) {
+  if (!line.trim()) continue
+  const [insStr, delStr, path] = line.split('\t')
+  if (!isSourceFile(path)) continue
+  if (insStr === '-' || delStr === '-') continue // binary, skip
+  const delta = Number(insStr) - Number(delStr)
+  if (Math.abs(delta) > DRIFT_THRESHOLD) deltas.push({ path, delta })
+}
+deltas.sort((a, b) => b.delta - a.delta)
+
+console.log(`\nsource-tree diff base: ${base}`)
+console.log(`files with |net line delta| > ${DRIFT_THRESHOLD}L since base: ${deltas.length}`)
+for (const d of deltas) {
+  console.log(`  ${d.delta >= 0 ? '+' : ''}${d.delta.toString().padStart(6)}  ${d.path}`)
+}
