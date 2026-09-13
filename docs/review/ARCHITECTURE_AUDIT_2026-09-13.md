@@ -100,8 +100,13 @@ since the bug's root cause was a check-then-act race with no capability gate at 
 
 ### 1.1 Largest files — significant growth across the board; one file crossed a size class it hadn't before
 
-Full `find src functions/src -name '*.ts' -o -name '*.tsx' | xargs wc -l | sort -rn`, filtered to every
-production file ≥1,500L, with deltas measured against the 08-30 baseline (`git show fc93f35:<path> | wc -l`):
+**Derived, not hand-counted** — Codex's round-1 finding on this report correctly named the original
+ad hoc `find | wc` pipeline as a survey with no committed script behind it. `scripts/architectureAuditCensus.ts`
+(new this cycle, `npm run census:arch-audit -- --base=<ref>`) is now that script: a base-independent
+snapshot of every non-test file ≥1,500L, plus — given a base ref — every file whose net line count moved
+by more than 150L against it (via `git diff --numstat`, so a line-count delta needs no per-file `git show`
+round trip). Run against this cycle's own window start: `npm run census:arch-audit -- --base=fc93f35`.
+Its ≥1,500L output (888 non-test files scanned, 17 at or above the threshold) is the table below:
 
 | File | 2026-09-13 | Δ since `fc93f35` (08-29) | Judgment |
 |---|---|---|---|
@@ -193,6 +198,46 @@ and no movement.** Given the standing nature of this recommendation, it may be w
   `SkillSnapshotPage.sections.test.tsx`) beyond the original `.defaults.test.tsx`, but none of their names
   suggest they cover the general merge/`persist` path. **Not re-derived exhaustively this cycle — flag
   for next audit to confirm directly** rather than assert a negative from file names alone.
+
+**Codex round-1 finding, addressed: the full zero-test-file feature inventory the prompt asks for ("re-list
+features with 0 test files. For each, decide: genuinely untestable UI shell, or missing coverage on real
+logic?"), not just the two previously-named targets.** `scripts/architectureAuditCensus.ts` (§1.1, same
+run) now derives this too — every `src/features/*` directory's source-file and test-file count:
+
+```
+src/features/* directories scanned: 25
+directories with 0 *.test.ts(x) files (and >0 source files): 5
+  auth  (1 source file, 0 tests)   login  (1 source file, 0 tests)   not-found  (1 source file, 0 tests)
+  planner  (1 source file, 0 tests)   ui-preview  (1 source file, 0 tests)
+```
+
+All five are **genuinely untestable UI shell by the prompt's own test**: `auth` is the route-guard wrapper
+component, `login` is profile selection, `not-found` is the 404 page, `planner` is a single shared dialog
+component (`TeachHelperDialog.tsx`) already exercised through its callers' own tests, and `ui-preview` is
+the dev-only, unlinked-from-nav component gallery `CLAUDE.md` names as exactly that. **None decided as
+missing coverage on real logic** — each is either presentational-only or a thin wrapper with no branching
+logic of its own to test in isolation.
+
+The more useful number from the same census is the **ratio**, not just the zero/non-zero split, since a
+directory with a handful of test files against dozens of source files is a coverage gap the "0 files"
+framing misses entirely:
+
+```
+  avatar    src=80  test=20   (4.0 : 1)      workshop  src=45  test=8   (5.6 : 1)
+  books     src=80  test=90   (0.9 : 1)      today     src=73  test=84  (0.9 : 1)
+  progress  src=38  test=40   (0.95 : 1)     planner-chat  src=47  test=38  (1.2 : 1)
+```
+
+**`workshop` (45 source files, 8 test files, 5.6:1) is this cycle's highest-value real gap** — worse than
+`avatar`'s already-known 4:1, and on a directory whose `WorkshopPage.tsx` is 1,928L and grew +305L this
+window (§1.1) with no corresponding test growth (the silent-fallback census, Step 0, separately counts 3
+swallowed catches in this same file). `avatar`'s 4:1 ratio is not new — `VoxelCharacter.tsx`'s Three.js
+render code is explicitly left untested by design per `CLAUDE.md` — but `workshop` has no equivalent
+"leave as-is" rationale on record. **Recommend `workshop`'s test coverage as a `TEST-04`-style follow-up
+candidate**, alongside the existing `DispositionProfile`/`SkillSnapshotPage` targets. `books`/`today`/
+`progress` all sit at or above 1:1, consistent with this codebase's standing "tests ship with the
+feature" norm holding for the window's largest feature areas.
+
 - **TEST-01 status: IMPROVING, with the first concrete file-level progress in several cycles** on one of
   its two named gaps.
 
@@ -264,37 +309,103 @@ alone, that the resolution is real and complete, not merely claimed. **No action
 genuine process win** — the 08-30 audit's "propose a structural fix rather than another verbatim port"
 recommendation was taken, and it worked within the very next window.
 
-### 1.12 Drift catalog beyond the headline files
+### 1.12 Drift catalog — every file that moved >150L, not only the ones that crossed 1,500L
 
-Given the window's size (353 non-test files changed under `src/`+`functions/src/`), an exhaustive >150L
-sweep of every file is not reproduced here in full; §1.1 already captures every production file that
-crossed or grew materially past the 1,500L table threshold, which is where this series' `>150L` drift
-rule has practical teeth. Two additional call-outs found while investigating other findings, both
-explained by named feature work rather than unexplained growth:
+**Codex round-1 finding, addressed:** the audit prompt's drift rule ("Any file that grew >150L since
+the last dated audit report") is not scoped to large files — the 08-30 report's own precedent
+(`cleanSketch.ts` at 905L, well under the table threshold) already read it that way, and this cycle's
+first draft narrowed it to the ≥1,500L table by mistake. `scripts/architectureAuditCensus.ts --base=fc93f35`
+(§1.1) now runs the complete sweep: **84 non-test files** moved by more than 150 net lines against the
+08-29 baseline (78 grew, 6 shrank). The full, exact list is in the script's own output — reproduced here
+is what it groups into, since narrating 84 files individually would bury the signal the rule exists to
+surface:
 
-- `src/features/progress/CurriculumTab.tsx` (+818L) and `src/features/settings/DevAdminTab.tsx` (+484L)
-  are this window's two largest single-file deltas of any kind — see 1.1 for the per-feature accounting.
-- `functions/src/shared/` gained real content this window (§1.11): `dadLabReportArtifacts.ts`,
-  `plannerBoundary.ts`, `customPictureNote.ts` are new files in the shared directory since 08-29, each
-  the single-definition home for a rule the app and functions previously duplicated or that this
-  window's new UX-269 planner-boundary feature needed shared from day one.
+- **Already covered above** — the eleven ≥1,500L files in §1.1's table account for 11 of the 84 rows
+  (`PlannerChatPage.tsx` +655, `CurriculumTab.tsx` +818, `chat.ts` +410, `WorkshopPage.tsx` +305,
+  `BookEditorPage.tsx` +301, `TodayPage.tsx` +420, `TodayChecklist.tsx` +198, `DevAdminTab.tsx` +484,
+  `useShellyChatActions.ts` +152, `RecordsPage.tsx` — under the >150L bar at +148, so not in this list —
+  and `shellyChat.ts` at −19, also under the bar).
+- **The single largest delta in the entire sweep is a file never mentioned above:**
+  `src/features/books/artHelpContent.ts` **+856L** — the FEAT-178 help-content module CLAUDE.md's books
+  section already documents in full (five per-surface help sheets, per-style blurbs derived from the
+  server's own recipe tables, budget copy with no hardcoded numbers). At 856L of net growth on a single
+  content/copy module, not application logic, this reads as **cohesive-but-big by construction** (one
+  file is the deliberate design — "the single source of truth for every help string" — rather than a
+  decomposition candidate), but it is the kind of number the >150L rule exists to surface rather than
+  let hide below a size-based table.
+- **Three files are test/census infrastructure, not application code:** `src/test/findingTagBridge.ts`
+  +587L, `src/test/childSwitchSurfaces.ts` +474L, `src/test/timeLedgerSurfaces.ts` +310L — all census
+  registries + invariant-test logic for `AUDIT-226`/`UX-329`/`AUDIT-234` respectively (§1.11-adjacent —
+  this is the same "committed derivation script" pattern this very finding asked for, applied three
+  times already this window before this report added a fourth).
+- **Six files shrank by more than 150L**, all explained: `functions/src/ai/tasks/monthlyHours.ts` −288L
+  (the ARCH-47 resolution, §1.11 — the hand-kept port was deleted in favor of the shared definition) and
+  five Story Guide files (`StoryGuidePage.tsx` −305L, `useStoryGuide.ts` −287L, `useBookGenerator.ts`
+  −301L, `StoryGuideQuestion.tsx` −273L, `GenerationProgress.tsx` −167L) — the FEAT-187 deletion already
+  named in §1.9's ARCH-43 re-verification.
+- **The remaining ~65 rows** are single-purpose new or grown modules matching named window features
+  one-to-one against `CLAUDE.md`'s own narrative for this window (the strand type's `strand.ts`/
+  `strandSession.ts`/`StrandSessionDialog.tsx`/`strandSessionWrites.ts`; the planner day-type and
+  week-selector work's `plannerDayTypes.ts`/`planningWeekSelection.ts`/`reviewWeekSelection.ts`; the
+  weekly-review by-subject work's `weekBySubject.ts`/`weekHours.ts`/`useWeekBySubject.ts`/
+  `useWeekHoursInputs.ts`; the Today row-kind/write-honesty lineage's `todayRowKind.ts`/`dayWriteOutcome.ts`/
+  `dailyPlanGate.ts`/`DayStatusRow.tsx`; the reading-level/story-generation lineage's `storyDecodability.ts`/
+  `storyPracticeWords.ts`/`storyLevelContext.ts`/`customStoryTheme.ts`; the learner-model bootstrap's
+  `bootstrapLearnerModel.ts`/`seedLearnerModel.ts`/`useFoundationsBootstrap.ts`; the FEAT-195/197 image-
+  retry/custom-note lineage's `imageGenerationFailure.ts`/`ImageRetryCard.tsx`/`imageFailure.ts`/
+  `enhanceSketch.ts`/`generateImage.ts`; and the curriculum-rename/reassign lineage's `renameActivity.ts`/
+  `reassignActivity.ts`/`RenameActivityDialog.tsx`). None of these reads as a single tangled function the
+  way `ARCH-44`'s `dataReviewExport.logic.ts` finding did — each is a small, independently-testable module
+  matching one named ledger row — so none is filed as a new decomposition candidate this cycle. The
+  complete list, with exact deltas, is the script's own output; recommend future cycles paste directly
+  from it (per `CLAUDE.md`'s derived-numbers rule) rather than re-deriving a fresh ad hoc command each time.
 
 ---
 
 ## Step 2 — Functional / UX Loop (Band 2)
 
-### 2.1 FUNC-01 ("where is Lincoln") — the decision doc's staleness gap named at 08-30 is still open, and the portal has kept growing past it
+### 2.1 FUNC-01 ("where is Lincoln") — the full six-surface mapping re-run against this window, plus a seventh surface the decision doc doesn't know exists
 
-`DOC-17` (filed by the 08-30 audit, still OPEN per the ledger) named `DECISION_FUNC-01_source_of_truth.md`
-as missing two writer rows (`conceptArcs`, `dadLabReports`) for FEAT-157's chat-portal writes. Re-checked
-this cycle: `grep -n "conceptArcs\|dadLabReports" docs/review/DECISION_FUNC-01_source_of_truth.md` still
-returns **zero hits** — the gap DOC-17 named is unchanged. Given the size of this window (the Shelly
-portal's write surface kept growing throughout it — `CLAUDE.md`'s own shelly-chat section documents
-continuing additive-write work), the doc's total staleness may now be wider than the two rows DOC-17
-scoped, but this audit did not attempt a full re-derivation of every portal writer against the doc (that
-is DOC-17's own job, not a fresh finding to duplicate). **Recommend DOC-17 stays the next `PROMPT_FIX`
-target for this lane, scoped to re-survey the full writer table rather than just the two originally-named
-rows, given how much has shipped since it was filed.**
+**Codex round-1 finding, addressed:** the 08-30-derived draft of this section only checked the decision
+doc's currency (`DOC-17`) and punted the actual "map every surface, who writes it, who reads it, can they
+disagree" question the audit prompt names as this band's **centerpiece**. Re-run properly this cycle,
+against `docs/review/DECISION_FUNC-01_source_of_truth.md`'s own **Authority table** (the 2026-05-30
+Model-2 ruling: layered ownership, one dimension per store, no overlapping claims) and this window's
+actual diff:
+
+| Dimension | Store | Did this window add a writer outside the documented chokepoint? |
+|---|---|---|
+| Stable identity | `children/{childId}` | **No new writer class** — `seedProfileChildren.ts` (UX-394) is a new **creator** (deterministic id, create-only transaction) for the document's existence, not a new writer of identity *fields*; Settings/Tier-C portal remain the only field writers. |
+| Current academic state | `skillSnapshots/{childId}` | **No** — `writeRestoredWorkingLevel` (UX-383) is a new *function*, but it lives inside the same central `skillSnapshotWrites.ts` chokepoint the ruling names, transactional and upgrade-only like every other writer there. |
+| Curriculum coverage | `childSkillMaps/{childId}` | **No** — confirmed untouched; `CLAUDE.md` asserts this explicitly ("the skill-map writers must never read the foundations bridge") and no new caller of `updateSkillMapFromFindings` was found. |
+| Curriculum position | `activityConfigs/{childId}` | **No new independent writer**, but the one **documented live exception got a second confirmed instance this window**: the decision doc already names `DATA-17` (the certificate-scan path skips the position→learner-model fold) as "a live exception, not a rounding error." Re-verified still open (§2.5/§4.4). The strand type's session-count writer (`strandSessionWrites.ts`) reuses `currentPosition` rather than adding a rival field, and the new manual-position dialog (`SetPositionDialog`/`manualPosition.ts`, UX-314) routes through the **same** `updatePosition` lane the chat's confirm card already uses — both are new *callers* of the existing chokepoint, not new chokepoints. |
+| Disposition | `children/{childId}.dispositionCache` | **No** — still derived-cache-only; this window's only related change is a regression test (`DispositionProfile.childSwitch.test.tsx`, §1.6), not a new writer. |
+| Milestones / Ladders | *(not a store)* / `ladderProgress` | Unaffected. |
+
+**So the six-dimension table itself still holds, and the one already-documented disagreement (`DATA-17`)
+is unchanged** — that is the direct answer to Codex's "did new writers deepen the disagreement" question:
+no, not among the six dimensions the ruling covers.
+
+**But there is a seventh dimension now, and the decision doc doesn't have a row for it.**
+`learnerModels/{childId}` — the Learner Model this window's `FIX-219`/`AUDIT-217` made real for ordinary
+families (not just the `?diag=1` diagnostic panel) — is written by **at least eight independent modules**:
+`evalModelWriteback.ts`, `questModelSync.ts`, `useFoundationsBootstrap.ts`, `writeReviewAction.ts`,
+`strandSessionWrites.ts`, `activityConfigWrites.ts`, `workbookPositionSync.ts`, and
+`bootstrapLearnerModel.ts` (`grep -rln "learnerModels" src --include=*.ts --include=*.tsx | grep -v
+'.test.' | grep -iE "write|sync|bootstrap|seed"`, this audit). This is a **second, independent answer to
+"what does Lincoln know"** running alongside `skillSnapshots` — and the codebase's own code already
+anticipates the two can disagree: `core/foundations/evalModelSync.ts` flags a concept `needsReconcile`
+specifically *"when a guided eval disagreed with [the parent's] word"* (per its own header comment), and
+`progress/conceptOverride.ts` renders a two-reads view precisely for that flagged case, letting a parent
+keep their own word or take the model's. **This is a real, working reconciliation mechanism for a
+disagreement class the FUNC-01 decision doc's table doesn't know exists**, because the doc predates the
+Learner Model becoming a populated, non-diagnostic store by three-plus months. It is not a new bug —
+`needsReconcile` shows the team already designed for exactly this — but the *documentation* of "where is
+Lincoln" is now missing one of its answers. **Recommend a `DOC-`-lane follow-up**: add `learnerModels` as
+a seventh row to the Authority table (store: `learnerModels/{childId}`; authoritative for: the
+synthesized concept frontier / `whatMattersNext`; written by: the eight modules above; reconciles with
+`skillSnapshots` via: `needsReconcile` + the Foundations tab's confirm/override flow) rather than leaving
+the ruling's own "no overlapping claims" framing silently one dimension short of the current codebase.
 
 ### 2.2 AUDIT-234 ("crawl every place time is logged and reported") — a real, recent, well-evidenced loop-integrity self-audit, one finding still open and worth leading this report with
 
@@ -513,12 +624,14 @@ of `collectHoursContributions`/`computeHoursSummary`.
   `ARCH-47`, `DATA-01`, `ARCH-07`/`ARCH-39`) was already correctly reflected in `docs/review/REVIEW_HOME_BASE.md`
   §6 by the runs that closed them mid-window; this audit's contribution on each was independent
   confirmation against current code, not a ledger write.
-- `docs/review/REVIEW_HOME_BASE.md` §6: **+1 new row**, `ARCH-50` (`CurriculumTab.tsx`'s +818L growth
-  crossing the 1,500L decomposition-review threshold for the first time — see §1.1), appended after
-  `UX-414` following the ledger's additive-only, append-at-end convention. Ledger gets **+1 new row / +0
-  rewritten** this cycle overall — every other finding in this report was either a re-verification of an
-  already-filed row, or an amplification of `AUDIT-234`'s own two-day-old findings, which already have
-  IDs and don't need duplicates. No existing row reordered, rewritten, deleted, or reopened.
+- `docs/review/REVIEW_HOME_BASE.md` §6: **+2 new rows**, `ARCH-50` (`CurriculumTab.tsx`'s +818L growth
+  crossing the 1,500L decomposition-review threshold for the first time — see §1.1) and `DOC-26` (the
+  `FUNC-01` decision doc's Authority table is missing the `learnerModels` dimension — see §2.1), both
+  appended after `UX-414` following the ledger's additive-only, append-at-end convention. Ledger gets
+  **+2 new rows / +0 rewritten** this cycle overall — every other finding in this report is either a
+  re-verification of an already-filed row, or an amplification of `AUDIT-234`'s own two-day-old findings,
+  which already have IDs and don't need duplicates. No existing row reordered, rewritten, deleted, or
+  reopened.
 - `CLAUDE.md` Known Technical Debt section: every stale line-count parenthetical in the list corrected
   against the fresh `wc -l` figures gathered in §1.1/§1.12 — `PlannerChatPage.tsx` 3,295L → **3,950L**,
   `chat.ts CF` 2,641L → **3,051L**, `BookEditorPage.tsx` 2,113L → **2,414L**, `useQuestSession.ts` 2,218L
@@ -529,6 +642,23 @@ of `collectHoursContributions`/`computeHoursSummary`.
   "3.9MB (1.2MB gzipped)" → **"4.57MB (1.38MB gzipped)"** matching Step 0's build output. `VoxelCharacter.tsx`
   (1,606L) needed no change — genuinely flat. No prose/judgement changed, line counts and the one ratio
   only.
+- `scripts/architectureAuditCensus.ts` (new, `npm run census:arch-audit -- --base=<ref>`): the committed
+  derivation script for this cycle's file-size survey (§1.1/§1.12/§1.6) — the ≥1,500L inventory, the full
+  >150L drift sweep against a given base commit, and the zero-test-file feature-directory census. Written
+  in direct answer to this PR's own Codex round 1 (findings 1–3 below), so the next cycle inherits a
+  script rather than an ad hoc pipeline.
+
+### 5.4 Codex round 1 on this PR (#1845) — four findings, all addressed in this push
+
+1. **Derive the file-size census with a committed script**, not an ad hoc `find | wc` pipeline — closed
+   by `scripts/architectureAuditCensus.ts` (§5.3); §1.1 now cites it directly.
+2. **Include every file that grew >150L, not only ones crossing 1,500L** — closed by the same script's
+   `--base` sweep; §1.12 rewritten with the full 84-file result, grouped rather than narrated file-by-file.
+3. **Re-run the zero-test-file feature inventory** — closed by the same script's feature-directory pass;
+   §1.6 now carries the full 25-directory census plus the `workshop` 5.6:1 ratio finding it surfaced.
+4. **Perform the FUNC-01 six-surface mapping in full** rather than only checking `DOC-17`'s currency —
+   §2.1 rewritten with the complete re-run against the decision doc's own Authority table, which surfaced
+   a genuine new finding (`DOC-26` — the table is missing a seventh, now-real dimension, `learnerModels`).
 
 ---
 
@@ -555,4 +685,7 @@ report that only lists what's wrong misses that this series' own recommendations
 **Recommend running `PROMPT_FIX.md` next against:** `UX-409` (compliance data-loss risk, already scoped
 in its own ledger row — highest priority), then `ARCH-02`'s live-day-edit handler trio extraction (now
 four cycles overdue), then `DOC-17` (mechanical, but rescope it to a full portal-writer resurvey given
-how much has shipped since it was filed rather than just the two originally-named rows).
+how much has shipped since it was filed rather than just the two originally-named rows) and `DOC-26`
+(mechanical — add the seventh `learnerModels` row to the `FUNC-01` Authority table, this cycle's own new
+finding, §2.1) together as one small docs pass, then `workshop`'s test-coverage gap (§1.6, 5.6:1
+source-to-test ratio, this cycle's own derived finding) as a `TEST-04`-style candidate.
