@@ -477,6 +477,22 @@ describe('the fourth state — the record landed, the narrative did not (UX-409)
     expect(container.textContent).not.toMatch(/rate limit/)
   })
 
+  it('does NOT claim the week is missing from the book when a summary stands', () => {
+    // A failed regenerate leaves the earlier narrative in place and the monthly
+    // book goes on reading it (Codex round 2).
+    renderWithReview({
+      ...snapshotOnly(snapshot(SEP_07, 14)),
+      status: 'draft',
+      summary: 'Steady week.',
+    } as unknown as WeeklyReview)
+    expect(
+      screen.getByText(
+        'This week’s summary couldn’t be refreshed, so the monthly book will use the earlier one. Everything above is read live and isn’t affected.',
+      ),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/won’t be part of the monthly book/)).not.toBeInTheDocument()
+  })
+
   it('says nothing on a week whose narrative landed', () => {
     const { container } = renderSection(snapshot(SEP_07, 14))
     expect(container.textContent).not.toMatch(/didn’t finish generating/)

@@ -320,9 +320,75 @@ export const REVIEW_UNAVAILABLE_LINE =
  * It claims nothing about WHY. The stored `narrativeError` message is the app's
  * own text and is not rendered: a rate limit or a missing secret is an operator's
  * sentence, not a parent's.
+ *
+ * It is one of TWO sentences — see {@link NARRATIVE_STALE_LINE} — and callers
+ * reach both through {@link narrativeFailureLine}, never directly.
  */
 export const NARRATIVE_FAILED_LINE =
   'This week’s summary didn’t finish generating, so it won’t be part of the monthly book. Everything above is read live and isn’t affected.'
+
+/**
+ * The same failure, on a week that already HAS a summary (Codex round 2, P2).
+ *
+ * The line above claims the week will be missing from the month's book, and on
+ * a week whose narrative never landed that is exactly right. But a failed
+ * REGENERATE of a week that already generated does not remove anything:
+ * `writeWeekRecord` deliberately leaves a standing `draft` / `reviewed` /
+ * `applied` narrative alone (round 1's own fix), and `loadWeeklyReviewsForMonth`
+ * goes on reading it. The first sentence would then have been false in the one
+ * direction that matters — it would have a parent believe a week is missing from
+ * a record that in fact contains it.
+ *
+ * So there are two sentences and {@link narrativeFailureLine} picks between them
+ * on what the document actually holds, rather than one sentence guessing.
+ */
+export const NARRATIVE_STALE_LINE =
+  'This week’s summary couldn’t be refreshed, so the monthly book will use the earlier one. Everything above is read live and isn’t affected.'
+
+/**
+ * Does this week hold a narrative at all?
+ *
+ * **The same question the monthly book asks**, deliberately: its
+ * `loadWeeklyReviewsForMonth` skips a row whose celebration, summary, wins and
+ * growth areas are all empty, so a claim on this page about what the book will
+ * contain is derived from the book's own rule rather than from a second guess at
+ * it. Structural, because this reads an unvalidated Firestore document.
+ */
+export function reviewHasNarrative(
+  review: {
+    celebration?: unknown
+    summary?: unknown
+    wins?: unknown
+    growthAreas?: unknown
+  } | null,
+): boolean {
+  if (!review) return false
+  const text = (value: unknown) => typeof value === 'string' && value.trim() !== ''
+  const list = (value: unknown) => Array.isArray(value) && value.length > 0
+  return (
+    text(review.celebration) ||
+    text(review.summary) ||
+    list(review.wins) ||
+    list(review.growthAreas)
+  )
+}
+
+/**
+ * Which failure sentence this week gets, or `null` when there is nothing to say.
+ *
+ * One entry point, so a caller cannot render the missing-summary claim about a
+ * week that has one.
+ */
+export function narrativeFailureLine(
+  review:
+    | (NonNullable<Parameters<typeof reviewHasNarrative>[0]> & {
+        narrativeError?: unknown
+      })
+    | null,
+): string | null {
+  if (!narrativeFailed(review)) return null
+  return reviewHasNarrative(review) ? NARRATIVE_STALE_LINE : NARRATIVE_FAILED_LINE
+}
 
 /**
  * Did this week's narrative fail?

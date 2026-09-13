@@ -601,3 +601,47 @@ describe("round 1 — three things the first cut got wrong", () => {
     expect(JSON.stringify(stored)).not.toMatch(/429/);
   });
 });
+
+describe("round 2 — the explanation does not outlive the failure", () => {
+  it("clears a previous run's narrativeError when the no-data prose lands", async () => {
+    // Every write here is a merge, so an error left standing would have the page
+    // telling a parent that generation failed about a week this run summarised.
+    state.existingDoc = {
+      status: "snapshot-only",
+      narrativeError: { message: "x", reason: "call-failed", at: "y" },
+    };
+
+    await generateReviewForChild("fam-1", emptyWeek, "key");
+
+    expect(state.writes[0].data.status).toBe("no-data");
+    expect(state.writes[0].data.narrativeError).toBeNull();
+  });
+
+  it("leaves it alone on a record write, where no narrative has landed yet", async () => {
+    // The record is written BEFORE the model is asked, so the previous run's
+    // explanation is still true at that moment. `writeNarrative` clears it.
+    state.existingDoc = {
+      status: "snapshot-only",
+      narrativeError: { message: "x", reason: "call-failed", at: "y" },
+    };
+
+    await generateReviewForChild("fam-1", loggedWeek, "key");
+
+    expect(state.writes[0].data).not.toHaveProperty("narrativeError");
+    const narrativeWrite = state.writes.find((w) => "celebration" in w.data)!;
+    expect(narrativeWrite.data.narrativeError).toBeNull();
+  });
+
+  it("does not clear it when a standing narrative means nothing new landed", async () => {
+    state.existingDoc = {
+      status: "draft",
+      celebration: "He read a whole chapter.",
+      narrativeError: { message: "x", reason: "call-failed", at: "y" },
+    };
+
+    await generateReviewForChild("fam-1", emptyWeek, "key");
+
+    expect(state.writes[0].data).not.toHaveProperty("narrativeError");
+    expect(state.writes[0].data).not.toHaveProperty("celebration");
+  });
+});

@@ -948,7 +948,16 @@ async function writeWeekRecord(
       existingStatus !== undefined && !REPLACEABLE_REVIEW_STATUSES.has(existingStatus);
 
     const payload: Record<string, unknown> = { ...record };
-    if (narrative && !standingNarrative) Object.assign(payload, narrative);
+    if (narrative && !standingNarrative) {
+      Object.assign(payload, narrative);
+      // A narrative accepted here is a narrative that landed, so the previous
+      // run's explanation of why one did not must go with it (Codex round 2,
+      // P2) — every write from this module is a merge, so a `narrativeError`
+      // left standing would have the page telling a parent that generation
+      // failed about a week this run successfully summarised. `writeNarrative`
+      // clears it on the model path for exactly the same reason.
+      payload.narrativeError = null;
+    }
     if (existing?.curriculumPositions !== undefined) {
       delete payload.curriculumPositions;
     }

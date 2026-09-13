@@ -12,7 +12,11 @@ import {
   hoursLoggedLine,
   msUntilPositionsDue,
   narrativeFailed,
+  narrativeFailureLine,
   positionsPendingLine,
+  reviewHasNarrative,
+  NARRATIVE_FAILED_LINE,
+  NARRATIVE_STALE_LINE,
   reviewWasGenerated,
 } from './weekHours'
 
@@ -236,5 +240,49 @@ describe('reviewWasGenerated counts the record, not the prose (UX-409)', () => {
   it('is still false for a document a parent created by answering', () => {
     expect(reviewWasGenerated({})).toBe(false)
     expect(reviewWasGenerated(null)).toBe(false)
+  })
+})
+
+describe('narrativeFailureLine — a failed regenerate is not a missing week', () => {
+  const failed = { narrativeError: { message: 'x', at: 'y' } }
+
+  it('says nothing when the narrative landed', () => {
+    expect(narrativeFailureLine({ narrativeError: null, summary: 'Steady week.' })).toBeNull()
+    expect(narrativeFailureLine(null)).toBeNull()
+  })
+
+  it('claims the week is missing from the book only when it holds nothing', () => {
+    expect(narrativeFailureLine(failed)).toBe(NARRATIVE_FAILED_LINE)
+    expect(narrativeFailureLine({ ...failed, summary: '', wins: [] })).toBe(
+      NARRATIVE_FAILED_LINE,
+    )
+  })
+
+  it('says the book will use the earlier one when a narrative still stands', () => {
+    // `writeWeekRecord` leaves a standing draft/reviewed/applied narrative
+    // alone, and the monthly book goes on reading it — so the missing-from-the-
+    // book claim would be false here, in the one direction that matters.
+    expect(narrativeFailureLine({ ...failed, summary: 'Steady week.' })).toBe(
+      NARRATIVE_STALE_LINE,
+    )
+    expect(narrativeFailureLine({ ...failed, wins: ['Phonics'] })).toBe(
+      NARRATIVE_STALE_LINE,
+    )
+  })
+
+  it('asks the same question the monthly book asks', () => {
+    // `loadWeeklyReviewsForMonth` keeps a row when celebration, summary, wins or
+    // growth areas carry anything. A claim here about what the book contains is
+    // derived from that rule, not from a second guess at it.
+    expect(reviewHasNarrative({ celebration: 'He read a chapter.' })).toBe(true)
+    expect(reviewHasNarrative({ growthAreas: ['Fluency'] })).toBe(true)
+    expect(reviewHasNarrative({ celebration: '   ', summary: '', wins: [] })).toBe(false)
+    expect(reviewHasNarrative({})).toBe(false)
+    expect(reviewHasNarrative(null)).toBe(false)
+  })
+
+  it('narrows structurally, like everything else reading this document', () => {
+    expect(reviewHasNarrative({ wins: 'Phonics' } as never)).toBe(false)
+    expect(narrativeFailureLine({ narrativeError: 'boom' } as never)).toBeNull()
   })
 })
