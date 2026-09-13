@@ -978,7 +978,11 @@ export default function TodayChecklist({
             // door that offers it — this one registers a stranded photo against a
             // workbook, and asked the fuzzy question the resolver no longer asks
             // first, so it could register a strand's photo against an unrelated one.
-            const mayRouteToCurriculum = captureMayRouteToCurriculum(row.kind)
+            // …and only when a curriculum row actually resolved. A workbook
+            // asserted by `itemType` alone has nothing to advance (Codex round 4),
+            // so neither door may claim it does.
+            const mayRouteToCurriculum =
+              captureMayRouteToCurriculum(row.kind) && !!row.configId
 
             return (
               <Box key={index}>
@@ -1481,7 +1485,6 @@ export default function TodayChecklist({
                   if (
                     !onBackfillWorkbookScan ||
                     !mayRouteToCurriculum ||
-                    !row.configId ||
                     item.workbookScanRegistration ||
                     item.evidenceCollection === 'scans'
                   ) {
