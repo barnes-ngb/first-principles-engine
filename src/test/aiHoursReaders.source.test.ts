@@ -114,3 +114,59 @@ describe('no AI-side Cloud Function counts hours its own way (UX-410)', () => {
     expect(SUMMING.test('totalMinutes += h.minutes;')).toBe(true)
   })
 })
+
+/**
+ * A legacy `days` document is still a day of this child's week (`FIX-236`,
+ * Codex round 3, P2).
+ *
+ * Legacy day logs carry no `childId` FIELD — the child is encoded only in the
+ * document id — so a Firestore equality predicate silently drops every one of
+ * them. `loadRawDayLogsForMonth` has resolved the id on read since its own Codex
+ * P2 on PR #1711, and both Records read paths do the same; the two AI-side
+ * readers that now fold `days` into minutes had to join them, or they would
+ * undercount against the very surfaces `UX-410` made them agree with.
+ *
+ * Asserted at the source because the alternative is a Firestore fake per reader,
+ * and what can go wrong is a query predicate and a missing call — both visible
+ * here. Same stated limit as the scan above: a naming convention, not a resolver.
+ */
+describe('the AI-side readers resolve a legacy day log’s child (UX-410)', () => {
+  const readers = [
+    { file: 'functions/src/ai/chat.ts', fn: 'loadHoursSummary' },
+    { file: 'functions/src/ai/evaluate.ts', fn: 'assembleWeekContext' },
+  ]
+
+  for (const { file, fn } of readers) {
+    it(`${fn} resolves the id rather than trusting the field`, () => {
+      const source = readFileSync(file, 'utf8')
+      expect(source).toMatch(/deriveChildIdFromDocId/)
+      expect(source).toMatch(/raw\.childId \?\? deriveChildIdFromDocId\(doc\.id\)/)
+    })
+  }
+
+  /** One function's body: from its declaration to the next `}` at column 0. */
+  const bodyOf = (source: string, fn: string): string => {
+    const start = source.indexOf(`function ${fn}(`)
+    expect(start, `${fn} not found`).toBeGreaterThan(-1)
+    const end = source.indexOf('\n}\n', start)
+    return source.slice(start, end === -1 ? undefined : end)
+  }
+
+  it('and neither asks Firestore to filter ITS days query by childId', () => {
+    // The predicate is what drops a legacy document, before any normalisation
+    // can run. Scoped to these two functions on purpose: `loadEngagementSummary`
+    // reads `days` for engagement counts with its own equality filter, which is
+    // a different question and not this row's to widen.
+    for (const { file, fn } of readers) {
+      const body = bodyOf(readFileSync(file, 'utf8'), fn)
+      // The two readers spell the collection differently — a template path in
+      // `chat.ts`, a `familyRef.collection("days")` in `evaluate.ts` — so the
+      // anchor is the segment both share.
+      expect(body, `${fn} filters its days query on childId`).not.toMatch(
+        /days["`]\)[\s\S]{0,200}?\.where\(\s*"childId"/,
+      )
+      // …and it does read `days`, so the assertion above is about something.
+      expect(body).toMatch(/days["`]\)/)
+    }
+  })
+})

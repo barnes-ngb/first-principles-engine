@@ -26,11 +26,28 @@
  * does not itself depend on**.
  *
  * It is a scan over import statements, not a resolver, which is a limit rather
- * than a proof: it reads static `import`/`export … from` specifiers and would
- * not see a dynamic one. Every import in this codebase is static.
+ * than a proof — and the first cut of that scan had a hole big enough to make it
+ * green for the very failure it claims to prevent (Codex round 4, P2). It
+ * matched only forms containing `from`, so a **side-effect import**
+ * (`import 'firebase-functions/…'`) — which the root `tsc -b` still resolves and
+ * which still produces the CI-only `TS2307` — was invisible, and worse, the lazy
+ * span between `import` and `from` ran past it to the NEXT statement's
+ * specifier. Three forms are read now: `from`-bearing imports and re-exports,
+ * bare side-effect imports, and dynamic `import(…)` calls. Comments are stripped
+ * first, because the modules this walks carry long docstrings that quote import
+ * lines.
  */
 
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
@@ -53,12 +70,34 @@ const APP_PACKAGES = new Set([
   'node:url',
 ])
 
-const IMPORT = /(?:^|\n)\s*(?:import|export)[\s\S]*?from\s+['"]([^'"]+)['"]/g
+/** A throwaway directory for the parser's own fixtures. */
+const SCRATCH = mkdtempSync(join(tmpdir(), 'fpe-import-scan-'))
+
+/** `import … from 'x'` and `export … from 'x'`. */
+const FROM_IMPORT = /\bfrom\s*['"]([^'"]+)['"]/g
+/** `import 'x'` — a side-effect import, which resolves just like any other. */
+const SIDE_EFFECT_IMPORT = /(?:^|\n)\s*import\s+['"]([^'"]+)['"]/g
+/** `import('x')` — dynamic, and still type-resolved. */
+const DYNAMIC_IMPORT = /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g
+
+/**
+ * Strip block comments, and line comments that START a line.
+ *
+ * The block strip is what matters — the modules here carry docstrings that quote
+ * `from '…'`. Line comments are stripped only when they open the line, so a
+ * `'https://…'` inside code keeps its slashes and cannot be mangled into a
+ * stray specifier.
+ */
+function withoutComments(text: string): string {
+  return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(?:^|\n)\s*\/\/[^\n]*/g, '\n')
+}
 
 function importsOf(file: string): string[] {
-  const text = readFileSync(file, 'utf8')
+  const text = withoutComments(readFileSync(file, 'utf8'))
   const out: string[] = []
-  for (const match of text.matchAll(IMPORT)) out.push(match[1])
+  for (const pattern of [FROM_IMPORT, SIDE_EFFECT_IMPORT, DYNAMIC_IMPORT]) {
+    for (const match of text.matchAll(pattern)) out.push(match[1])
+  }
   return out
 }
 
@@ -141,6 +180,36 @@ describe('the app only reaches into functions/src for modules it can compile', (
         'functions/node_modules. Move the pure part into a module that imports ' +
         'nothing outside functions/src/shared, or assert it from the functions suite.',
     ).toEqual([])
+  })
+
+  it('reads a side-effect import, which the first cut of this scan could not', () => {
+    // The round-4 finding, asserted as the parser property rather than as prose:
+    // `import 'x'` resolves exactly like any other import and produces the same
+    // CI-only TS2307, and a scan that needs a `from` sees neither it nor — worse
+    // — the statement after it.
+    const seen = (source: string) => {
+      const file = join(SCRATCH, `boundary-${Math.random().toString(36).slice(2)}.ts`)
+      writeFileSync(file, source, 'utf8')
+      try {
+        return importsOf(file)
+      } finally {
+        rmSync(file, { force: true })
+      }
+    }
+
+    expect(seen("import 'firebase-functions/v2/https'\n")).toEqual([
+      'firebase-functions/v2/https',
+    ])
+    // The capture bug: the side-effect import used to be skipped AND the lazy
+    // span swallowed the statement after it.
+    expect(
+      seen("import 'side-effect'\nimport { x } from './y.js'\n"),
+    ).toEqual(expect.arrayContaining(['side-effect', './y.js']))
+    expect(seen("const m = await import('firebase-admin')\n")).toEqual([
+      'firebase-admin',
+    ])
+    // …and a docstring that quotes an import line is not one.
+    expect(seen("/** see `import x from 'not-a-dep'` */\nexport const a = 1\n")).toEqual([])
   })
 
   it('PROVES IT CAN FAIL — the import FIX-236 had to withdraw', () => {

@@ -12,6 +12,7 @@ import { modelForTask } from "./chat.js";
 import { synthesizeIfStale } from "./learnerSynthesis.js";
 import { civilDateObjectInZone } from "./familyClock.js";
 import { foldHoursForPrompt, hoursLoggedBlock, type HoursTotals } from "./promptHours.js";
+import { deriveChildIdFromDocId } from "../shared/docId.js";
 import { ADJUSTMENT_BOTH } from "../shared/hoursContributions.js";
 import type {
   RawDayLog,
@@ -378,9 +379,20 @@ export async function assembleWeekContext(
   // The child's raw day documents, kept whole (UX-410): the hours fold reads
   // blocks and checklist items together under the DATA-14 partial-day rule, and
   // a summary narrowed for the prompt cannot be folded back into minutes.
+  //
+  // **Legacy day logs carry no `childId` field** — the child is encoded only in
+  // the document id — so the id is resolved before the filter, exactly as
+  // `loadRawDayLogsForMonth` and both Records read paths do (Codex round 3, P2,
+  // on this row's sibling in `chat.ts`). Filtering on the raw field alone
+  // dropped those documents, which mattered nowhere while this was a per-day
+  // engagement summary and matters now that the same array is folded into the
+  // week's minutes.
   const dayLogDocs: RawDayLog[] = daysSnap.docs
-    .map((doc) => doc.data() as RawDayLog)
-    .filter((d) => d?.childId === childId);
+    .map((doc) => {
+      const raw = doc.data() as RawDayLog;
+      return { ...raw, childId: raw.childId ?? deriveChildIdFromDocId(doc.id) };
+    })
+    .filter((d) => d.childId === childId);
 
   const dayLogs: DayLogSummary[] = dayLogDocs.map((d) => {
     const checklist = (Array.isArray(d.checklist) ? d.checklist : []) as Array<{

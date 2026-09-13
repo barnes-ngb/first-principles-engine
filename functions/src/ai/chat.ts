@@ -13,6 +13,7 @@ import {
   normalizeLevelStretch,
 } from "./storyDecodability.js";
 import { foldHoursForPrompt, type HoursTotals } from "./promptHours.js";
+import { deriveChildIdFromDocId } from "../shared/docId.js";
 import type {
   RawDayLog,
   RawHoursAdjustment,
@@ -270,7 +271,16 @@ export async function loadWeekContext(
  * The adjustments query is deliberately **not** filtered by `childId` in
  * Firestore: DATA-09 attribution counts an adjustment for this child when it is
  * tagged to them **or to `'both'`**, and that is the fold's rule to apply, not a
- * query's. Every other source is filtered at the query and again in the fold.
+ * query's.
+ *
+ * Nor is the `days` query, and for a different reason (Codex round 3, P2):
+ * **legacy day logs carry no `childId` field at all** — the child is encoded
+ * only in the document id. An equality predicate silently drops every one of
+ * them, which would have left this reader undercounting against Records and the
+ * monthly book on exactly the minutes it was rewritten to include. The id is
+ * resolved on read through the shared `deriveChildIdFromDocId` and the filter
+ * runs after, which is what `loadRawDayLogsForMonth` does (itself a Codex P2, on
+ * PR #1711) and what both Records read paths do.
  *
  * The school-year boundary here (Aug 1) still differs from the app's own
  * (`getSchoolYearRange`, July 1) — filed as `UX-411` and deliberately untouched:
@@ -292,7 +302,6 @@ export async function loadHoursSummary(
       .get(),
     db
       .collection(`families/${familyId}/days`)
-      .where("childId", "==", childId)
       .where("date", ">=", startDate)
       .get(),
     db
@@ -301,8 +310,15 @@ export async function loadHoursSummary(
       .get(),
   ]);
 
+  const dayLogs = daysSnap.docs
+    .map((doc) => {
+      const raw = doc.data() as RawDayLog;
+      return { ...raw, childId: raw.childId ?? deriveChildIdFromDocId(doc.id) };
+    })
+    .filter((d) => d.childId === childId);
+
   return foldHoursForPrompt(
-    daysSnap.docs.map((d) => d.data() as RawDayLog),
+    dayLogs,
     hoursSnap.docs.map((d) => d.data() as RawHoursEntry),
     adjSnap.docs.map((d) => d.data() as RawHoursAdjustment),
     childId,

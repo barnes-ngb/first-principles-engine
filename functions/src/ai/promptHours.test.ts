@@ -115,3 +115,23 @@ describe("hoursLoggedBlock", () => {
     expect(block).not.toContain("Other");
   });
 });
+
+describe("a legacy day log is still this child's day (Codex round 3, P2)", () => {
+  it("counts a document whose child is only in its id, once it is normalised", () => {
+    // `deriveChildIdFromDocId` is the shared rule; the readers resolve the id on
+    // read and the fold's own safety-net filter then sees a child. What is
+    // asserted here is the consequence: a normalised legacy document counts
+    // exactly like a modern one, so a reader that drops it undercounts.
+    const legacy = {
+      date: "2026-09-07",
+      checklist: [
+        { label: "Phonics", completed: true, subjectBucket: "Reading", estimatedMinutes: 20 },
+      ],
+    };
+    expect(foldHoursForPrompt([legacy], [], [], "lincoln").totalMinutes).toBe(0);
+    expect(
+      foldHoursForPrompt([{ ...legacy, childId: "lincoln" }], [], [], "lincoln")
+        .totalMinutes,
+    ).toBe(20);
+  });
+});
