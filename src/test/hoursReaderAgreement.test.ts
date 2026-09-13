@@ -55,18 +55,11 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { foldWeekHours } from '../../functions/src/ai/evaluate'
-import type { WeekContext } from '../../functions/src/ai/evaluate'
 import { foldHoursForPrompt } from '../../functions/src/ai/promptHours'
 import { computeMonthHours } from '../../functions/src/ai/tasks/monthlyHours'
 import {
   collectHoursContributions,
   entryMinutes as sharedEntryMinutes,
-} from '../../functions/src/shared/hoursContributions'
-import type {
-  RawDayLog,
-  RawHoursAdjustment,
-  RawHoursEntry,
 } from '../../functions/src/shared/hoursContributions'
 import type {
   DayLog,
@@ -354,7 +347,16 @@ const READERS: Reader[] = [
   {
     surface: 'Weekly-review prompt → HOURS THIS WEEK (functions: foldWeekHours)',
     fold: 'collectHoursContributions → summarizeHoursContributions',
-    read: () => foldWeekHours(WEEK_CONTEXT).totalMinutes,
+    // `evaluate.foldWeekHours` is an adapter over exactly this call, and
+    // `evaluate.test.ts` pins that delegation. It is NOT imported here, and the
+    // reason is a rule rather than a preference: the app compiles what this file
+    // imports, `evaluate.ts` pulls in `firebase-admin` and `firebase-functions`,
+    // and neither is an app dependency — CI's root `tsc -b` runs without
+    // `functions/node_modules` and says so, while a workstation with them
+    // installed does not. `src/test/functionsImportBoundary.test.ts` is the
+    // guard; this comment is why it exists.
+    read: () =>
+      foldHoursForPrompt(DAY_LOGS, HOURS_ENTRIES, ADJUSTMENTS, CHILD).totalMinutes,
   },
   {
     surface: 'weeklyReviews.hoursSummary (the week’s recorded minutes)',
@@ -362,37 +364,11 @@ const READERS: Reader[] = [
     // Written onto the document by the same fold the prompt reads, so the
     // record and the prose can never state two different weeks.
     read: () =>
-      Object.values(foldWeekHours(WEEK_CONTEXT).minutesBySubject).reduce(
-        (sum, minutes) => sum + minutes,
-        0,
-      ),
+      Object.values(
+        foldHoursForPrompt(DAY_LOGS, HOURS_ENTRIES, ADJUSTMENTS, CHILD).minutesBySubject,
+      ).reduce((sum, minutes) => sum + minutes, 0),
   },
 ]
-
-/**
- * The same three arrays, as the weekly cron hands them to its own fold.
- *
- * `WeekContext` is the Cloud Function's shape; everything here is the fixture
- * above, so a disagreement between this reader and the eight app-side ones is a
- * disagreement about the RULE and not about the data.
- */
-const WEEK_CONTEXT = {
-  child: { id: CHILD, name: 'Lincoln' },
-  weekKey: WEEK_START,
-  dayLogs: [],
-  dayLogDocs: DAY_LOGS as unknown as RawDayLog[],
-  hours: HOURS_ENTRIES as unknown as RawHoursEntry[],
-  hoursAdjustments: ADJUSTMENTS as unknown as RawHoursAdjustment[],
-  dailyPlans: [],
-  missedDays: 0,
-  bookActivity: [],
-  books: {
-    booksCreated: [],
-    booksCompleted: [],
-    readingSessions: { count: 0, totalMinutes: 0, booksRead: [] },
-  },
-  teachBacks: { count: 0, bySubject: {}, audioCount: 0, textCount: 0, examples: [] },
-} as WeekContext
 
 /**
  * The arithmetic `functions/src/ai/chat.ts loadHoursSummary` USED to perform,

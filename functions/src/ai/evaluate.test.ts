@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   buildEvaluationPrompt,
+  foldWeekHours,
   formatBooksEvidence,
   formatTeachBacksEvidence,
   hasAnyEvidence,
@@ -13,6 +14,7 @@ import {
   WEEKLY_REVIEW_SCHEDULE,
 } from "./evaluate.js";
 import type { WeekContext } from "./evaluate.js";
+import { foldHoursForPrompt } from "./promptHours.js";
 
 // ── lastWeekKey ─────────────────────────────────────────────────
 
@@ -376,6 +378,29 @@ function makeContext(overrides?: Partial<WeekContext>): WeekContext {
     ...overrides,
   };
 }
+
+describe("foldWeekHours is the shared fold, not a second one", () => {
+  it("delegates to foldHoursForPrompt over the context's own three arrays", () => {
+    // The app-side agreement suite asserts `foldHoursForPrompt` beside the other
+    // ten readers and deliberately does NOT import this module — `evaluate.ts`
+    // pulls in `firebase-admin` and `firebase-functions`, which are not app
+    // dependencies. This is the link in that chain which only the functions
+    // suite can see.
+    const ctx = makeContext();
+    expect(foldWeekHours(ctx)).toEqual(
+      foldHoursForPrompt(ctx.dayLogDocs, ctx.hours, ctx.hoursAdjustments, ctx.child.id),
+    );
+  });
+
+  it("counts his brother's week as none of his", () => {
+    const ctx = makeContext({
+      hoursAdjustments: [
+        { childId: "london", minutes: 500, subjectBucket: "Reading", date: "2026-02-24" },
+      ],
+    });
+    expect(foldWeekHours(ctx).minutesBySubject.Reading).toBe(90);
+  });
+});
 
 describe("buildEvaluationPrompt", () => {
   it("includes child name and week key", () => {

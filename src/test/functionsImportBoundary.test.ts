@@ -1,0 +1,157 @@
+/**
+ * What the APP may reach into `functions/src/` for — and what it may not.
+ *
+ * ── Why this exists ─────────────────────────────────────────────────────────
+ *
+ * `functions/src/shared/` holds the rules with exactly one definition, compiled
+ * by BOTH projects (ARCH-47), and its README states the constraint that makes
+ * that possible: a module the app compiles may not import anything outside the
+ * directory. What nothing checked was the constraint one level up — **which
+ * `functions/src/` modules the app is allowed to import at all**.
+ *
+ * `FIX-236` broke it and CI caught it, which is the wrong place to find out.
+ * `src/test/hoursReaderAgreement.test.ts` imported `foldWeekHours` from
+ * `functions/src/ai/evaluate.ts` to assert the weekly reader beside the other
+ * ten — reasonable-looking, and it pulled `firebase-admin`,
+ * `firebase-functions/v2/https` and `firebase-functions/v2/scheduler` into the
+ * app's type graph. Those are `functions/package.json` dependencies, not the
+ * app's, so the root `tsc -b` resolves them only where `functions/node_modules`
+ * happens to be installed — true on a workstation that has run the functions
+ * suite, false in CI, which runs `npm ci` at the root alone. The result was a
+ * green local verification and twenty-one `TS2307`s on the `test` job.
+ *
+ * So the rule is now asserted where it can fail before a push: every
+ * `functions/src/…` module the app imports is walked through its own relative
+ * imports, and **no module in that closure may import a bare package the app
+ * does not itself depend on**.
+ *
+ * It is a scan over import statements, not a resolver, which is a limit rather
+ * than a proof: it reads static `import`/`export … from` specifiers and would
+ * not see a dynamic one. Every import in this codebase is static.
+ */
+
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { dirname, join, relative, resolve } from 'node:path'
+
+import { describe, expect, it } from 'vitest'
+
+const ROOT = resolve(import.meta.dirname, '../..')
+const APP_DIR = join(ROOT, 'src')
+const FUNCTIONS_SRC = join(ROOT, 'functions/src')
+
+/** The app's own dependencies — everything it may resolve at type-check time. */
+const APP_PACKAGES = new Set([
+  ...Object.keys(
+    JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).dependencies ?? {},
+  ),
+  ...Object.keys(
+    JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).devDependencies ?? {},
+  ),
+  // Node builtins and the test runner, which the app compiles happily.
+  'node:fs',
+  'node:path',
+  'node:url',
+])
+
+const IMPORT = /(?:^|\n)\s*(?:import|export)[\s\S]*?from\s+['"]([^'"]+)['"]/g
+
+function importsOf(file: string): string[] {
+  const text = readFileSync(file, 'utf8')
+  const out: string[] = []
+  for (const match of text.matchAll(IMPORT)) out.push(match[1])
+  return out
+}
+
+function tsFiles(dir: string): string[] {
+  const out: string[] = []
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry)
+    if (statSync(full).isDirectory()) {
+      out.push(...tsFiles(full))
+      continue
+    }
+    if (/\.tsx?$/.test(entry)) out.push(full)
+  }
+  return out
+}
+
+/** Resolve a relative specifier the way both tsconfigs do (`.js` → `.ts`). */
+function resolveRelative(fromFile: string, spec: string): string | null {
+  const base = resolve(dirname(fromFile), spec).replace(/\.js$/, '')
+  for (const candidate of [`${base}.ts`, `${base}.tsx`, join(base, 'index.ts')]) {
+    if (existsSync(candidate)) return candidate
+  }
+  return null
+}
+
+/** Every `functions/src/…` module the app imports, directly. */
+function appEntryPoints(): string[] {
+  const entries = new Set<string>()
+  for (const file of tsFiles(APP_DIR)) {
+    for (const spec of importsOf(file)) {
+      if (!spec.startsWith('.')) continue
+      const target = resolve(dirname(file), spec)
+      if (!target.startsWith(FUNCTIONS_SRC)) continue
+      const resolved = resolveRelative(file, spec)
+      if (resolved) entries.add(resolved)
+    }
+  }
+  return [...entries]
+}
+
+/** Walk a module's relative imports and collect every bare package reached. */
+function packagesReachedFrom(entry: string): Map<string, string> {
+  const seen = new Set<string>()
+  const packages = new Map<string, string>()
+  const queue = [entry]
+  while (queue.length > 0) {
+    const file = queue.pop()!
+    if (seen.has(file)) continue
+    seen.add(file)
+    for (const spec of importsOf(file)) {
+      if (spec.startsWith('.')) {
+        const next = resolveRelative(file, spec)
+        if (next) queue.push(next)
+        continue
+      }
+      if (!packages.has(spec)) packages.set(spec, relative(ROOT, file))
+    }
+  }
+  return packages
+}
+
+describe('the app only reaches into functions/src for modules it can compile', () => {
+  const entries = appEntryPoints()
+
+  it('finds the imports at all — an empty scan would pass every check below', () => {
+    expect(entries.length).toBeGreaterThan(3)
+  })
+
+  it('reaches no package the app does not itself depend on', () => {
+    const offenders: string[] = []
+    for (const entry of entries) {
+      for (const [pkg, via] of packagesReachedFrom(entry)) {
+        if (APP_PACKAGES.has(pkg) || pkg.startsWith('node:')) continue
+        offenders.push(`${relative(ROOT, entry)} → ${pkg} (via ${via})`)
+      }
+    }
+    expect(
+      offenders,
+      'The app compiles what it imports, and CI runs the root `tsc -b` with no ' +
+        'functions/node_modules. Move the pure part into a module that imports ' +
+        'nothing outside functions/src/shared, or assert it from the functions suite.',
+    ).toEqual([])
+  })
+
+  it('PROVES IT CAN FAIL — the import FIX-236 had to withdraw', () => {
+    // `evaluate.ts` is the module that broke CI. It is still there, still
+    // importing firebase-admin; what changed is that nothing under `src/` points
+    // at it. If this assertion ever goes false, the scan above has stopped
+    // being able to tell.
+    const reached = packagesReachedFrom(join(FUNCTIONS_SRC, 'ai/evaluate.ts'))
+    expect([...reached.keys()]).toContain('firebase-admin/firestore')
+    expect(entries.map((e) => relative(ROOT, e))).not.toContain(
+      'functions/src/ai/evaluate.ts',
+    )
+  })
+})
