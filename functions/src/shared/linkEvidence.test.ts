@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { isLinkEvidenceType } from './linkEvidence'
+import { isLinkEvidenceType } from './linkEvidence.js'
 
 describe('isLinkEvidenceType — link vs file evidence (UX-285)', () => {
   it('returns true for "video"', () => {
