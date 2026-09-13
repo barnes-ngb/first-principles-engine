@@ -179,9 +179,62 @@ call. Recommend a first decomposition read next cycle now that it's in the table
 `three` into always-rendered nav chrome (`AppShell.tsx`) — not re-verified at exact line numbers this
 cycle given the window size, but the file does not appear in the window's diff (`git diff fc93f35..HEAD
 --stat -- src/features/avatar/AvatarThumbnail.tsx` is empty), so the 07-19 finding stands unmoved.
-**Band 1, ARCH-05/ARCH-08, OPEN — unchanged, now the fourth full-audit cycle with an identical finding
-and no movement.** Given the standing nature of this recommendation, it may be worth a dedicated
-`PROMPT_FIX` run rather than a fifth re-verification next cycle.
+
+**Codex round-2 finding, addressed: the prompt's own ask — name the heaviest imports, the routes that
+pull them, and a concrete split with an estimated reduction — done properly this cycle, with one number
+actually measured rather than guessed.**
+
+**The two heaviest static dependencies in the main chunk, by source size and by what pulls them in:**
+`three` (28MB on disk) and `jspdf` (29MB on disk). They are import-blocked very differently, which is
+why one has a concrete fix here and the other doesn't yet:
+
+- **`three` cannot be route-split without first fixing `ARCH-08`.** It's imported by 23 files, but the
+  one that matters is `AvatarThumbnail.tsx` — mounted in `AppShell.tsx`'s always-visible nav chrome, not
+  behind any route. Wrapping `MyAvatarPage`/`VoxelCharacter`/the `voxel/` module tree in `React.lazy()`
+  would not remove `three` from the initial bundle, because `AppShell` (which renders on every route)
+  would still pull it in synchronously through `AvatarThumbnail`. **`ARCH-08` is the correct prerequisite,
+  not a separate item** — until `AvatarThumbnail` stops importing `three` directly (a static 2D icon or a
+  cached render in nav chrome, deferring the live 3D character to the Avatar route itself), no route-level
+  split can remove this dependency, however the routes are split.
+- **`jspdf` has no such blocker, and the number below is measured, not estimated.** It is imported by
+  exactly two leaf modules, `src/features/books/printBook.ts` and `printStickerSheet.ts`, both reached
+  only from Books' print actions (a button press, not page load) — `router.tsx` has **zero** `React.lazy`
+  calls anywhere (`grep -c "React.lazy\|lazy(" src/app/router.tsx` → 0), so today `jspdf`'s full weight
+  loads for every visitor regardless of whether they ever print anything. **This audit ran the experiment
+  directly** (converting both files' top-level `import { jsPDF } from 'jspdf'` to a point-of-use
+  `const { jsPDF } = await import('jspdf')` inside the one function in each that constructs a `jsPDF`
+  instance, building, measuring, then reverting via `git checkout` — no committed change, per the
+  prompt's "write it up, don't do it" rule):
+
+  ```
+  before:  dist/assets/index-D2hmFUKx.js   4,573.26 kB │ gzip: 1,375.80 kB   (one chunk, everything)
+  after:   dist/assets/index-AXUnS2NV.js   4,180.06 kB │ gzip: 1,247.02 kB   (jspdf split out)
+           dist/assets/jspdf.es.min-*.js     385.99 kB │ gzip:   126.32 kB   (loaded only on print)
+  ─────────────────────────────────────────────────────────────────────────
+  measured reduction:                       −393.20 kB │ gzip: −128.78 kB   (−8.6% / −9.4% gzip)
+  ```
+
+  This is a **point-of-use dynamic `import()`**, not a `React.lazy()` route split — `jsPDF` isn't a React
+  component and its two call sites sit inside an already-loaded Books page rather than at a route
+  boundary, so the surgical tool is a dynamic import at the two constructor call sites, not a page-level
+  split. `html2canvas` (already its own 201.04 kB / 47.43 kB gzip async chunk, per Step 0's build output)
+  is the existing precedent for exactly this pattern in this codebase — it's pulled in by `jsPDF`'s own
+  optional `.html()` code path via a dynamic import inside the `jspdf` package itself, which is why it
+  already splits cleanly even though nothing in `src/` references it directly.
+
+**Proposed action (unchanged from "propose, don't implement"):** the `jspdf` point-of-use split is a
+two-file, low-risk change with a measured ~393 kB / ~129 kB gzip win and no design decision attached —
+strong next `PROMPT_FIX` candidate. A genuine `React.lazy()` route split (the prompt's literal ask) is
+better aimed at whole-page component trees with no nav-chrome entanglement — `WorkshopPage.tsx` (1,928L,
+§1.1) and `BookEditorPage.tsx` (2,414L) are the two largest route-root components with no known
+`AppShell`-level import of their own, making them the next candidates to measure the same way, though
+that measurement is not attempted here as it would require touching `router.tsx`'s structure rather than
+two leaf files, which is more than a quick reversible build experiment justifies.
+
+**Band 1, ARCH-05/ARCH-08, OPEN — unchanged, now the fourth full-audit cycle with the Three.js finding
+specifically unmoved.** Given the standing nature of that recommendation, it may be worth a dedicated
+`PROMPT_FIX` run rather than a fifth re-verification next cycle; the `jspdf` split above is a smaller,
+independent, unblocked win that doesn't need `ARCH-08` resolved first.
 
 ### 1.6 Test coverage (TEST-01) — genuine partial progress this window, but on the narrower half of both named gaps
 
@@ -211,12 +264,22 @@ directories with 0 *.test.ts(x) files (and >0 source files): 5
   planner  (1 source file, 0 tests)   ui-preview  (1 source file, 0 tests)
 ```
 
-All five are **genuinely untestable UI shell by the prompt's own test**: `auth` is the route-guard wrapper
-component, `login` is profile selection, `not-found` is the 404 page, `planner` is a single shared dialog
-component (`TeachHelperDialog.tsx`) already exercised through its callers' own tests, and `ui-preview` is
-the dev-only, unlinked-from-nav component gallery `CLAUDE.md` names as exactly that. **None decided as
-missing coverage on real logic** — each is either presentational-only or a thin wrapper with no branching
-logic of its own to test in isolation.
+**Codex round-2 finding, addressed: `planner`'s classification was wrong.** The first draft called
+`TeachHelperDialog.tsx` "already exercised through its callers' own tests" without checking — it isn't.
+`grep -rl "TeachHelperDialog" src --include=*.test.tsx` returns **zero hits**, including in
+`TodayPage`'s own test files, the component's only caller. At 467L it is genuinely stateful: it calls
+`useAI()`'s `chat`/`useGenerateActivity`, branches on the AI response, and has two distinct `catch`
+blocks (lines 188, 252) with no test exercising either the happy path or a failure. **Reclassified as
+missing coverage on real logic, not untestable shell** — `planner` moves out of the "genuinely
+untestable" group.
+
+That leaves **four** genuinely untestable UI shells (re-verified, not just asserted): `auth`
+(`LoginPage.tsx` — the route-guard wrapper), `login` (`ProfileSelectPage.tsx` — profile selection),
+`not-found` (`NotFoundPage.tsx` — the 404 page), and `ui-preview` (`UiPreviewPage.tsx` — the dev-only,
+unlinked-from-nav component gallery `CLAUDE.md` names as exactly that). Each is presentational-only or a
+thin wrapper with no branching logic of its own — genuinely different in kind from `TeachHelperDialog.tsx`,
+not merely smaller. **Recommend `TeachHelperDialog.tsx`'s AI-call/error-branch paths as a `TEST-04`-style
+follow-up candidate**, alongside `workshop`'s ratio gap below.
 
 The more useful number from the same census is the **ratio**, not just the zero/non-zero split, since a
 directory with a handful of test files against dozens of source files is a coverage gap the "0 files"
@@ -241,10 +304,16 @@ feature" norm holding for the window's largest feature areas.
 - **TEST-01 status: IMPROVING, with the first concrete file-level progress in several cycles** on one of
   its two named gaps.
 
-### 1.7 ARCH-06 (WorkbookConfig → ActivityConfig) — essentially unchanged
+### 1.7 ARCH-06 (WorkbookConfig → ActivityConfig) — essentially unchanged, now derived by the committed script
 
-`grep -rn -w 'WorkbookConfig' src functions/src --include=*.ts --include=*.tsx | grep -v '.test.'`: **29
-refs / 10 files** (was 28/10 at 08-30 — +1 ref, no new file). **Band 1, ARCH-06, OPEN — unchanged.**
+**Codex round-2 finding, addressed:** this count and the name-literal census below (§1.9) were still
+ad hoc greps after round 1's fix only covered the file-size survey. `scripts/architectureAuditCensus.ts`
+now derives both (`npm run census:arch-audit`, no `--base` needed for these two): **`ActivityConfig`: 306
+refs / 77 files; `WorkbookConfig`: 38 refs / 12 files** (whole-word, all `.ts`/`.tsx` including tests —
+the CLAUDE.md tech-debt line's own long-standing methodology, kept so the ratio stays comparable cycle
+to cycle rather than silently narrowing). **Band 1, ARCH-06, OPEN — the ratio (~8:1) is essentially
+unchanged in shape from every prior cycle's report, though the exact figures were never comparably
+derived before this script existed.**
 
 ### 1.8 ARCH-07/ARCH-39 (Ladder deprecation) — confirmed still fully resolved, nothing removable found
 
@@ -253,8 +322,10 @@ in the ledger; re-confirmed, no action needed.
 
 ### 1.9 ARCH-43 (Lincoln/London name-literal census) — the count dropped for a real, traceable reason
 
-Re-run of the audit series' standing 3-pattern grep (`toLowerCase() === 'lincoln'` / `=== 'Lincoln'` /
-`=== 'London'`, non-test): **18 sites / 16 files**, down from the "20 sites, unchanged" figure this row
+Re-run via `scripts/architectureAuditCensus.ts`'s new section (same standing 3-pattern rule this row has
+used since it was raised — `toLowerCase() === 'lincoln'` / `=== 'Lincoln'` / `=== 'London'`, non-test,
+now a committed derivation rather than an ad hoc grep per Codex's round-2 finding): **18 sites / 16
+files**, down from the "20 sites, unchanged" figure this row
 carried through five consecutive re-verifications (most recently 2026-09-03, FEAT-180). The drop traces
 to a real, already-ledgered deletion, not a grep artifact: `StoryGuidePage.tsx` and its sibling files —
 named in this row's own "what remains" list as of the 2026-09-03 update — were **deleted outright** by
@@ -316,9 +387,98 @@ the last dated audit report") is not scoped to large files — the 08-30 report'
 (`cleanSketch.ts` at 905L, well under the table threshold) already read it that way, and this cycle's
 first draft narrowed it to the ≥1,500L table by mistake. `scripts/architectureAuditCensus.ts --base=fc93f35`
 (§1.1) now runs the complete sweep: **84 non-test files** moved by more than 150 net lines against the
-08-29 baseline (78 grew, 6 shrank). The full, exact list is in the script's own output — reproduced here
-is what it groups into, since narrating 84 files individually would bury the signal the rule exists to
-surface:
+08-29 baseline (78 grew, 6 shrank). **Codex round 2 correctly rejected the first fix's grouped summary
+as still not the complete inventory the finding asked for** — here is the full, exact list, verbatim
+from the script's own output, every one of the 84 rows:
+
+```
+  +   856  src/features/books/artHelpContent.ts
+  +   818  src/features/progress/CurriculumTab.tsx
+  +   676  src/features/weekly-review/weekBySubject.ts
+  +   655  src/features/planner-chat/PlannerChatPage.tsx
+  +   587  src/test/findingTagBridge.ts
+  +   575  src/features/books/useBookGenerateChat.ts
+  +   541  src/features/today/todayRowKind.ts
+  +   529  functions/src/ai/storyDecodability.ts
+  +   529  src/features/settings/ghostChildDocs.ts
+  +   510  src/core/firebase/strandSessionWrites.ts
+  +   490  src/core/foundations/curriculumNodeBridge.ts
+  +   484  src/features/settings/DevAdminTab.tsx
+  +   474  src/test/childSwitchSurfaces.ts
+  +   467  src/features/books/storyPracticeWords.ts
+  +   451  functions/src/ai/imageTasks/generateImage.ts
+  +   420  src/features/today/TodayPage.tsx
+  +   418  src/features/progress/strand.ts
+  +   410  functions/src/ai/chat.ts
+  +   402  functions/src/ai/tasks/generateStory.ts
+  +   387  src/features/books/imageGenerationFailure.ts
+  +   384  src/features/today/quickLogChips.ts
+  +   373  src/features/planner-chat/plannerDayTypes.ts
+  +   361  functions/src/shared/hoursContributions.ts
+  +   343  src/features/weekly-review/weekHours.ts
+  +   320  functions/src/shared/plannerBoundary.ts
+  +   320  src/features/planner-chat/planningWeekSelection.ts
+  +   310  src/test/timeLedgerSurfaces.ts
+  +   305  src/features/workshop/WorkshopPage.tsx
+  +   301  src/features/books/BookEditorPage.tsx
+  +   300  src/features/settings/restoreScanLoweredLevels.ts
+  +   296  src/core/curriculum/mapFindingToNode.ts
+  +   276  functions/src/ai/evaluate.ts
+  +   270  src/features/shelly-chat/activityTypeChoices.ts
+  +   264  src/features/books/printBook.ts
+  +   255  src/features/weekly-review/WeekPaceSection.tsx
+  +   250  src/features/planner-chat/pace.logic.ts
+  +   241  src/features/progress/StrandSessionDialog.tsx
+  +   236  src/features/today/lifeDay.ts
+  +   231  src/features/planner-chat/applyWeekPlan.ts
+  +   228  src/features/books/ArtHelpSheet.tsx
+  +   226  src/features/books/SketchScanner.tsx
+  +   225  src/features/progress/RenameActivityDialog.tsx
+  +   224  src/features/progress/strandSession.ts
+  +   222  src/core/types/planning.ts
+  +   219  src/features/weekly-review/reviewWeekSelection.ts
+  +   216  functions/src/ai/imageTasks/enhanceSketch.ts
+  +   213  src/features/planner-chat/plannerRequest.ts
+  +   205  src/features/today/dayWriteOutcome.ts
+  +   201  src/features/progress/renameActivity.ts
+  +   200  src/features/weekly-review/WeekReflectionCard.tsx
+  +   199  src/core/foundations/bootstrapLearnerModel.ts
+  +   198  src/features/today/TodayChecklist.tsx
+  +   195  src/features/today/dailyPlanGate.ts
+  +   193  src/core/hooks/scanAnalysis.ts
+  +   193  src/features/books/draftOwnership.ts
+  +   187  src/features/today/DayStatusRow.tsx
+  +   185  src/features/books/BookGenerateChat.tsx
+  +   185  src/features/today/todayScope.ts
+  +   184  src/core/foundations/seedLearnerModel.ts
+  +   182  src/core/utils/activityNames.ts
+  +   181  src/features/weekly-review/WeekBySubject.tsx
+  +   180  src/core/foundations/workingLevelProjection.ts
+  +   179  src/features/books/ImageRetryCard.tsx
+  +   179  src/features/books/storyGenerationFailure.ts
+  +   173  functions/src/ai/storyLevelContext.ts
+  +   173  src/features/progress/AddActivityDialog.tsx
+  +   173  src/features/weekly-review/useWeekHoursInputs.ts
+  +   170  src/features/books/customStoryTheme.ts
+  +   169  src/features/planner-chat/PlanPreviewCard.tsx
+  +   169  src/features/planner-chat/removedItemFollowUp.ts
+  +   164  src/features/today/useDayLog.ts
+  +   159  src/features/progress/reassignActivity.ts
+  +   158  src/features/books/useBackgroundReimagine.ts
+  +   158  src/features/progress/useFoundationsBootstrap.ts
+  +   157  functions/src/ai/imageTasks/imageFailure.ts
+  +   156  src/core/firebase/seedProfileChildren.ts
+  +   153  src/features/weekly-review/useWeekBySubject.ts
+  +   152  src/features/shelly-chat/useShellyChatActions.ts
+    -167  src/features/books/GenerationProgress.tsx
+    -273  src/features/books/StoryGuideQuestion.tsx
+    -287  src/features/books/useStoryGuide.ts
+    -288  functions/src/ai/tasks/monthlyHours.ts
+    -301  src/features/books/useBookGenerator.ts
+    -305  src/features/books/StoryGuidePage.tsx
+```
+
+What it groups into, for anyone reading the list rather than scanning it:
 
 - **Already covered above** — the eleven ≥1,500L files in §1.1's table account for 11 of the 84 rows
   (`PlannerChatPage.tsx` +655, `CurriculumTab.tsx` +818, `chat.ts` +410, `WorkshopPage.tsx` +305,
@@ -523,7 +683,8 @@ window's 353 non-test file changes).
   this cycle's specific positive confirmation, in the same spirit as the 08-30 report's `PatternSummary.tsx`
   bare-`0%` example.
 - **Charter preamble reach:** re-confirmed **21** task types still wired in `CHAT_TASKS`
-  (`functions/src/ai/tasks/index.ts`), unchanged count. One pre-existing, **not new**, gap re-noticed
+  (`functions/src/ai/tasks/index.ts`, now derived by `scripts/architectureAuditCensus.ts` per §1.7),
+  unchanged count. One pre-existing, **not new**, gap re-noticed
   while checking this: `analyzePatterns` (a separate, non-chat-dispatched Cloud Function per its own
   header comment — *"Context: childProfile (mapped in TASK_CONTEXT but not called — separate Cloud
   Function)"*) carries no `"charter"` slice in `TASK_CONTEXT`. This traces back to `DOC-04` (2026-06-07),
@@ -648,17 +809,35 @@ of `collectHoursContributions`/`computeHoursSummary`.
   in direct answer to this PR's own Codex round 1 (findings 1–3 below), so the next cycle inherits a
   script rather than an ad hoc pipeline.
 
-### 5.4 Codex round 1 on this PR (#1845) — four findings, all addressed in this push
+### 5.4 Codex rounds on this PR (#1845)
+
+**Round 1 — four findings, all addressed:**
 
 1. **Derive the file-size census with a committed script**, not an ad hoc `find | wc` pipeline — closed
    by `scripts/architectureAuditCensus.ts` (§5.3); §1.1 now cites it directly.
 2. **Include every file that grew >150L, not only ones crossing 1,500L** — closed by the same script's
-   `--base` sweep; §1.12 rewritten with the full 84-file result, grouped rather than narrated file-by-file.
+   `--base` sweep; §1.12 rewritten with the full 84-file result.
 3. **Re-run the zero-test-file feature inventory** — closed by the same script's feature-directory pass;
    §1.6 now carries the full 25-directory census plus the `workshop` 5.6:1 ratio finding it surfaced.
 4. **Perform the FUNC-01 six-surface mapping in full** rather than only checking `DOC-17`'s currency —
    §2.1 rewritten with the complete re-run against the decision doc's own Authority table, which surfaced
    a genuine new finding (`DOC-26` — the table is missing a seventh, now-real dimension, `learnerModels`).
+
+**Round 2 — four more findings, all addressed:**
+
+1. **`planner`'s `TeachHelperDialog.tsx` was wrongly classified as an untestable shell** — round 1's fix
+   asserted it was "already exercised through its callers' own tests" without checking; it isn't (zero
+   `.test.tsx` files reference it, including `TodayPage`'s own). §1.6 corrected: reclassified as missing
+   coverage on 467L of real AI-call/branch/error-handling logic, filed as a `TEST-04`-style candidate.
+2. **The >150L drift list was still a grouped summary, not the complete inventory** — §1.12 now pastes
+   all 84 rows verbatim from the script's own output.
+3. **`ARCH-06`/`ARCH-43`/the `CHAT_TASKS` count were still ad hoc greps** — extended
+   `scripts/architectureAuditCensus.ts` to derive all three; §1.7/§1.9/Step 3 now cite it.
+4. **The bundle section repeated the prior Three.js finding without doing the prompt's own ask** (heaviest
+   imports, routes, a concrete `React.lazy` split, an estimated reduction) — §1.5 rewritten with a real
+   measured number: a throwaway, reverted experiment (dynamic-importing `jspdf` at its two call sites)
+   shows a **−393.20 kB / −128.78 kB gzip** reduction to the main chunk, plus an explanation of why
+   `three` needs `ARCH-08` resolved first before any route split can remove it.
 
 ---
 
@@ -687,5 +866,7 @@ in its own ledger row — highest priority), then `ARCH-02`'s live-day-edit hand
 four cycles overdue), then `DOC-17` (mechanical, but rescope it to a full portal-writer resurvey given
 how much has shipped since it was filed rather than just the two originally-named rows) and `DOC-26`
 (mechanical — add the seventh `learnerModels` row to the `FUNC-01` Authority table, this cycle's own new
-finding, §2.1) together as one small docs pass, then `workshop`'s test-coverage gap (§1.6, 5.6:1
-source-to-test ratio, this cycle's own derived finding) as a `TEST-04`-style candidate.
+finding, §2.1) together as one small docs pass, then the `jspdf` point-of-use dynamic-import split
+(§1.5 — measured **−393.20 kB / −128.78 kB gzip**, two files, no design decision attached, this cycle's
+own strongest concrete bundle win), then `workshop`'s test-coverage gap and `TeachHelperDialog.tsx`'s
+untested AI-call/error paths (§1.6, both this cycle's own derived findings) as `TEST-04`-style candidates.
