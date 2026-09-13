@@ -1,5 +1,5 @@
 import { useCallback } from 'react'
-import { doc, getDoc, getDocs, query, runTransaction, setDoc, updateDoc, where } from 'firebase/firestore'
+import { doc, getDocs, query, runTransaction, setDoc, where } from 'firebase/firestore'
 
 import { useFamilyId } from '../auth/useAuth'
 import {
@@ -34,13 +34,19 @@ export type ScanConfigNoneReason =
   /** The page read fine but named no curriculum and no subject — nothing to register against. */
   | 'no-curriculum-detected'
   /**
-   * A `targetConfigId` was pinned but it does not name a config this child's
-   * scan may write — it is gone, or it belongs to the other child (`UX-403`).
+   * The document this scan resolved to is not one this child's scan may write —
+   * it is gone, or it belongs to the other child (`UX-403`).
    *
    * One reason for both, deliberately: the outcome and the advice are identical
    * (nothing was written, and retaking the photo cannot help), and the caller's
    * message for it — *"that workbook isn't there any more"* — is as true of a
    * join pointing at somebody else's document as of one pointing at none.
+   *
+   * Since `UX-416` it also covers the **fuzzy** branch, where the query's own
+   * `childId` filter was a claim about the document at query time: a row
+   * reassigned or deleted between the match and the write is refused here rather
+   * than falling through to CREATE, which would write the duplicate the match
+   * existed to prevent.
    */
   | 'target-missing'
 
@@ -85,32 +91,17 @@ export function useScanToActivityConfig() {
       const lessonNumber = detected?.lessonNumber ?? detected?.pageNumber ?? null
       const subject = mapSubjectBucket(curriculumName, detected?.provider ?? null)
 
-      // If a target config ID is provided, load it directly and skip fuzzy matching.
-      // This is used when scanning from a specific curriculum card — the user already
-      // chose the card, so no matching is needed and no duplicates can be created.
-      let existing: { id: string; ref: ReturnType<typeof doc>; data: () => ActivityConfig } | null = null
+      // ── Which document may this scan write? (resolve) ──────────────────
+      //
+      // A pinned target names it outright. Otherwise the fuzzy matcher finds it,
+      // and that query stays OUT of the transaction below because a web-SDK
+      // transaction cannot run a collection query (the `bootstrapLearnerModel`
+      // precedent). Resolving is not writing: whichever branch answers, the
+      // document is re-read and re-checked inside the transaction before a
+      // single field moves.
+      let targetId: string | null = null
       if (options.targetConfigId) {
-        const targetRef = doc(activityConfigsCollection(familyId), options.targetConfigId)
-        const targetSnap = await getDoc(targetRef)
-        if (targetSnap.exists()) {
-          const data = targetSnap.data() as ActivityConfig
-          // UX-403: the target must be THIS child's row. The id path skipped the
-          // `childId` filter the fuzzy path has always applied, so a stale join —
-          // a stamp left on a row while the header was on the other boy, which is
-          // exactly what `useActivityConfigs` not resetting its state produced —
-          // advanced the sibling's lesson count from this child's photo. A
-          // mismatch leaves `existing` null, and a pinned target that resolves to
-          // nothing bails below without creating anything.
-          const owner = data.childId
-          if (owner === childId || owner === 'both') {
-            existing = { id: targetSnap.id, ref: targetSnap.ref, data: () => data }
-          } else {
-            console.warn(
-              '[ScanToConfig] refusing a pinned target that belongs to another child',
-              { targetConfigId: options.targetConfigId },
-            )
-          }
-        }
+        targetId = options.targetConfigId
       } else {
         const configsSnap = await getDocs(
           query(
@@ -129,69 +120,116 @@ export function useScanToActivityConfig() {
             isWorkbookMatch(candidate, curriculumName, config.subjectBucket, subject),
           )
         })
-        if (match) {
-          existing = { id: match.id, ref: match.ref, data: () => match.data() as ActivityConfig }
-        }
+        targetId = match?.id ?? null
       }
 
-      if (existing) {
-        // UPDATE existing config with new position
-        const existingData = existing.data()
-        const updates: Record<string, unknown> = { updatedAt: new Date().toISOString() }
-        if (lessonNumber != null) {
-          const current = existingData.currentPosition ?? 0
-          if (lessonNumber > current) {
-            updates.currentPosition = lessonNumber
+      // ── The owner check and the position write are ONE transaction (UX-416) ──
+      //
+      // Codex round 3 on PR #1848: the `UX-403` ownership check read the target
+      // with `getDoc` and the `updateDoc` happened afterwards, so a parent using
+      // `CurriculumTab.handleReassign` in that window handed the document to the
+      // other child while the cached `childId` still passed — the scan then
+      // advanced the newly-reassigned workbook while `updateWorkingLevelFromScan`
+      // and `syncWorkbookPositionToModel` attributed it to the ORIGINAL child.
+      // The guard exists to stop exactly that, so it must not have a window.
+      //
+      // **The fuzzy branch is inside it too**, though the finding named only the
+      // pinned one: its `where('childId', 'in', …)` filter is a claim about the
+      // document *at query time* and has the identical hole one branch over —
+      // and this run has already answered that class twice (`captureRowWrite`,
+      // and the checklist patch). One lane, no second shape to find later.
+      //
+      // **No number is computed differently.** The advance-only rule, the
+      // 5-minute-floor minutes rule and `planScannedNameUpgrade` are the same
+      // expressions — they simply read the document as it stands at the write
+      // rather than as it stood at the read, which is the correction and not a
+      // new rule. Both side effects stay OUTSIDE, and fire only on a commit.
+      if (targetId) {
+        const targetRef = doc(activityConfigsCollection(familyId), targetId)
+        const outcome = await runTransaction(db, async (tx) => {
+          const snap = await tx.get(targetRef)
+          if (!snap.exists()) return { status: 'gone' as const }
+          const existingData = snap.data() as ActivityConfig
+          // UX-403's rule, re-asked against the document this write will land on.
+          const owner = existingData.childId
+          if (owner !== childId && owner !== 'both') {
+            return { status: 'not-this-child' as const }
+          }
+
+          const updates: Record<string, unknown> = { updatedAt: new Date().toISOString() }
+          if (lessonNumber != null) {
+            const current = existingData.currentPosition ?? 0
+            if (lessonNumber > current) {
+              updates.currentPosition = lessonNumber
+            }
+          }
+          // Skip when we're targeting a specific config — preserve the user's chosen name.
+          if (!options.targetConfigId) {
+            const upgrade = planScannedNameUpgrade(existingData, curriculumName)
+            if (upgrade.name != null) updates.name = upgrade.name
+            if (upgrade.curriculum != null) updates.curriculum = upgrade.curriculum
+          }
+          // Use scan's estimated minutes if current is suspiciously low (5m default)
+          const existingMinutes = existingData.defaultMinutes ?? 0
+          const estimatedMinutes = scanResult.estimatedMinutes ?? 0
+          if (existingMinutes < 10 && estimatedMinutes >= 10) {
+            updates.defaultMinutes = estimatedMinutes
+          }
+          tx.update(targetRef, updates)
+
+          return {
+            status: 'updated' as const,
+            configId: snap.id,
+            configName: (updates.name as string) ?? existingData.name,
+            // `null` when the scan did not advance the position — the side
+            // effect below keys on it, so it is carried out rather than
+            // re-derived from a document nobody is holding any more.
+            advancedTo: (updates.currentPosition as number | undefined) ?? null,
+          }
+        })
+
+        if (outcome.status === 'updated') {
+          // Update working level from curriculum scan (fire-and-forget)
+          void updateWorkingLevelFromScan(familyId, childId, lessonNumber, curriculumName, subject)
+
+          // FEAT-63 trigger 1a: fold the new position into the learner model when a
+          // bridge matches this workbook. Fire-and-forget, learnerModels-only; a no
+          // bridge / uncurated lesson mapping is a silent no-op (see the diag sync).
+          // Only sync when the position ACTUALLY ADVANCED — scanning an older page
+          // leaves the config at its higher position, so syncing the lower lesson
+          // would replace a source's evidence with an earlier unit and log a
+          // misleading change (positions are advance-only here).
+          if (outcome.advancedTo != null) {
+            void syncWorkbookPositionToModel(
+              familyId,
+              childId,
+              {
+                workbookName: curriculumName,
+                position: outcome.advancedTo,
+                via: 'scan',
+              },
+              new Date().toISOString(),
+            )
+          }
+
+          return {
+            action: 'updated',
+            configId: outcome.configId,
+            configName: outcome.configName,
+            position: lessonNumber,
           }
         }
-        // Skip when we're targeting a specific config — preserve the user's chosen name.
-        if (!options.targetConfigId) {
-          const upgrade = planScannedNameUpgrade(existingData, curriculumName)
-          if (upgrade.name != null) updates.name = upgrade.name
-          if (upgrade.curriculum != null) updates.curriculum = upgrade.curriculum
-        }
-        // Use scan's estimated minutes if current is suspiciously low (5m default)
-        const existingMinutes = existingData.defaultMinutes ?? 0
-        const estimatedMinutes = scanResult.estimatedMinutes ?? 0
-        if (existingMinutes < 10 && estimatedMinutes >= 10) {
-          updates.defaultMinutes = estimatedMinutes
-        }
-        await updateDoc(existing.ref, updates)
 
-        // Update working level from curriculum scan (fire-and-forget)
-        void updateWorkingLevelFromScan(familyId, childId, lessonNumber, curriculumName, subject)
-
-        // FEAT-63 trigger 1a: fold the new position into the learner model when a
-        // bridge matches this workbook. Fire-and-forget, learnerModels-only; a no
-        // bridge / uncurated lesson mapping is a silent no-op (see the diag sync).
-        // Only sync when the position ACTUALLY ADVANCED (`updates.currentPosition`
-        // is set) — scanning an older page leaves the config at its higher position,
-        // so syncing the lower lesson would replace a source's evidence with an
-        // earlier unit and log a misleading change (positions are advance-only here).
-        if (updates.currentPosition != null) {
-          void syncWorkbookPositionToModel(
-            familyId,
-            childId,
-            {
-              workbookName: curriculumName,
-              position: updates.currentPosition as number,
-              via: 'scan',
-            },
-            new Date().toISOString(),
+        if (outcome.status === 'not-this-child') {
+          console.warn(
+            '[ScanToConfig] refusing a target that belongs to another child',
+            { targetConfigId: targetId },
           )
         }
-
-        return {
-          action: 'updated',
-          configId: existing.id,
-          configName: (updates.name as string) ?? existingData.name,
-          position: lessonNumber,
-        }
-      }
-
-      // If a target config ID was provided but the doc didn't exist, bail.
-      // Don't create a new doc — that would defeat the purpose of targeting.
-      if (options.targetConfigId) {
+        // Nothing was written. A pinned target that resolves to nothing must NOT
+        // fall through to CREATE — that would defeat the purpose of targeting —
+        // and neither may a fuzzy match that was reassigned or deleted under us,
+        // because creating there would write the duplicate the match prevented.
         return { action: 'none', reason: 'target-missing' }
       }
 
