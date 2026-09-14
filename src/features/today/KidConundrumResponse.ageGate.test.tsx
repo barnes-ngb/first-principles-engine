@@ -48,7 +48,14 @@ const ROWAN = { id: 'c-rowan', name: 'Rowan', birthdate: '2015-04-04' } as Child
 const MAEVE = { id: 'c-maeve', name: 'Maeve', birthdate: '2020-04-04' } as Child
 
 function renderFor(child: Child) {
-  render(<KidConundrumResponse conundrum={CONUNDRUM} child={child} familyId="f1" />)
+  render(
+    <KidConundrumResponse
+      conundrum={CONUNDRUM}
+      child={child}
+      familyId="f1"
+      dayKey="2026-09-14"
+    />,
+  )
 }
 
 describe('KidConundrumResponse — the flow follows the age group (B3)', () => {

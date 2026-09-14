@@ -258,6 +258,13 @@ export default function TodayPage() {
   const [strandSessionSaving, setStrandSessionSaving] = useState(false)
   const [strandSessionError, setStrandSessionError] = useState<string | null>(null)
   const [todayArtifacts, setTodayArtifacts] = useState<Artifact[]>([])
+  /**
+   * The artifact read dropped (UX-431). A failed read is never rendered as an
+   * affirmative empty result — *"Nothing captured yet today"* over a query that
+   * did not land is the worst thing a records surface can say, and the snackbar
+   * that already reports it is gone within four seconds.
+   */
+  const [todayArtifactsFailed, setTodayArtifactsFailed] = useState(false)
   const [energy, setEnergy] = useState<EnergyLevel>(EnergyLevel.Normal)
   const [planType, setPlanType] = useState<PlanType>(PlanType.Normal)
   const [teachHelperItem, setTeachHelperItem] = useState<ChecklistItemType | null>(null)
@@ -661,7 +668,20 @@ export default function TodayPage() {
     today,
     dayLog,
     onMessage: setSnackMessage,
-    onArtifactCreated: (artifact) => setTodayArtifacts((prev) => [artifact, ...prev]),
+    onArtifactCreated: (artifact) => {
+      // The optimistic append is what makes a capture feel instant.
+      setTodayArtifacts((prev) => [artifact, ...prev])
+      // …and the re-read is what settles the FAILED flag (UX-441, Codex round
+      // 3). Without it, a day whose first read dropped stayed behind the
+      // load-error line forever: `TodayEvidenceList` returns that line ahead of
+      // any row it holds, so a note the parent had just saved was appended to a
+      // list nobody could see. Clearing the flag on the append alone would be
+      // the wrong repair — one local row is not a faithful picture of the day,
+      // and claiming it is would be this surface's one rule broken from the
+      // inside. A read that succeeds clears it truthfully; one that fails again
+      // leaves the honest message standing.
+      loadTodayArtifacts()
+    },
     configs: activityConfigs,
     configsState: activityConfigsState,
   })
@@ -965,41 +985,78 @@ export default function TodayPage() {
     [saveDailyPlan, energy, planType, reportPlanSave, selectedChildId, today],
   )
 
-  // Load artifacts scoped to child + date (reload when child changes)
+  // ── The day's evidence: one loader, two callers (UX-431 / UX-438) ─────────
+  //
+  // Extracted from the effect into a `useCallback` on Codex round 2 (P2), so
+  // the Today-side writers that do NOT go through `useUnifiedCapture` can ask
+  // for a refresh. `UX-436` made a teach-back note, a conundrum note and a
+  // chapter recording ELIGIBLE for the evidence list; a section that is
+  // eligible but stale until a page reload is a list that quietly lies about
+  // the day, which is worse than the omission it replaced.
+  //
+  // A re-READ rather than an optimistic append: it is one round trip on a save
+  // the parent just tapped, and it cannot drift from what was stored. It is
+  // also what `KidTodayView` has done since `UX-359`, so the two halves of this
+  // page refresh the same way.
+  //
+  // Scoped by a ref rather than by a per-effect `isMounted` flag, for the same
+  // reason `KidTodayView` is: a reload fired by a save can resolve AFTER the
+  // parent has changed child or date, and a list belonging to another scope
+  // must never be presented as this one's.
+  const artifactScope = `${familyId}|${selectedChildId}|${today}`
+  const artifactScopeRef = useRef(artifactScope)
   useEffect(() => {
+    artifactScopeRef.current = artifactScope
+  }, [artifactScope])
+
+  const loadTodayArtifacts = useCallback(() => {
     if (!selectedChildId) {
       setTodayArtifacts([])
+      setTodayArtifactsFailed(false)
       return
     }
-    let isMounted = true
-
-    const loadArtifacts = async () => {
-      try {
-        const q = query(
-          artifactsCollection(familyId),
-          where('dayLogId', '==', today),
-          where('childId', '==', selectedChildId),
-        )
-        const snapshot = await getDocs(q)
-        if (!isMounted) return
+    const scope = `${familyId}|${selectedChildId}|${today}`
+    const q = query(
+      artifactsCollection(familyId),
+      where('dayLogId', '==', today),
+      where('childId', '==', selectedChildId),
+    )
+    getDocs(q)
+      .then((snapshot) => {
+        if (artifactScopeRef.current !== scope) return
+        // `docSnapshot.data()` CARRIES THE DOCUMENT ID, and deliberately does
+        // not have `snapshot.id` spread over it (Codex round 1 read this as a
+        // missing id). `artifactsCollection` is `withConverter(artifactConverter)`
+        // (`core/firebase/firestore.ts`), whose `fromFirestore` returns
+        // `{ ...data, id: data.id ?? snapshot.id }`, and `query()` preserves a
+        // collection's converter — which is also why `resolveDisplayPhotos`'s
+        // `a.id === item.evidenceArtifactId` match already works in production
+        // for the *Captured* chip, off this very array. Adding `id: d.id` here
+        // would not be belt-and-braces, it would DIVERGE from the converter,
+        // which prefers a stored `id` field over the document key.
         const loadedArtifacts = snapshot.docs
           .map((docSnapshot) => docSnapshot.data())
           .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
         setTodayArtifacts(loadedArtifacts)
-      } catch (err) {
+        setTodayArtifactsFailed(false)
+      })
+      .catch((err) => {
+        if (artifactScopeRef.current !== scope) return
         console.error('Failed to load artifacts', err)
-        if (isMounted) {
-          setSnackMessage({ text: 'Could not load artifacts.', severity: 'error' })
-        }
-      }
-    }
-
-    loadArtifacts()
-
-    return () => {
-      isMounted = false
-    }
+        // The list is CLEARED as well as flagged (UX-431). Stamping a failure
+        // over the previous child's or previous day's array would present
+        // stale records as this day's — `KidTodayView`'s own scope guard
+        // learned that on Codex round 2, and `FIX-235` learned it again about
+        // `useActivityConfigs`.
+        setTodayArtifacts([])
+        setTodayArtifactsFailed(true)
+        setSnackMessage({ text: 'Could not load artifacts.', severity: 'error' })
+      })
   }, [familyId, today, selectedChildId, setSnackMessage])
+
+  useEffect(() => {
+    loadTodayArtifacts()
+  }, [loadTodayArtifacts])
 
   // --- Print materials handler ---
 
@@ -1630,6 +1687,8 @@ export default function TodayPage() {
             weekFocus={weekFocus}
             familyId={familyId}
             selectedChildId={selectedChildId}
+            today={today}
+            onArtifactSaved={loadTodayArtifacts}
             onSnackMessage={handleSnackMessage}
           />
         </SectionErrorBoundary>
@@ -1684,6 +1743,7 @@ export default function TodayPage() {
             selectedChildId={selectedChildId}
             today={today}
             persistDayLogImmediate={persistDayLogImmediate}
+            onArtifactSaved={loadTodayArtifacts}
             onSnackMessage={handleSnackMessage}
           />
         </SectionErrorBoundary>
@@ -1705,6 +1765,9 @@ export default function TodayPage() {
           selectableChildren={selectableChildren}
           todayArtifacts={todayArtifacts}
           setTodayArtifacts={setTodayArtifacts}
+          todayChecklist={dayLog?.checklist ?? []}
+          artifactsFailed={todayArtifactsFailed}
+          familyTimeZone={selectedChild?.settings?.timeZone}
           onSnackMessage={handleSnackMessage}
         />
       </SectionErrorBoundary>

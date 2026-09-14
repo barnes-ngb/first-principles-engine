@@ -25,6 +25,12 @@ interface TeachBackSectionProps {
   selectedChildId: string
   today: string
   persistDayLogImmediate: (updated: DayLog) => void
+  /**
+   * Refresh *Today's evidence* after this note lands (UX-438). `UX-436` made
+   * this write eligible for that list; without the refresh it would not appear
+   * until a page reload, which is a list quietly lying about the day.
+   */
+  onArtifactSaved?: () => void
   onSnackMessage: (msg: { text: string; severity: 'success' | 'error' }) => void
 }
 
@@ -36,6 +42,7 @@ export default function TeachBackSection({
   selectedChildId,
   today,
   persistDayLogImmediate,
+  onArtifactSaved,
   onSnackMessage,
 }: TeachBackSectionProps) {
   const [teachBackText, setTeachBackText] = useState('')
@@ -85,11 +92,19 @@ export default function TeachBackSection({
                 childId: selectedChildId,
                 title: `Teach-back ${today}`,
                 type: EvidenceType.Note,
+                // UX-436 — a Today door stamps the day it was captured on.
+                // Without it this record could never reach *Today's evidence*
+                // (UX-431), whose whole claim is that it holds everything the
+                // day produced. Additive, one existing optional field, no
+                // migration, no number: `dayLogId` is what every other capture
+                // door on this screen already writes.
+                dayLogId: today,
                 tags: { engineStage: EngineStage.Explain, subjectBucket: SubjectBucket.Other, domain: 'speech', location: LearningLocation.Home },
                 content: `Teach-back: ${teachBackText.trim()}`,
                 createdAt: new Date().toISOString(),
               })
               persistDayLogImmediate({ ...dayLog, teachBackDone: true })
+              onArtifactSaved?.()
               setTeachBackSaved(true)
               onSnackMessage({
                 text: `${selectedChild.name} explained something to ${recipient.name}!`,

@@ -8,8 +8,6 @@ import DialogTitle from '@mui/material/DialogTitle'
 import Divider from '@mui/material/Divider'
 import IconButton from '@mui/material/IconButton'
 import Link from '@mui/material/Link'
-import List from '@mui/material/List'
-import ListItem from '@mui/material/ListItem'
 import MenuItem from '@mui/material/MenuItem'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
@@ -25,7 +23,6 @@ import { Link as RouterLink } from 'react-router-dom'
 import AudioRecorder from '../../components/AudioRecorder'
 import PhotoCapture from '../../components/PhotoCapture'
 import SectionCard from '../../components/SectionCard'
-import { EmptyState } from '../../components/states'
 import { kidPalette } from '../../app/tokens'
 import {
   artifactsCollection,
@@ -35,7 +32,7 @@ import {
   generateFilename,
   uploadArtifactFile,
 } from '../../core/firebase/upload'
-import type { Artifact, Child } from '../../core/types'
+import type { Artifact, ChecklistItem, Child } from '../../core/types'
 import {
   EngineStage,
   EvidenceType,
@@ -55,6 +52,8 @@ import {
 // takes it: a KID opening Today must not seed or migrate anything, which
 // `useActivityConfigs` would.
 import { useChatActivityConfigs } from '../shelly-chat/useChatActivityConfigs'
+import TodayEvidenceList from './TodayEvidenceList'
+import { EvidenceAudience, evidenceCopy } from './todayEvidence'
 
 const MAX_DURATION_MINUTES = 240
 const DURATION_STEP = 5
@@ -112,6 +111,24 @@ interface UnifiedCaptureCardProps {
   selectableChildren: Child[]
   todayArtifacts: Artifact[]
   setTodayArtifacts: React.Dispatch<React.SetStateAction<Artifact[]>>
+  /**
+   * The live day's checklist, so the evidence list below can say WHICH ROW each
+   * piece of evidence belongs to (UX-431). Optional and absent-able: a day with
+   * no document yet has none, and the list says *(not attached to a row)*
+   * rather than asserting anything about a list it was not handed.
+   */
+  todayChecklist?: ChecklistItem[]
+  /**
+   * The artifact read dropped. A failed read is never rendered as an empty day
+   * (UX-431) — the house rule, stated in four places on the weekly review.
+   */
+  artifactsFailed?: boolean
+  /**
+   * The family's own `FamilySettings.timeZone` (Codex round 1, P2) — the clock
+   * the evidence list reads each stamp in. Absent or unparseable falls back to
+   * the app's default inside `resolveFamilyTimeZone`.
+   */
+  familyTimeZone?: string
   onSnackMessage: (msg: { text: string; severity: 'success' | 'error' }) => void
   /** 'parent' (default) — full form. 'kid' — chip-required, +/- duration, audio-only note. */
   variant?: Variant
@@ -127,6 +144,9 @@ export default function UnifiedCaptureCard({
   selectableChildren,
   todayArtifacts,
   setTodayArtifacts,
+  todayChecklist = [],
+  artifactsFailed = false,
+  familyTimeZone,
   onSnackMessage,
   variant = 'parent',
   activeChild,
@@ -823,8 +843,28 @@ export default function UnifiedCaptureCard({
         </Stack>
       </SectionCard>
 
+      {/*
+        UX-431 — *Today's evidence*: every artifact the day produced, with the
+        time it was added and the row it belongs to.
+
+        This section used to be titled *Artifacts* — the data model's word, not
+        a parent's — and drew a title, a type chip and media for `Photo` and
+        `Audio` only, so a note, a captured video link and a scanned page each
+        rendered as a bare line with nothing under it, and nothing anywhere said
+        WHEN. Owner, 2026-09-13: *"We should include any artifacts, not just the
+        pictures, but the time that they were added, details."*
+
+        It is UPGRADED IN PLACE rather than joined by a second list below it.
+        There were already two lists of the same records on this page (this one
+        and Kid Today's inventory); adding a third would be the duplication
+        `FEAT-237` removed from this very screen one run earlier. Both render
+        `TodayEvidenceList` now, so they cannot show different subsets again.
+
+        Read-only: no write, no delete, no edit. Removing a piece of evidence
+        from here is filed as `UX-433`, not built.
+      */}
       {!isKid && (
-        <SectionCard title="Artifacts">
+        <SectionCard title={evidenceCopy(EvidenceAudience.Parent).title}>
           <Stack spacing={2}>
             <Link
               component={RouterLink}
@@ -834,43 +874,13 @@ export default function UnifiedCaptureCard({
             >
               View all work in Portfolio →
             </Link>
-            {todayArtifacts.length === 0 ? (
-              // UX-24: EmptyState's own convention is "Nothing here yet", never
-              // "No data" — and "artifacts" is the data model's word, not a
-              // parent's.
-              <EmptyState title="Nothing captured yet today." />
-            ) : (
-              <List dense>
-                {todayArtifacts.map((artifact) => (
-                  <ListItem key={artifact.id ?? artifact.title} disableGutters>
-                    <Stack spacing={1} sx={{ width: '100%' }}>
-                      <Stack direction="row" spacing={1} alignItems="center">
-                        <Typography variant="body2">{artifact.title}</Typography>
-                        <Chip size="small" label={artifact.type} />
-                      </Stack>
-                      {artifact.type === EvidenceType.Photo && artifact.uri && (
-                        <Box
-                          component="img"
-                          src={artifact.uri}
-                          alt={artifact.title}
-                          sx={{
-                            width: '100%',
-                            maxHeight: 180,
-                            objectFit: 'contain',
-                            borderRadius: 1,
-                            border: '1px solid',
-                            borderColor: 'divider',
-                          }}
-                        />
-                      )}
-                      {artifact.type === EvidenceType.Audio && artifact.uri && (
-                        <Box component="audio" controls src={artifact.uri} sx={{ width: '100%' }} />
-                      )}
-                    </Stack>
-                  </ListItem>
-                ))}
-              </List>
-            )}
+            <TodayEvidenceList
+              artifacts={todayArtifacts}
+              checklist={todayChecklist}
+              audience={EvidenceAudience.Parent}
+              failed={artifactsFailed}
+              timeZone={familyTimeZone}
+            />
           </Stack>
         </SectionCard>
       )}

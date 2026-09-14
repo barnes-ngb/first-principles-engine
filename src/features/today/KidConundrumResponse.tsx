@@ -34,12 +34,29 @@ interface KidConundrumResponseProps {
   }
   child: Child
   familyId: string
+  /**
+   * The day on screen, `YYYY-MM-DD` (UX-440, Codex round 3). A kid can be on
+   * `/today?date=…`, so a record belongs to the day being recorded rather than
+   * to the device's clock — which is also the day the refresh queries, so a
+   * `todayKey()` stamp would misfile the record AND make it vanish the instant
+   * it was saved. `KidTodayView` already holds this value; unlike
+   * `KidChapterPool` this component is handed no `dayLog` to read it from.
+   */
+  dayKey: string
+  /**
+   * Refresh *Today's evidence* after an answer or a drawing lands (UX-438).
+   * `UX-436` made these writes eligible for that list; without the refresh they
+   * would not appear until a page reload.
+   */
+  onArtifactSaved?: () => void
 }
 
 export default function KidConundrumResponse({
   conundrum,
   child,
   familyId,
+  dayKey,
+  onArtifactSaved,
 }: KidConundrumResponseProps) {
   // FEAT-183 / UX-152 (B3): which response flow a kid gets is an age question.
   // The audio + quick-picks flow below is for a reader; the listen + picks +
@@ -124,6 +141,15 @@ export default function KidConundrumResponse({
       await addDoc(artifactsCollection(familyId), {
         childId: child.id,
         type: EvidenceType.Audio,
+        // UX-436 — a Today door stamps the day it was captured on. Without it
+        // this record could never reach *Today's evidence* (UX-431), whose whole
+        // claim is that it holds everything the day produced. Additive, one
+        // existing optional field, no migration, no number — `dayLogId` is what
+        // every other capture door on this screen already writes. A LOCAL civil
+        // date rather than the UTC slice beside it: this is a stored
+        // record's date, which is `UX-412`'s distinction exactly — and the
+        // DISPLAYED day rather than the device's (UX-440).
+        dayLogId: dayKey,
         tags: {
           engineStage: EngineStage.Wonder,
           subjectBucket: SubjectBucket.Other,
@@ -132,9 +158,21 @@ export default function KidConundrumResponse({
         },
         title: `Conundrum: ${conundrum.title}`,
         content,
-        ...(mediaUrl ? { mediaUrl } : {}),
+        // UX-437 — the uploaded address is written to `mediaUrls` (and `uri`
+        // as the cover), the two fields `Artifact` actually declares. It used
+        // to be written to `mediaUrl`, singular, which is on no type and is
+        // read by nothing — so the recording was uploaded to Storage and then
+        // thrown away from the record's point of view, leaving a media-typed
+        // artifact with no address at all. That is `artifact-media-missing`
+        // (`UX-387`), and `UX-432` is what finally made it visible: the new
+        // evidence list would have said *(no file)* over audio that exists.
+        // Rows already written stay as they are — a data repair is its own run.
+        ...(mediaUrl ? { uri: mediaUrl, mediaUrls: [mediaUrl] } : {}),
         createdAt: new Date().toISOString(),
       })
+
+      // UX-438 — this answer is now part of *What you did today*, so tell the list.
+      onArtifactSaved?.()
 
       // Award 5 XP for conundrum response
       const conundrumDate = new Date().toISOString().slice(0, 10)
@@ -159,7 +197,7 @@ export default function KidConundrumResponse({
       setSaveError("Hmm, that didn't save. Check your connection and try again.")
     }
     setSavingConundrum(false)
-  }, [conundrumAudioBlob, familyId, child.id, conundrum, selectedPick])
+  }, [conundrumAudioBlob, familyId, child.id, conundrum, selectedPick, dayKey, onArtifactSaved])
 
   const handleConundrumPhoto = useCallback(async (file: File) => {
     try {
@@ -175,10 +213,20 @@ export default function KidConundrumResponse({
         },
         title: `Conundrum Drawing: ${conundrum.title}`,
         content: conundrum.londonDrawingPrompt ?? conundrum.question,
+        // UX-436 / UX-440 — see the audio path above: a Today door stamps the
+        // day being displayed.
+        dayLogId: dayKey,
         createdAt: new Date().toISOString(),
       })
       const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, file, filename)
-      await updateDoc(docRef, { mediaUrl: downloadUrl })
+      // UX-437 — `uri` + `mediaUrls`, the fields `Artifact` declares. This was
+      // `mediaUrl`, which no type carries and no reader reads, so a drawing a
+      // six-year-old uploaded reached his portfolio as an artifact with no
+      // picture on it.
+      await updateDoc(docRef, { uri: downloadUrl, mediaUrls: [downloadUrl] })
+
+      // UX-438 — the drawing is now part of *What you did today*.
+      onArtifactSaved?.()
 
       // Award 5 XP for conundrum drawing
       const conundrumDate = new Date().toISOString().slice(0, 10)
@@ -203,7 +251,7 @@ export default function KidConundrumResponse({
       console.error('Conundrum photo save failed:', err)
       setSaveError("Hmm, that didn't save. Check your connection and try again.")
     }
-  }, [familyId, child.id, conundrum])
+  }, [familyId, child.id, conundrum, dayKey, onArtifactSaved])
 
   // Older child: audio + quick picks response
   if (isOlder) {

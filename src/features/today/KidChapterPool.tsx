@@ -64,6 +64,12 @@ interface KidChapterPoolProps {
   dayLog: DayLog
   weekFocus?: { theme?: string; virtue?: string; scriptureRef?: string } | null
   /**
+   * Refresh *Today's evidence* after a recording lands (UX-438). `UX-436` made
+   * this write eligible for that list; without the refresh it would not appear
+   * until a page reload, which is a list quietly lying about the day.
+   */
+  onArtifactSaved?: () => void
+  /**
    * UX-355, Codex round 1 (P1) — this now ANSWERS instead of throwing, so every
    * caller below must read the outcome before it discards the boy's recording.
    * `useBookProgress.updateChapter` used to reject, and the `catch` blocks in
@@ -84,6 +90,7 @@ export default function KidChapterPool({
   childId,
   dayLog,
   weekFocus,
+  onArtifactSaved,
   onChapterAnswered,
 }: KidChapterPoolProps) {
   const [recordingChapter, setRecordingChapter] = useState<number | null>(null)
@@ -126,6 +133,19 @@ export default function KidChapterPool({
       const artifactRef = await addDoc(artifactsCollection(familyId), {
         childId,
         type: EvidenceType.Audio,
+        // UX-436 — a Today door stamps the day it was captured on. Without it
+        // this record could never reach *Today's evidence* (UX-431), whose whole
+        // claim is that it holds everything the day produced. Additive, one
+        // existing optional field, no migration, no number — `dayLogId` is what
+        // every other capture door on this screen already writes. The DISPLAYED
+        // day (`dayLog.date`), not `todayKey()` (UX-440, Codex round 3): a kid
+        // can be on `/today?date=…`, so a record belongs to the day being
+        // recorded rather than to the device's clock — which is also the day
+        // the refresh queries, so a mis-stamped record would vanish the instant
+        // it was saved. Read off the day log this component is already handed,
+        // rather than as a new prop, so there is nothing for a caller to pass
+        // wrongly.
+        dayLogId: dayLog.date,
         tags: {
           engineStage: EngineStage.Reflect,
           subjectBucket: SubjectBucket.Reading,
@@ -155,6 +175,11 @@ export default function KidChapterPool({
         scripture: weekFocus?.scriptureRef ?? '',
         createdAt: new Date().toISOString(),
       })
+
+      // UX-438 — the recording is now part of *What you did today*, so tell the
+      // list. Fired after BOTH writes land and before the chapter is marked,
+      // so a failure below leaves the evidence visible rather than hidden.
+      onArtifactSaved?.()
 
       // Mark answered globally
       const outcome = await onChapterAnswered(item.chapter, {
@@ -186,7 +211,7 @@ export default function KidChapterPool({
       setSaveError("Hmm, that didn't save. Check your connection and try again.")
     }
     setSavingChapter(null)
-  }, [chapterBlobs, familyId, childId, bookProgress.bookId, book.title, weekFocus, onChapterAnswered])
+  }, [chapterBlobs, familyId, childId, bookProgress.bookId, book.title, dayLog.date, weekFocus, onArtifactSaved, onChapterAnswered])
 
   const handleDeleteResponse = useCallback(
     async (item: ChapterQuestionPoolItem) => {
