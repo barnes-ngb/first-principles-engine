@@ -53,3 +53,31 @@ describe('every weekly-review write is a merge', () => {
     }
   })
 })
+
+/**
+ * UX-409 — the hours on this page are folded LIVE, never read off the document.
+ *
+ * The weekly run now records the week's counted minutes onto the review
+ * (`hoursSummary`), because a record that cannot say what the narrative was
+ * written from cannot answer whether the run happened at all. That is a stamped
+ * reading, and a stamped reading rendered beside a live fold is two numbers for
+ * one week — the exact failure UX-211 and the whole *Hours and Coverage* design
+ * exist to prevent. A parent's hours must reconcile with the Records page and
+ * the compliance pack, which fold live and cannot read this document.
+ *
+ * So the rule is structural: nothing in this directory may read the field.
+ */
+describe('the page never reads the recorded hours off the review (UX-409)', () => {
+  it('folds live instead — no file here mentions hoursSummary', () => {
+    for (const { file, text } of sources()) {
+      expect(text, `${file} reads the stored hours summary`).not.toMatch(
+        /\bhoursSummary\b/,
+      )
+    }
+  })
+
+  it('and the live fold is still the one it uses', () => {
+    const section = readFileSync(join(DIR, 'WeekPaceSection.tsx'), 'utf8')
+    expect(section).toMatch(/useWeekHours/)
+  })
+})

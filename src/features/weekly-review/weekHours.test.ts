@@ -11,7 +11,13 @@ import {
   REVIEW_SAVE_TIME_ZONE,
   hoursLoggedLine,
   msUntilPositionsDue,
+  narrativeFailed,
+  narrativeFailureLine,
   positionsPendingLine,
+  reviewHasNarrative,
+  NARRATIVE_FAILED_LINE,
+  NARRATIVE_STALE_LINE,
+  reviewWasGenerated,
 } from './weekHours'
 
 describe('hoursLoggedLine (UX-211)', () => {
@@ -196,5 +202,87 @@ describe('msUntilPositionsDue', () => {
     const ms = msUntilPositionsDue('not-a-week', now)
     expect(positionsPendingLine('not-a-week', now)).toBe(POSITIONS_PENDING_LINE)
     if (ms !== null) expect(ms).toBeGreaterThan(0)
+  })
+})
+
+// ── UX-409: the fourth state ────────────────────────────────────────────────
+
+describe('narrativeFailed', () => {
+  it('is true for a week whose model call failed', () => {
+    expect(
+      narrativeFailed({ narrativeError: { message: '429 rate limit', at: 'x' } }),
+    ).toBe(true)
+  })
+
+  it('is false once a narrative lands — the run writes null, not a delete', () => {
+    expect(narrativeFailed({ narrativeError: null })).toBe(false)
+  })
+
+  it('is false on every review written before UX-409', () => {
+    expect(narrativeFailed({})).toBe(false)
+    expect(narrativeFailed(null)).toBe(false)
+  })
+
+  it('narrows structurally — this reads an unvalidated document', () => {
+    expect(narrativeFailed({ narrativeError: 'boom' } as never)).toBe(false)
+    expect(narrativeFailed({ narrativeError: { at: 'x' } } as never)).toBe(false)
+  })
+})
+
+describe('reviewWasGenerated counts the record, not the prose (UX-409)', () => {
+  it('is true for a week recorded before its narrative was asked for', () => {
+    // The positions ARE saved on a `snapshot-only` week — which is the only
+    // question this predicate gates. Whether the prose arrived has its own
+    // sentence.
+    expect(reviewWasGenerated({ status: 'snapshot-only' })).toBe(true)
+  })
+
+  it('is still false for a document a parent created by answering', () => {
+    expect(reviewWasGenerated({})).toBe(false)
+    expect(reviewWasGenerated(null)).toBe(false)
+  })
+})
+
+describe('narrativeFailureLine — a failed regenerate is not a missing week', () => {
+  const failed = { narrativeError: { message: 'x', at: 'y' } }
+
+  it('says nothing when the narrative landed', () => {
+    expect(narrativeFailureLine({ narrativeError: null, summary: 'Steady week.' })).toBeNull()
+    expect(narrativeFailureLine(null)).toBeNull()
+  })
+
+  it('claims the week is missing from the book only when it holds nothing', () => {
+    expect(narrativeFailureLine(failed)).toBe(NARRATIVE_FAILED_LINE)
+    expect(narrativeFailureLine({ ...failed, summary: '', wins: [] })).toBe(
+      NARRATIVE_FAILED_LINE,
+    )
+  })
+
+  it('says the book will use the earlier one when a narrative still stands', () => {
+    // `writeWeekRecord` leaves a standing draft/reviewed/applied narrative
+    // alone, and the monthly book goes on reading it — so the missing-from-the-
+    // book claim would be false here, in the one direction that matters.
+    expect(narrativeFailureLine({ ...failed, summary: 'Steady week.' })).toBe(
+      NARRATIVE_STALE_LINE,
+    )
+    expect(narrativeFailureLine({ ...failed, wins: ['Phonics'] })).toBe(
+      NARRATIVE_STALE_LINE,
+    )
+  })
+
+  it('asks the same question the monthly book asks', () => {
+    // `loadWeeklyReviewsForMonth` keeps a row when celebration, summary, wins or
+    // growth areas carry anything. A claim here about what the book contains is
+    // derived from that rule, not from a second guess at it.
+    expect(reviewHasNarrative({ celebration: 'He read a chapter.' })).toBe(true)
+    expect(reviewHasNarrative({ growthAreas: ['Fluency'] })).toBe(true)
+    expect(reviewHasNarrative({ celebration: '   ', summary: '', wins: [] })).toBe(false)
+    expect(reviewHasNarrative({})).toBe(false)
+    expect(reviewHasNarrative(null)).toBe(false)
+  })
+
+  it('narrows structurally, like everything else reading this document', () => {
+    expect(reviewHasNarrative({ wins: 'Phonics' } as never)).toBe(false)
+    expect(narrativeFailureLine({ narrativeError: 'boom' } as never)).toBeNull()
   })
 })

@@ -442,6 +442,70 @@ function sourcesUnder(dir: string): { file: string; text: string }[] {
   return out
 }
 
+describe('the fourth state — the record landed, the narrative did not (UX-409)', () => {
+  /** A week the run recorded before its model call failed. */
+  const snapshotOnly = (curriculumPositions?: CurriculumSnapshot): WeeklyReview =>
+    ({
+      childId: 'c1',
+      weekKey: '2026-08-30',
+      status: 'snapshot-only',
+      curriculumPositions,
+      narrativeError: { message: '429 rate limit', at: '2026-09-06T05:15:00.000Z' },
+    }) as unknown as WeeklyReview
+
+  it('says the summary is missing, and that the numbers above are not', () => {
+    renderWithReview(snapshotOnly(snapshot(SEP_07, 14)))
+    expect(
+      screen.getByText(
+        'This week’s summary didn’t finish generating, so it won’t be part of the monthly book. Everything above is read live and isn’t affected.',
+      ),
+    ).toBeInTheDocument()
+    expect(screen.getByText('4.8 hours logged this week.')).toBeInTheDocument()
+  })
+
+  it('does not also claim the positions are missing — they are not', () => {
+    const { container } = renderWithReview(snapshotOnly(snapshot(SEP_07, 14)), [
+      snapshot(AUG_17, 10),
+    ])
+    expect(container.textContent).not.toMatch(/saved overnight, once Saturday is over/)
+    expect(container.textContent).not.toMatch(/No workbook positions were saved/)
+  })
+
+  it('never shows the operator’s own error text to a parent', () => {
+    const { container } = renderWithReview(snapshotOnly(snapshot(SEP_07, 14)))
+    expect(container.textContent).not.toMatch(/429/)
+    expect(container.textContent).not.toMatch(/rate limit/)
+  })
+
+  it('does NOT claim the week is missing from the book when a summary stands', () => {
+    // A failed regenerate leaves the earlier narrative in place and the monthly
+    // book goes on reading it (Codex round 2).
+    renderWithReview({
+      ...snapshotOnly(snapshot(SEP_07, 14)),
+      status: 'draft',
+      summary: 'Steady week.',
+    } as unknown as WeeklyReview)
+    expect(
+      screen.getByText(
+        'This week’s summary couldn’t be refreshed, so the monthly book will use the earlier one. Everything above is read live and isn’t affected.',
+      ),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/won’t be part of the monthly book/)).not.toBeInTheDocument()
+  })
+
+  it('says nothing on a week whose narrative landed', () => {
+    const { container } = renderSection(snapshot(SEP_07, 14))
+    expect(container.textContent).not.toMatch(/didn’t finish generating/)
+  })
+
+  it('says nothing when the review itself could not be read', () => {
+    // A failed read is not a failed narrative — that sentence is already taken.
+    const { container } = renderWithReview(null, [], { reviewFailed: true })
+    expect(container.textContent).not.toMatch(/didn’t finish generating/)
+    expect(container.textContent).toMatch(/Couldn’t read this week’s review/)
+  })
+})
+
 describe('the parent-only rate reaches no kid-facing surface', () => {
   it('is imported nowhere under the kid feature directories', () => {
     for (const name of KID_SURFACE_DIRS) {
