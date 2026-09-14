@@ -23,7 +23,6 @@ import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 import { addDoc, doc, getDoc, getDocs, orderBy, query, setDoc, updateDoc, where } from 'firebase/firestore'
 
-import ChildSelector from '../../components/ChildSelector'
 import Page from '../../components/Page'
 import { LoadingState, ErrorState } from '../../components/states'
 import { useAI, TaskType } from '../../core/ai/useAI'
@@ -169,7 +168,9 @@ export default function EvaluateChatPage() {
   const familyId = useFamilyId()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const { activeChildId, activeChild, children, setActiveChildId } = useActiveChild()
+  // UX-425: this page no longer chooses or adds a child — it reads the active
+  // one. The shell's chip is the one control that changes it.
+  const { activeChildId, activeChild } = useActiveChild()
   const { chat, analyzePatterns, loading: aiLoading, error: aiError } = useAI()
 
   const [domain, setDomain] = useState<EvaluationDomain>(EvaluationDomain.Reading)
@@ -800,11 +801,9 @@ export default function EvaluateChatPage() {
         </Typography>
       </Stack>
 
-      <ChildSelector
-        children={children}
-        selectedChildId={activeChildId}
-        onSelect={setActiveChildId}
-      />
+      {/* UX-425: the in-page selector is gone — the shell's chip is the one
+          place a parent chooses the child. The heading above already names him,
+          so no `ActiveChildLine` is needed here (UX-426). */}
 
       {/* Domain Tabs */}
       <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>

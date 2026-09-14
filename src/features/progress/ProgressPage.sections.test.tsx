@@ -120,29 +120,30 @@ describe('UX-326 — each moved section has exactly one home', () => {
 })
 
 /**
- * UX-325 — three of the six Progress tabs render no child selector at all, while
- * the header names one. Fixed by UX-324 EXISTING rather than by adding a fourth
- * in-page copy: the shell's chip is on every page in the product, so a tab with
- * no selector of its own is still switchable.
+ * UX-325 — three of the six Progress tabs rendered no child selector at all,
+ * while the header named one. Fixed by UX-324 EXISTING rather than by adding a
+ * fourth in-page copy: the shell's chip is on every page in the product, so a
+ * tab with no selector of its own is still switchable.
  *
- * The eight in-page selectors stay for now (owner decision, 2026-09-09 — removing
- * them is a follow-up once the header switcher has been lived with). Both read
- * the same `useActiveChild`, so switching in either place moves both.
+ * `UX-425` finished the sentence. The owner, 2026-09-13, after the first
+ * post-deploy test: *"There are now as many as four locations to choose a
+ * child. I like the chip drop-down in the header as the primary source; remove
+ * the others."* So every tab now delegates, the asymmetry this describe block
+ * was written about is gone, and what it pins is the new uniformity — including
+ * the three that used to be the exception, so a re-added in-page selector fails
+ * here rather than being noticed on a phone.
  */
-describe('UX-325 — the tabs with no selector of their own', () => {
+describe('UX-325 / UX-425 — no Progress tab chooses the child', () => {
   const readFeature = (rel: string) => readFileSync(resolve(__dirname, rel), 'utf8')
 
   it.each([
     ['Learning Map', './learning-map/LearningMap.tsx'],
     ['Monthly Books', '../monthly-review/MonthlyBooksTab.tsx'],
     ['Word Wall', './WordWall.tsx'],
-  ])('%s delegates child selection to its containing surface', (_label, rel) => {
+    ['Foundations', './FoundationsTab.tsx'],
+    ['Curriculum', './CurriculumTab.tsx'],
+    ['Skill Snapshot', '../evaluation/SkillSnapshotPage.tsx'],
+  ])('%s delegates child selection to the shell', (_label, rel) => {
     expect(readFeature(rel)).not.toMatch(/<ChildSelector/)
-  })
-
-  it('the tabs that DO have one still have it', () => {
-    expect(readFeature('./FoundationsTab.tsx')).toMatch(/<ChildSelector/)
-    expect(readFeature('./CurriculumTab.tsx')).toMatch(/<ChildSelector/)
-    expect(readFeature('../evaluation/SkillSnapshotPage.tsx')).toMatch(/<ChildSelector/)
   })
 })

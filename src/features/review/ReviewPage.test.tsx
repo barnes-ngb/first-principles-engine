@@ -1,44 +1,46 @@
-import { createContext, useContext, useState, type ReactNode } from 'react'
+import { createContext, useContext, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { UseActiveChildResult } from '../../core/hooks/useActiveChild'
 import type { Child } from '../../core/types'
+import {
+  __resetSharedChildren,
+  addSharedChild,
+  getSharedChildren,
+  setSharedChildren,
+  subscribeSharedChildren,
+} from '../../core/hooks/childrenStore'
 import ReviewPage from './ReviewPage'
 import ReviewRedirect from './ReviewRedirect'
 import MonthlyReviewReaderPage from '../monthly-review/MonthlyReviewReaderPage'
 
 const initialChildren = [{ id: 'c1', name: 'Lincoln' }, { id: 'c2', name: 'London' }] as Child[]
-let savedChildren = initialChildren
 const ChildContext = createContext<{
   activeChildId: string; setActiveChildId: (id: string) => void; kid: boolean
 }>(null!)
-// Match production: the selected ID is shared, but each hook loads its OWN child
-// array once. A context that shared the whole array would mask the Add Child bug.
+// Match production: the selected ID is shared through this context, and the
+// child LIST through the real `childrenStore`. It used to be a per-instance
+// `useState` here, mirroring the production shape of the day — but `UX-362`
+// Codex round 2 made the list shared for exactly the Add-child case below, and
+// `UX-425` then moved the add door into the shell, so a per-instance copy would
+// now model a shape the app does not have and fail on a defect it cannot have.
 vi.mock('../../core/hooks/useActiveChild', () => ({
   useActiveChild: function useActiveChild(): UseActiveChildResult {
     const { activeChildId, setActiveChildId, kid } = useContext(ChildContext)
-    const [children, setChildren] = useState(() => [...savedChildren])
+    const children = useSyncExternalStore(subscribeSharedChildren, getSharedChildren)
     return {
       children, activeChildId, setActiveChildId,
       activeChild: children.find(c => c.id === activeChildId),
       isChildProfile: kid, isLoading: false,
       addChild: child => {
-        savedChildren = [...savedChildren, child]
-        setChildren(previous => [...previous, child])
+        addSharedChild(child)
         setActiveChildId(child.id)
       },
     }
   },
 }))
 vi.mock('../../core/auth/useAuth', () => ({ useFamilyId: () => 'family' }))
-vi.mock('../../components/ChildSelector', () => ({
-  default: ({ children, selectedChildId, onSelect, onChildAdded }: {
-    children: Child[]; selectedChildId: string; onSelect: (id: string) => void; onChildAdded: (child: Child) => void
-  }) => <><select aria-label="Review child" value={selectedChildId} onChange={e => onSelect(e.target.value)}>
-    {children.map(child => <option key={child.id} value={child.id}>{child.name}</option>)}
-  </select><button onClick={() => onChildAdded({ id: 'c3', name: 'New child' } as Child)}>Add child</button></>,
-}))
 vi.mock('../weekly-review/WeeklyReviewPage', () => ({
   WeeklyReviewContent: ({ embedded, childContext }: { embedded: boolean; childContext: UseActiveChildResult }) => (
     <div>Week for {childContext.activeChildId}{embedded ? '' : ' duplicate shell'}
@@ -75,6 +77,46 @@ function Family({ children: content, kid }: { children: ReactNode; kid: boolean 
   return <ChildContext.Provider value={{ activeChildId, setActiveChildId, kid }}>{content}</ChildContext.Provider>
 }
 
+/**
+ * The shell, as far as this suite is concerned — `UX-425`.
+ *
+ * `ReviewPage` used to render a `ChildSelector`, and these cases changed child
+ * through it. The page has no child control any more; the shell's
+ * `ChildSwitcherChip` is the one place that happens, app-wide. The property
+ * under test is unchanged — the page follows the shared active child across
+ * tabs, history and the reader — so the control that moves it simply moves out
+ * of the page and into this stand-in shell, driving the same mocked context the
+ * real chip drives through `useActiveChild`.
+ *
+ * It is a `<select>` rather than the real chip because this file mocks
+ * `useActiveChild` wholesale (deliberately: each hook instance loads its OWN
+ * child array, which is what makes the Add-child case meaningful). The real
+ * chip is exercised against the real hook and the real stores in
+ * `components/ChildSwitcherChip.menu.test.tsx`.
+ */
+function ShellChildControl() {
+  const { activeChildId, setActiveChildId, kid } = useContext(ChildContext)
+  if (kid) return null
+  return (
+    <>
+      <select
+        aria-label="Shell child switcher"
+        value={activeChildId}
+        onChange={(e) => setActiveChildId(e.target.value)}
+      >
+        {getSharedChildren().map((child) => (
+          <option key={child.id} value={child.id}>{child.name}</option>
+        ))}
+      </select>
+      <button onClick={() => {
+        const child = { id: 'c3', name: 'New child' } as Child
+        addSharedChild(child)
+        setActiveChildId(child.id)
+      }}>Add child</button>
+    </>
+  )
+}
+
 function Location() {
   const location = useLocation()
   const navigate = useNavigate()
@@ -86,6 +128,7 @@ function Location() {
 function renderReview(url = '/review', kid = false) {
   return render(<Family kid={kid}><MemoryRouter initialEntries={[url]}>
     <Location />
+    <ShellChildControl />
     <Routes>
       <Route path="/review" element={<ReviewPage />} />
       <Route path="/review/monthly-books/:reviewId" element={<MonthlyReviewReaderPage />} />
@@ -96,7 +139,8 @@ function renderReview(url = '/review', kid = false) {
 }
 
 beforeEach(() => {
-  savedChildren = initialChildren
+  __resetSharedChildren()
+  setSharedChildren([...initialChildren])
   monthlyReads.mockReset().mockReturnValue({ loading: false, reviews: [
     { id: 'c1_august', childId: 'c1', month: '2026-08', pages: [], status: 'published' },
     { id: 'c2_august', childId: 'c2', month: '2026-08', pages: [], status: 'published' },

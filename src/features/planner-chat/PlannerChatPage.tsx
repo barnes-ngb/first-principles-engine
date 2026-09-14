@@ -15,7 +15,7 @@ import Typography from '@mui/material/Typography'
 import { addDoc, deleteField, doc, getDoc, getDocs, limit as fsLimit, onSnapshot, orderBy, query, setDoc, updateDoc, where } from 'firebase/firestore'
 
 import { useNavigate } from 'react-router-dom'
-import ChildSelector from '../../components/ChildSelector'
+import ActiveChildLine from '../../components/ActiveChildLine'
 import Page from '../../components/Page'
 import { LoadingState } from '../../components/states'
 import { AIFeatureFlag, useAIFeatureFlags } from '../../core/ai/featureFlags'
@@ -261,14 +261,9 @@ export default function PlannerChatPage() {
   const { isEnabled } = useAIFeatureFlags()
   const { chat: aiChat, loading: aiLoading } = useAI()
   const { generate: generateActivity, loading: generateLoading } = useGenerateActivity()
-  const {
-    children,
-    activeChildId,
-    activeChild,
-    setActiveChildId,
-    isLoading: isLoadingChildren,
-    addChild,
-  } = useActiveChild()
+  // UX-425: this page no longer chooses or adds a child — it reads the active
+  // one. The shell's chip is the one control that changes it.
+  const { children, activeChildId, activeChild } = useActiveChild()
 
   const navigate = useNavigate()
   const { profile } = useProfile()
@@ -3318,14 +3313,11 @@ ${dayPrompts}`
         </IconButton>
       </Stack>
 
-      <ChildSelector
-        children={children}
-        selectedChildId={activeChildId}
-        onSelect={setActiveChildId}
-        onChildAdded={addChild}
-        isLoading={isLoadingChildren}
-        emptyMessage="Add a child to start planning."
-      />
+      {/* UX-425 / UX-426: the selector is gone (the shell's chip is the one
+          place a parent chooses the child), but this page's heading is *Plan My
+          Week* and names nobody — and Apply writes `days`, `weeks` and
+          `dailyPlans` for one boy. So the sentence stays where the control was. */}
+      <ActiveChildLine hint />
 
       {activeChildId && (
         <>

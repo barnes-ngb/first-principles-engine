@@ -1,23 +1,19 @@
 /**
- * The Today/Week context strip — and, since `UX-362`, the third site of the one
- * child chip.
+ * The Today/Week context strip.
  *
- * It used to draw its own `<Chip label={activeChild.name} color="primary"
- * variant="outlined" />` with **no `onClick`**: the exact defect `UX-324` wrote
- * `ChildSwitcherChip` to fix in the app shell, live on the page a parent opens
- * first, styled precisely like every *tappable* chip in the app. AUDIT-228
- * counted six things about one particular boy rendering above the control that
- * says which boy, and that chip was the first of them.
+ * **It no longer renders a child chip** (`FEAT-237` / `UX-425`, owner decision
+ * 2026-09-13: *"There are now as many as four locations to choose a child. I
+ * like the chip drop-down in the header as the primary source; remove the
+ * others."*). It carried one from `UX-362` until then — the shared
+ * `ChildSwitcherChip`, correctly, after AUDIT-228 found it drawing an inert
+ * look-alike — and the shell's chip sits ~60px above it on the page a parent
+ * opens first. Two working switchers a thumb apart is the duplication the owner
+ * reported, so this one went and the shell's stayed.
  *
- * It now renders the shared `ChildSwitcherChip`, so this strip and the shell
- * cannot disagree about whether a name is a control. The chip reads
- * `useActiveChild` itself rather than taking the `activeChild` prop: the prop
- * and the hook resolve to the same value (every caller passes
- * `useActiveChild().activeChild`), and reading the hook is what makes the chip
- * and every in-page `ChildSelector` move together — one source of truth, which
- * is the rule the switcher was built on. The prop stays because this component
- * also uses it for the avatar thumbnail, and because it is what decides whether
- * the child block renders at all.
+ * The avatar thumbnail stays: it is a picture of the child, not a control that
+ * chooses one, and it is what makes the strip read as *this* boy's day. The
+ * `activeChild` prop stays with it, and still decides whether that block
+ * renders at all.
  */
 import { useNavigate } from 'react-router-dom'
 import Box from '@mui/material/Box'
@@ -34,7 +30,6 @@ import { formatDateShort, formatWeekShort, navTo, weekRangeFromDateKey } from '.
 import { useAuth } from '../core/auth/useAuth'
 import AvatarThumbnail from '../features/avatar/AvatarThumbnail'
 import { useAvatarProfile } from '../features/avatar/useAvatarProfile'
-import ChildSwitcherChip from './ChildSwitcherChip'
 
 export type ContextBarPage = 'today' | 'week' | 'artifacts'
 
@@ -79,21 +74,17 @@ export default function ContextBar({
         minHeight: 44,
       }}
     >
-      {/* Child chip with avatar — the shared switcher (UX-362), never a second
-          inert copy of it. Read-only for a kid profile and for a one-child
-          family, by the one `canSwitchChild` rule. */}
-      {activeChild && (
+      {/* The child's avatar — a picture, never a control. UX-425 removed the
+          chip that sat beside it; the one child chip is in the shell above. */}
+      {activeChild && avatarProfile && (
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-          {avatarProfile && (
-            <AvatarThumbnail
-              features={avatarProfile.characterFeatures}
-              ageGroup={avatarProfile.ageGroup}
-              equippedPieces={avatarProfile.equippedPieces ?? []}
-              totalXp={avatarProfile.totalXp}
-              size={28}
-            />
-          )}
-          <ChildSwitcherChip />
+          <AvatarThumbnail
+            features={avatarProfile.characterFeatures}
+            ageGroup={avatarProfile.ageGroup}
+            equippedPieces={avatarProfile.equippedPieces ?? []}
+            totalXp={avatarProfile.totalXp}
+            size={28}
+          />
         </Box>
       )}
 

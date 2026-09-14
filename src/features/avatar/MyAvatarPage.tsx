@@ -229,7 +229,8 @@ function announceSuitUp(fullArmorOn: boolean, ritualDone: boolean) {
 export default function MyAvatarPage() {
   const navigate = useNavigate()
   const familyId = useFamilyId()
-  const { activeChild, children, setActiveChildId, isChildProfile } = useActiveChild()
+  // UX-425: this page reads the active child; the shell's chip changes it.
+  const { activeChild, children, isChildProfile } = useActiveChild()
   const childId = activeChild?.id ?? ''
   // Cosmetic age group from the child's real age (birthdate) — seeds avatar
   // proportions/theme defaults below; never gates a feature (ARCH-15).
@@ -1415,50 +1416,12 @@ export default function MyAvatarPage() {
       <Page>
         {/* ── Hero Hub Header ────── */}
         <Box sx={{ textAlign: 'center', pt: 1.5, pb: 0.5 }}>
-          {/* Child switcher — only for parent profiles with multiple children */}
-          {!isChildProfile && children.length > 1 && (
-            <Box sx={{ display: 'flex', justifyContent: 'center', gap: '8px', mb: 2 }}>
-              {children.map((child) => {
-                const isActive = child.id === childId
-                const childIsLincoln = child.name.toLowerCase() === 'lincoln'
-                const childAccent = childIsLincoln ? kidPalette.xpGreen : '#E8A0BF'
-                return (
-                  <Box
-                    key={child.id}
-                    component="button"
-                    onClick={() => setActiveChildId(child.id)}
-                    sx={{
-                      px: '20px',
-                      py: '10px',
-                      border: isActive
-                        ? `2px solid ${childAccent}`
-                        : `1.5px solid ${isLincoln ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)'}`,
-                      borderRadius: childIsLincoln ? '6px' : '20px',
-                      background: isActive
-                        ? (childIsLincoln ? 'rgba(126,252,32,0.12)' : 'rgba(232,160,191,0.12)')
-                        : 'transparent',
-                      color: isActive
-                        ? childAccent
-                        : (isLincoln ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.35)'),
-                      fontFamily: childIsLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive',
-                      fontSize: childIsLincoln ? '12px' : '16px',
-                      fontWeight: isActive ? 700 : 400,
-                      cursor: 'pointer',
-                      transition: 'all 0.2s ease',
-                      boxShadow: isActive ? `0 0 12px ${childAccent}22` : 'none',
-                      '&:hover': {
-                        borderColor: childAccent,
-                        background: childIsLincoln ? 'rgba(126,252,32,0.08)' : 'rgba(232,160,191,0.08)',
-                      },
-                      '&:active': { transform: 'scale(0.96)' },
-                    }}
-                  >
-                    {child.name}
-                  </Box>
-                )
-              })}
-            </Box>
-          )}
+          {/* UX-425: the parent-only chip row that stood here is gone — the
+              shell's chip is the one place a parent chooses the child, and this
+              was a third shape of the same control (it was not a
+              `<ChildSelector>`, so the `UX-425` sweep's grep could not see it).
+              It also keyed its styling on a literal `child.name === 'lincoln'`,
+              which went with it. The hero banner below names the child. */}
 
           <Box
             sx={{

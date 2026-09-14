@@ -45,7 +45,6 @@ vi.mock('../../core/ai/useAI', () => ({
   TaskType: { Disposition: 'disposition' },
 }))
 vi.mock('../../core/firebase/firestore', () => ({ db: {} }))
-vi.mock('../../components/ChildSelector', () => ({ default: () => null }))
 
 /**
  * Lincoln has a fresh cache; London has none at all — which is the exact

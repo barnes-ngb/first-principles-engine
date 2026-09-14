@@ -73,7 +73,6 @@ vi.mock('firebase/firestore', () => ({
   },
 }))
 
-vi.mock('../../components/ChildSelector', () => ({ default: () => null }))
 vi.mock('./QuickCheckPanel', () => ({ default: () => null }))
 vi.mock('../evaluate/MasteryCheckoffPanel', () => ({ default: () => null }))
 vi.mock('../evaluate/FoundationsSection', () => ({ default: () => null }))
