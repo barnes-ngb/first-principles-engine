@@ -23,7 +23,7 @@ import {
   where,
 } from 'firebase/firestore'
 
-import ChildSelector from '../../components/ChildSelector'
+import ActiveChildLine from '../../components/ActiveChildLine'
 import ContextBar from '../../components/ContextBar'
 import HelpStrip from '../../components/HelpStrip'
 import Page from '../../components/Page'
@@ -214,14 +214,14 @@ export default function TodayPage() {
    * is a decision made once.
    */
   const { canEdit } = useProfile()
+  // UX-425: no `setActiveChildId` / `addChild` / `isLoading` here any more —
+  // the page no longer offers a way to choose or add a child. It reads the
+  // active one; the shell's chip is what changes it.
   const {
     children,
     activeChildId: selectedChildId,
     activeChild,
-    setActiveChildId: setSelectedChildId,
     isChildProfile: isKidProfile,
-    isLoading: isLoadingChildren,
-    addChild,
   } = useActiveChild()
   const artifactSectionRef = useRef<HTMLDivElement>(null)
 
@@ -1369,22 +1369,11 @@ export default function TodayPage() {
           activeChild={activeChild}
           dateKey={today}
         />
-        {/* UX-362: which boy, before anything about him — same order as the
-            loaded page below. */}
-        {isKidProfile ? (
-          <Typography variant="subtitle1" color="text.secondary">
-            {selectedChild?.name ?? 'Loading...'}
-          </Typography>
-        ) : (
-          <ChildSelector
-            children={children}
-            selectedChildId={selectedChildId}
-            onSelect={setSelectedChildId}
-            onChildAdded={addChild}
-            isLoading={isLoadingChildren}
-            emptyMessage="Add a child to start logging."
-          />
-        )}
+        {/* UX-362 / UX-426: which boy, before anything about him — same order
+            as the loaded page below. The selector that used to say it is gone
+            (UX-425); the sentence says it instead, for a parent and a kid
+            alike, because the page's own heading is *Today* and names nobody. */}
+        <ActiveChildLine hint={!isKidProfile} />
         <Typography variant="h4" component="h1">{pageHeading}</Typography>
         <HelpStrip
           pageKey="today"
@@ -1408,33 +1397,24 @@ export default function TodayPage() {
         onCaptureArtifact={scrollToArtifacts}
       />
 
-      {/* ── UX-362: which boy, before anything about him ───────────────────
+      {/* ── UX-362 / UX-425 / UX-426: which boy, before anything about him ──
           AUDIT-228 counted six things about one particular child rendering
           above the control that says which child — the ContextBar chip, this
           heading, the day arrows, `WeekRibbon`'s five dots, the day banner and
-          `HelpStrip`. The chip above is now the switcher itself, and the
-          selector moves up beside it rather than sitting six sections down.
-          The in-page selector STAYS (owner: the in-page selectors stay); this
-          is a reorder, not a removal, and it writes nothing that did not get
-          written before.
+          `HelpStrip`. `UX-362` made the chip the real switcher and moved the
+          selector up beside it. `UX-425` then removed BOTH in-page controls
+          (owner, 2026-09-13, reversing *"the in-page selectors stay"*): the one
+          place a parent chooses the child is the chip in the shell.
 
-          A kid profile gets the name as text and NO selector — capability,
-          never a name, the same answer `ChildSwitcherChip` gives the chip
-          above it. */}
-      {isKidProfile ? (
-        <Typography variant="subtitle1" color="text.secondary">
-          {selectedChild?.name}
-        </Typography>
-      ) : (
-        <ChildSelector
-          children={children}
-          selectedChildId={selectedChildId}
-          onSelect={setSelectedChildId}
-          onChildAdded={addChild}
-          isLoading={isLoadingChildren}
-          emptyMessage="Add a child to start logging."
-        />
-      )}
+          What the selector was also doing here is NAMING the child, and this
+          page's heading is *Today* — so the sentence stays even though the
+          control does not. `UX-313`'s rule: a records surface names its target
+          before the tap. Today writes `days`, `dailyPlans`, `artifacts`,
+          `scans` and `activityConfigs`, so it is exactly that surface.
+
+          A kid gets the same sentence without the switch hint — capability,
+          never a name, the answer `ChildSwitcherChip` gives the chip above. */}
+      <ActiveChildLine hint={!isKidProfile} />
 
       <Typography variant="h4" component="h1">{pageHeading}</Typography>
 

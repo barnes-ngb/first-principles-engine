@@ -51,7 +51,6 @@ vi.mock('firebase/firestore', () => ({
 }))
 
 // Thin stubs for the child panels (they pull their own firebase/quest deps).
-vi.mock('../../components/ChildSelector', () => ({ default: () => null }))
 vi.mock('./QuickCheckPanel', () => ({ default: () => null }))
 vi.mock('./WorkingLevelsSection', () => ({ default: () => null }))
 vi.mock('../evaluate/MasteryCheckoffPanel', () => ({ default: () => null }))

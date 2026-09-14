@@ -6,11 +6,16 @@
  * in this file, and every per-surface fix that shipped alongside it, is
  * unchanged.
  *
- * `AppShell` renders the active child's name in two places (the mobile header
- * and `NavContent`, which is both the desktop sidebar and the mobile drawer),
- * and since `UX-362` the parent Today's `ContextBar` renders a third. All three
- * render THIS rule through `ChildSwitcherChip`, so no two of them can disagree
- * about whether the name is a control.
+ * **Since `FEAT-237` / `UX-425` there is exactly ONE site.** `AppShell` renders
+ * this chip in the mobile header, and `NavContent` renders it in the desktop
+ * sidebar — one per viewport, never both at once, because the sidebar is hidden
+ * below 900px and the header above it. The mobile **drawer** shares
+ * `NavContent` and deliberately passes `showChildChip={false}`: the header chip
+ * is visible above the open drawer, which is what the owner's screenshot
+ * showed. `ContextBar`'s chip (`UX-362`) and the ten in-page `ChildSelector`s
+ * are gone. Owner, 2026-09-13: *"There are now as many as four locations to
+ * choose a child. I like the chip drop-down in the header as the primary
+ * source; remove the others."*
  *
  * Until UX-324 the shell's two were inert `<Chip variant="outlined" color="primary">` —
  * exactly how every *tappable* chip in this app is styled. It sits beside the
@@ -18,7 +23,8 @@
  * control anywhere, and a parent reading that header reasonably concludes it is
  * how she changes child. It was not; the only real selectors lived inside eight
  * individual page bodies, three of the six Progress tabs having none at all
- * (UX-325).
+ * (UX-325). Making the chip real then made the duplication the visible problem,
+ * which is `UX-425` above.
  *
  * The rule is here rather than in the component so that "who may switch" is one
  * testable sentence, and so the two chip sites cannot answer it differently.
@@ -26,8 +32,10 @@
  * **Capability, never a name.** `useActiveChild` already hands a child profile a
  * no-op setter, so switching is impossible by construction — but an inert menu
  * is this same defect wearing a menu, so a child profile is not offered one at
- * all. A single-child family is refused for the same reason: a menu with one
- * entry is a control that cannot do anything.
+ * all. A single-child family is refused the child LIST for the same reason: a
+ * list with one entry is a control that cannot do anything — but see
+ * {@link canOpenChildMenu}, which is a different question and answers a parent
+ * yes either way, because the menu now also holds *Add a child…*.
  */
 
 export interface ChildSwitcherAudience {
@@ -129,3 +137,54 @@ export function childSwitcherLabel(childName: string): string {
 
 /** Accessible name for the menu the switcher opens. */
 export const CHILD_SWITCHER_MENU_LABEL = 'Choose a child'
+
+/**
+ * Whether the chip should open a MENU at all — `FEAT-237` / `UX-425`.
+ *
+ * Owner decision, 2026-09-13, from the first post-deploy test: *"There are now
+ * as many as four locations to choose a child. I like the chip drop-down in the
+ * header as the primary source; remove the others. Keep the actual profile
+ * change between parent and child."* The ten in-page `ChildSelector`s went with
+ * that decision, and **Add a child lived in exactly one of them** — the selector
+ * was `AddChildDialog`'s only host in the app. So the door moves into this
+ * menu, which is the one place a parent is already looking at the list of
+ * children.
+ *
+ * That makes "who gets a menu" a different question from "who may switch", and
+ * the two are kept apart rather than collapsed:
+ *
+ * - **A kid never gets a menu.** Capability, never a name — unchanged, and the
+ *   whole rule below still holds for the child list.
+ * - **A parent always gets one**, including in a single-child family, where
+ *   `canSwitchChild` refuses the child list because a one-entry menu could not
+ *   do anything. It can now: it can add the second child. Refusing the menu
+ *   there would leave a one-child family with no way to add a second at all,
+ *   which is the in-page selector's job arriving as a hole.
+ *
+ * **Deliberately NOT gated on `CHILD_SWITCHER_ENABLED`.** That constant is a
+ * safety switch over *switching*, and switching is what it must be able to turn
+ * off. Adding a child is not switching: with the flag `false` this menu holds
+ * *Add a child…* and no child list, so the kill-switch still kills exactly what
+ * it names and does not take the only add door with it.
+ */
+export function canOpenChildMenu({ isChildProfile }: Pick<ChildSwitcherAudience, 'isChildProfile'>): boolean {
+  return !isChildProfile
+}
+
+/**
+ * The menu's add row. The ellipsis is the house signal that a tap opens
+ * something rather than doing something — it opens `AddChildDialog`, which is
+ * where the write is confirmed.
+ */
+export const ADD_CHILD_MENU_LABEL = 'Add a child…'
+
+/**
+ * The chip a parent sees when the family has NO children yet.
+ *
+ * `ChildSwitcherChip` returns `null` with no active child, which was harmless
+ * while every page carried a selector whose empty state offered *Add Child*.
+ * With the selectors gone that would be a family who can never add their first
+ * child, so the chip renders this instead — the same door, before there is a
+ * name to put on it.
+ */
+export const ADD_FIRST_CHILD_LABEL = 'Add a child'

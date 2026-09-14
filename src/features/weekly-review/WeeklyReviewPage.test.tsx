@@ -33,12 +33,6 @@ vi.mock('../../core/auth/useAuth', () => ({
   useAuth: () => ({ familyId: 'fam-1' }),
 }))
 
-// The child selector reaches auth + avatar Firestore of its own; it is not what
-// this file is about.
-vi.mock('../../components/ChildSelector', () => ({
-  default: () => <div data-testid="child-selector" />,
-}))
-
 const mockUseWeekHours = vi.fn()
 vi.mock('./useWeekHours', () => ({
   useWeekHours: (...args: unknown[]) => mockUseWeekHours(...args),
@@ -158,10 +152,13 @@ describe('the page is parent-only (UX-219)', () => {
     expect(screen.getByText('4.8 hours logged this week.')).toBeInTheDocument()
   })
 
-  it('embeds the existing weekly content without a duplicate title or child selector', () => {
+  it('embeds the existing weekly content without a duplicate title or child line', () => {
+    // UX-425 retired the in-page selector; the standalone frame names the child
+    // with one `ActiveChildLine` and the embedded frame must not repeat it,
+    // because `ReviewPage` — the shell it is embedded in — renders its own.
     render(<WeeklyReviewPage embedded />)
     expect(screen.queryByText('Weekly Review')).not.toBeInTheDocument()
-    expect(screen.queryByTestId('child-selector')).not.toBeInTheDocument()
+    expect(screen.queryByText(/^For /)).not.toBeInTheDocument()
     expect(screen.getByText('4.8 hours logged this week.')).toBeInTheDocument()
     expect(screen.getByText('The Week by Subject')).toBeInTheDocument()
   })
@@ -418,9 +415,9 @@ describe('the week selector (UX-406)', () => {
     nowSpy()
     render(<WeeklyReviewContent childContext={PARENT} embedded />)
     expect(screen.getByTestId('review-week-selector')).toBeInTheDocument()
-    // The shell owns the title and the child selector; the week control is
-    // neither, and is the one the owner's report asked for.
-    expect(screen.queryByTestId('child-selector')).not.toBeInTheDocument()
+    // The shell owns the title and the child line; the week control is neither,
+    // and is the one the owner's report asked for.
+    expect(screen.queryByText(/^For /)).not.toBeInTheDocument()
   })
 
   it('does not carry one week’s review, ticks or loading state onto another', () => {

@@ -682,10 +682,17 @@ export default function AvatarAdminTab() {
           {switchNotice}
         </Alert>
       )}
-      {/* ── Child selector ──────────────────────────────────────── */}
+      {/* ── Avatar profiles ─────────────────────────────────────────
+          UX-425: this row was *Select Child* and each chip was `onClick`
+          → `setActiveChildId`, a third shape of the shell's own control (not a
+          `<ChildSelector>`, so the sweep's grep could not see it). The chips
+          stay because they are not only a picker — they carry the `(duplicate)`
+          mark and the per-profile delete, both of which name their own child id
+          and are unaffected — but choosing the child is the shell chip's job
+          now, and the panel below still scopes to whoever it is on. */}
       <Box>
         <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-          Select Child
+          Avatar profiles
         </Typography>
         <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
           {children.map((c) => (
@@ -703,7 +710,6 @@ export default function AvatarAdminTab() {
               }
               color={c.id === activeChildId ? 'primary' : 'default'}
               variant={c.id === activeChildId ? 'filled' : 'outlined'}
-              onClick={() => setActiveChildId(c.id)}
               onDelete={canDeleteProfile(c.id) ? () => void handleOpenDeleteProfile(c.id, c.name) : undefined}
               deleteIcon={
                 canDeleteProfile(c.id) ? (

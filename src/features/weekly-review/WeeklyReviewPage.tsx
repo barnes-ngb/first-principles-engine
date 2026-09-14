@@ -14,7 +14,7 @@ import ThumbDownIcon from '@mui/icons-material/ThumbDown'
 import ThumbUpIcon from '@mui/icons-material/ThumbUp'
 import { doc, onSnapshot, runTransaction } from 'firebase/firestore'
 
-import ChildSelector from '../../components/ChildSelector'
+import ActiveChildLine from '../../components/ActiveChildLine'
 import HelpStrip from '../../components/HelpStrip'
 import Page from '../../components/Page'
 import SectionCard from '../../components/SectionCard'
@@ -116,14 +116,9 @@ export function WeeklyReviewContent({ childContext, embedded = false }: {
 
 function WeeklyReviewBody({ childContext, embedded }: { childContext: UseActiveChildResult; embedded: boolean }) {
   const familyId = useFamilyId()
-  const {
-    children,
-    activeChildId,
-    activeChild,
-    setActiveChildId,
-    isLoading: childrenLoading,
-    addChild,
-  } = childContext
+  // UX-425: this page no longer chooses or adds a child — it reads the active
+  // one. The shell's chip is the one control that changes it.
+  const { activeChildId, activeChild, isLoading: childrenLoading } = childContext
 
   // ── Which week (UX-218 default, UX-406 selector) ─────────────────────────
   //
@@ -388,13 +383,12 @@ function WeeklyReviewBody({ childContext, embedded }: { childContext: UseActiveC
             {weekRangeLabel}
           </Typography>
 
-          <ChildSelector
-            children={children}
-            selectedChildId={activeChildId}
-            onSelect={setActiveChildId}
-            onChildAdded={addChild}
-            isLoading={childrenLoading}
-          />
+          {/* UX-425 / UX-426: the selector is gone; the heading is *Weekly
+              Review* and names nobody, while the reflection card below writes
+              the parent's own answer onto one child's week. The sentence stays
+              where the control was — in the standalone frame only, because the
+              embedded frame is `ReviewPage`, which renders its own. */}
+          <ActiveChildLine hint />
         </>
       )}
 

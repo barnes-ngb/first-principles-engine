@@ -36,7 +36,6 @@ import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import { limit, onSnapshot, orderBy, query, where } from 'firebase/firestore'
 
-import ChildSelector from '../../components/ChildSelector'
 import ScanAnalysisPanel from '../../components/ScanAnalysisPanel'
 import ScanButton from '../../components/ScanButton'
 import SectionCard from '../../components/SectionCard'
@@ -94,13 +93,13 @@ import {
 
 export default function CurriculumTab() {
   const familyId = useFamilyId()
+  // UX-425: this page no longer chooses or adds a child — it reads the active
+  // one. The shell's chip is the one control that changes it.
   const {
     children: childList,
     activeChildId,
     activeChild,
-    setActiveChildId,
     isLoading: isLoadingChildren,
-    addChild,
     isChildProfile,
   } = useActiveChild()
   const {
@@ -961,15 +960,10 @@ export default function CurriculumTab() {
   return (
     <Container maxWidth="lg" sx={{ py: 2 }}>
       <Stack spacing={2}>
-        {/* Child selector */}
-        {childList.length > 1 && (
-          <ChildSelector
-            children={childList}
-            selectedChildId={activeChildId}
-            onSelect={setActiveChildId}
-            onChildAdded={addChild}
-          />
-        )}
+        {/* UX-425: the in-page selector is gone — the shell's chip is the one
+            place a parent chooses the child. The heading below reads
+            "<name>'s Curriculum", so the page already names what it writes
+            about (UX-426, UX-313's rule). */}
 
         <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
           <Typography variant="h5" component="h1" fontWeight={600}>

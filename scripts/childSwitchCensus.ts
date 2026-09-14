@@ -20,7 +20,7 @@ import {
   tallySeverities,
   tallyVerdicts,
 } from '../src/test/childSwitchSurfaces'
-import { loadCensus, loadSourceFiles } from '../src/test/childSwitchSources'
+import { loadCensus, loadSourceFiles, stripComments } from '../src/test/childSwitchSources'
 
 const files = loadSourceFiles()
 const candidates = deriveChildSwitchCandidates(files)
@@ -28,12 +28,18 @@ const rows = parseCensusRows(loadCensus())
 const problems = censusProblems(candidates, rows, new Set(files.map((f) => f.path)))
 
 const readsActiveChild = files.filter((f) => /useActiveChild/.test(f.source)).length
-/** Surfaces that can change the active child WITHOUT the shell switcher. */
+/**
+ * Surfaces that can change the active child WITHOUT the shell switcher.
+ *
+ * Read from the CODE, not the prose: `UX-425` removed these controls and said
+ * so in a comment at each site, and a raw-text scan counted those sentences as
+ * the thing they describe.
+ */
 const rendersSelector = files.filter(
-  (f) => /<ChildSelector\b/.test(f.source) && !f.path.endsWith('components/ChildSelector.tsx'),
+  (f) => /<ChildSelector\b/.test(stripComments(f.source)) && !f.path.endsWith('components/ChildSelector.tsx'),
 ).length
 const callsSetActiveChild = files.filter(
-  (f) => f.path.startsWith('src/features/') && /\bsetActiveChildId\b/.test(f.source),
+  (f) => f.path.startsWith('src/features/') && /\bsetActiveChildId\b/.test(stripComments(f.source)),
 ).length
 const byArm = { hook: 0, prop: 0 }
 for (const c of candidates) byArm[c.arm] += 1

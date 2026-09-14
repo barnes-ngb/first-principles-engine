@@ -49,6 +49,24 @@ export function loadSourceFiles(root: string = REPO_ROOT): SourceFile[] {
   return out
 }
 
+/**
+ * A source file with its comments removed — `UX-425`.
+ *
+ * Two of the census's published counts ask *does this file render an in-page
+ * child control*, and they used to ask it of the raw text. That was right only
+ * for as long as no comment in the repo quoted the thing being counted. `UX-425`
+ * removed those controls and explained each removal **by naming it**, so three
+ * files that render nothing at all began to count as three that do — the
+ * `[ledger-shape]` failure in reverse: a scan satisfied by prose.
+ *
+ * So the two counts read code. Deliberately not applied to the candidate
+ * heuristic, which is unchanged: over-matching there costs a census row with a
+ * reason, and narrowing it is not this row's decision to make.
+ */
+export function stripComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+}
+
 /** The census markdown, read from disk. */
 export function loadCensus(root: string = REPO_ROOT): string {
   return readFileSync(join(root, CENSUS_PATH), 'utf8')

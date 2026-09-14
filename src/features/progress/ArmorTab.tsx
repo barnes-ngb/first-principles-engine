@@ -712,7 +712,8 @@ function useArmorStreak(familyId: string, childId: string): number {
 }
 
 export default function ArmorTab() {
-  const { activeChildId, activeChild, children, setActiveChildId } = useActiveChild()
+  // UX-425: this tab reads the active child; the shell's chip changes it.
+  const { activeChildId, activeChild, children } = useActiveChild()
   const familyId = useFamilyId()
   const xpData = useXpLedger(familyId, activeChildId)
   const armorStreak = useArmorStreak(familyId, activeChildId)
@@ -759,21 +760,10 @@ export default function ArmorTab() {
 
   return (
     <Box sx={{ p: { xs: 2, md: 3 }, maxWidth: 600, mx: 'auto' }}>
-      {/* Child selector for parents with multiple children */}
-      {children.length > 1 && (
-        <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
-          {children.map((c) => (
-            <Button
-              key={c.id}
-              variant={c.id === activeChildId ? 'contained' : 'outlined'}
-              size="small"
-              onClick={() => setActiveChildId(c.id)}
-            >
-              {c.name}
-            </Button>
-          ))}
-        </Box>
-      )}
+      {/* UX-425: the hand-rolled button-pair picker that stood here is gone —
+          the shell's chip is the one place a parent chooses the child. It was
+          not a `<ChildSelector>`, so it answered the same question in a third
+          shape; `XpOverviewCard` below names the child this tab is about. */}
 
       {activeChildId && (
         <>

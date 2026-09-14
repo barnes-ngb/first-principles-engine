@@ -41,7 +41,6 @@ vi.mock('./useFoundationsBootstrap', () => ({
 
 // Heavy, self-contained children stubbed to markers — their own suites own them.
 vi.mock('./DispositionProfile', () => ({ default: () => <div>DISPOSITION_SECTION</div> }))
-vi.mock('../../components/ChildSelector', () => ({ default: () => <div>CHILD_SELECTOR</div> }))
 vi.mock('../foundations-review/FoundationsReviewSession', () => ({
   default: () => <div>REVIEW_SESSION</div>,
 }))
