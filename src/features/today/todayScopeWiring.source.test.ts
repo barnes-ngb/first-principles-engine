@@ -147,6 +147,24 @@ describe('the capability boundary has one definition (UX-358)', () => {
     expect(KID_TODAY_CODE).toMatch(/failed=\{artifactsFailed\}/)
   })
 
+  it('every Today-side artifact write refreshes the evidence list (UX-438)', () => {
+    // Codex round 2 (P2): `UX-436` made a teach-back, a conundrum note and a
+    // chapter recording ELIGIBLE for *Today's evidence*, and none of those save
+    // paths told the list — `TodayPage` loaded it once in an effect keyed to
+    // family/day/child, so the section stayed stale until a page reload. A list
+    // that is eligible-but-stale lies about the day, which is worse than the
+    // omission it replaced.
+    //
+    // A source scan because the property spans five files and one callback: the
+    // page must EXPOSE a reload, and every writer that is not routed through
+    // `useUnifiedCapture` must be handed it.
+    expect(TODAY_PAGE_CODE).toMatch(/const loadTodayArtifacts = useCallback/)
+    const parentHandoffs = TODAY_PAGE_CODE.match(/onArtifactSaved=\{loadTodayArtifacts\}/g) ?? []
+    expect(parentHandoffs.length).toBe(2) // WeekFocusCard + TeachBackSection
+    const kidHandoffs = KID_TODAY_CODE.match(/onArtifactSaved=\{loadArtifacts\}/g) ?? []
+    expect(kidHandoffs.length).toBe(2) // KidChapterPool + KidConundrumResponse
+  })
+
   it('BOTH Today surfaces report a failed artifact read, through the one list (UX-431)', () => {
     // The parent half had no such report at all before this: a dropped query
     // showed a four-second snackbar and then *"Nothing captured yet today."* —

@@ -53,6 +53,11 @@ interface WeekFocusCardProps {
    * belongs to the day being recorded, not to the wall clock.
    */
   today: string
+  /**
+   * Refresh *Today's evidence* after this note lands (UX-438) — see
+   * `TeachBackSection`'s copy of this prop for why.
+   */
+  onArtifactSaved?: () => void
   onSnackMessage: (msg: { text: string; severity: 'success' | 'error' }) => void
 }
 
@@ -61,6 +66,7 @@ export default function WeekFocusCard({
   familyId,
   selectedChildId,
   today,
+  onArtifactSaved,
   onSnackMessage,
 }: WeekFocusCardProps) {
   return (
@@ -160,6 +166,7 @@ export default function WeekFocusCard({
                       content: `Discussed conundrum: ${weekFocus.conundrum!.title}`,
                       createdAt: new Date().toISOString(),
                     })
+                    onArtifactSaved?.()
                     onSnackMessage({ text: 'Conundrum discussion recorded!', severity: 'success' })
                   } catch (err) {
                     console.error('Failed to record conundrum:', err)

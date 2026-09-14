@@ -25,6 +25,12 @@ interface TeachBackSectionProps {
   selectedChildId: string
   today: string
   persistDayLogImmediate: (updated: DayLog) => void
+  /**
+   * Refresh *Today's evidence* after this note lands (UX-438). `UX-436` made
+   * this write eligible for that list; without the refresh it would not appear
+   * until a page reload, which is a list quietly lying about the day.
+   */
+  onArtifactSaved?: () => void
   onSnackMessage: (msg: { text: string; severity: 'success' | 'error' }) => void
 }
 
@@ -36,6 +42,7 @@ export default function TeachBackSection({
   selectedChildId,
   today,
   persistDayLogImmediate,
+  onArtifactSaved,
   onSnackMessage,
 }: TeachBackSectionProps) {
   const [teachBackText, setTeachBackText] = useState('')
@@ -97,6 +104,7 @@ export default function TeachBackSection({
                 createdAt: new Date().toISOString(),
               })
               persistDayLogImmediate({ ...dayLog, teachBackDone: true })
+              onArtifactSaved?.()
               setTeachBackSaved(true)
               onSnackMessage({
                 text: `${selectedChild.name} explained something to ${recipient.name}!`,

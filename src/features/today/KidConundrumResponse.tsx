@@ -35,12 +35,19 @@ interface KidConundrumResponseProps {
   }
   child: Child
   familyId: string
+  /**
+   * Refresh *Today's evidence* after an answer or a drawing lands (UX-438).
+   * `UX-436` made these writes eligible for that list; without the refresh they
+   * would not appear until a page reload.
+   */
+  onArtifactSaved?: () => void
 }
 
 export default function KidConundrumResponse({
   conundrum,
   child,
   familyId,
+  onArtifactSaved,
 }: KidConundrumResponseProps) {
   // FEAT-183 / UX-152 (B3): which response flow a kid gets is an age question.
   // The audio + quick-picks flow below is for a reader; the listen + picks +
@@ -154,6 +161,9 @@ export default function KidConundrumResponse({
         createdAt: new Date().toISOString(),
       })
 
+      // UX-438 — this answer is now part of *What you did today*, so tell the list.
+      onArtifactSaved?.()
+
       // Award 5 XP for conundrum response
       const conundrumDate = new Date().toISOString().slice(0, 10)
       void addXpEvent(
@@ -177,7 +187,7 @@ export default function KidConundrumResponse({
       setSaveError("Hmm, that didn't save. Check your connection and try again.")
     }
     setSavingConundrum(false)
-  }, [conundrumAudioBlob, familyId, child.id, conundrum, selectedPick])
+  }, [conundrumAudioBlob, familyId, child.id, conundrum, selectedPick, onArtifactSaved])
 
   const handleConundrumPhoto = useCallback(async (file: File) => {
     try {
@@ -204,6 +214,9 @@ export default function KidConundrumResponse({
       // picture on it.
       await updateDoc(docRef, { uri: downloadUrl, mediaUrls: [downloadUrl] })
 
+      // UX-438 — the drawing is now part of *What you did today*.
+      onArtifactSaved?.()
+
       // Award 5 XP for conundrum drawing
       const conundrumDate = new Date().toISOString().slice(0, 10)
       void addXpEvent(
@@ -227,7 +240,7 @@ export default function KidConundrumResponse({
       console.error('Conundrum photo save failed:', err)
       setSaveError("Hmm, that didn't save. Check your connection and try again.")
     }
-  }, [familyId, child.id, conundrum])
+  }, [familyId, child.id, conundrum, onArtifactSaved])
 
   // Older child: audio + quick picks response
   if (isOlder) {

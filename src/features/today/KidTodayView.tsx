@@ -772,6 +772,7 @@ export default function KidTodayView({
                 childId={child.id}
                 dayLog={dayLog}
                 weekFocus={weekFocus}
+                onArtifactSaved={loadArtifacts}
                 onChapterAnswered={updateChapter}
               />
             ) : (
@@ -845,6 +846,7 @@ export default function KidTodayView({
               conundrum={weekFocus.conundrum}
               child={child}
               familyId={familyId}
+              onArtifactSaved={loadArtifacts}
             />
           </KidRitualRow>
         </SectionErrorBoundary>
