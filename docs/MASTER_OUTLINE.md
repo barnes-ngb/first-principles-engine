@@ -22,7 +22,7 @@ Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), 
 - Routes: **39**
 
 ## Navigation
-**Parent:** Today, Plan My Week, Curriculum, Review, Progress (**Foundations** · **Monthly Books** · Learning Map · Curriculum · Skill Snapshot · Word Wall — Foundations is index 0, absorbing the former Learning Profile tab with dispositions as a section, FEAT-65), Records, Books, **Watch Library** (FEAT-132 — its own top-level parent entry at `/watch`, moved out of Settings), **Barnes Bros**, Game Workshop, Dad Lab, Settings, Ask AI  
+**Parent:** Today, Plan My Week, Curriculum, Review (Week · Month tabs, replacing the former standalone Weekly Review nav entry and absorbing the Progress tab's former Monthly Books tab — `ProgressPage`'s `?tab=monthly-books` now redirects to Review's Month view), Progress (**Foundations** · Learning Map · Curriculum · Skill Snapshot · Word Wall — Foundations is index 0, absorbing the former Learning Profile tab with dispositions as a section, FEAT-65), Records, Books, **Watch Library** (FEAT-132 — its own top-level parent entry at `/watch`, moved out of Settings), **Barnes Bros**, Game Workshop, Dad Lab, Settings, Ask AI  
 **Kid:** Today, Knowledge Mine, My Books, **Books About Me**, **My Hero** (Hero Hub), **Barnes Bros**, Game Workshop, Dad Lab
 
 ---

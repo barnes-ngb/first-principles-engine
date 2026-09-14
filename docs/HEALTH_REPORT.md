@@ -11,7 +11,7 @@
 | **Firestore collections** | **47** | +0 |
 | **Cloud Functions** | **29** | +0 |
 | **Chat task types** | **21** | +0 |
-| **Routes** | **39** | +3 (new top-level `/curriculum` and `/review` routes — see Navigation below) |
+| **Routes** | **39** | +3 (new top-level `/curriculum` and `/review` routes, plus the nested `/review/monthly-books/:reviewId` reader route — see Navigation below) |
 | **Bundle size** | **4,570.43 kB / 1,375.47 kB gzip** | +141.93 kB / +49.25 kB gzip |
 
 ---
@@ -45,7 +45,7 @@
 | Firestore collections | 47 | 47 | ✅ OK |
 | Cloud Functions | 29 | 29 | ✅ OK (naive single-line grep on `functions/src/index.ts` undercounts to 22 because 2 of the 11 `export {...}` blocks span multiple lines; hand-walking every block confirms 29 — same caveat as every prior cycle) |
 | Chat task types | 21 | 21 | ✅ OK |
-| Routes | 36 | 39 | DRIFT +8.3% — **AUTO-FIXED** (real growth: `/curriculum` and `/review` are new top-level parent routes — see Navigation) |
+| Routes | 36 | 39 | DRIFT +8.3% — **AUTO-FIXED** (real growth: `/curriculum` and `/review` are new top-level parent routes, plus the nested `/review/monthly-books/:reviewId` reader route — see Navigation) |
 
 **Commit-count caveat, resolved this cycle:** the session started from a **shallow clone** (`git rev-parse --is-shallow-repository` → `true`, `git rev-list --count HEAD` → 266, not the true count). `git fetch --unshallow` was run before trusting the number; the real count is 3,690. Any future cycle that skips this step will under-report commits by roughly an order of magnitude.
 
@@ -67,9 +67,11 @@ Same eight expected carry-overs as every prior cycle — checked individually, e
 
 ### Navigation — MISMATCH FOUND AND FIXED
 
-`src/app/AppShell.tsx`'s parent `navItems` array now reads: Today, Plan My Week, **Curriculum**, **Review**, Progress, Records, Books, Watch Library, Barnes Bros, Game Workshop, Dad Lab, Settings, Ask AI — two entries (`/curriculum` → `CurriculumTab`, `/review` → the new `ReviewPage`, which combines the former Weekly Review content and Monthly Books into Week/Month tabs) that `docs/MASTER_OUTLINE.md`'s Navigation line did not have. The doc's line still read "Today, Plan My Week, **Weekly Review**, Progress (...)" with no standalone Curriculum entry.
+`src/app/AppShell.tsx`'s parent `navItems` array now reads: Today, Plan My Week, **Curriculum**, **Review**, Progress, Records, Books, Watch Library, Barnes Bros, Game Workshop, Dad Lab, Settings, Ask AI — two entries (`/curriculum` → `CurriculumTab`, `/review` → the new `ReviewPage`, which combines the former Weekly Review content and Monthly Books into Week/Month tabs, plus the nested reader route `/review/monthly-books/:reviewId`) that `docs/MASTER_OUTLINE.md`'s Navigation line did not have. The doc's line still read "Today, Plan My Week, **Weekly Review**, Progress (**Foundations** · **Monthly Books** · Learning Map · ...)" with no standalone Curriculum entry, and it still listed Monthly Books as a *Progress* tab.
 
-**Auto-fixed** per the companion prompt's Rule 4: inserted `Curriculum` before `Review` and renamed `Weekly Review` → `Review` to match `AppShell.tsx`'s exact labels and order; every other annotation (the Progress tab list, the Watch Library parenthetical) was left untouched. Kid Nav (8 items) already matched code exactly — no change needed there.
+**Auto-fixed** per the companion prompt's Rule 4, in two passes (the second following a Codex review finding on this same PR — see below): inserted `Curriculum` before `Review`, renamed `Weekly Review` → `Review`, added a parenthetical noting Review absorbs the Progress tab's former Monthly Books tab, and **removed `Monthly Books` from the Progress tab list** — `ProgressPage.tsx`'s own `TABS` array (Foundations, Learning Map, Curriculum, Skill Snapshot, Word Wall) no longer has a Monthly Books entry, and its `?tab=monthly-books` query param now redirects to Review's Month view (`ProgressPage.tsx:59-60`). Every other annotation (the Watch Library parenthetical) was left untouched. Kid Nav (8 items) already matched code exactly — no change needed there.
+
+**Codex review round 1 on this PR (commit `945b5fe`) caught both of the above** — the stale Progress tab list (P2) and the incomplete route accounting one paragraph up (P2, this section's own route count was missing the third new route). Both were real, verified against source, and fixed in a follow-up commit on this same PR rather than left for a human, since they were mechanical corrections squarely within this audit's stated scope (nav accuracy, route accounting) — not a design judgment call.
 
 **Not fixed, flagged for a human:** neither `CLAUDE.md`'s route list under `src/app/` nor its `src/features/` project-structure notes mention `/curriculum` or `/review` as standalone routes, or the `ReviewPage` component (`src/features/review/ReviewPage.tsx`, which composes `WeeklyReviewContent` + `MonthlyBooksTab` under Week/Month tabs, reading `UX-425`/`UX-426` in its own source comments). This looks like real, already-shipped, undocumented-in-`CLAUDE.md` structure — out of this audit's auto-fix scope (`CLAUDE.md` prose is excluded by policy) and worth a deliberate doc pass rather than a mechanical one.
 
@@ -190,7 +192,8 @@ Same pattern, same absolute count (43) as last cycle — the doc-index grew by 1
 ### Auto-Fixed
 
 - **`docs/MASTER_OUTLINE.md` stats block:** TypeScript lines 317,104→369,843; Commits 3,403→3,690; Test files 537→687; Routes 36→39. (Firestore collections, Cloud Functions, and Chat task types were already correct — no change.)
-- **`docs/MASTER_OUTLINE.md` Navigation line:** inserted `Curriculum` and renamed `Weekly Review`→`Review` in the Parent nav list to match `src/app/AppShell.tsx`'s current `navItems` array exactly. See Navigation section above.
+- **`docs/MASTER_OUTLINE.md` Navigation line:** inserted `Curriculum` and renamed `Weekly Review`→`Review` in the Parent nav list to match `src/app/AppShell.tsx`'s current `navItems` array exactly; removed `Monthly Books` from the Progress tab list (moved to Review's Month view — caught by Codex review round 1 on this PR, verified against `ProgressPage.tsx`, fixed same-PR). See Navigation section above.
+- **`docs/HEALTH_REPORT.md`'s own route-count explanation:** named the third new route, `/review/monthly-books/:reviewId`, alongside `/curriculum` and `/review` (also caught by Codex review round 1, verified against `router.tsx`).
 - Ran `npm run lint` (0 auto-fixable issues — same 3 pre-existing `react-hooks/exhaustive-deps` warnings, left as-is) and `npm run docs:fix` (made no further changes — nothing else to auto-fix, all HARD checks already passing).
 
 ### Needs Human Attention
