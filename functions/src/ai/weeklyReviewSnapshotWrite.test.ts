@@ -1,23 +1,39 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
- * UX-212 / UX-214 — what the review WRITE does around the snapshot.
+ * What the weekly review WRITE does, and in what ORDER (UX-212 / UX-214 / UX-409).
  *
- * Exercised through the no-evidence path, which reaches Firestore and skips the
- * model entirely: a week with nothing logged is exactly the week the rate exists
- * to make visible, so it must record positions like any other.
+ * ── The order is the point (UX-409) ─────────────────────────────────────────
+ * `generateReviewForChild` used to call Claude first and write the document only
+ * after that call returned, so a rate limit, a missing secret, a parse failure
+ * or an outage wrote NOTHING — losing the regenerable narrative and, with it,
+ * the `curriculumPositions` snapshot, which is the repository's only record of
+ * where a workbook stood on a date and cannot be rebuilt once the positions
+ * move on. Owner decision, 2026-09-13: write the snapshot first, narrative
+ * second. These tests assert that as an order, with the failing-model case as
+ * the positive control: make the call throw, and the week's record must still be
+ * on file with no narrative on it.
  *
- * Two properties, both of which would be invisible until they cost real data:
- *   • the positions are recorded even when the week was empty; and
- *   • a regenerate does not delete a parent's answer. Both write paths `.set()`
- *     the WHOLE document, so an answer given on Tuesday would vanish the moment
- *     anybody tapped "Regenerate Review" — the carry-forward read is the only
- *     thing standing between the parent's judgement and a silent deletion.
+ * ── The properties that were already here ───────────────────────────────────
+ *   • the positions are recorded even when the week was empty (UX-212); and
+ *   • a regenerate does not delete a parent's answer (UX-214). Every write from
+ *     the module is now field-scoped, which makes the answer safe by
+ *     construction, and the transactional carry-forward is kept on top.
  */
+
+interface CapturedWrite {
+  data: Record<string, unknown>;
+  options: unknown;
+  viaTransaction: boolean;
+  /** Monotonic tick, so a write can be ordered against the model call. */
+  at: number;
+}
 
 interface FakeState {
   configs: Array<{ id: string; data: Record<string, unknown> }>;
   existing: Record<string, unknown> | undefined;
+  /** Fields already on the review document, beside the reflection. */
+  existingDoc: Record<string, unknown> | undefined;
   /** When true, the transactional read of the review document throws. */
   existingReadFails: boolean;
   /** Set by the caller to simulate an answer saved DURING the transaction. */
@@ -27,27 +43,59 @@ interface FakeState {
   /** True when the write went through a transaction rather than a plain set. */
   wroteInTransaction: boolean;
   configQueries: unknown[][];
+  /** Every write, in order — UX-409 is about which one lands first. */
+  writes: CapturedWrite[];
+  /** What the model call does: return text, or throw. */
+  claude: () => { text: string; inputTokens: number; outputTokens: number };
+  /** The tick at which the model was called, or null if it never was. */
+  claudeCalledAt: number | null;
+  usageLogged: number;
+  clock: number;
 }
 
 const state: FakeState = {
   configs: [],
   existing: undefined,
+  existingDoc: undefined,
   existingReadFails: false,
   onTransactionRead: undefined,
   written: undefined,
   writeOptions: undefined,
   wroteInTransaction: false,
   configQueries: [],
+  writes: [],
+  claude: () => ({ text: "{}", inputTokens: 0, outputTokens: 0 }),
+  claudeCalledAt: null,
+  usageLogged: 0,
+  clock: 0,
 };
+
+function tick(): number {
+  state.clock += 1;
+  return state.clock;
+}
+
+function record(
+  data: Record<string, unknown>,
+  options: unknown,
+  viaTransaction: boolean,
+): void {
+  state.written = { ...data };
+  state.writeOptions = options;
+  state.wroteInTransaction = viaTransaction;
+  state.writes.push({ data: { ...data }, options, viaTransaction, at: tick() });
+}
 
 /** Read the review document the way the real transaction would. */
 function readReviewDoc() {
   if (state.existingReadFails) throw new Error("unavailable");
   state.onTransactionRead?.();
-  return {
-    exists: state.existing !== undefined,
-    data: () => (state.existing ? { reflection: state.existing } : {}),
+  const doc = {
+    ...state.existingDoc,
+    ...(state.existing ? { reflection: state.existing } : {}),
   };
+  const exists = state.existing !== undefined || state.existingDoc !== undefined;
+  return { exists, data: () => doc };
 }
 
 vi.mock("firebase-admin/firestore", () => ({
@@ -63,40 +111,60 @@ vi.mock("firebase-admin/firestore", () => ({
       },
       doc: (id: string) => ({
         set: async (data: Record<string, unknown>, options?: unknown) => {
-          state.written = { ...data, __path: `${path}/${id}` };
-          state.writeOptions = options;
+          record({ ...data, __path: `${path}/${id}` }, options, false);
         },
       }),
     }),
-    doc: () => ({
-      get: async () => readReviewDoc(),
-    }),
+    // Only `loadSnapshotData` reaches this, and only on the model path.
+    doc: () => ({ get: async () => ({ exists: false, data: () => ({}) }) }),
     runTransaction: async (
       fn: (tx: {
         get: (ref: unknown) => Promise<unknown>;
-        set: (ref: unknown, data: Record<string, unknown>) => void;
+        set: (ref: unknown, data: Record<string, unknown>, options?: unknown) => void;
       }) => Promise<void>,
     ) => {
       await fn({
         get: async () => readReviewDoc(),
-        set: (_ref, data) => {
-          state.written = { ...data };
-          state.writeOptions = undefined;
-          state.wroteInTransaction = true;
-        },
+        set: (_ref, data, options) => record(data, options, true),
       });
     },
   }),
 }));
 
-const { generateReviewForChild } = await import("./evaluate.js");
+// The model and the context it is given — mocked so the ORDER of the writes
+// around them can be asserted without a network call.
+vi.mock("./chatTypes.js", () => ({
+  callClaude: async () => {
+    state.claudeCalledAt = tick();
+    return state.claude();
+  },
+  logAiUsage: async () => {
+    state.usageLogged += 1;
+  },
+}));
+
+vi.mock("./chat.js", () => ({
+  modelForTask: () => "claude-test",
+}));
+
+vi.mock("./contextSlices.js", () => ({
+  buildContextForTask: async () => ["CONTEXT"],
+}));
+
+vi.mock("./learnerSynthesis.js", () => ({
+  synthesizeIfStale: async () => undefined,
+}));
+
+const { generateReviewForChild, toCurriculumPositions } = await import("./evaluate.js");
 import type { WeekContext } from "./evaluate.js";
 
 const emptyWeek: WeekContext = {
   child: { id: "lincoln", name: "Lincoln", grade: "3rd" },
   weekKey: "2026-08-30",
   dayLogs: [],
+  dayLogDocs: [],
   hours: [],
+  hoursAdjustments: [],
   dailyPlans: [],
   missedDays: 5,
   bookActivity: [],
@@ -108,15 +176,39 @@ const emptyWeek: WeekContext = {
   teachBacks: { count: 0, bySubject: {}, audioCount: 0, textCount: 0, examples: [] },
 };
 
+/** A week with evidence — the path that actually calls the model. */
+const loggedWeek: WeekContext = {
+  ...emptyWeek,
+  hours: [
+    { childId: "lincoln", minutes: 45, subjectBucket: "Reading", date: "2026-08-31" },
+  ],
+};
+
+const VALID_REVIEW = JSON.stringify({
+  celebration: "Great week",
+  summary: "Steady",
+  wins: ["Phonics"],
+  growthAreas: [],
+  paceAdjustments: [],
+  recommendations: [],
+  energyPattern: "even",
+});
+
 beforeEach(() => {
   state.configs = [];
   state.existing = undefined;
+  state.existingDoc = undefined;
   state.existingReadFails = false;
   state.onTransactionRead = undefined;
   state.written = undefined;
   state.writeOptions = undefined;
   state.wroteInTransaction = false;
   state.configQueries = [];
+  state.writes = [];
+  state.claude = () => ({ text: VALID_REVIEW, inputTokens: 10, outputTokens: 20 });
+  state.claudeCalledAt = null;
+  state.usageLogged = 0;
+  state.clock = 0;
 });
 
 describe("the review write records the week's positions (UX-212)", () => {
@@ -216,5 +308,340 @@ describe("a regenerate does not delete the parent's answer (UX-214)", () => {
 
     expect(state.written?.curriculumPositions).toBeDefined();
     expect(state.writeOptions).toEqual({ merge: true });
+  });
+});
+
+describe("the record is written BEFORE the model is called (UX-409)", () => {
+  it("writes the week's record first, then calls the model", async () => {
+    state.configs = [{ id: "w1", data: { name: "Math", currentPosition: 14 } }];
+
+    await generateReviewForChild("fam-1", loggedWeek, "key");
+
+    expect(state.claudeCalledAt).not.toBeNull();
+    expect(state.writes[0].at).toBeLessThan(state.claudeCalledAt!);
+    expect(state.writes[0].data.curriculumPositions).toBeDefined();
+    // …and the narrative arrives on a LATER write, never in that first one.
+    expect(state.writes[0].data).not.toHaveProperty("celebration");
+    expect(state.writes.length).toBeGreaterThan(1);
+  });
+
+  it("POSITIVE CONTROL — a model failure still leaves the week's record on file", async () => {
+    // The whole of UX-409: this is the run that used to write nothing at all.
+    state.configs = [
+      { id: "w1", data: { name: "TGTB Math", currentPosition: 14, totalUnits: 60, unitLabel: "lesson" } },
+    ];
+    state.claude = () => {
+      throw new Error("429 rate limit");
+    };
+
+    await expect(
+      generateReviewForChild("fam-1", loggedWeek, "key"),
+    ).rejects.toThrow("429 rate limit");
+
+    const first = state.writes[0].data;
+    expect(first.status).toBe("snapshot-only");
+    expect(first.curriculumPositions).toBeDefined();
+    expect(first.hoursSummary).toBeDefined();
+    expect(first).not.toHaveProperty("celebration");
+    expect(first).not.toHaveProperty("summary");
+  });
+
+  it("says on the document WHY the narrative is missing", async () => {
+    state.claude = () => {
+      throw new Error("Missing CLAUDE_API_KEY secret");
+    };
+
+    await expect(
+      generateReviewForChild("fam-1", loggedWeek, "key"),
+    ).rejects.toThrow();
+
+    const last = state.writes[state.writes.length - 1].data;
+    expect(last.narrativeError).toMatchObject({ reason: "call-failed" });
+    // The explanation is merged on; it carries no narrative and no record fields.
+    expect(last).not.toHaveProperty("curriculumPositions");
+    expect(state.writes[state.writes.length - 1].options).toEqual({ merge: true });
+  });
+
+  it("an unparseable reply is a narrative failure, not a lost week", async () => {
+    state.configs = [{ id: "w1", data: { name: "Math", currentPosition: 3 } }];
+    state.claude = () => ({ text: "I can't do that.", inputTokens: 1, outputTokens: 1 });
+
+    await expect(
+      generateReviewForChild("fam-1", loggedWeek, "key"),
+    ).rejects.toThrow();
+
+    expect(state.writes[0].data.curriculumPositions).toBeDefined();
+    expect(state.writes[state.writes.length - 1].data).toHaveProperty("narrativeError");
+    expect(state.usageLogged).toBe(0);
+  });
+
+  it("clears the explanation once a narrative lands", async () => {
+    await generateReviewForChild("fam-1", loggedWeek, "key");
+
+    const narrativeWrite = state.writes.find((w) => "celebration" in w.data)!;
+    expect(narrativeWrite.data.status).toBe("draft");
+    expect(narrativeWrite.data.narrativeError).toBeNull();
+    expect(narrativeWrite.options).toEqual({ merge: true });
+    expect(state.usageLogged).toBe(1);
+  });
+
+  it("never writes the whole document, so the parent's answer cannot be in the payload", async () => {
+    state.existing = { answer: "about-right", answeredAt: "x" };
+
+    await generateReviewForChild("fam-1", loggedWeek, "key");
+
+    for (const write of state.writes) {
+      expect(write.options).toEqual({ merge: true });
+    }
+    // The record write carries the answer forward; the narrative write, which
+    // does not read the document at all, must not mention it.
+    const narrativeWrite = state.writes.find((w) => "celebration" in w.data)!;
+    expect(narrativeWrite.data).not.toHaveProperty("reflection");
+  });
+});
+
+describe("the snapshot is the record of THAT week, not of today (UX-409)", () => {
+  it("does not re-stamp positions a previous run already recorded", async () => {
+    // The manual regenerate case: re-run the narrative for a week whose
+    // workbooks have moved on since. The week's own reading must stand.
+    state.existingDoc = {
+      curriculumPositions: {
+        recordedAt: "2026-08-30T05:15:00.000Z",
+        weekKey: "2026-08-30",
+        positions: [{ configId: "w1", name: "Math", currentPosition: 14 }],
+      },
+    };
+    state.configs = [{ id: "w1", data: { name: "Math", currentPosition: 31 } }];
+
+    await generateReviewForChild("fam-1", loggedWeek, "key");
+
+    expect(state.writes[0].data).not.toHaveProperty("curriculumPositions");
+  });
+
+  it("does not downgrade the status of a week that already generated one", async () => {
+    state.existingDoc = { status: "draft" };
+    await generateReviewForChild("fam-1", loggedWeek, "key");
+    expect(state.writes[0].data).not.toHaveProperty("status");
+  });
+
+  it("keeps the UX-212 snapshot shape exactly — derived, not retyped", async () => {
+    const configs = [
+      { id: "w1", data: { name: "TGTB Math", currentPosition: 14, totalUnits: 60, unitLabel: "lesson" } },
+      { id: "s1", data: { name: "History", currentPosition: 4, unitLabel: "session" } },
+      { id: "r1", data: { name: "Prayer", defaultMinutes: 10 } },
+    ];
+    state.configs = configs;
+
+    await generateReviewForChild("fam-1", loggedWeek, "key");
+
+    const snapshot = state.writes[0].data.curriculumPositions as {
+      recordedAt: string;
+      weekKey: string;
+      positions: unknown[];
+    };
+    expect(snapshot.weekKey).toBe("2026-08-30");
+    expect(snapshot.recordedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    // The positions are asserted against the same pure function the pre-UX-409
+    // ordering wrote them with, so a drift in the shape fails here rather than
+    // silently changing what a week's record means.
+    expect(snapshot.positions).toEqual(toCurriculumPositions(configs));
+  });
+});
+
+describe("the week's counted minutes are recorded with it (UX-409 / UX-410)", () => {
+  it("folds all three sources onto the record, stamped", async () => {
+    const week: WeekContext = {
+      ...emptyWeek,
+      dayLogDocs: [
+        {
+          childId: "lincoln",
+          date: "2026-08-31",
+          checklist: [
+            { label: "Phonics", completed: true, subjectBucket: "Reading", estimatedMinutes: 20 },
+          ],
+        },
+      ],
+      hours: [
+        { childId: "lincoln", minutes: 45, subjectBucket: "Math", date: "2026-08-31" },
+      ],
+      hoursAdjustments: [
+        { childId: "both", minutes: 15, subjectBucket: "Science", date: "2026-09-01" },
+      ],
+    };
+
+    await generateReviewForChild("fam-1", week, "key");
+
+    expect(state.writes[0].data.hoursSummary).toMatchObject({
+      weekKey: "2026-08-30",
+      totalMinutes: 80,
+      minutesBySubject: { Reading: 20, Math: 45, Science: 15 },
+    });
+  });
+});
+
+describe("round 1 — three things the first cut got wrong", () => {
+  it("P1 — a week whose only record is an adjustment is NOT an empty week", async () => {
+    // `hoursAdjustments` only reached this cron in the same change, so the
+    // question could not be asked before. A *Log watch time* row is a real hour
+    // of a child's week; storing a positive `hoursSummary` beside prose reading
+    // "No day logs, hours, books, or teach-backs were recorded" is one document
+    // contradicting itself.
+    const adjustmentOnly: WeekContext = {
+      ...emptyWeek,
+      hoursAdjustments: [
+        { childId: "lincoln", minutes: 25, subjectBucket: "Science", date: "2026-09-01" },
+      ],
+    };
+
+    await generateReviewForChild("fam-1", adjustmentOnly, "key");
+
+    expect(state.claudeCalledAt).not.toBeNull();
+    expect(state.writes[0].data.status).toBe("snapshot-only");
+    expect(state.writes[0].data.hoursSummary).toMatchObject({ totalMinutes: 25 });
+    const narrativeWrite = state.writes.find((w) => "celebration" in w.data)!;
+    expect(narrativeWrite.data.status).toBe("draft");
+  });
+
+  it("P1 — but his BROTHER's adjustment is not evidence about him", async () => {
+    const siblingOnly: WeekContext = {
+      ...emptyWeek,
+      hoursAdjustments: [
+        { childId: "london", minutes: 90, subjectBucket: "Reading", date: "2026-09-01" },
+      ],
+    };
+
+    await generateReviewForChild("fam-1", siblingOnly, "key");
+
+    expect(state.claudeCalledAt).toBeNull();
+    expect(state.written?.status).toBe("no-data");
+    expect(state.written?.hoursSummary).toMatchObject({ totalMinutes: 0 });
+  });
+
+  it("P1 — a family-wide ('both') adjustment IS his", async () => {
+    await generateReviewForChild("fam-1", {
+      ...emptyWeek,
+      hoursAdjustments: [
+        { childId: "both", minutes: 60, subjectBucket: "Science", date: "2026-09-01" },
+      ],
+    }, "key");
+    expect(state.claudeCalledAt).not.toBeNull();
+  });
+
+  it("P2 — an empty-week rerun never writes over a generated narrative", async () => {
+    // The queries move: `summarizeBooksWeek` keys on `updatedAt`, so a week whose
+    // only evidence was one book stops reporting it the moment somebody touches
+    // that book again. Rerunning then reached the no-data path.
+    state.existingDoc = { status: "draft", celebration: "He read a whole chapter." };
+
+    await generateReviewForChild("fam-1", emptyWeek, "key");
+
+    expect(state.writes).toHaveLength(1);
+    expect(state.writes[0].data).not.toHaveProperty("status");
+    expect(state.writes[0].data).not.toHaveProperty("celebration");
+    expect(state.writes[0].data).not.toHaveProperty("summary");
+    // …and the record half still lands, which is the point of writing it first.
+    expect(state.writes[0].data.hoursSummary).toBeDefined();
+  });
+
+  it("P2 — a week that only ever had a record DOES get the empty-week prose", async () => {
+    // `snapshot-only` carries no narrative anybody could lose, so the no-data
+    // write is an upgrade rather than a downgrade.
+    state.existingDoc = { status: "snapshot-only" };
+
+    await generateReviewForChild("fam-1", emptyWeek, "key");
+
+    expect(state.writes[0].data.status).toBe("no-data");
+    expect(state.writes[0].data.celebration).toMatch(/No activities were logged/);
+  });
+
+  it("P2 — nor does it write over a week the parent already reviewed", async () => {
+    state.existingDoc = { status: "applied", celebration: "x" };
+    await generateReviewForChild("fam-1", emptyWeek, "key");
+    expect(state.writes[0].data).not.toHaveProperty("status");
+  });
+
+  it("P2 — the stored explanation can never carry the model's own text", async () => {
+    // `parseReviewResponse` lets a JSON.parse SyntaxError propagate, and Node
+    // quotes an excerpt of the rejected input in it — the rejected input being
+    // the model's reply, which can echo the child's page (UX-311's rule).
+    state.claude = () => ({
+      text: '{"celebration": "Lincoln wrote SECRET-PAGE-TEXT and then',
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+
+    await expect(
+      generateReviewForChild("fam-1", loggedWeek, "key"),
+    ).rejects.toThrow();
+
+    const stored = state.writes[state.writes.length - 1].data.narrativeError as {
+      message: string;
+      reason: string;
+    };
+    expect(stored.reason).toBe("unreadable-reply");
+    expect(JSON.stringify(stored)).not.toMatch(/SECRET-PAGE-TEXT/);
+    expect(stored.message).toBe(
+      "The weekly review reply could not be read as a review.",
+    );
+  });
+
+  it("P2 — and it tells the two failures apart", async () => {
+    state.claude = () => {
+      throw new Error("429 rate limit");
+    };
+    await expect(
+      generateReviewForChild("fam-1", loggedWeek, "key"),
+    ).rejects.toThrow();
+
+    const stored = state.writes[state.writes.length - 1].data.narrativeError as {
+      message: string;
+      reason: string;
+    };
+    expect(stored.reason).toBe("call-failed");
+    expect(JSON.stringify(stored)).not.toMatch(/429/);
+  });
+});
+
+describe("round 2 — the explanation does not outlive the failure", () => {
+  it("clears a previous run's narrativeError when the no-data prose lands", async () => {
+    // Every write here is a merge, so an error left standing would have the page
+    // telling a parent that generation failed about a week this run summarised.
+    state.existingDoc = {
+      status: "snapshot-only",
+      narrativeError: { message: "x", reason: "call-failed", at: "y" },
+    };
+
+    await generateReviewForChild("fam-1", emptyWeek, "key");
+
+    expect(state.writes[0].data.status).toBe("no-data");
+    expect(state.writes[0].data.narrativeError).toBeNull();
+  });
+
+  it("leaves it alone on a record write, where no narrative has landed yet", async () => {
+    // The record is written BEFORE the model is asked, so the previous run's
+    // explanation is still true at that moment. `writeNarrative` clears it.
+    state.existingDoc = {
+      status: "snapshot-only",
+      narrativeError: { message: "x", reason: "call-failed", at: "y" },
+    };
+
+    await generateReviewForChild("fam-1", loggedWeek, "key");
+
+    expect(state.writes[0].data).not.toHaveProperty("narrativeError");
+    const narrativeWrite = state.writes.find((w) => "celebration" in w.data)!;
+    expect(narrativeWrite.data.narrativeError).toBeNull();
+  });
+
+  it("does not clear it when a standing narrative means nothing new landed", async () => {
+    state.existingDoc = {
+      status: "draft",
+      celebration: "He read a whole chapter.",
+      narrativeError: { message: "x", reason: "call-failed", at: "y" },
+    };
+
+    await generateReviewForChild("fam-1", emptyWeek, "key");
+
+    expect(state.writes[0].data).not.toHaveProperty("narrativeError");
+    expect(state.writes[0].data).not.toHaveProperty("celebration");
   });
 });

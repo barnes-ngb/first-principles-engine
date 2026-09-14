@@ -32,10 +32,6 @@ vi.mock('./DispositionProfile', () => ({
   default: () => <div>DISPOSITION_SECTION</div>,
 }))
 
-// ChildSelector pulls its own data deps — stub to a marker.
-vi.mock('../../components/ChildSelector', () => ({
-  default: () => <div>CHILD_SELECTOR</div>,
-}))
 
 // UX-326 moved three sections into this tab. They are self-contained (the two
 // diagnostic panels gate themselves on `canEdit` and then `?diag=1`, and reach

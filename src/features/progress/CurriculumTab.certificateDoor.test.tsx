@@ -83,7 +83,6 @@ vi.mock('../../core/hooks/useScanToActivityConfig', () => ({
 vi.mock('../../core/curriculum/updateSkillMapFromFindings', () => ({
   updateSkillMapFromFindings: vi.fn(),
 }))
-vi.mock('../../components/ChildSelector', () => ({ default: () => <div>CHILD_SELECTOR</div> }))
 vi.mock('../../components/ScanButton', () => ({ default: () => <div>SCAN_BUTTON</div> }))
 vi.mock('../../components/ScanAnalysisPanel', () => ({ default: () => null }))
 // The door itself is a marker — its own suites own its behaviour, and this
@@ -108,17 +107,21 @@ describe('CurriculumTab — the certificate door (UX-326 / UX-319)', () => {
     expect(screen.getByText('CERTIFICATE_DOOR')).toBeInTheDocument()
   })
 
-  it('puts it BELOW the child selector and ABOVE the staging area', async () => {
+  it('puts it BELOW the heading that names the child and ABOVE the staging area', async () => {
+    // UX-319's ordering half used to read "below this tab's own child
+    // selector". `UX-425` removed that selector, so what the door must sit
+    // below is the thing that still names whose curriculum this is — the
+    // heading (UX-313: a records surface names its target before the tap).
     const { container } = render(<CurriculumTab />)
     await screen.findByText('Scan Certificate or Progress Report')
     const text = container.textContent ?? ''
 
-    const selector = text.indexOf('CHILD_SELECTOR')
+    const heading = text.indexOf("'s Curriculum")
     const door = text.indexOf('Scan Certificate or Progress Report')
     const staging = text.indexOf('Add to Curriculum')
 
-    expect(selector).toBeGreaterThanOrEqual(0)
-    expect(door).toBeGreaterThan(selector)
+    expect(heading).toBeGreaterThanOrEqual(0)
+    expect(door).toBeGreaterThan(heading)
     expect(staging).toBeGreaterThan(door)
   })
 })

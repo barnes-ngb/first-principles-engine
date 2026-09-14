@@ -36,34 +36,40 @@
 //  1. **Watch** — `itemType: 'watch'` is authoritative and is the one kind that
 //     is definitionally *not* a curriculum row (it names a `watchLibrary`
 //     video). `watchDayItem` is the only writer of it.
-//  2. **Workbook, resolved EXACTLY as the capture path resolves it** —
-//     `item.workbookConfigId ?? findWorkbookConfigId(item, configs)`, the same
-//     expression `useUnifiedCapture` evaluates before anything else. It is
-//     first among the curriculum kinds for one reason: it is the only door with
-//     a consequence that cannot be taken back (`currentPosition` advances), so
-//     the tell must say what the photo is actually going to do. Asking a
-//     different question here than the capture asks is how a row comes to read
-//     *Routine* while its photo advances a workbook.
-//  3. **The stamped `activityConfigId`** — written by `buildApplyChecklist`
-//     when the row was planned from a named curriculum row. A **stale** stamp
-//     resolves to nothing rather than falling back to the label, the rule
-//     `findStrandConfigId` already follows: the row told us which row it meant,
-//     and the answer is that that row is gone, not that another will do.
+//  2. **The row's own `workbookConfigId` stamp** — written by
+//     `buildApplyChecklist` for a workbook and nothing else, and the first thing
+//     `useUnifiedCapture` reads, so it is the one workbook answer that cannot
+//     disagree with the door. It answers with no list in hand (the ID is on the
+//     row), but once the list has **settled** and the document is not in it, the
+//     stamp is stale and says so — `syncScanToConfig` would return
+//     `target-missing`, so *Add page* would advertise nothing.
+//  3. **The stamped `activityConfigId`** — written from the activity a parent
+//     actually picked. It comes BEFORE the fuzzy workbook match, because
+//     `buildApplyChecklist` deliberately leaves `workbookConfigId` unset for a
+//     non-workbook, and `isSameWorkbook` will match a strand or routine whose
+//     name merely shares two words and a subject with a workbook. The row
+//     already told us what it is. A **stale** stamp resolves to nothing rather
+//     than falling back to the label, the rule `findStrandConfigId` follows.
 //  4. **Strand**, through the shared `findStrandConfigId` — the same function
 //     that decides whether the *Record a session* button renders, so the tell
 //     and the door cannot disagree about whether this is a strand.
 //  5. **`itemType: 'evaluation'`** — the planner writes these itself
 //     (`chatPlanner.logic`'s Knowledge Mine row) and they have no config.
-//  6. **The row's name**, against every live config of any type, through
+//  6. **The fuzzy workbook match**, for a row carrying no stamp at all — a
+//     legacy row, or one the routine-text round trip stripped the join from
+//     (`UX-402`). Here it is the capture path's own question, asked its way.
+//  7. **The row's name**, against every live config of any type, through
 //     `activityMatchNames` + `nameKey` — the repo's one comparison key for a
 //     human-typed name (`UX-205`), so a renamed row keeps its tell (`UX-280`).
 //     **A single distinct match, or none**: two rows answering to one label is
 //     the duplicate case Curriculum's own notice exists to surface, and picking
 //     one would be the app deciding what her curriculum is.
-//  7. **`itemType`**, the legacy five and whatever an older build stored.
-//  8. **`unknown`**, which says so and offers the honest door.
+//  8. **Ambiguity**, which outranks step 9 — a duplicated label is a fact about
+//     the family's curriculum and `itemType` is a word.
+//  9. **`itemType`**, the legacy five and whatever an older build stored.
+// 10. **`unknown`**, which says so and offers the honest door.
 //
-// Steps 6 and 7 are in that order deliberately: a config is a record the family
+// Steps 7 and 9 are in that order deliberately: a config is a record the family
 // wrote, `itemType` is a string that may have come from a model.
 //
 // ── One door per row (`UX-361`, owner decision 2026-09-11) ──────────────────
@@ -186,6 +192,119 @@ export const DOOR_FOR_KIND: Record<TodayRowKind, TodayRowDoor> = {
 }
 
 /**
+ * May a photo taken on a row of this kind reach the CURRICULUM route?
+ *
+ * **The owner's decision on `UX-403` (2026-09-13): workbook rows only.**
+ *
+ * The curriculum route is `useUnifiedCapture`'s classification path — it hands
+ * the page to `syncScanToConfig` with no target, which fuzzy-matches the cover
+ * text across the child's workbooks and **creates or advances one**, then writes
+ * `childSkillMaps` (`updateSkillMapFromFindings`) and
+ * `skillSnapshots.conceptualBlocks` (`detectBlockersFromScan`), and
+ * auto-completes other rows. None of that was confirmed, and none of it was ever
+ * what a door reading *Add a photo* said it would do: a page photographed under
+ * *Handwriting* could move a workbook the row has nothing to do with.
+ *
+ * So a `Record<TodayRowKind, boolean>`, the `UX-204` rail: a new kind cannot
+ * arrive without somebody deciding whether a photo on it may write the family's
+ * curriculum. Exactly one entry is `true`, and it is the kind whose whole
+ * definition is *this row is a workbook page, and the photo advances its lesson
+ * count*. Everything else — including the two that claim nothing
+ * ({@link TodayRowKind.Unresolved}, {@link TodayRowKind.Unknown}) — is evidence
+ * only, which is the fail-closed direction: an unread curriculum list cannot
+ * tell us this is a workbook, and a row nothing answers to is not one.
+ *
+ * This is a **narrowing of two propose-and-confirm rails** and is made on the
+ * owner's decision above, nothing wider: the writes themselves are untouched,
+ * and the Curriculum tab's own scan doors (`UX-315`) still reach all of them.
+ *
+ * Read by the write (`useUnifiedCapture`) and by every door that offers it
+ * (`TodayChecklist`), so the tell, the button and the record cannot disagree —
+ * the same discipline that made {@link DOOR_FOR_KIND} one table.
+ */
+export const CURRICULUM_ROUTE_FOR_KIND: Record<TodayRowKind, boolean> = {
+  [TodayRowKind.Workbook]: true,
+  [TodayRowKind.Routine]: false,
+  [TodayRowKind.Formation]: false,
+  [TodayRowKind.Activity]: false,
+  [TodayRowKind.App]: false,
+  [TodayRowKind.Evaluation]: false,
+  [TodayRowKind.Strand]: false,
+  [TodayRowKind.Watch]: false,
+  [TodayRowKind.Unknown]: false,
+  [TodayRowKind.Unresolved]: false,
+}
+
+/** {@link CURRICULUM_ROUTE_FOR_KIND}, as the one question every caller asks. */
+export function captureMayRouteToCurriculum(kind: TodayRowKind): boolean {
+  return CURRICULUM_ROUTE_FOR_KIND[kind] === true
+}
+
+/**
+ * Whether a caller's curriculum list can be believed yet, from the two flags
+ * `useActivityConfigs` actually hands out.
+ *
+ * One definition, because three surfaces now ask it — the checklist, the page,
+ * and the capture hook — and a surface that got the precedence backwards would
+ * render *"checking"* over a read that had failed and will never resolve.
+ * `failed` is checked first: a read that errored is not still loading, and its
+ * sentence is the one that does not resolve on its own.
+ */
+export function todayRowConfigsState(
+  loading: boolean,
+  failed: boolean,
+): TodayRowConfigsState {
+  if (failed) return TodayRowConfigsState.Failed
+  if (loading) return TodayRowConfigsState.Loading
+  return TodayRowConfigsState.Settled
+}
+
+/**
+ * Does this door need a curriculum row behind it to do anything?
+ *
+ * A `Record<TodayRowDoor, boolean>`, the `UX-204` rail again: a new door must
+ * declare whether it can act with no config resolved.
+ *
+ * **The two that need one both promise a record that lives on a config** — *Add
+ * page* advances `currentPosition`, *Record a session* increments a strand's
+ * count — so offering either with nothing behind it is a button that cannot keep
+ * its word. Codex round 4 caught the workbook half: step 9 answers from the row's
+ * own `itemType`, which is *a record of an intention, not of a config*, so a
+ * settled row asserting `workbook` with no stamp and no name match resolved to
+ * `Workbook` with a **null** `configId` — and `TodayChecklist` drew *Add page*
+ * while `useUnifiedCapture` took the evidence branch and no lesson moved.
+ *
+ * The strand half was latent and is worse in the other direction: its button is
+ * already gated on a resolvable `findStrandConfigId`, so a config-less strand row
+ * rendered *no door at all* — `UX-405`'s finding on a second kind.
+ */
+export const DOOR_REQUIRES_CONFIG: Record<TodayRowDoor, boolean> = {
+  [TodayRowDoor.AddPage]: true,
+  [TodayRowDoor.RecordSession]: true,
+  // The photo needs nothing; the Mine is at a fixed route (`UX-405`); a watch
+  // row carries its own `watchVideoId` and is not a curriculum row at all.
+  [TodayRowDoor.AddPhoto]: false,
+  [TodayRowDoor.StartMining]: false,
+  [TodayRowDoor.Watch]: false,
+}
+
+/**
+ * The door a row can actually offer: its kind's door, or the plain photo when
+ * that door needs a curriculum row and none resolved.
+ *
+ * The photo is the right fallback for both — it is the one record such a row
+ * *can* make, and taking it away would be the `UX-363` mistake of leaving a
+ * labelled row with nothing to tap.
+ */
+export function resolveAddDoor(
+  kind: TodayRowKind,
+  configId: string | null,
+): TodayRowDoor {
+  const door = DOOR_FOR_KIND[kind]
+  return DOOR_REQUIRES_CONFIG[door] && !configId ? TodayRowDoor.AddPhoto : door
+}
+
+/**
  * What a parent calls each door.
  *
  * `Add page` against `Add a photo` is the sentence this run is really adding to
@@ -254,20 +373,26 @@ export type TodayRowUnknownReason =
 /**
  * What the capture door on an unplaced row actually does — one clause, shared.
  *
- * **Codex round 1 (P1) caught the first draft of these notes claiming *"no lesson
- * count moves"*, and it was false.** A photo on a row the app cannot place takes
- * `useUnifiedCapture`'s classification path, which fuzzy-matches the page by
- * name and may create or advance a workbook (and does say so, in its own snack).
- * Narrowing that write is a `skillSnapshots` / `activityConfigs` change and
- * therefore propose-and-confirm — filed as `UX-403`, with the proposal, rather
- * than made here. What was this run's to fix is the sentence, so the sentence now
- * says what happens.
+ * **This sentence has now been wrong in both directions, which is why it is one
+ * constant and not three.** `UX-363`'s first draft claimed *"no lesson count
+ * moves"* and Codex round 1 was right that it was false: a photo on an unplaced
+ * row took `useUnifiedCapture`'s classification path, which fuzzy-matched the
+ * page by name and could create or advance an unrelated workbook. That run could
+ * only fix the sentence, because narrowing the write crossed a
+ * propose-and-confirm rail — so it said what actually happened and filed the
+ * narrowing as `UX-403`.
+ *
+ * `UX-403` is the owner's decision (2026-09-13): **curriculum route on workbook
+ * rows only.** A row that does not resolve to {@link TodayRowKind.Workbook}
+ * writes an `artifacts` document and the day-log link and nothing else — see
+ * {@link captureMayRouteToCurriculum}, which is the rule both the door and the
+ * write now read. So the original sentence is finally the true one.
  *
  * One clause, appended to all three reasons, so no note can drift from another
  * about the same door.
  */
 export const UNPLACED_ROW_EVIDENCE_CLAUSE =
-  'A photo saves as evidence here; if it reads as a workbook page, the app files it on Curriculum and says which.'
+  'A photo saves as evidence here and nothing else moves.'
 
 /**
  * The one line the row shows when there is nowhere on Today to add to it.
@@ -415,11 +540,15 @@ function build(
 ): TodayRow {
   const where = positionPhrase(kind, config)
   const word = TODAY_ROW_KIND_WORD[kind]
+  const configId = config?.id ?? configIdOverride
   return {
     kind,
-    configId: config?.id ?? configIdOverride,
+    configId,
     tell: where ? `${word} · ${where}` : word,
-    addDoor: DOOR_FOR_KIND[kind],
+    // The KIND is the row's own claim and stands; the DOOR is a promise about a
+    // record, so it narrows when there is no curriculum row to make one on
+    // (Codex round 4 — see `DOOR_REQUIRES_CONFIG`).
+    addDoor: resolveAddDoor(kind, configId),
     unknownReason,
     note: unknownReason ? TODAY_ROW_UNKNOWN_NOTE[unknownReason] : null,
   }
@@ -466,26 +595,32 @@ export function resolveTodayRow(
   //     answerable even while the list is unread.
   if (item.itemType === TodayRowKind.Watch) return build(TodayRowKind.Watch, null)
 
-  // 2 · The workbook question, asked exactly as `useUnifiedCapture` asks it, so
-  //     the tell cannot promise something other than what the photo will do.
+  // 2 · The row's own WORKBOOK stamp. `workbookConfigId` is written by
+  //     `buildApplyChecklist` for a workbook and nothing else, and it is the
+  //     first thing the capture path reads, so this is the one workbook answer
+  //     that cannot disagree with the door.
   //
   //     **Including the completed filter, which is to say: without one.** Neither
   //     `findWorkbookConfigId` nor the capture path skips a finished program, so
   //     skipping it here would make the row read *Routine* while its photo went
-  //     to a workbook — the one disagreement this step exists to prevent. A
-  //     finished program is a separate question, and it belongs on the door
-  //     rather than on the label that describes it (`UX-399`).
+  //     to a workbook. A finished program is a separate question, and it belongs
+  //     on the door rather than on the label that describes it (`UX-399`).
   //
-  //     **The STAMP answers even when the document is not in hand** (Codex round
-  //     1, P2): `workbookConfigId` lives on the row, so the capture path resolves
-  //     it with no config list at all — and a row that reads *"No curriculum
-  //     row"* while its photo advances the workbook it names is the exact
-  //     contradiction this step exists to prevent, arriving through an unread
-  //     list. The position is simply absent until the document loads.
-  const workbookConfigId = item.workbookConfigId ?? findWorkbookConfigId(item, configs)
-  if (workbookConfigId) {
-    const workbook = configs.find((c) => c.id === workbookConfigId) ?? null
-    return build(TodayRowKind.Workbook, workbook, null, workbookConfigId)
+  //     **The stamp answers with no list in hand, but only while there is no
+  //     list** (Codex round 1 P2, narrowed by round 2 P2). An unread list cannot
+  //     contradict the stamp, so the ID alone is the honest answer and the
+  //     position is simply absent. Once the list has **settled** and the document
+  //     is not in it, the stamp is stale: `syncScanToConfig` returns
+  //     `target-missing` and saves ordinary evidence, so *Add page* would
+  //     advertise a curriculum action that cannot happen. That is a stale join,
+  //     and it says so.
+  if (item.workbookConfigId) {
+    const stampedWorkbook = configs.find((c) => c.id === item.workbookConfigId)
+    if (stampedWorkbook) return build(TodayRowKind.Workbook, stampedWorkbook)
+    if (!settled) {
+      return build(TodayRowKind.Workbook, null, null, item.workbookConfigId)
+    }
+    return build(TodayRowKind.Unknown, null, TodayRowUnknownReason.StaleJoin)
   }
 
   // An unread list cannot answer any of the questions below — and answering them
@@ -493,7 +628,25 @@ export function resolveTodayRow(
   // that may well be, permanently so on a failed read.
   if (!settled) return buildUnresolved(configsState)
 
-  // 3 · The stamped curriculum join. A stale stamp is its own answer.
+  // 3 · The stamped curriculum join, and it comes BEFORE the fuzzy workbook
+  //     match (Codex round 2, P1).
+  //
+  //     `buildApplyChecklist` stamps `activityConfigId` from the activity a
+  //     parent actually picked and **deliberately leaves `workbookConfigId`
+  //     unset** for a non-workbook. Asking `findWorkbookConfigId` first therefore
+  //     let a strand or a routine whose name fuzzily resembles a workbook —
+  //     `isSameWorkbook` matches on two shared words plus a subject — be
+  //     presented as a *Workbook* with an *Add page* door, on a row the parent
+  //     had chosen as something else. The row already told us what it is; a fuzzy
+  //     name match is not evidence against it.
+  //
+  //     **The residual is named rather than hidden**: `useUnifiedCapture` still
+  //     evaluates the same fuzzy fallback, so on such a row a *post-completion*
+  //     photo can still target that unrelated workbook. Preventing that stops a
+  //     `skillSnapshots.workingLevels` write, which is propose-and-confirm, so it
+  //     is `UX-403`'s second shape and not narrowed here. What this ordering does
+  //     fix is the reach `UX-363` added: with the kind resolved from the stamp,
+  //     no up-front photo door renders on those rows at all.
   if (item.activityConfigId) {
     const stamped = byId(item.activityConfigId)
     if (stamped) {
@@ -511,14 +664,28 @@ export function resolveTodayRow(
   // 5 · A Knowledge Mine row the planner wrote itself. No config exists for it.
   if (item.itemType === TodayRowKind.Evaluation) return build(TodayRowKind.Evaluation, null)
 
-  // 6 · The row's name, against every live config. One answer, or none.
+  // 6 · The FUZZY workbook match, for a row carrying no stamp at all — a legacy
+  //     row, or one the routine-text round trip stripped the join from
+  //     (`UX-402`). Here it is the capture path's own question and its own
+  //     answer, so the tell and the door agree by construction.
+  const fuzzyWorkbookId = findWorkbookConfigId(item, configs)
+  if (fuzzyWorkbookId) {
+    return build(
+      TodayRowKind.Workbook,
+      configs.find((c) => c.id === fuzzyWorkbookId) ?? null,
+      null,
+      fuzzyWorkbookId,
+    )
+  }
+
+  // 7 · The row's name, against every live config. One answer, or none.
   const { config: named, ambiguous } = configByName(item.label, configs)
   if (named) {
     const kind = kindFromItemType(named.type) ?? TodayRowKind.Activity
     return build(kind, named)
   }
 
-  // 7 · Ambiguity outranks what the row SAYS it is (Codex round 1, P2).
+  // 8 · Ambiguity outranks what the row SAYS it is (Codex round 1, P2).
   //
   //     Two live configs answering to one label is a fact about the family's
   //     curriculum; `itemType` on a model-planned row is a word. Letting the word
@@ -527,15 +694,49 @@ export function resolveTodayRow(
   //     word, on a name the app has just admitted it cannot resolve.
   if (ambiguous) return build(TodayRowKind.Unknown, null, TodayRowUnknownReason.Ambiguous)
 
-  // 8 · What the row says it is — a record of an intention, not of a config.
+  // 9 · What the row says it is — a record of an intention, not of a config.
   const stated = kindFromItemType(item.itemType)
   if (stated) return build(stated, null)
 
-  // 9 · Nothing answers. Say so, and offer the door that is honest.
+  // 10 · Nothing answers. Say so, and offer the door that is honest.
   return build(TodayRowKind.Unknown, null, TodayRowUnknownReason.NoMatch)
 }
 
 /** Does this row's door put a photo on it? The two capture doors, named once. */
 export function isPhotoDoor(door: TodayRowDoor): boolean {
   return door === TodayRowDoor.AddPage || door === TodayRowDoor.AddPhoto
+}
+
+/** Where the Knowledge Mine lives. One route, named once (`router.tsx`). */
+export const KNOWLEDGE_MINE_ROUTE = '/quest'
+
+/**
+ * Where an `evaluation` row's *Start Mining* door goes — `UX-405`.
+ *
+ * **The defect was a labelled row with nothing to tap.** `DOOR_FOR_KIND` gives
+ * {@link TodayRowKind.Evaluation} the {@link TodayRowDoor.StartMining} door,
+ * which suppresses the photo door; but the button that renders it required
+ * `item.itemType === 'evaluation' && item.link`, and a row that resolved to
+ * `evaluation` from the family's own **config** carries neither — the ordinary
+ * planner path round-trips through routine prose and drops both (`UX-402`). So
+ * the row read *Quest* and offered no door at all.
+ *
+ * The fix is the destination, not a guess. `evaluationMode` is a **targeting
+ * hint** for `useQuestSession`'s completion match, and there is nothing on an
+ * `ActivityConfig` that could honestly produce one — so none is invented. The
+ * *route* needs no inference: the kind already means *this row is a Knowledge
+ * Mine quest*, and the Mine is at one address. A row that carries its own `link`
+ * keeps it (a planner row may point at a specific quest); everything else opens
+ * the Mine, exactly as the Hero Hub tile does.
+ *
+ * Returns `null` for every other kind, so the caller cannot render the button on
+ * a row whose door is not this one.
+ */
+export function todayRowMineLink(
+  row: Pick<TodayRow, 'kind' | 'addDoor'>,
+  item: Pick<ChecklistItem, 'link'>,
+): string | null {
+  if (row.addDoor !== TodayRowDoor.StartMining) return null
+  const link = item.link?.trim()
+  return link ? link : KNOWLEDGE_MINE_ROUTE
 }

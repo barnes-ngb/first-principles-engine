@@ -52,7 +52,7 @@ take them — marked, not guessed:
 | Question | What the code says | What would settle it |
 |---|---|---|
 | Which door wrote his Practical Arts hours | Only `UnifiedCaptureCard` writes an `hours` row **and** an artifact in one tap, with the activity name in `notes`. That is the shape he described | The `hours` docs for `2026-09-07`–`2026-09-11`, `source` field |
-| Whether the weekly cron ran for Aug 31 – Sep 4 | Not derivable. `generateReviewForChild` writes **nothing at all** when the Claude call throws, so an absent document is consistent with both "the cron never fired" and "it fired and failed" (`UX-409`) | `weeklyReviews/2026-08-30_<lincoln>` existing, and the `weeklyReview` function's logs |
+| Whether the weekly cron ran for Aug 31 – Sep 4 | **Still not derivable, and never will be for that week.** `generateReviewForChild` wrote **nothing at all** when the Claude call threw, so an absent document is consistent with both "the cron never fired" and "it fired and failed" (`UX-409`). `FIX-236` makes it derivable from the week it ships onward — the record lands before the model call — but nothing back-fills a week whose positions were never read | `weeklyReviews/2026-08-30_<lincoln>` existing, and the `weeklyReview` function's logs |
 | Whether Practical Arts' 4 hours are entries, adjustments or blocks | All three are possible and all three now get named (`UX-408`) | The same week's `hours` / `hoursAdjustments` / `days` documents |
 
 **Not checked:** no browser, no pixels measured, no live Firestore, no Cloud Function
@@ -63,15 +63,15 @@ logs. No number, fold, rounding or stored row was changed by this run.
 ## 3. The derived numbers
 
 ```
-source files scanned (non-test, src/ + functions/src/): 873
-surfaces naming a time or evidence collection: 60
-by role: {"WRITE":14,"READ":21,"BOTH":25}
-by collection: {"hours":16,"hoursAdjustments":7,"days":28,"artifacts":32}
-census rows: 60
+source files scanned (non-test, src/ + functions/src/): 874
+surfaces naming a time or evidence collection: 61
+by role: {"WRITE":15,"READ":21,"BOTH":25}
+by collection: {"hours":16,"hoursAdjustments":9,"days":29,"artifacts":32}
+census rows: 61
 census problems: 0
-date-rule call sites (9 distinct rules): 33
+date-rule call sites (9 distinct rules): 34
    13  getWeekRange
-    5  weekRangeFromDateKey
+    6  weekRangeFromDateKey
     4  weekKeyFromDate
     3  getWeekMonday
     2  getSchoolYearRange
@@ -79,7 +79,8 @@ date-rule call sites (9 distinct rules): 33
     2  schoolYearStart
     1  getPlanningWeekRange
     1  lastCompletedSchoolWeekKey
-consumers of the shared counting path: 6
+consumers of the shared counting path: 7
+       functions/src/ai/promptHours.ts
        functions/src/ai/tasks/monthlyReviewData.ts
        src/features/records/MonthlyTrend.tsx
        src/features/records/RecordsPage.tsx
@@ -87,6 +88,15 @@ consumers of the shared counting path: 6
        src/features/weekly-review/useWeekHours.ts
        src/features/weekly-review/weekBySubject.ts
 ```
+
+Re-derived by `npm run census:time-ledger` on 2026-09-13 and pasted, never retyped
+(`FIX-235`, re-run by `FIX-236`: `hoursAdjustments` moves 7 → 9 because the two AI-side
+readers `UX-410` fixed now read the third additive source, and `promptHours.ts` is the
+seventh consumer of the shared counting path). Two things moved: `src/features/today/captureRowWrite.ts` is the new row-scoped
+day writer `UX-404` added, and the **date-rule** line was already stale on `main` — the script
+prints 34 call sites across 9 rules where the block said 33, because a sixth
+`weekRangeFromDateKey` call arrived after the census was written and nothing re-derived the
+prose. Exactly the failure the derived-numbers rule exists for, found by running it.
 
 `ROLE` is per **file**: a file that both reads and writes is `BOTH`, because read/write
 intent per call site is not derivable by a scan. What the derivation guarantees is
@@ -157,9 +167,9 @@ no document.
 
 | File | Collections | Role | Fold / date rule | What it is |
 |---|---|---|---|---|
-| `functions/src/ai/chat.ts` | hours · days | READ | own — `schoolYearStart` (Aug 1) + its own minute sum | **`loadHoursSummary`: the one reader that counts its own way** (`UX-410`). `hours` only, `minutes` **plus** `hours*60`, unrounded, non-positives admitted. `loadEngagementSummary` / `loadWeekContext` read `days` for engagement and the week plan, not for minutes |
+| `functions/src/ai/chat.ts` | hours · hoursAdjustments · days | READ | own — `schoolYearStart` (Aug 1); **the shared fold** since `FIX-236` | **`loadHoursSummary` was the one reader that counted its own way** (`UX-410`, fixed): `hours` only, `minutes` **plus** `hours*60`, unrounded, non-positives admitted. It reads all three additive sources now and folds them through `collectHoursContributions`; the Aug-1 year boundary is still its own (`UX-411`, open). `loadEngagementSummary` / `loadWeekContext` read `days` for engagement and the week plan, not for minutes |
 | `functions/src/ai/contextSlices.ts` | days | READ | — (renders the `hoursProgress` slice) | Prints *“N hours of 1000 target (P% complete)”* into the **plan** and **shellyChat** prompts — a target and a percentage the surfaces are forbidden (`UX-410`). `dayToday` reads the day log for the checklist |
-| `functions/src/ai/evaluate.ts` | hours · days · artifacts | BOTH | `lastWeekKey` over `civilDateObjectInZone` (UX-263 / UX-266); **its own** minute sums for the prompt | **The weekly cron and its `generateWeeklyReviewNow` twin.** Reads the week's `hours` / `days` / `artifacts` for the narrative and writes the `weeklyReviews` document — including the `UX-212` position snapshot, lost when the Claude call throws (`UX-409`). It reads **no `hoursAdjustments` at all** and sums minutes two more ways of its own (`UX-410`). Writes no `hours` row |
+| `functions/src/ai/evaluate.ts` | hours · hoursAdjustments · days · artifacts | BOTH | `lastWeekKey` over `civilDateObjectInZone` (UX-263 / UX-266); **the shared fold** since `FIX-236` | **The weekly cron and its `generateWeeklyReviewNow` twin.** Reads the week's `hours` / `hoursAdjustments` / `days` / `artifacts` and writes the `weeklyReviews` document. `FIX-236` reordered that write — the `UX-212` position snapshot and the week's counted minutes land **before** the Claude call, so a failed narrative no longer loses them (`UX-409`) — and replaced its two own minute sums with `foldWeekHours`, which reads the third source it had never read (`UX-410`). Writes no `hours` row |
 | `functions/src/ai/tasks/conundrum.ts` | days | READ | — (reads `days` for recent responses) | Reads the day log for conundrum history. No minutes |
 | `functions/src/ai/tasks/disposition.ts` | days | READ | — (reads `days` for engagement + notes) | Reads the day log for the disposition narrative. No minutes |
 | `functions/src/ai/tasks/monthlyReviewData.ts` | hours · hoursAdjustments · days · artifacts | READ | `collectHoursContributions` → `computeMonthHours` | The monthly review book's month figure — the shared path (ARCH-47 slice 4), and the reason the book stopped narrating a smaller month than the record |
@@ -193,6 +203,7 @@ no document.
 | `src/features/settings/DevAdminTab.tsx` | days | BOTH | `getWeekRange()` for the Sunday sweep | **WRITER.** The admin Sunday cleanup deletes day logs through `deleteDayLogGuarded` |
 | `src/features/shelly-chat/useChatWeekDays.ts` | days | READ | `getWeekRange(now, 1)` — Monday-start | Reads the chat's week of days. **The one caller that starts its week on MONDAY**, because it is building a Mon–Fri card set, not counting a compliance week |
 | `src/features/shelly-chat/useShellyChatFlows.ts` | days | BOTH | 14 days back, `toISOString().slice(0,10)` | Reads recent days for chat context; writes day edits through the guard |
+| `src/features/today/captureRowWrite.ts` | days | WRITE | the captured day's key — local | **WRITER.** The capture's own row-scoped lane (`UX-404`): patches the one row the photo was taken for, resolved by `checklistItemKey`, and writes `checklist` alone. The read, the patch and the write are ONE transaction through `dayWriteGuard.patchDayChecklistGuarded`, so `blocks` and `xpTotal` are never in the payload and an edit landing mid-write is not overwritten. No minutes |
 | `src/features/today/ExplorerMap.tsx` | days | READ | — (recent days) | Reads day logs for the kid map |
 | `src/features/today/KidCaptureForm.tsx` | artifacts | WRITE | — (no range rule) | **WRITER.** A kid's captured artifact. No minutes |
 | `src/features/today/KidChapterPool.tsx` | artifacts | BOTH | — (no range rule) | Chapter answers as artifacts |
@@ -207,7 +218,7 @@ no document.
 | `src/features/today/useDayLog.ts` | days | BOTH | `getWeekRange(new Date())` (`UX-366`) | **WRITER.** The day document's read and its one write lane, `persistDayLogImmediate` (`UX-351`) |
 | `src/features/today/useRolloverUnchecked.ts` | days | READ | yesterday's key — local | Reads the previous day to roll unchecked items forward |
 | `src/features/today/useTodayMiningMinutes.ts` | hours | READ | one day, `hours` only | A cap, not a record: Knowledge Mine minutes for today, for the daily mining limit |
-| `src/features/today/useUnifiedCapture.ts` | artifacts | BOTH | the selected day — local | **WRITER.** The capture pipeline behind the card: the artifact, the scan, and FEAT-184's kid/parent lane split |
+| `src/features/today/useUnifiedCapture.ts` | artifacts | BOTH | the selected day — local | **WRITER.** The capture pipeline behind the card: the artifact, the scan, and FEAT-184's kid/parent lane split. Its day write goes through `captureRowWrite.ts` (`UX-404`), and only a row resolving to a **workbook** may reach the curriculum route at all (`UX-403`) |
 | `src/features/today/WeekFocusCard.tsx` | artifacts | WRITE | the week's key | **WRITER.** The conundrum's artifact |
 | `src/features/today/WeekRibbon.tsx` | days | READ | `getWeekRange(…, 1)` — Monday-start | `formatHoursChip`: progress through the week's **planned** checklist against a planned denominator. A different question, excluded from the agreement test **by name** (`UX-211`) |
 | `src/features/watch/useWatchHistory.ts` | days | READ | a rolling window back from today | Reads day logs for watch history |
@@ -238,13 +249,22 @@ checklist items cannot tell two readers apart.
 | Review → Week → *Hours and Coverage* | `computeHoursSummary` | `weekRangeFromDateKey(weekKey)` | ✅ |
 | Review → Week → *The Week by Subject* | `computeHoursSummary` → `computeSubjectDistribution` | same | ✅ |
 | Monthly review book (CF) | `collectHoursContributions` → `computeMonthHours` | the month | ✅ |
-| **AI context slice `hoursProgress`** | **its own** | **`schoolYearStart` (Aug 1)** | ❌ `UX-410` |
-| **The weekly-review prompt's `HOURS BY SUBJECT`** | **its own**, `hours` docs only | `lastWeekKey` | ❌ `UX-410` |
-| **The weekly-review prompt's per-day `minutesBySubject`** | **its own**, completed items only | `lastWeekKey` | ❌ `UX-410` |
+| AI context slice `hoursProgress` | `collectHoursContributions` → `summarizeHoursContributions` | `schoolYearStart` (Aug 1) — `UX-411` open | ✅ since `FIX-236` |
+| The weekly-review prompt's `HOURS THIS WEEK` | `foldWeekHours` over the same rule | `lastWeekKey` | ✅ since `FIX-236` |
+| `weeklyReviews.hoursSummary` (the week's recorded minutes) | `foldWeekHours` | `lastWeekKey` | ✅ — added by `FIX-236` |
 
-**The last three rows are the audit's finding**, and the first of them is the agreement
-test's **positive control**: the suite asserts that adding a reader with that arithmetic
-makes the set disagree, so a future "simplification" of the comparison reddens.
+**The last three rows WERE the audit's finding** and are now folded like the rest —
+`FIX-236`, and the three are asserted in `hoursReaderAgreement.test.ts` beside the
+original eight. The per-day `minutesBySubject` that was the third of them is **gone**
+rather than repaired: the prompt states the week's minutes once, and the per-day
+breakdown answers about completion and engagement, which is a different question.
+The **positive control stays**: the suite still asserts that a reader with
+`loadHoursSummary`'s old arithmetic makes the set disagree, because a control deleted
+when its defect is fixed cannot catch the defect coming back — and `src/test/aiHoursReaders.source.test.ts`
+now fails closed on a new minute sum anywhere under `functions/src/ai/`.
+
+The paragraph below describes the three **as they were found**; it is the finding, and
+it is left standing rather than rewritten, because a census records what a survey saw.
 
 `loadHoursSummary` differs from the rule four ways, each of which changes the answer: it
 reads `hours` documents only (no day logs, no adjustments), it adds `minutes` **and**
@@ -296,8 +316,8 @@ exclusion list that is a heuristic is an exclusion list that grows silently.
 | `UX-406` | 2 | **FIXED** in this run | Review → Week had no week control, so on any day but Saturday it showed the previous school week with no way to move |
 | `UX-407` | 3 | **FIXED** in this run | The positions sentence promised *"saved overnight, once Saturday is over"* about Saturdays already past |
 | `UX-408` | 2 | **FIXED** in this run | Counted minutes that no completed checklist item accounts for were named nowhere |
-| `UX-409` | 1 | FILED | A failed weekly review writes **nothing**, so that week's position snapshot — the repo's only record of where a workbook stood on a date — is lost permanently, and no client route regenerates it |
-| `UX-410` | 2 | FILED | `loadHoursSummary` is a fourth definition of hours, read into two AI prompts, with a 1000-hour target and a percentage |
+| `UX-409` | 1 | **FIXED** by `FIX-236` | A failed weekly review writes **nothing**, so that week's position snapshot — the repo's only record of where a workbook stood on a date — is lost permanently, and no client route regenerates it. The record is now written **before** the model call (owner decision, 2026-09-13); the missing regenerate door is filed on as `UX-420` |
+| `UX-410` | 2 | **FIXED** by `FIX-236` | `loadHoursSummary` is a fourth definition of hours, read into two AI prompts, with a 1000-hour target and a percentage. All three AI-side readers now fold through the shared rule and the target line is gone |
 | `UX-411` | 2 | FILED | Two school years: July 1 in the app, August 1 in the Cloud Function |
 | `UX-412` | 2 | FILED | The Workshop and Knowledge Mine date their `hours` / `days` writes in **UTC**, so an evening session is stamped tomorrow |
 | `UX-413` | 3 | FILED | The week's evidence is range-queried on `createdAt` while its minutes are range-queried on `date` |
@@ -323,10 +343,15 @@ Three shapes, hand-checked, stated rather than hidden:
 
 1. **A write that reaches a collection through a helper in another file.** The scan is
    per file, so a module whose only Firestore verb lives in an imported writer is only
-   caught where the repo's own guarded writers are named. `setDayLogGuarded` /
-   `deleteDayLogGuarded` are in the write-verb list for exactly this reason — without them
+   caught where the repo's own guarded writers are named. All **five** guarded day writers
+   (`setDayLogGuarded` / `updateDayLogGuarded` / `mergeDayLogGuarded` /
+   `deleteDayLogGuarded` / `patchDayChecklistGuarded`) are in the write-verb list for exactly this reason — without them
    four of this repo's day writers read as readers, `watch/writeWatchItemToDay.ts` (a file
-   whose entire job is the write) among them. There is no equivalent for `hours`, because
+   whose entire job is the write) among them. `updateDayLogGuarded` was the one missing
+   until `FIX-235`, and `UX-404`'s `captureRowWrite.ts` — a file whose entire job is also the
+   write — is the first that reaches `days` through a guarded writer alone, so it published as
+   a READER until the rule was completed; `patchDayChecklistGuarded` is that run's own new
+   writer and went in with it. There is no equivalent for `hours`, because
    there is no shared hours writer: **every hours door calls `addDoc` itself.** That is
    itself worth noticing and is half of `UX-361`'s shape.
 2. **Which collection a `BOTH` file reads and which it writes.** Not derivable by a scan;

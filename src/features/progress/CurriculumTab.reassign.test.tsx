@@ -107,7 +107,6 @@ vi.mock('../../core/hooks/useScanToActivityConfig', () => ({
 vi.mock('../../core/curriculum/updateSkillMapFromFindings', () => ({
   updateSkillMapFromFindings: vi.fn(),
 }))
-vi.mock('../../components/ChildSelector', () => ({ default: () => <div>CHILD_SELECTOR</div> }))
 vi.mock('../../components/ScanButton', () => ({ default: () => <div>SCAN_BUTTON</div> }))
 vi.mock('../../components/ScanAnalysisPanel', () => ({ default: () => null }))
 vi.mock('firebase/firestore', () => ({

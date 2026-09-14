@@ -14,7 +14,6 @@ import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 import { doc, onSnapshot, setDoc } from 'firebase/firestore'
 
-import ChildSelector from '../../components/ChildSelector'
 import SaveIndicator from '../../components/SaveIndicator'
 import SectionCard, { type SectionDisclosure } from '../../components/SectionCard'
 import { useFamilyId } from '../../core/auth/useAuth'
@@ -23,7 +22,6 @@ import {
 } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useSaveState } from '../../core/hooks/useSaveState'
-import { useProfile } from '../../core/profile/useProfile'
 import type {
   EvidenceDefinition,
   PrioritySkill,
@@ -31,7 +29,7 @@ import type {
   StopRule,
   SupportDefault,
 } from '../../core/types'
-import { MasteryGate, SkillLevel, UserProfile } from '../../core/types/enums'
+import { MasteryGate, SkillLevel } from '../../core/types/enums'
 import { getDefaultsForChild } from './childDefaults'
 import FoundationsSection from '../evaluate/FoundationsSection'
 import MasteryCheckoffPanel from '../evaluate/MasteryCheckoffPanel'
@@ -52,16 +50,9 @@ const emptySnapshot = (childId: string): SkillSnapshot => ({
 export default function SkillSnapshotPage() {
   const navigate = useNavigate()
   const familyId = useFamilyId()
-  const { profile } = useProfile()
-  const isParent = profile === UserProfile.Parents
-  const {
-    children,
-    activeChildId,
-    activeChild,
-    setActiveChildId,
-    isLoading: isLoadingChildren,
-    addChild,
-  } = useActiveChild()
+  // UX-425: this page no longer chooses or adds a child — it reads the active
+  // one. The shell's chip is the one control that changes it.
+  const { activeChildId, activeChild } = useActiveChild()
 
   const [snapshot, setSnapshot] = useState<SkillSnapshot | null>(null)
   const [expandedSections, setExpandedSections] = useState<string[]>([])
@@ -310,20 +301,10 @@ export default function SkillSnapshotPage() {
         </Button>
       </Stack>
 
-      {isParent ? (
-        <ChildSelector
-          children={children}
-          selectedChildId={activeChildId}
-          onSelect={setActiveChildId}
-          onChildAdded={addChild}
-          isLoading={isLoadingChildren}
-          emptyMessage="Add a child to create a skill snapshot."
-        />
-      ) : (
-        <Typography variant="subtitle1" color="text.secondary">
-          {activeChild?.name ?? 'Loading...'}
-        </Typography>
-      )}
+      {/* UX-425: the in-page selector is gone — the shell's chip is the one
+          place a parent chooses the child. The heading above reads
+          "<name>'s Skill Snapshot" for parent and kid alike, so this page
+          already names the child it writes about (UX-426). */}
 
       {!snapshot ? (
         <SectionCard title="Loading">

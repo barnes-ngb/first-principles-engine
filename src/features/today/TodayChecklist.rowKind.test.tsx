@@ -28,6 +28,7 @@ const configs: TodayRowConfigLike[] = [
   { id: 'rt-1', name: 'Handwriting', type: ActivityType.Routine },
   { id: 'st-1', name: 'History', type: ActivityType.Strand, currentPosition: 14 },
   { id: 'ap-1', name: 'Reading Eggs', type: ActivityType.App },
+  { id: 'ev-1', name: 'Knowledge Mine', type: ActivityType.Evaluation },
 ]
 
 function renderRow(
@@ -219,5 +220,72 @@ describe('TodayChecklist — a saved photo is visible before the box is ticked (
   it('and a completed one still does', () => {
     renderRow(item({ completed: true, evidenceArtifactId: 'a1', evidenceCollection: 'artifacts' }))
     expect(screen.getByText(/captured/i)).toBeTruthy()
+  })
+})
+
+describe('TodayChecklist — the evaluation row has a door again (UX-405)', () => {
+  it('a row resolved as an evaluation from its CONFIG offers Start Mining', () => {
+    // The finding: `DOOR_FOR_KIND` gave this row the Start Mining door, which
+    // suppressed the photo door, while the button required `itemType` and `link`
+    // — neither of which survives the routine-text round trip (`UX-402`). So the
+    // row read *Quest* and had nothing to tap at all.
+    renderRow(item({ label: 'Knowledge Mine (15m)', activityConfigId: 'ev-1' }))
+    expect(screen.getByText(TODAY_ROW_KIND_WORD[TodayRowKind.Evaluation])).toBeTruthy()
+    expect(screen.getByRole('button', { name: /start mining/i })).toBeTruthy()
+  })
+
+  it('a planner-written evaluation row still uses its own link', () => {
+    renderRow(item({ label: 'Fluency Practice (10m)', itemType: 'evaluation', link: '/quest' }))
+    expect(screen.getByRole('button', { name: /start mining/i })).toBeTruthy()
+  })
+
+  it('a completed evaluation row offers no quest — the finished-row rule is unchanged', () => {
+    renderRow(item({ label: 'Knowledge Mine (15m)', activityConfigId: 'ev-1', completed: true }))
+    expect(screen.queryByRole('button', { name: /start mining/i })).toBeNull()
+  })
+})
+
+describe('TodayChecklist — an unbound workbook assertion promises nothing (round 4)', () => {
+  it('offers Add a photo, not Add page, when nothing answers to the row', () => {
+    renderRow(item({ label: 'Nothing answers to this (20m)', itemType: 'workbook' }))
+    expect(screen.queryByRole('button', { name: /^add page$/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /add a photo/i })).not.toBeNull()
+  })
+
+  it('and offers no curriculum door either — there is nothing to advance', () => {
+    renderRow(item({
+      label: 'Nothing answers to this (20m)',
+      itemType: 'workbook',
+      skipGuidance: 'Check lesson 12 before you start',
+    }))
+    expect(screen.queryByRole('button', { name: /scan lesson to check/i })).toBeNull()
+  })
+
+  it('POSITIVE CONTROL — the same assertion over a real config still says Add page', () => {
+    renderRow(item({ label: 'GATB Math (30m)', itemType: 'workbook', subjectBucket: SubjectBucket.Math }))
+    expect(screen.queryByRole('button', { name: /^add page$/i })).not.toBeNull()
+  })
+})
+
+describe('TodayChecklist — the curriculum doors belong to a workbook row (UX-403)', () => {
+  const guided = (over: Partial<ChecklistItem> = {}) =>
+    item({ skipGuidance: 'Check lesson 12 before you start', ...over })
+
+  it('the scan-to-skip door renders on a workbook row', () => {
+    renderRow(guided({ label: 'GATB Math (30m)', subjectBucket: SubjectBucket.Math }))
+    expect(screen.getByRole('button', { name: /scan lesson to check/i })).toBeTruthy()
+  })
+
+  it('and NOT on a routine row, whose photo may not write the curriculum', () => {
+    // The gate used to be the guidance sentence alone — a string an AI wrote,
+    // which is no evidence that the row is a workbook. Behind it sits an
+    // untargeted `syncScanToConfig` plus `childSkillMaps`, unconfirmed.
+    renderRow(guided())
+    expect(screen.queryByRole('button', { name: /scan lesson to check/i })).toBeNull()
+  })
+
+  it('nor on a row the app cannot place', () => {
+    renderRow(guided({ label: 'Trip to the museum (90m)' }))
+    expect(screen.queryByRole('button', { name: /scan lesson to check/i })).toBeNull()
   })
 })

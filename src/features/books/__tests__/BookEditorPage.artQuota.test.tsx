@@ -176,7 +176,15 @@ async function openSceneDialog(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getAllByText('Make a picture')[0])
 }
 
-describe('BookEditorPage — weekly art budget (FEAT-168)', () => {
+/**
+ * These mount the whole 2,414-line Book Editor in jsdom and drive it a keystroke
+ * at a time, so the slowest of them sits around 2.4s against vitest's 5s default —
+ * half the budget, with nothing left for a loaded runner. CI proved it: run 3680
+ * and run 3681 are the same commit (f875609), and the refusal test timed out in the
+ * first and passed in the second. A block timeout gives the margin; it changes no
+ * assertion, and a genuine hang still fails, four seconds later than it used to.
+ */
+describe('BookEditorPage — weekly art budget (FEAT-168)', { timeout: 20_000 }, () => {
   it('asks the budget question once and hands the answer to both child doors', async () => {
     quotaHolder.atLimit = true
     render(<BookEditorPage />)

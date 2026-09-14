@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   buildEvaluationPrompt,
+  foldWeekHours,
   formatBooksEvidence,
   formatTeachBacksEvidence,
   hasAnyEvidence,
@@ -13,6 +14,7 @@ import {
   WEEKLY_REVIEW_SCHEDULE,
 } from "./evaluate.js";
 import type { WeekContext } from "./evaluate.js";
+import { foldHoursForPrompt } from "./promptHours.js";
 
 // ── lastWeekKey ─────────────────────────────────────────────────
 
@@ -270,6 +272,39 @@ describe("the weeklyReview schedule", () => {
 
 // ── buildEvaluationPrompt ───────────────────────────────────────
 
+/**
+ * The week's day documents, raw — the fixture's day-log SOURCE (UX-410).
+ *
+ * The summaries below are derived from exactly these, because the prompt's
+ * per-day breakdown and its hours block must be talking about the same two days.
+ * Their completed items carry Reading 60 / Math 45 on the Monday and Reading 30
+ * on the Tuesday, which is what the retired per-day `minutesBySubject` used to
+ * sum by itself.
+ */
+const DAY_DOCS = [
+  {
+    childId: "child-1",
+    date: "2026-02-23",
+    checklist: [
+      { label: "Phonics", completed: true, subjectBucket: "Reading", estimatedMinutes: 30, engagement: "engaged", gradeResult: "5/6 correct" },
+      { label: "Read aloud", completed: true, subjectBucket: "Reading", estimatedMinutes: 30, engagement: "engaged", evidenceArtifactId: "a1" },
+      { label: "Math facts", completed: true, subjectBucket: "Math", estimatedMinutes: 45, engagement: "engaged" },
+      { label: "Copywork", completed: true, subjectBucket: "LanguageArts", estimatedMinutes: 0, engagement: "okay" },
+      { label: "Science", completed: false, subjectBucket: "Science", estimatedMinutes: 20 },
+    ],
+  },
+  {
+    childId: "child-1",
+    date: "2026-02-24",
+    checklist: [
+      { label: "Phonics", completed: true, subjectBucket: "Reading", estimatedMinutes: 30, engagement: "engaged" },
+      { label: "Sight words", completed: true, subjectBucket: "Reading", estimatedMinutes: 0, engagement: "engaged" },
+      { label: "Math", completed: true, subjectBucket: "Math", estimatedMinutes: 0, engagement: "struggled" },
+      { label: "Handwriting", completed: false, subjectBucket: "LanguageArts", estimatedMinutes: 15 },
+    ],
+  },
+];
+
 function makeContext(overrides?: Partial<WeekContext>): WeekContext {
   return {
     child: { id: "child-1", name: "Lincoln", grade: "3rd" },
@@ -280,7 +315,6 @@ function makeContext(overrides?: Partial<WeekContext>): WeekContext {
         totalItems: 5,
         completedItems: 4,
         engagement: { engaged: 3, okay: 1 },
-        minutesBySubject: { Reading: 60, Math: 45 },
         gradeResults: ["Phonics: 5/6 correct"],
         evidenceCount: 1,
       },
@@ -289,15 +323,23 @@ function makeContext(overrides?: Partial<WeekContext>): WeekContext {
         totalItems: 4,
         completedItems: 3,
         engagement: { engaged: 2, struggled: 1 },
-        minutesBySubject: { Reading: 30 },
         gradeResults: [],
         evidenceCount: 0,
       },
     ],
+    dayLogDocs: DAY_DOCS,
+    // Deliberately DIFFERENT subjects from the day logs, so the hours block can
+    // be read source by source: 90 min of Practical Arts and 45 of Science come
+    // from `hours` documents, 90 Reading and 45 Math from the days, and the
+    // adjustment takes 30 off Math. Before UX-410 the block summed this list
+    // alone and the days and the adjustment reached the model not at all.
     hours: [
-      { minutes: 60, subjectBucket: "Reading", date: "2026-02-23" },
-      { minutes: 45, subjectBucket: "Math", date: "2026-02-23" },
-      { minutes: 30, subjectBucket: "Reading", date: "2026-02-24" },
+      { childId: "child-1", minutes: 60, subjectBucket: "PracticalArts", date: "2026-02-23" },
+      { childId: "child-1", minutes: 45, subjectBucket: "Science", date: "2026-02-23" },
+      { childId: "child-1", minutes: 30, subjectBucket: "PracticalArts", date: "2026-02-24" },
+    ],
+    hoursAdjustments: [
+      { childId: "child-1", minutes: -30, subjectBucket: "Math", date: "2026-02-24" },
     ],
     dailyPlans: [
       {
@@ -337,6 +379,29 @@ function makeContext(overrides?: Partial<WeekContext>): WeekContext {
   };
 }
 
+describe("foldWeekHours is the shared fold, not a second one", () => {
+  it("delegates to foldHoursForPrompt over the context's own three arrays", () => {
+    // The app-side agreement suite asserts `foldHoursForPrompt` beside the other
+    // ten readers and deliberately does NOT import this module — `evaluate.ts`
+    // pulls in `firebase-admin` and `firebase-functions`, which are not app
+    // dependencies. This is the link in that chain which only the functions
+    // suite can see.
+    const ctx = makeContext();
+    expect(foldWeekHours(ctx)).toEqual(
+      foldHoursForPrompt(ctx.dayLogDocs, ctx.hours, ctx.hoursAdjustments, ctx.child.id),
+    );
+  });
+
+  it("counts his brother's week as none of his", () => {
+    const ctx = makeContext({
+      hoursAdjustments: [
+        { childId: "london", minutes: 500, subjectBucket: "Reading", date: "2026-02-24" },
+      ],
+    });
+    expect(foldWeekHours(ctx).minutesBySubject.Reading).toBe(90);
+  });
+});
+
 describe("buildEvaluationPrompt", () => {
   it("includes child name and week key", () => {
     const prompt = buildEvaluationPrompt(makeContext());
@@ -349,16 +414,40 @@ describe("buildEvaluationPrompt", () => {
     expect(prompt).toContain("7/9 items");
   });
 
-  it("includes total hours logged", () => {
+  it("includes total hours logged, folded from all three sources", () => {
     const prompt = buildEvaluationPrompt(makeContext());
-    // 60 + 45 + 30 = 135 min = 2.3 hours
-    expect(prompt).toContain("2.3 hours (135 min)");
+    // days (60 Reading + 45 Math + 30 Reading) + hours (60 + 45 + 30)
+    // − 30 adjustment = 240 min = 4 hours.
+    expect(prompt).toContain("4 hours (240 min)");
   });
 
-  it("includes hours breakdown by subject", () => {
+  it("includes hours breakdown by subject, from all three sources", () => {
     const prompt = buildEvaluationPrompt(makeContext());
-    expect(prompt).toContain("Reading: 90 min");
-    expect(prompt).toContain("Math: 45 min");
+    expect(prompt).toContain("Reading: 90 min"); // day logs only
+    expect(prompt).toContain("PracticalArts: 90 min"); // hours documents only
+    expect(prompt).toContain("Math: 15 min"); // 45 logged, 30 corrected away
+  });
+
+  it("states the week's minutes ONCE, never as two competing blocks (UX-410)", () => {
+    const prompt = buildEvaluationPrompt(makeContext());
+    expect(prompt).toContain("HOURS THIS WEEK:");
+    // The retired second claim: completed checklist items summed by subject with
+    // no block-actuals rule, printed beside the hours-document total.
+    expect(prompt).not.toContain("Subject time from checklists");
+  });
+
+  it("states no target, quota or percentage about the HOURS (UX-410)", () => {
+    const prompt = buildEvaluationPrompt(makeContext());
+    // Scoped to the hours block on purpose: the per-day breakdown's completion
+    // percentage is a different claim — progress through the week's PLANNED
+    // checklist — and is deliberately untouched by this row.
+    const block = prompt
+      .slice(prompt.indexOf("HOURS THIS WEEK:"))
+      .split("- Energy states")[0];
+    expect(block).not.toMatch(/%/);
+    expect(block.toLowerCase()).not.toContain("target");
+    expect(block.toLowerCase()).not.toContain("quota");
+    expect(block.toLowerCase()).not.toContain("goal");
   });
 
   it("includes energy state summary", () => {
@@ -392,13 +481,15 @@ describe("buildEvaluationPrompt", () => {
     const prompt = buildEvaluationPrompt(
       makeContext({
         dayLogs: [],
+        dayLogDocs: [],
         hours: [],
+        hoursAdjustments: [],
         dailyPlans: [],
         missedDays: 5,
       }),
     );
     expect(prompt).toContain("Day logs recorded: 0");
-    expect(prompt).toContain("(none)");
+    expect(prompt).toContain("No hours logged this week.");
     expect(prompt).toContain("Missed school days (Sun–Thu): 5");
   });
 });
@@ -753,7 +844,9 @@ describe("hasAnyEvidence", () => {
       child: { id: "c1", name: "Lincoln" },
       weekKey: "2026-02-23",
       dayLogs: [],
+      dayLogDocs: [],
       hours: [],
+      hoursAdjustments: [],
       dailyPlans: [],
       missedDays: 0,
       bookActivity: [],
@@ -777,7 +870,6 @@ describe("hasAnyEvidence", () => {
               totalItems: 1,
               completedItems: 0,
               engagement: {},
-              minutesBySubject: {},
               gradeResults: [],
               evidenceCount: 0,
             },
@@ -790,7 +882,7 @@ describe("hasAnyEvidence", () => {
   it("returns true when only hours exist", () => {
     expect(
       hasAnyEvidence(
-        emptyCtx({ hours: [{ minutes: 30, date: "2026-02-23" }] }),
+        emptyCtx({ hours: [{ childId: "c1", minutes: 30, date: "2026-02-23" }] }),
       ),
     ).toBe(true);
   });
@@ -848,7 +940,9 @@ describe("buildEvaluationPrompt — evidence sections", () => {
       child: { id: "c1", name: "Lincoln", grade: "3rd" },
       weekKey: "2026-02-23",
       dayLogs: [],
+      dayLogDocs: [],
       hours: [],
+      hoursAdjustments: [],
       dailyPlans: [],
       missedDays: 0,
       bookActivity: [],

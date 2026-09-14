@@ -15,7 +15,7 @@ import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 
-import ChildSelector from '../../components/ChildSelector'
+import ActiveChildLine from '../../components/ActiveChildLine'
 import SectionCard from '../../components/SectionCard'
 import { LoadingState } from '../../components/states'
 import { FOUNDATION_NODE_MAP } from '../../core/foundations'
@@ -108,8 +108,9 @@ export default function FoundationsTab() {
   // on the same **capability** the route guard uses (`canEdit`), never on a name
   // (ARCH-41/42/43): kids may read the terrain, they may not attest.
   const { canEdit } = useProfile()
-  const { activeChild, activeChildId, children, setActiveChildId, isLoading } =
-    useActiveChild()
+  // UX-425: this page no longer chooses or adds a child — it reads the active
+  // one. The shell's chip is the one control that changes it.
+  const { activeChild, activeChildId } = useActiveChild()
   const { model, loading } = useLearnerModel(familyId, activeChildId)
   // UX-286 — the model's ONE non-diagnostic door into existence. Create-only:
   // it fires when the snapshot has resolved and the document is absent, once per
@@ -184,13 +185,12 @@ export default function FoundationsTab() {
 
   return (
     <Container maxWidth="md" sx={{ py: 2 }}>
-      <ChildSelector
-        children={children}
-        selectedChildId={activeChildId}
-        onSelect={setActiveChildId}
-        isLoading={isLoading}
-        emptyMessage="Add a child to see their foundations."
-      />
+      {/* UX-425 / UX-426: the selector is gone — the shell's chip is the one
+          place a parent chooses the child. This tab's first control is the
+          Foundations Review launcher, which opens a conversation that writes
+          `learnerModels` for one boy, and the tab's own headings name him only
+          further down. So the sentence stays where the control was. */}
+      <ActiveChildLine hint />
 
       {/* Foundations Review Chat (FEAT-51, slice 2a) — a ~10-minute parent
           conversation that establishes where each child really is, and the

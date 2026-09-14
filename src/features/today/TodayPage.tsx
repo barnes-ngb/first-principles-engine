@@ -23,7 +23,7 @@ import {
   where,
 } from 'firebase/firestore'
 
-import ChildSelector from '../../components/ChildSelector'
+import ActiveChildLine from '../../components/ActiveChildLine'
 import ContextBar from '../../components/ContextBar'
 import HelpStrip from '../../components/HelpStrip'
 import Page from '../../components/Page'
@@ -50,7 +50,7 @@ import {
   skillSnapshotsCollection,
 } from '../../core/firebase/firestore'
 import { useProfile } from '../../core/profile/useProfile'
-import type { Artifact, ChapterBook, ChapterQuestionPoolItem, ChecklistItem as ChecklistItemType, CurriculumDetected, DailyPlan, DraftDayPlan, DraftPlanItem, ScanRecord, SkillSnapshot, WatchVideo, WorksheetScanResult } from '../../core/types'
+import type { ActivityConfig, Artifact, ChapterBook, ChapterQuestionPoolItem, ChecklistItem as ChecklistItemType, CurriculumDetected, DailyPlan, DraftDayPlan, DraftPlanItem, ScanRecord, SkillSnapshot, WatchVideo, WorksheetScanResult } from '../../core/types'
 import { effectiveRecommendation, isWorksheetScan } from '../../core/types'
 import TeachHelperDialog from '../planner/TeachHelperDialog'
 import {
@@ -113,9 +113,18 @@ import { selectTodayDayBanner } from './unappliedDraft'
 import { useUnifiedCapture } from './useUnifiedCapture'
 import SectionErrorBoundary from '../../components/SectionErrorBoundary'
 import DraftReadyCard from '../monthly-review/DraftReadyCard'
+import { captureRowWriteNotice, writeCaptureRow } from './captureRowWrite'
+import {
+  captureMayRouteToCurriculum,
+  resolveTodayRow,
+  todayRowConfigsState,
+} from './todayRowKind'
 import WeekFocusCard from './WeekFocusCard'
 import WeekRibbon from './WeekRibbon'
 import WorkshopGameCards from './WorkshopGameCards'
+
+/** Stable empty list, so gating on it does not churn every consumer's deps. */
+const EMPTY_ACTIVITY_CONFIGS: ActivityConfig[] = []
 
 export default function TodayPage() {
   const navigate = useNavigate()
@@ -205,24 +214,45 @@ export default function TodayPage() {
    * is a decision made once.
    */
   const { canEdit } = useProfile()
+  // UX-425: no `setActiveChildId` / `addChild` / `isLoading` here any more —
+  // the page no longer offers a way to choose or add a child. It reads the
+  // active one; the shell's chip is what changes it.
   const {
     children,
     activeChildId: selectedChildId,
     activeChild,
-    setActiveChildId: setSelectedChildId,
     isChildProfile: isKidProfile,
-    isLoading: isLoadingChildren,
-    addChild,
   } = useActiveChild()
   const artifactSectionRef = useRef<HTMLDivElement>(null)
 
   // FEAT-62 (legacy-item fallback): scannable workbook configs let unstamped items
   // resolve their workbook by name/subject match for routed capture + backfill.
   const {
-    configs: activityConfigs,
-    loading: activityConfigsLoading,
+    configs: rawActivityConfigs,
+    loading: rawActivityConfigsLoading,
     error: activityConfigsError,
+    configsChildId: activityConfigsChildId,
   } = useActivityConfigs(selectedChildId)
+  // UX-363, Codex round 2 (P1): the hook does not reset `configs` / `loading`
+  // when the child changes, so between a switch and the next snapshot they still
+  // describe the PREVIOUS child. Treating that as settled let a similarly named
+  // row resolve to the old child's workbook — and `syncScanToConfig` loads a
+  // `targetConfigId` by id without checking `childId`, so a capture would have
+  // advanced the other boy's lesson count. Until the hook's state is stamped with
+  // the child on screen it is an unsettled read, and the list handed to the
+  // checklist and to the capture hook is EMPTY rather than the wrong child's:
+  // `configsLoading` alone would still leave the raw array reaching
+  // `findWorkbookConfigId` and `findStrandConfigId`.
+  const activityConfigsSettled = activityConfigsChildId === selectedChildId
+  const activityConfigs = activityConfigsSettled ? rawActivityConfigs : EMPTY_ACTIVITY_CONFIGS
+  const activityConfigsLoading = rawActivityConfigsLoading || !activityConfigsSettled
+  // UX-403: the page, the checklist and the capture hook all resolve a row
+  // against this one state. `todayRowConfigsState` owns the precedence (a failed
+  // read is not still loading) so a third surface cannot get it backwards.
+  const activityConfigsState = todayRowConfigsState(
+    activityConfigsLoading,
+    !!activityConfigsError,
+  )
 
   const [strandSessionId, setStrandSessionId] = useState<string | null>(null)
   const [strandSessionSaving, setStrandSessionSaving] = useState(false)
@@ -630,10 +660,10 @@ export default function TodayPage() {
     childName: activeChild?.name ?? 'Student',
     today,
     dayLog,
-    persistDayLogImmediate,
     onMessage: setSnackMessage,
     onArtifactCreated: (artifact) => setTodayArtifacts((prev) => [artifact, ...prev]),
     configs: activityConfigs,
+    configsState: activityConfigsState,
   })
 
   const { chat: aiChat } = useAI()
@@ -1032,11 +1062,25 @@ export default function TodayPage() {
   }, [dayLog, selectedChildId, activeChild, todaySnapshot, weekFocus, aiChat, familyId, setSnackMessage])
 
   // --- Pre-completion scan handler (for "should I skip?" advice) ---
+  //
+  // UX-403 — **the same rule as the capture, because this is the same route.**
+  // This door hands the page to an untargeted `syncScanToConfig` (which
+  // fuzzy-matches the cover text and may create or advance a workbook) and then
+  // writes `childSkillMaps`, with no confirm. Its button renders on any row whose
+  // AI-written `skipGuidance` says *check lesson*, which is not a claim that the
+  // row is a workbook — so on the owner's decision it is gated on the same
+  // resolved kind, at the write as well as at the button. A row that is not a
+  // workbook still gets the scan and its advice, and is still stamped `scanned`;
+  // what it no longer does is write the family's curriculum.
   const handlePreCompletionScan = useCallback(async (file: File, index: number) => {
     setScanItemIndex(index)
+    const item = dayLog?.checklist?.[index]
+    const curriculumRouteAllowed = !!item && captureMayRouteToCurriculum(
+      resolveTodayRow(item, activityConfigs, activityConfigsState).kind,
+    )
     const record = await runScan(file, familyId, selectedChildId)
 
-    if (record?.results && record.results.pageType !== 'certificate') {
+    if (curriculumRouteAllowed && record?.results && record.results.pageType !== 'certificate') {
       try {
         const result = await syncScanToConfig(selectedChildId, record.results)
         if (result.action === 'created') {
@@ -1075,13 +1119,27 @@ export default function TodayPage() {
       }
     }
 
-    if (record?.results && dayLog?.checklist) {
-      const updatedChecklist = (dayLog.checklist ?? []).map((ci, i) =>
-        i === index ? { ...ci, scanned: true } : ci,
-      )
-      persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
+    // UX-404, same class as the capture's: `dayLog` here is the document as it
+    // stood before an AI scan call that takes seconds, so writing it whole put
+    // back every edit made in between. One row, on the live document.
+    if (record?.results && item) {
+      const outcome = await writeCaptureRow({
+        familyId,
+        childId: selectedChildId,
+        dateKey: today,
+        itemKey: checklistItemKey(item),
+        patch: { scanned: true },
+        // The duplicate-row hint the capture paths pass (Codex round 2, P2).
+        // Apply retains a completed row and appends a fresh one with the same
+        // label and subject, so without it `scanned: true` lands on the older
+        // completed twin rather than the row whose page was just scanned.
+        hint: { index, completed: !!item.completed },
+        context: 'today-pre-completion-scan',
+      })
+      const notice = captureRowWriteNotice(outcome)
+      if (notice) setSnackMessage({ text: notice, severity: 'warning' })
     }
-  }, [runScan, familyId, selectedChildId, syncScanToConfig, setSnackMessage, dayLog, persistDayLogImmediate, setScanItemIndex])
+  }, [runScan, familyId, selectedChildId, syncScanToConfig, setSnackMessage, dayLog, setScanItemIndex, today, activityConfigs, activityConfigsState])
 
   const handleScanAddToPlan = useCallback(() => {
     if (!scanResult?.results || scanItemIndex == null || !dayLog?.checklist) return
@@ -1311,22 +1369,11 @@ export default function TodayPage() {
           activeChild={activeChild}
           dateKey={today}
         />
-        {/* UX-362: which boy, before anything about him — same order as the
-            loaded page below. */}
-        {isKidProfile ? (
-          <Typography variant="subtitle1" color="text.secondary">
-            {selectedChild?.name ?? 'Loading...'}
-          </Typography>
-        ) : (
-          <ChildSelector
-            children={children}
-            selectedChildId={selectedChildId}
-            onSelect={setSelectedChildId}
-            onChildAdded={addChild}
-            isLoading={isLoadingChildren}
-            emptyMessage="Add a child to start logging."
-          />
-        )}
+        {/* UX-362 / UX-426: which boy, before anything about him — same order
+            as the loaded page below. The selector that used to say it is gone
+            (UX-425); the sentence says it instead, for a parent and a kid
+            alike, because the page's own heading is *Today* and names nobody. */}
+        <ActiveChildLine hint={!isKidProfile} />
         <Typography variant="h4" component="h1">{pageHeading}</Typography>
         <HelpStrip
           pageKey="today"
@@ -1350,33 +1397,24 @@ export default function TodayPage() {
         onCaptureArtifact={scrollToArtifacts}
       />
 
-      {/* ── UX-362: which boy, before anything about him ───────────────────
+      {/* ── UX-362 / UX-425 / UX-426: which boy, before anything about him ──
           AUDIT-228 counted six things about one particular child rendering
           above the control that says which child — the ContextBar chip, this
           heading, the day arrows, `WeekRibbon`'s five dots, the day banner and
-          `HelpStrip`. The chip above is now the switcher itself, and the
-          selector moves up beside it rather than sitting six sections down.
-          The in-page selector STAYS (owner: the in-page selectors stay); this
-          is a reorder, not a removal, and it writes nothing that did not get
-          written before.
+          `HelpStrip`. `UX-362` made the chip the real switcher and moved the
+          selector up beside it. `UX-425` then removed BOTH in-page controls
+          (owner, 2026-09-13, reversing *"the in-page selectors stay"*): the one
+          place a parent chooses the child is the chip in the shell.
 
-          A kid profile gets the name as text and NO selector — capability,
-          never a name, the same answer `ChildSwitcherChip` gives the chip
-          above it. */}
-      {isKidProfile ? (
-        <Typography variant="subtitle1" color="text.secondary">
-          {selectedChild?.name}
-        </Typography>
-      ) : (
-        <ChildSelector
-          children={children}
-          selectedChildId={selectedChildId}
-          onSelect={setSelectedChildId}
-          onChildAdded={addChild}
-          isLoading={isLoadingChildren}
-          emptyMessage="Add a child to start logging."
-        />
-      )}
+          What the selector was also doing here is NAMING the child, and this
+          page's heading is *Today* — so the sentence stays even though the
+          control does not. `UX-313`'s rule: a records surface names its target
+          before the tap. Today writes `days`, `dailyPlans`, `artifacts`,
+          `scans` and `activityConfigs`, so it is exactly that surface.
+
+          A kid gets the same sentence without the switch hint — capability,
+          never a name, the answer `ChildSwitcherChip` gives the chip above. */}
+      <ActiveChildLine hint={!isKidProfile} />
 
       <Typography variant="h4" component="h1">{pageHeading}</Typography>
 

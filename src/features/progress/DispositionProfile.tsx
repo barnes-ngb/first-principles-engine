@@ -12,7 +12,7 @@ import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 import { deleteField, doc, getDoc, updateDoc } from 'firebase/firestore'
 
-import ChildSelector from '../../components/ChildSelector'
+import ActiveChildLine from '../../components/ActiveChildLine'
 import { ErrorState, LoadingState } from '../../components/states'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useFamilyId } from '../../core/auth/useAuth'
@@ -69,14 +69,9 @@ function formatCacheAge(isoDate: string): string {
 
 export default function DispositionProfile() {
   const familyId = useFamilyId()
-  const {
-    children,
-    activeChildId,
-    setActiveChildId,
-    activeChild,
-    isLoading: isLoadingChildren,
-    addChild,
-  } = useActiveChild()
+  // UX-425: this page no longer chooses or adds a child — it reads the active
+  // one. The shell's chip is the one control that changes it.
+  const { activeChildId, activeChild } = useActiveChild()
   const { chat, error: aiError } = useAI()
 
   const [result, setResult] = useState<DispositionResult | null>(null)
@@ -289,14 +284,11 @@ export default function DispositionProfile() {
 
   return (
     <Box sx={{ px: { xs: 2, md: 3 }, py: 2, maxWidth: 800, mx: 'auto' }}>
-      <ChildSelector
-        children={children}
-        selectedChildId={activeChildId}
-        onSelect={setActiveChildId}
-        onChildAdded={addChild}
-        isLoading={isLoadingChildren}
-        emptyMessage="Add a child to view their learning profile."
-      />
+      {/* UX-425 / UX-426: the selector is gone. This section's own heading
+          names the child, but only once a narrative exists — the empty state
+          below offers *Generate* with nothing naming whose four weeks of day
+          logs it would read. So the sentence stays. */}
+      <ActiveChildLine />
 
       {!result && !loading && (
         <Box sx={{ textAlign: 'center', py: 4 }}>

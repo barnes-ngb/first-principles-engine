@@ -13,6 +13,7 @@ import {
   HISTORY_UNAVAILABLE_LINE,
   HOURS_SOURCE_CAPTION,
   HOURS_UNAVAILABLE_LINE,
+  narrativeFailureLine,
   REVIEW_UNAVAILABLE_LINE,
   hoursLoggedLine,
   msUntilPositionsDue,
@@ -174,6 +175,10 @@ function WeekPaceBody({
   // said, and the pending line below explains when it lands.
   const evidenceLine = weekEvidenceCountsLine(review?.evidence)
 
+  // `null` unless this week's narrative failed; which of the two sentences it
+  // is depends on whether an earlier one is still on the document.
+  const narrativeLine = narrativeFailureLine(review)
+
   // A failed read is not an empty result, and a read still in flight is not a
   // first week. Both would otherwise print as an affirmative claim.
   const hoursLine = error
@@ -226,6 +231,25 @@ function WeekPaceBody({
       {!reviewFailed && !reviewWasGenerated(review) && (
         <Typography variant="body2" color="text.secondary">
           {positionsPendingLine(weekKey, clock)}
+        </Typography>
+      )}
+
+      {/*
+        The fourth state (UX-409): the run reached this week and recorded it,
+        and the MODEL half failed. It is not one of the three above — those
+        answer *were the positions saved*, and here they were. It rides beside
+        them rather than replacing one, because both can be true at once: a week
+        can have no positioned workbook (silent above) and still have lost its
+        narrative.
+
+        Which of its two sentences is true is `narrativeFailureLine`'s decision,
+        from what the document holds: a failed REGENERATE leaves the earlier
+        narrative standing and the monthly book goes on reading it, so the
+        missing-from-the-book claim would have been false there (Codex round 2).
+      */}
+      {!reviewFailed && narrativeLine && (
+        <Typography variant="body2" color="text.secondary">
+          {narrativeLine}
         </Typography>
       )}
 

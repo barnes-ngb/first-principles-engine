@@ -79,7 +79,6 @@ vi.mock('../../core/hooks/useScanToActivityConfig', () => ({
 vi.mock('../../core/curriculum/updateSkillMapFromFindings', () => ({
   updateSkillMapFromFindings: vi.fn(),
 }))
-vi.mock('../../components/ChildSelector', () => ({ default: () => <div>CHILD_SELECTOR</div> }))
 vi.mock('../../components/ScanAnalysisPanel', () => ({ default: () => null }))
 
 // UX-326 moved the certificate door into this tab, and it renders a ScanButton

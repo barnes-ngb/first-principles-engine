@@ -299,6 +299,117 @@ export const REVIEW_UNAVAILABLE_LINE =
   'Couldn’t read this week’s review, so there’s nothing to say about coverage yet.'
 
 /**
+ * What is said when this week's record was saved but its narrative was not
+ * (UX-409).
+ *
+ * The FOURTH state of this sentence, and it exists because UX-409 split a write
+ * that used to be one. The weekly run now writes the positions and the hours
+ * FIRST and asks the model second, so "the run happened" and "the week has a
+ * summary" came apart — and the half that can fail is the half nobody on this
+ * page reads. The narrative is not rendered here at all (UX-219): it is written
+ * for the monthly review book and the Shelly Chat context strip.
+ *
+ * So the sentence says the one thing that is both true and consequential — the
+ * numbers on this page are unaffected, and the month's book will be thinner for
+ * this week — and it **does not instruct**. There is no *Regenerate* control on
+ * this page (UX-219 removed it, deliberately, and restoring one is the owner's
+ * decision, not a side effect of a fix); pointing a parent at an action with no
+ * button is UX-269's own failure, so the absent door is filed as `UX-420`
+ * instead of promised here.
+ *
+ * It claims nothing about WHY. The stored `narrativeError` message is the app's
+ * own text and is not rendered: a rate limit or a missing secret is an operator's
+ * sentence, not a parent's.
+ *
+ * It is one of TWO sentences — see {@link NARRATIVE_STALE_LINE} — and callers
+ * reach both through {@link narrativeFailureLine}, never directly.
+ */
+export const NARRATIVE_FAILED_LINE =
+  'This week’s summary didn’t finish generating, so it won’t be part of the monthly book. Everything above is read live and isn’t affected.'
+
+/**
+ * The same failure, on a week that already HAS a summary (Codex round 2, P2).
+ *
+ * The line above claims the week will be missing from the month's book, and on
+ * a week whose narrative never landed that is exactly right. But a failed
+ * REGENERATE of a week that already generated does not remove anything:
+ * `writeWeekRecord` deliberately leaves a standing `draft` / `reviewed` /
+ * `applied` narrative alone (round 1's own fix), and `loadWeeklyReviewsForMonth`
+ * goes on reading it. The first sentence would then have been false in the one
+ * direction that matters — it would have a parent believe a week is missing from
+ * a record that in fact contains it.
+ *
+ * So there are two sentences and {@link narrativeFailureLine} picks between them
+ * on what the document actually holds, rather than one sentence guessing.
+ */
+export const NARRATIVE_STALE_LINE =
+  'This week’s summary couldn’t be refreshed, so the monthly book will use the earlier one. Everything above is read live and isn’t affected.'
+
+/**
+ * Does this week hold a narrative at all?
+ *
+ * **The same question the monthly book asks**, deliberately: its
+ * `loadWeeklyReviewsForMonth` skips a row whose celebration, summary, wins and
+ * growth areas are all empty, so a claim on this page about what the book will
+ * contain is derived from the book's own rule rather than from a second guess at
+ * it. Structural, because this reads an unvalidated Firestore document.
+ */
+export function reviewHasNarrative(
+  review: {
+    celebration?: unknown
+    summary?: unknown
+    wins?: unknown
+    growthAreas?: unknown
+  } | null,
+): boolean {
+  if (!review) return false
+  const text = (value: unknown) => typeof value === 'string' && value.trim() !== ''
+  const list = (value: unknown) => Array.isArray(value) && value.length > 0
+  return (
+    text(review.celebration) ||
+    text(review.summary) ||
+    list(review.wins) ||
+    list(review.growthAreas)
+  )
+}
+
+/**
+ * Which failure sentence this week gets, or `null` when there is nothing to say.
+ *
+ * One entry point, so a caller cannot render the missing-summary claim about a
+ * week that has one.
+ */
+export function narrativeFailureLine(
+  review:
+    | (NonNullable<Parameters<typeof reviewHasNarrative>[0]> & {
+        narrativeError?: unknown
+      })
+    | null,
+): string | null {
+  if (!narrativeFailed(review)) return null
+  return reviewHasNarrative(review) ? NARRATIVE_STALE_LINE : NARRATIVE_FAILED_LINE
+}
+
+/**
+ * Did this week's narrative fail?
+ *
+ * Structural, because this reads an unvalidated Firestore document, and
+ * deliberately narrow: the field is written as `null` by every run whose
+ * narrative landed (a written `null` rather than a field delete keeps the Cloud
+ * Function's writes plain merges), so only a real object counts.
+ */
+export function narrativeFailed(
+  review: { narrativeError?: unknown } | null,
+): boolean {
+  const err = review?.narrativeError
+  return (
+    !!err &&
+    typeof err === 'object' &&
+    typeof (err as { message?: unknown }).message === 'string'
+  )
+}
+
+/**
  * Did the weekly cron actually generate this week's review?
  *
  * **Not the same question as "does the document exist"** (Codex round 3, P2),
@@ -307,8 +418,15 @@ export const REVIEW_UNAVAILABLE_LINE =
  * generated.
  *
  * `status` is the marker because only generation writes it — `evaluate.ts`
- * stamps `'draft'` on the AI path and `'no-data'` on the empty-week path, while
- * the reflection merge writes `{childId, weekKey, reflection}` and nothing else.
+ * stamps `'snapshot-only'` on the record it writes before calling the model
+ * (UX-409), `'draft'` once the narrative lands and `'no-data'` on the empty-week
+ * path, while the reflection merge writes `{childId, weekKey, reflection}` and
+ * nothing else.
+ *
+ * All three count, because the question this gates is about the POSITIONS: a
+ * `snapshot-only` week is one the run did reach and did record, and whether its
+ * prose arrived is a different question with its own sentence
+ * ({@link NARRATIVE_FAILED_LINE}).
  * (The page's *Apply adjustments* also writes a status, but it is reachable only
  * on a document that already carries `paceAdjustments`, which only generation
  * puts there.) Structural, because this reads an unvalidated Firestore document.

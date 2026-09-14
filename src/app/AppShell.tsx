@@ -70,6 +70,7 @@ function NavContent({
   avatarProfile,
   armorReady,
   showKnowledgeMine,
+  showChildChip = true,
 }: {
   isParent: boolean
   onNavigate?: () => void
@@ -77,6 +78,16 @@ function NavContent({
   avatarProfile?: import('../core/types').AvatarProfile | null
   armorReady?: boolean
   showKnowledgeMine?: boolean
+  /**
+   * `UX-425`: this component is BOTH the desktop sidebar and the mobile drawer,
+   * and they do not have the same neighbours. On desktop the sidebar chip is
+   * the only one on screen (the mobile header is `display: none` above 900px),
+   * so it must render. In the drawer it is the second chip in view — the mobile
+   * header's is visible above the open drawer, which is what the owner's
+   * screenshot showed — so the drawer passes `false`. One chip per viewport,
+   * never two.
+   */
+  showChildChip?: boolean
 }) {
   // Hide the Knowledge Mine item for kids without Mine calibration — the /quest
   // route guard would silently bounce them to Today, so nav shouldn't advertise
@@ -89,7 +100,7 @@ function NavContent({
       <div className="app-shell__profile-row">
         <ProfileMenu />
       </div>
-      {activeChild && (
+      {activeChild && showChildChip && (
         <Box
           sx={{
             display: 'flex',
@@ -111,9 +122,11 @@ function NavContent({
               childName={activeChild.name}
             />
           )}
-          {/* UX-324: the same switcher the mobile header renders. Both name
-              chips are ONE component so they can never disagree about whether
-              the name is a control. */}
+          {/* UX-324: the same switcher the mobile header renders — one
+              component, so the two can never disagree about whether the name is
+              a control. UX-425: the DRAWER does not render it (see
+              `showChildChip`); this is the desktop sidebar's chip, and on
+              desktop it is the only one on screen. */}
           <ChildSwitcherChip />
         </Box>
       )}
@@ -254,8 +267,9 @@ export function AppShell({ children }: AppShellProps) {
                 childName={activeChild.name}
               />
             )}
-            {/* UX-324 — the shell's one place to change the child. Read-only
-                for a kid profile and for a single-child family; see
+            {/* UX-324 / UX-425 — the app's ONE place to choose the child.
+                Read-only for a kid profile; a one-child family gets the menu
+                for its *Add a child…* row only. See
                 `components/childSwitcher.ts`. */}
             <ChildSwitcherChip />
           </Box>
@@ -274,6 +288,9 @@ export function AppShell({ children }: AppShellProps) {
           },
         }}
       >
+        {/* UX-425 — one child chip per viewport. The mobile header's chip is
+            visible above the open drawer, so a second one here was the owner's
+            "as many as four locations to choose a child" in miniature. */}
         <NavContent
           isParent={isParent}
           onNavigate={closeDrawer}
@@ -281,6 +298,7 @@ export function AppShell({ children }: AppShellProps) {
           avatarProfile={avatarProfile}
           armorReady={armorReady}
           showKnowledgeMine={showKnowledgeMine}
+          showChildChip={false}
         />
       </Drawer>
 

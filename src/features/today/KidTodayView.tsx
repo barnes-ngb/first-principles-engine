@@ -195,7 +195,6 @@ export default function KidTodayView({
     childName: child.name,
     today,
     dayLog,
-    persistDayLogImmediate,
     onMessage: setCaptureMessage,
     onArtifactCreated: (artifact) => setArtifacts((prev) => [artifact, ...prev]),
   })
