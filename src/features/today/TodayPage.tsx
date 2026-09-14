@@ -668,7 +668,20 @@ export default function TodayPage() {
     today,
     dayLog,
     onMessage: setSnackMessage,
-    onArtifactCreated: (artifact) => setTodayArtifacts((prev) => [artifact, ...prev]),
+    onArtifactCreated: (artifact) => {
+      // The optimistic append is what makes a capture feel instant.
+      setTodayArtifacts((prev) => [artifact, ...prev])
+      // …and the re-read is what settles the FAILED flag (UX-441, Codex round
+      // 3). Without it, a day whose first read dropped stayed behind the
+      // load-error line forever: `TodayEvidenceList` returns that line ahead of
+      // any row it holds, so a note the parent had just saved was appended to a
+      // list nobody could see. Clearing the flag on the append alone would be
+      // the wrong repair — one local row is not a faithful picture of the day,
+      // and claiming it is would be this surface's one rule broken from the
+      // inside. A read that succeeds clears it truthfully; one that fails again
+      // leaves the honest message standing.
+      loadTodayArtifacts()
+    },
     configs: activityConfigs,
     configsState: activityConfigsState,
   })

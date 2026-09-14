@@ -846,6 +846,7 @@ export default function KidTodayView({
               conundrum={weekFocus.conundrum}
               child={child}
               familyId={familyId}
+              dayKey={today}
               onArtifactSaved={loadArtifacts}
             />
           </KidRitualRow>

@@ -230,6 +230,34 @@ describe('TodayEvidenceList — the kid', () => {
   })
 })
 
+describe('a curated Watch completion (Codex round 3)', () => {
+  const watched = artifact({
+    id: 'a-watch',
+    type: EvidenceType.Video,
+    title: 'Watched How Volcanoes Work',
+    tags: {
+      engineStage: EngineStage.Build,
+      domain: 'watch-vehicle',
+      subjectBucket: SubjectBucket.Science,
+      location: LearningLocation.Home,
+      planItem: 'Watch: How Volcanoes Work',
+      watchVideoId: 'wv-123',
+    },
+  })
+
+  it('is NOT reported as a missing file — its address lives in the library', () => {
+    // `buildWatchArtifact` writes no `uri` and no `mediaUrls` on purpose. Saying
+    // "(file missing)" over a video the family actually watched is false, and
+    // saying "(no file)" to a six-year-old about it is worse.
+    render(<TodayEvidenceList artifacts={[watched]} audience={EvidenceAudience.Parent} />)
+    expect(screen.getByText('Watched How Volcanoes Work')).toBeTruthy()
+    expect(screen.queryByText(FILE_MISSING_LABEL)).toBeNull()
+
+    render(<TodayEvidenceList artifacts={[watched]} audience={EvidenceAudience.Kid} />)
+    expect(screen.queryByText(KID_FILE_MISSING_LABEL)).toBeNull()
+  })
+})
+
 describe('it writes nothing and offers no control', () => {
   it('renders no button, checkbox or input', () => {
     const { container } = render(

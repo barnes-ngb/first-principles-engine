@@ -12,7 +12,6 @@ import { getDownloadURL, ref, uploadBytes } from 'firebase/storage'
 import PhotoCapture from '../../components/PhotoCapture'
 import SectionCard from '../../components/SectionCard'
 import { artifactsCollection } from '../../core/firebase/firestore'
-import { todayKey } from '../../core/utils/dateKey'
 import { storage } from '../../core/firebase/storage'
 import { generateFilename, uploadArtifactFile } from '../../core/firebase/upload'
 import { useTTS } from '../../core/hooks/useTTS'
@@ -36,6 +35,15 @@ interface KidConundrumResponseProps {
   child: Child
   familyId: string
   /**
+   * The day on screen, `YYYY-MM-DD` (UX-440, Codex round 3). A kid can be on
+   * `/today?date=…`, so a record belongs to the day being recorded rather than
+   * to the device's clock — which is also the day the refresh queries, so a
+   * `todayKey()` stamp would misfile the record AND make it vanish the instant
+   * it was saved. `KidTodayView` already holds this value; unlike
+   * `KidChapterPool` this component is handed no `dayLog` to read it from.
+   */
+  dayKey: string
+  /**
    * Refresh *Today's evidence* after an answer or a drawing lands (UX-438).
    * `UX-436` made these writes eligible for that list; without the refresh they
    * would not appear until a page reload.
@@ -47,6 +55,7 @@ export default function KidConundrumResponse({
   conundrum,
   child,
   familyId,
+  dayKey,
   onArtifactSaved,
 }: KidConundrumResponseProps) {
   // FEAT-183 / UX-152 (B3): which response flow a kid gets is an age question.
@@ -136,10 +145,11 @@ export default function KidConundrumResponse({
         // this record could never reach *Today's evidence* (UX-431), whose whole
         // claim is that it holds everything the day produced. Additive, one
         // existing optional field, no migration, no number — `dayLogId` is what
-        // every other capture door on this screen already writes. `todayKey()`
-        // (LOCAL fields) rather than the UTC slice beside it: this is a stored
-        // record's date, which is `UX-412`'s distinction exactly.
-        dayLogId: todayKey(),
+        // every other capture door on this screen already writes. A LOCAL civil
+        // date rather than the UTC slice beside it: this is a stored
+        // record's date, which is `UX-412`'s distinction exactly — and the
+        // DISPLAYED day rather than the device's (UX-440).
+        dayLogId: dayKey,
         tags: {
           engineStage: EngineStage.Wonder,
           subjectBucket: SubjectBucket.Other,
@@ -187,7 +197,7 @@ export default function KidConundrumResponse({
       setSaveError("Hmm, that didn't save. Check your connection and try again.")
     }
     setSavingConundrum(false)
-  }, [conundrumAudioBlob, familyId, child.id, conundrum, selectedPick, onArtifactSaved])
+  }, [conundrumAudioBlob, familyId, child.id, conundrum, selectedPick, dayKey, onArtifactSaved])
 
   const handleConundrumPhoto = useCallback(async (file: File) => {
     try {
@@ -203,8 +213,9 @@ export default function KidConundrumResponse({
         },
         title: `Conundrum Drawing: ${conundrum.title}`,
         content: conundrum.londonDrawingPrompt ?? conundrum.question,
-        // UX-436 — see the audio path above: a Today door stamps its day.
-        dayLogId: todayKey(),
+        // UX-436 / UX-440 — see the audio path above: a Today door stamps the
+        // day being displayed.
+        dayLogId: dayKey,
         createdAt: new Date().toISOString(),
       })
       const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, file, filename)
@@ -240,7 +251,7 @@ export default function KidConundrumResponse({
       console.error('Conundrum photo save failed:', err)
       setSaveError("Hmm, that didn't save. Check your connection and try again.")
     }
-  }, [familyId, child.id, conundrum, onArtifactSaved])
+  }, [familyId, child.id, conundrum, dayKey, onArtifactSaved])
 
   // Older child: audio + quick picks response
   if (isOlder) {

@@ -52,6 +52,35 @@ describe('artifactMediaMissing (UX-432)', () => {
     ).toBe(false)
   })
 
+  it('a curated-watch Video is LINK-BACKED, not broken media (Codex round 3)', () => {
+    // `buildWatchArtifact` deliberately writes no `uri` and no `mediaUrls`: it
+    // stamps `tags.watchVideoId`, the library document id, because FEAT-100
+    // keeps the validated YouTube id in the library and FEAT-139 added the id
+    // so the record is joinable rather than matched on an editable title. So
+    // its address IS on record, and *(file missing)* over a video the family
+    // actually watched is simply false.
+    const watched = base({
+      type: EvidenceType.Video,
+      title: 'Watched How Volcanoes Work',
+      tags: {
+        engineStage: EngineStage.Build,
+        domain: 'watch-vehicle',
+        subjectBucket: SubjectBucket.Science,
+        location: 'Home',
+        planItem: 'Watch: How Volcanoes Work',
+        watchVideoId: 'wv-123',
+      },
+    })
+    expect(artifactExpectsMedia(watched)).toBe(false)
+    expect(artifactMediaMissing(watched)).toBe(false)
+  })
+
+  it('POSITIVE CONTROL — a Video with no library join is still flagged', () => {
+    // The exemption is keyed on the join, not on the type: a `Video` artifact
+    // that carries neither an address nor a `watchVideoId` really is broken.
+    expect(artifactMediaMissing(base({ type: EvidenceType.Video }))).toBe(true)
+  })
+
   it('a Worksheet is excluded, exactly as the export excludes it', () => {
     expect(artifactExpectsMedia(base({ type: EvidenceType.Worksheet }))).toBe(false)
     expect(artifactMediaMissing(base({ type: EvidenceType.Worksheet }))).toBe(false)

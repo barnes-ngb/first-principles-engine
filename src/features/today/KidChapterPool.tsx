@@ -137,10 +137,15 @@ export default function KidChapterPool({
         // this record could never reach *Today's evidence* (UX-431), whose whole
         // claim is that it holds everything the day produced. Additive, one
         // existing optional field, no migration, no number — `dayLogId` is what
-        // every other capture door on this screen already writes. `todayKey()`
-        // (LOCAL fields) rather than the UTC slice beside it: this is a stored
-        // record's date, which is `UX-412`'s distinction exactly.
-        dayLogId: todayKey(),
+        // every other capture door on this screen already writes. The DISPLAYED
+        // day (`dayLog.date`), not `todayKey()` (UX-440, Codex round 3): a kid
+        // can be on `/today?date=…`, so a record belongs to the day being
+        // recorded rather than to the device's clock — which is also the day
+        // the refresh queries, so a mis-stamped record would vanish the instant
+        // it was saved. Read off the day log this component is already handed,
+        // rather than as a new prop, so there is nothing for a caller to pass
+        // wrongly.
+        dayLogId: dayLog.date,
         tags: {
           engineStage: EngineStage.Reflect,
           subjectBucket: SubjectBucket.Reading,
@@ -206,7 +211,7 @@ export default function KidChapterPool({
       setSaveError("Hmm, that didn't save. Check your connection and try again.")
     }
     setSavingChapter(null)
-  }, [chapterBlobs, familyId, childId, bookProgress.bookId, book.title, weekFocus, onArtifactSaved, onChapterAnswered])
+  }, [chapterBlobs, familyId, childId, bookProgress.bookId, book.title, dayLog.date, weekFocus, onArtifactSaved, onChapterAnswered])
 
   const handleDeleteResponse = useCallback(
     async (item: ChapterQuestionPoolItem) => {

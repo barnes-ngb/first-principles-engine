@@ -46,9 +46,37 @@ export const MEDIA_BEARING_ARTIFACT_TYPES: ReadonlySet<string> = new Set([
   'video',
 ])
 
-/** Does this artifact's type expect media at all? */
-export function artifactExpectsMedia(artifact: Pick<Artifact, 'type'>): boolean {
-  return MEDIA_BEARING_ARTIFACT_TYPES.has(artifact.type as string)
+/**
+ * Does this artifact's type expect media at all?
+ *
+ * ── The curated-watch exception (Codex round 3, P2) ────────────────────────
+ *
+ * A Watch Vehicle completion writes an `EvidenceType.Video` that **deliberately
+ * carries no `uri` and no `mediaUrls`**: `buildWatchArtifact` stamps
+ * `tags.watchVideoId`, the `watchLibrary` document id, because FEAT-100 stores
+ * a validated YouTube id in the library and never a free-form URL on the
+ * artifact, and FEAT-139 added the id precisely so the record is **joinable**
+ * rather than matched on an editable title. So its address is on record — in
+ * the form this app keeps one — and calling it a missing file is simply false.
+ *
+ * Without this, *Today's evidence* would have said *(file missing)* — and
+ * *(no file)* to a six-year-old — over every curated video the family actually
+ * watched. That is the defect `UX-432` exists to prevent, arriving through the
+ * rule written to prevent it.
+ *
+ * **This narrows `dataReviewExport`'s `artifact-media-missing` flag too, and
+ * that is the correction, not a side effect**: those rows were never broken
+ * media, so counting them overstated the finding `UX-387` is tracking. No
+ * record changes, and the check's own `detail` still lists the ids it flags, so
+ * the drop is auditable against a prior export.
+ */
+export function artifactExpectsMedia(
+  artifact: Pick<Artifact, 'type' | 'tags'>,
+): boolean {
+  if (!MEDIA_BEARING_ARTIFACT_TYPES.has(artifact.type as string)) return false
+  // Link-backed by the library join, not by a file.
+  if (artifact.tags?.watchVideoId) return false
+  return true
 }
 
 /** Every address this artifact carries, `mediaUrls` first, de-duped. */
@@ -78,7 +106,7 @@ export function artifactMediaUrls(
  * is "did the file that was promised arrive", not "is there a file".
  */
 export function artifactMediaMissing(
-  artifact: Pick<Artifact, 'type' | 'uri' | 'mediaUrls'>,
+  artifact: Pick<Artifact, 'type' | 'uri' | 'mediaUrls' | 'tags'>,
 ): boolean {
   return artifactExpectsMedia(artifact) && artifactMediaUrls(artifact).length === 0
 }

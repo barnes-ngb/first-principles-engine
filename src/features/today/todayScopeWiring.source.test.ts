@@ -21,6 +21,14 @@ function code(source: string): string {
 
 const TODAY_PAGE_CODE = code(TODAY_PAGE)
 const KID_TODAY_CODE = code(KID_TODAY)
+// The two kid capture doors `UX-436` stamped and `UX-440` re-aimed at the day
+// being displayed.
+const KID_CHAPTER_POOL_CODE = code(
+  readFileSync(resolve(__dirname, './KidChapterPool.tsx'), 'utf8'),
+)
+const KID_CONUNDRUM_CODE = code(
+  readFileSync(resolve(__dirname, './KidConundrumResponse.tsx'), 'utf8'),
+)
 
 /**
  * UX-343 and UX-358 — two structural properties of the heaviest write surface in
@@ -163,6 +171,32 @@ describe('the capability boundary has one definition (UX-358)', () => {
     expect(parentHandoffs.length).toBe(2) // WeekFocusCard + TeachBackSection
     const kidHandoffs = KID_TODAY_CODE.match(/onArtifactSaved=\{loadArtifacts\}/g) ?? []
     expect(kidHandoffs.length).toBe(2) // KidChapterPool + KidConundrumResponse
+  })
+
+  it('kid artifact writes stamp the DISPLAYED day, not the device clock (UX-440)', () => {
+    // Codex round 3 (P2): `KidTodayView` takes `today` because a kid can be on
+    // `/today?date=…`. A `todayKey()` stamp would both misfile the record and
+    // make it vanish the instant it was saved, since the refresh queries the
+    // displayed day. `KidChapterPool` reads it off the `dayLog` it is already
+    // handed (nothing for a caller to pass wrongly); `KidConundrumResponse`
+    // takes `dayKey`, being handed no day log.
+    expect(KID_CHAPTER_POOL_CODE).toMatch(/dayLogId: dayLog\.date/)
+    expect(KID_CHAPTER_POOL_CODE).not.toMatch(/dayLogId: todayKey\(\)/)
+    const conundrumStamps = KID_CONUNDRUM_CODE.match(/dayLogId: dayKey/g) ?? []
+    expect(conundrumStamps.length).toBe(2) // the answer and the drawing
+    expect(KID_CONUNDRUM_CODE).not.toMatch(/dayLogId: todayKey\(\)/)
+    expect(KID_TODAY_CODE).toMatch(/dayKey=\{today\}/)
+  })
+
+  it('a successful local save RECONCILES the failed-read flag (UX-441)', () => {
+    // Codex round 3 (P2): `TodayEvidenceList` returns the load-error line ahead
+    // of any row it holds, so a capture appended after a failed read was saved
+    // into a list nobody could see. The append stays (it is what makes a
+    // capture feel instant) and a re-read settles the flag — clearing it on the
+    // append alone would claim one local row is a faithful picture of the day.
+    expect(TODAY_PAGE_CODE).toMatch(
+      /onArtifactCreated: \(artifact\) => \{[\s\S]*?setTodayArtifacts\([\s\S]*?loadTodayArtifacts\(\)/,
+    )
   })
 
   it('BOTH Today surfaces report a failed artifact read, through the one list (UX-431)', () => {
