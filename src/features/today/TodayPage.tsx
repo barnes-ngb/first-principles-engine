@@ -258,6 +258,13 @@ export default function TodayPage() {
   const [strandSessionSaving, setStrandSessionSaving] = useState(false)
   const [strandSessionError, setStrandSessionError] = useState<string | null>(null)
   const [todayArtifacts, setTodayArtifacts] = useState<Artifact[]>([])
+  /**
+   * The artifact read dropped (UX-431). A failed read is never rendered as an
+   * affirmative empty result — *"Nothing captured yet today"* over a query that
+   * did not land is the worst thing a records surface can say, and the snackbar
+   * that already reports it is gone within four seconds.
+   */
+  const [todayArtifactsFailed, setTodayArtifactsFailed] = useState(false)
   const [energy, setEnergy] = useState<EnergyLevel>(EnergyLevel.Normal)
   const [planType, setPlanType] = useState<PlanType>(PlanType.Normal)
   const [teachHelperItem, setTeachHelperItem] = useState<ChecklistItemType | null>(null)
@@ -969,6 +976,7 @@ export default function TodayPage() {
   useEffect(() => {
     if (!selectedChildId) {
       setTodayArtifacts([])
+      setTodayArtifactsFailed(false)
       return
     }
     let isMounted = true
@@ -986,9 +994,17 @@ export default function TodayPage() {
           .map((docSnapshot) => docSnapshot.data())
           .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
         setTodayArtifacts(loadedArtifacts)
+        setTodayArtifactsFailed(false)
       } catch (err) {
         console.error('Failed to load artifacts', err)
         if (isMounted) {
+          // The list is CLEARED as well as flagged (UX-431). Stamping a failure
+          // over the previous child's or previous day's array would present
+          // stale records as this day's — `KidTodayView`'s own scope guard
+          // learned that on Codex round 2, and `FIX-235` learned it again about
+          // `useActivityConfigs`.
+          setTodayArtifacts([])
+          setTodayArtifactsFailed(true)
           setSnackMessage({ text: 'Could not load artifacts.', severity: 'error' })
         }
       }
@@ -1705,6 +1721,8 @@ export default function TodayPage() {
           selectableChildren={selectableChildren}
           todayArtifacts={todayArtifacts}
           setTodayArtifacts={setTodayArtifacts}
+          todayChecklist={dayLog?.checklist ?? []}
+          artifactsFailed={todayArtifactsFailed}
           onSnackMessage={handleSnackMessage}
         />
       </SectionErrorBoundary>

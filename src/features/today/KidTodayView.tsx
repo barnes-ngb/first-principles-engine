@@ -61,6 +61,8 @@ import { useConundrumDoneToday } from './useConundrumDoneToday'
 import { useTodayMiningMinutes } from './useTodayMiningMinutes'
 import WorkshopGameCards from './WorkshopGameCards'
 import KidCaptureForm from './KidCaptureForm'
+import TodayEvidenceList from './TodayEvidenceList'
+import { EvidenceAudience } from './todayEvidence'
 import KidChecklist from './KidChecklist'
 import WatchItemDialog from '../watch/WatchItemDialog'
 import { useWatchLibrary } from '../watch/useWatchLibrary'
@@ -1140,60 +1142,32 @@ export default function KidTodayView({
           />
         )}
 
-        {/* Artifacts list */}
-        {artifactsFailed ? (
-          // UX-359 — never "nothing here" over a read that did not land, and
-          // never STALE items presented as today's either (Codex round 2, P2):
-          // the list is cleared when the scope changes and this line does not
-          // depend on the list being empty, so a failed refresh after a capture
-          // cannot pass old photos off as the current day's inventory.
-          <Typography color="text.secondary" variant="body2">
-            Could not load your stuff. Try again.
-          </Typography>
-        ) : artifacts.length === 0 ? (
-          <Typography color="text.secondary" variant="body2">
-            {isLincoln
-              ? 'Nothing in your inventory yet. Capture your builds!'
-              : 'Nothing captured yet today. Take a photo of your work!'}
-          </Typography>
-        ) : (
-          <Stack spacing={1}>
-            {artifacts.map((artifact) => (
-              <Stack
-                key={artifact.id}
-                direction="row"
-                spacing={1.5}
-                alignItems="center"
-                sx={{ p: 1, borderRadius: 1, bgcolor: 'action.hover' }}
-              >
-                {artifact.type === 'Photo' && artifact.uri && (
-                  <Box
-                    component="img"
-                    src={artifact.uri}
-                    sx={{
-                      width: 48,
-                      height: 48,
-                      borderRadius: 1,
-                      objectFit: 'cover',
-                    }}
-                  />
-                )}
-                {artifact.type === 'Note' && (
-                  <NoteIcon color="action" />
-                )}
-                <Typography variant="body2" sx={{ flex: 1 }}>
-                  {artifact.title}
-                </Typography>
-                <Typography variant="caption" color="text.secondary">
-                  {new Date(artifact.createdAt ?? '').toLocaleTimeString([], {
-                    hour: 'numeric',
-                    minute: '2-digit',
-                  })}
-                </Typography>
-              </Stack>
-            ))}
-          </Stack>
-        )}
+        {/*
+          UX-431 — the same list the parent reads at the bottom of Today, in kid
+          copy. It used to draw a thumbnail for a `Photo`, an icon for a `Note`
+          and a title — so a recording, a captured link and a scanned page each
+          showed as a bare title with no way to play or open them, and every
+          type that was not one of those two got nothing at all.
+
+          Three things came with the move, and each of them was a defect here:
+          the clock is read in a **named** zone (`formatClockTime`) instead of
+          the runtime's, an unreadable `createdAt` renders nothing instead of
+          the literal string *"Invalid Date"* (`new Date('')` is what this line
+          used to hand `toLocaleTimeString`), and a media-typed artifact that
+          never got its file says *(no file)* rather than rendering as a bare
+          title (`UX-432`; 16 such rows on Lincoln alone in the 2026-09-11
+          export).
+
+          `UX-359`'s rule is unchanged and now lives inside the component: a
+          failed read is never "nothing here", and the cleared-on-scope-change
+          guard above still means stale items cannot be passed off as today's.
+        */}
+        <TodayEvidenceList
+          artifacts={artifacts}
+          checklist={dayLog.checklist ?? []}
+          audience={EvidenceAudience.Kid}
+          failed={artifactsFailed}
+        />
       </SectionCard>
 
       {/* --- Per-item capture dialog for kids --- */}

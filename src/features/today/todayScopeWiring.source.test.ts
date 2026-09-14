@@ -135,8 +135,30 @@ describe('the capability boundary has one definition (UX-358)', () => {
   it('the kid artifact list is scoped, and its failure does not need an empty list', () => {
     // Codex round 2 (P2): stale items from another day must never render as this
     // day's, and a refresh that fails must say so even when the list is full.
+    //
+    // UX-431 moved the RENDERING of that flag into `TodayEvidenceList`, which
+    // both Today surfaces share, so the inline `{artifactsFailed ? (` ternary
+    // this line used to read no longer exists. The property is unchanged and is
+    // asserted in two places rather than one: here, that the kid view still
+    // HANDS the flag over — a list that is never told cannot report — and in
+    // `TodayEvidenceList.test.tsx` ("a failed read shows no stale rows either"),
+    // that being told it, the component says so ahead of any row it holds.
     expect(KID_TODAY_CODE).toMatch(/artifactScopeRef\.current !== scope/)
-    expect(KID_TODAY_CODE).toMatch(/\{artifactsFailed \? \(/)
+    expect(KID_TODAY_CODE).toMatch(/failed=\{artifactsFailed\}/)
+  })
+
+  it('BOTH Today surfaces report a failed artifact read, through the one list (UX-431)', () => {
+    // The parent half had no such report at all before this: a dropped query
+    // showed a four-second snackbar and then *"Nothing captured yet today."* —
+    // a failed read rendered as an affirmative empty day, on a records surface.
+    expect(KID_TODAY_CODE).toMatch(/<TodayEvidenceList/)
+    expect(TODAY_PAGE_CODE).toMatch(/artifactsFailed=\{todayArtifactsFailed\}/)
+    expect(TODAY_PAGE_CODE).toMatch(/setTodayArtifactsFailed\(true\)/)
+    // And the list is CLEARED on a failure, so stale records cannot be shown
+    // under a sentence about a different day or child.
+    expect(TODAY_PAGE_CODE).toMatch(
+      /setTodayArtifacts\(\[\]\)\s*\n\s*setTodayArtifactsFailed\(true\)/,
+    )
   })
 
   it('the kid view reads its capability from the same hook', () => {

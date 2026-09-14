@@ -52,6 +52,7 @@ import {
   matchWorkbookBridge,
   resolveNativePosition,
 } from '../../core/foundations/workbookBridge'
+import { artifactMediaMissing } from '../../core/utils/artifactMedia'
 import { reportArtifactIds } from '../dad-lab/reportArtifacts'
 import {
   computeHoursSummary,
@@ -700,11 +701,12 @@ export const computeIntegrityChecks = (
   })
 
   // 9 — photo/audio artifacts with no media at all.
-  const mediaTypes = new Set(['Photo', 'photo', 'Audio', 'audio', 'Video', 'video'])
-  const medialess = artifacts.filter(
-    (a) =>
-      mediaTypes.has(a.type as string) && !a.uri && (a.mediaUrls?.length ?? 0) === 0,
-  )
+  //
+  // UX-432: the rule moved to `core/utils/artifactMedia.ts` so the screen that
+  // now SAYS "(file missing)" on a Today row and this export's flag cannot
+  // disagree about which rows they mean. Byte-identical to the set-and-filter
+  // that stood here, and asserted so in `dataReviewExport.logic.test.ts`.
+  const medialess = artifacts.filter((a) => artifactMediaMissing(a))
   checks.push({
     id: 'artifact-media-missing',
     label: 'Photo / audio / video artifacts carry a media URL',
