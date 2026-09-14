@@ -990,6 +990,16 @@ export default function TodayPage() {
         )
         const snapshot = await getDocs(q)
         if (!isMounted) return
+        // `docSnapshot.data()` CARRIES THE DOCUMENT ID, and deliberately does
+        // not have `snapshot.id` spread over it (Codex round 1 read this as a
+        // missing id). `artifactsCollection` is `withConverter(artifactConverter)`
+        // (`core/firebase/firestore.ts`), whose `fromFirestore` returns
+        // `{ ...data, id: data.id ?? snapshot.id }`, and `query()` preserves a
+        // collection's converter — which is also why `resolveDisplayPhotos`'s
+        // `a.id === item.evidenceArtifactId` match already works in production
+        // for the *Captured* chip, off this very array. Adding `id: d.id` here
+        // would not be belt-and-braces, it would DIVERGE from the converter,
+        // which prefers a stored `id` field over the document key.
         const loadedArtifacts = snapshot.docs
           .map((docSnapshot) => docSnapshot.data())
           .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
@@ -1646,6 +1656,7 @@ export default function TodayPage() {
             weekFocus={weekFocus}
             familyId={familyId}
             selectedChildId={selectedChildId}
+            today={today}
             onSnackMessage={handleSnackMessage}
           />
         </SectionErrorBoundary>
@@ -1723,6 +1734,7 @@ export default function TodayPage() {
           setTodayArtifacts={setTodayArtifacts}
           todayChecklist={dayLog?.checklist ?? []}
           artifactsFailed={todayArtifactsFailed}
+          familyTimeZone={selectedChild?.settings?.timeZone}
           onSnackMessage={handleSnackMessage}
         />
       </SectionErrorBoundary>

@@ -330,3 +330,62 @@ describe('the audience’s copy', () => {
     }
   })
 })
+
+// ── contentNote is parent-only (Codex round 1, P2) ──────────────────────────
+
+describe('contentNote', () => {
+  const withNote = artifact({
+    id: 'a',
+    type: EvidenceType.Worksheet,
+    title: 'Math (15m) — Lincoln’s work',
+    contentNote: 'A page of two-digit addition, most of it worked out.',
+  })
+
+  it('reaches the PARENT — for a scan capture it is the only descriptive detail there is', () => {
+    expect(evidenceDetails(withNote, EvidenceAudience.Parent)).toEqual([
+      'A page of two-digit addition, most of it worked out.',
+    ])
+    const [entry] = buildTodayEvidence({
+      artifacts: [withNote],
+      audience: EvidenceAudience.Parent,
+    })
+    expect(entry.details).toContain('A page of two-digit addition, most of it worked out.')
+  })
+
+  it('is WITHHELD from the child — FEAT-141’s own contract, "never rendered to a child"', () => {
+    expect(evidenceDetails(withNote, EvidenceAudience.Kid)).toEqual([])
+    const [entry] = buildTodayEvidence({
+      artifacts: [withNote],
+      audience: EvidenceAudience.Kid,
+    })
+    expect(entry.details).toEqual([])
+  })
+
+  it('defaults to the parent reading, so a caller that forgets does not silently drop it', () => {
+    expect(evidenceDetails(withNote)).toHaveLength(1)
+  })
+})
+
+// ── The family's own zone (Codex round 1, P2) ───────────────────────────────
+
+describe('the family’s configured time zone', () => {
+  it('is used when the caller passes one', () => {
+    const [entry] = buildTodayEvidence({
+      artifacts: [artifact({ id: 'a', createdAt: '2026-09-14T14:05:00Z' })],
+      audience: EvidenceAudience.Parent,
+      timeZone: 'America/Denver',
+    })
+    expect(entry.time).toBe('8:05 AM')
+  })
+
+  it('falls back to the app default when unset or unparseable', () => {
+    for (const zone of [undefined, 'Mars/Olympus_Mons']) {
+      const [entry] = buildTodayEvidence({
+        artifacts: [artifact({ id: 'a', createdAt: '2026-09-14T14:05:00Z' })],
+        audience: EvidenceAudience.Parent,
+        timeZone: zone,
+      })
+      expect(entry.time, `zone ${zone}`).toBe('9:05 AM')
+    }
+  })
+})

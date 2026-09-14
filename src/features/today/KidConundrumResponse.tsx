@@ -12,6 +12,7 @@ import { getDownloadURL, ref, uploadBytes } from 'firebase/storage'
 import PhotoCapture from '../../components/PhotoCapture'
 import SectionCard from '../../components/SectionCard'
 import { artifactsCollection } from '../../core/firebase/firestore'
+import { todayKey } from '../../core/utils/dateKey'
 import { storage } from '../../core/firebase/storage'
 import { generateFilename, uploadArtifactFile } from '../../core/firebase/upload'
 import { useTTS } from '../../core/hooks/useTTS'
@@ -124,6 +125,14 @@ export default function KidConundrumResponse({
       await addDoc(artifactsCollection(familyId), {
         childId: child.id,
         type: EvidenceType.Audio,
+        // UX-436 — a Today door stamps the day it was captured on. Without it
+        // this record could never reach *Today's evidence* (UX-431), whose whole
+        // claim is that it holds everything the day produced. Additive, one
+        // existing optional field, no migration, no number — `dayLogId` is what
+        // every other capture door on this screen already writes. `todayKey()`
+        // (LOCAL fields) rather than the UTC slice beside it: this is a stored
+        // record's date, which is `UX-412`'s distinction exactly.
+        dayLogId: todayKey(),
         tags: {
           engineStage: EngineStage.Wonder,
           subjectBucket: SubjectBucket.Other,
@@ -132,7 +141,16 @@ export default function KidConundrumResponse({
         },
         title: `Conundrum: ${conundrum.title}`,
         content,
-        ...(mediaUrl ? { mediaUrl } : {}),
+        // UX-437 — the uploaded address is written to `mediaUrls` (and `uri`
+        // as the cover), the two fields `Artifact` actually declares. It used
+        // to be written to `mediaUrl`, singular, which is on no type and is
+        // read by nothing — so the recording was uploaded to Storage and then
+        // thrown away from the record's point of view, leaving a media-typed
+        // artifact with no address at all. That is `artifact-media-missing`
+        // (`UX-387`), and `UX-432` is what finally made it visible: the new
+        // evidence list would have said *(no file)* over audio that exists.
+        // Rows already written stay as they are — a data repair is its own run.
+        ...(mediaUrl ? { uri: mediaUrl, mediaUrls: [mediaUrl] } : {}),
         createdAt: new Date().toISOString(),
       })
 
@@ -175,10 +193,16 @@ export default function KidConundrumResponse({
         },
         title: `Conundrum Drawing: ${conundrum.title}`,
         content: conundrum.londonDrawingPrompt ?? conundrum.question,
+        // UX-436 — see the audio path above: a Today door stamps its day.
+        dayLogId: todayKey(),
         createdAt: new Date().toISOString(),
       })
       const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, file, filename)
-      await updateDoc(docRef, { mediaUrl: downloadUrl })
+      // UX-437 — `uri` + `mediaUrls`, the fields `Artifact` declares. This was
+      // `mediaUrl`, which no type carries and no reader reads, so a drawing a
+      // six-year-old uploaded reached his portfolio as an artifact with no
+      // picture on it.
+      await updateDoc(docRef, { uri: downloadUrl, mediaUrls: [downloadUrl] })
 
       // Award 5 XP for conundrum drawing
       const conundrumDate = new Date().toISOString().slice(0, 10)

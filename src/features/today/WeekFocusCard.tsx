@@ -46,6 +46,13 @@ interface WeekFocusCardProps {
   weekFocus: WeekFocusData
   familyId: string
   selectedChildId: string
+  /**
+   * The day on screen, `YYYY-MM-DD` (UX-436). Stamped onto the conundrum note
+   * so it reaches *Today's evidence*. It is a PROP rather than `todayKey()`
+   * because `TodayPage` can be showing a past date (`?date=`), and a record
+   * belongs to the day being recorded, not to the wall clock.
+   */
+  today: string
   onSnackMessage: (msg: { text: string; severity: 'success' | 'error' }) => void
 }
 
@@ -53,6 +60,7 @@ export default function WeekFocusCard({
   weekFocus,
   familyId,
   selectedChildId,
+  today,
   onSnackMessage,
 }: WeekFocusCardProps) {
   return (
@@ -141,6 +149,13 @@ export default function WeekFocusCard({
                       childId: selectedChildId,
                       title: `Conundrum: ${weekFocus.conundrum!.title}`,
                       type: EvidenceType.Note,
+                      // UX-436 — a Today door stamps the day it was captured on.
+                      // Without it this record could never reach *Today's evidence*
+                      // (UX-431), whose whole claim is that it holds everything the
+                      // day produced. Additive, one existing optional field, no
+                      // migration, no number: `dayLogId` is what every other capture
+                      // door on this screen already writes.
+                      dayLogId: today,
                       tags: { engineStage: EngineStage.Wonder, subjectBucket: SubjectBucket.Other, domain: '', location: LearningLocation.Home },
                       content: `Discussed conundrum: ${weekFocus.conundrum!.title}`,
                       createdAt: new Date().toISOString(),

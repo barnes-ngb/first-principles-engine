@@ -126,6 +126,14 @@ export default function KidChapterPool({
       const artifactRef = await addDoc(artifactsCollection(familyId), {
         childId,
         type: EvidenceType.Audio,
+        // UX-436 — a Today door stamps the day it was captured on. Without it
+        // this record could never reach *Today's evidence* (UX-431), whose whole
+        // claim is that it holds everything the day produced. Additive, one
+        // existing optional field, no migration, no number — `dayLogId` is what
+        // every other capture door on this screen already writes. `todayKey()`
+        // (LOCAL fields) rather than the UTC slice beside it: this is a stored
+        // record's date, which is `UX-412`'s distinction exactly.
+        dayLogId: todayKey(),
         tags: {
           engineStage: EngineStage.Reflect,
           subjectBucket: SubjectBucket.Reading,

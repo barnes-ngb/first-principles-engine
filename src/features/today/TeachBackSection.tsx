@@ -85,6 +85,13 @@ export default function TeachBackSection({
                 childId: selectedChildId,
                 title: `Teach-back ${today}`,
                 type: EvidenceType.Note,
+                // UX-436 — a Today door stamps the day it was captured on.
+                // Without it this record could never reach *Today's evidence*
+                // (UX-431), whose whole claim is that it holds everything the
+                // day produced. Additive, one existing optional field, no
+                // migration, no number: `dayLogId` is what every other capture
+                // door on this screen already writes.
+                dayLogId: today,
                 tags: { engineStage: EngineStage.Explain, subjectBucket: SubjectBucket.Other, domain: 'speech', location: LearningLocation.Home },
                 content: `Teach-back: ${teachBackText.trim()}`,
                 createdAt: new Date().toISOString(),

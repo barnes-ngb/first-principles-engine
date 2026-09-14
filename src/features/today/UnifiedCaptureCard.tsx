@@ -123,6 +123,12 @@ interface UnifiedCaptureCardProps {
    * (UX-431) — the house rule, stated in four places on the weekly review.
    */
   artifactsFailed?: boolean
+  /**
+   * The family's own `FamilySettings.timeZone` (Codex round 1, P2) — the clock
+   * the evidence list reads each stamp in. Absent or unparseable falls back to
+   * the app's default inside `resolveFamilyTimeZone`.
+   */
+  familyTimeZone?: string
   onSnackMessage: (msg: { text: string; severity: 'success' | 'error' }) => void
   /** 'parent' (default) — full form. 'kid' — chip-required, +/- duration, audio-only note. */
   variant?: Variant
@@ -140,6 +146,7 @@ export default function UnifiedCaptureCard({
   setTodayArtifacts,
   todayChecklist = [],
   artifactsFailed = false,
+  familyTimeZone,
   onSnackMessage,
   variant = 'parent',
   activeChild,
@@ -872,6 +879,7 @@ export default function UnifiedCaptureCard({
               checklist={todayChecklist}
               audience={EvidenceAudience.Parent}
               failed={artifactsFailed}
+              timeZone={familyTimeZone}
             />
           </Stack>
         </SectionCard>

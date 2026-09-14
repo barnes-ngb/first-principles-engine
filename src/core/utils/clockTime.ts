@@ -42,8 +42,19 @@
  * that zone — every device this family owns — the two agree exactly. On a
  * device that is not, a capture near midnight can be filed under the device's
  * day and read with the family's clock. The alternative is worse: a clock
- * nobody named, which is the thing `UX-215` was filed about. A caller that
- * knows better may pass `FamilySettings.timeZone` through.
+ * nobody named, which is the thing `UX-215` was filed about.
+ *
+ * ── The family's own setting wins (Codex round 1, P2) ──────────────────────
+ *
+ * `FamilySettings.timeZone` is a real, optional field on `Child.settings`, and
+ * treating the app's default as *"the configured family zone"* would show every
+ * capture at the wrong clock time for a family that had set one. So callers
+ * pass it, through {@link resolveFamilyTimeZone} — which also decides what a
+ * zone the runtime cannot parse means. It means **fall back to the app's own
+ * default**, not to nothing: a stored zone is a setting that may be stale or
+ * mistyped, and answering `null` for every row would take the whole column away
+ * over one bad string. That is not "a second unnamed clock" — the fallback is
+ * the same named constant this module already documents.
  */
 
 /**
@@ -79,5 +90,28 @@ export function formatClockTime(
     // so answer with the same `null` an unreadable stamp gets rather than
     // falling back to a second, unnamed clock.
     return null
+  }
+}
+
+/**
+ * The zone to read a family's records in: their own setting where it is one the
+ * runtime can parse, {@link FAMILY_TIME_ZONE} otherwise.
+ *
+ * Separate from {@link formatClockTime} on purpose. *Which zone is this
+ * family's* and *what does this stamp read in that zone* are two questions, and
+ * only the first one has a sensible fallback — a stamp that cannot be read is
+ * not recoverable, while a zone that cannot be parsed is.
+ */
+export function resolveFamilyTimeZone(configured?: string | null): string {
+  const zone = configured?.trim()
+  if (!zone) return FAMILY_TIME_ZONE
+  try {
+    // Throws `RangeError` on a zone this runtime does not know. Formatting the
+    // epoch is the cheapest way to ask, and it asks the same `Intl` that
+    // `formatClockTime` will use, so the two cannot disagree about validity.
+    new Intl.DateTimeFormat('en-US', { timeZone: zone }).format(new Date(0))
+    return zone
+  } catch {
+    return FAMILY_TIME_ZONE
   }
 }

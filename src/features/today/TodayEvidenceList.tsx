@@ -33,6 +33,12 @@ export interface TodayEvidenceListProps {
   audience: EvidenceAudience
   /** The read dropped. Never rendered as an affirmative empty result. */
   failed?: boolean
+  /**
+   * The family's own `FamilySettings.timeZone`, where they have set one
+   * (Codex round 1, P2). Absent falls back to the app's default inside
+   * `resolveFamilyTimeZone`; so does a value the runtime cannot parse.
+   */
+  timeZone?: string
 }
 
 export default function TodayEvidenceList({
@@ -40,6 +46,7 @@ export default function TodayEvidenceList({
   checklist = [],
   audience,
   failed = false,
+  timeZone,
 }: TodayEvidenceListProps) {
   const copy = evidenceCopy(audience)
 
@@ -51,7 +58,7 @@ export default function TodayEvidenceList({
     )
   }
 
-  const entries = buildTodayEvidence({ artifacts, checklist, audience })
+  const entries = buildTodayEvidence({ artifacts, checklist, audience, timeZone })
 
   if (entries.length === 0) {
     return (

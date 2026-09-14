@@ -3,7 +3,7 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { FAMILY_TIME_ZONE, formatClockTime } from './clockTime'
+import { FAMILY_TIME_ZONE, formatClockTime, resolveFamilyTimeZone } from './clockTime'
 
 describe('formatClockTime (UX-431)', () => {
   it('reads a stamp in the family zone, not the runtime zone', () => {
@@ -77,5 +77,32 @@ describe('FAMILY_TIME_ZONE stays in step with the Cloud Function', () => {
 
   it('mirrors it', () => {
     expect(FAMILY_TIME_ZONE).toBe(declared)
+  })
+})
+
+// ── The family's own setting (Codex round 1, P2) ────────────────────────────
+
+describe('resolveFamilyTimeZone (UX-431)', () => {
+  it('uses the family’s own setting when they have one', () => {
+    expect(resolveFamilyTimeZone('America/Denver')).toBe('America/Denver')
+    expect(formatClockTime('2026-09-14T14:05:00Z', resolveFamilyTimeZone('America/Denver'))).toBe(
+      '8:05 AM',
+    )
+  })
+
+  it('falls back to the app default when nothing is set', () => {
+    expect(resolveFamilyTimeZone(undefined)).toBe(FAMILY_TIME_ZONE)
+    expect(resolveFamilyTimeZone(null)).toBe(FAMILY_TIME_ZONE)
+    expect(resolveFamilyTimeZone('   ')).toBe(FAMILY_TIME_ZONE)
+  })
+
+  it('falls back for a zone the runtime cannot parse, rather than losing the column', () => {
+    // A stored setting can be stale or mistyped. Answering `null` for every row
+    // would take the whole time column away over one bad string — and the
+    // fallback is the same NAMED constant, not a second unnamed clock.
+    expect(resolveFamilyTimeZone('Mars/Olympus_Mons')).toBe(FAMILY_TIME_ZONE)
+    expect(
+      formatClockTime('2026-09-14T14:05:00Z', resolveFamilyTimeZone('Mars/Olympus_Mons')),
+    ).toBe('9:05 AM')
   })
 })

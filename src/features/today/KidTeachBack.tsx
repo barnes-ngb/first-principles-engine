@@ -94,7 +94,16 @@ export default function KidTeachBack({
           domain: 'speech',
           location: 'home',
         },
-        ...(mediaUrl ? { mediaUrl } : {}),
+        // UX-437 — the uploaded address is written to `mediaUrls` (and `uri`
+        // as the cover), the two fields `Artifact` actually declares. It used
+        // to be written to `mediaUrl`, singular, which is on no type and is
+        // read by nothing — so the recording was uploaded to Storage and then
+        // thrown away from the record's point of view, leaving a media-typed
+        // artifact with no address at all. That is `artifact-media-missing`
+        // (`UX-387`), and `UX-432` is what finally made it visible: the new
+        // evidence list would have said *(no file)* over audio that exists.
+        // Rows already written stay as they are — a data repair is its own run.
+        ...(mediaUrl ? { uri: mediaUrl, mediaUrls: [mediaUrl] } : {}),
         notes: `${child.name} taught ${recipientName} about ${teachSubject}`,
         createdAt: new Date().toISOString(),
       })

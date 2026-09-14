@@ -1167,6 +1167,7 @@ export default function KidTodayView({
           checklist={dayLog.checklist ?? []}
           audience={EvidenceAudience.Kid}
           failed={artifactsFailed}
+          timeZone={child.settings?.timeZone}
         />
       </SectionCard>
 

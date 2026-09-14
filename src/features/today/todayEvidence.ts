@@ -47,7 +47,7 @@
 import type { Artifact, ChecklistItem } from '../../core/types'
 import { EvidenceType } from '../../core/types/enums'
 import { FILE_MISSING_LABEL, artifactMediaMissing } from '../../core/utils/artifactMedia'
-import { formatClockTime } from '../../core/utils/clockTime'
+import { formatClockTime, resolveFamilyTimeZone } from '../../core/utils/clockTime'
 
 /** Who is reading. Capability, never a name. */
 export const EvidenceAudience = {
@@ -232,8 +232,24 @@ export function resolveEvidenceRow(
   return null
 }
 
-/** The detail lines for one artifact, de-duped and trimmed. */
-export function evidenceDetails(artifact: Artifact): string[] {
+/**
+ * The detail lines for one artifact, de-duped and trimmed.
+ *
+ * **`contentNote` is parent-only, and that is the field's own contract**
+ * (Codex round 1, P2). FEAT-141 writes it as a short plain-language description
+ * of what a captured image shows, produced by the classification pass that
+ * already runs on that path — *"parent-side metadata for curation / portfolio /
+ * compliance — **never rendered to a child**"*. For a photo or a scanned page
+ * captured through `useUnifiedCapture` it is the **only** descriptive detail
+ * the record carries, the title being a generic row label, so dropping it left
+ * the parent's list with nothing to say about exactly the captures the owner's
+ * sentence was about. The audience gate is therefore load-bearing rather than
+ * cosmetic, and is asserted in both directions.
+ */
+export function evidenceDetails(
+  artifact: Artifact,
+  audience: EvidenceAudience = EvidenceAudience.Parent,
+): string[] {
   const out: string[] = []
   const seen = new Set<string>()
   const push = (value: string | undefined) => {
@@ -250,6 +266,7 @@ export function evidenceDetails(artifact: Artifact): string[] {
   }
   push(artifact.notes)
   push(artifact.content)
+  if (audience === EvidenceAudience.Parent) push(artifact.contentNote)
   push(artifact.topic)
   return out
 }
@@ -258,7 +275,11 @@ export interface BuildTodayEvidenceArgs {
   artifacts: readonly Artifact[]
   checklist?: readonly ChecklistItem[]
   audience: EvidenceAudience
-  /** Overridable so a caller that knows the family's zone can pass it. */
+  /**
+   * The family's own `FamilySettings.timeZone`, where they have set one. Passed
+   * through `resolveFamilyTimeZone`, so an unset or unparseable value reads as
+   * the app's default rather than taking the whole time column away.
+   */
   timeZone?: string
 }
 
@@ -273,11 +294,11 @@ export function buildTodayEvidence({
     const row = resolveEvidenceRow(artifact, checklist)
     const entry: TodayEvidenceEntry = {
       key: artifact.id ?? `${artifact.createdAt ?? 'unstamped'}-${index}`,
-      time: formatClockTime(artifact.createdAt, timeZone),
+      time: formatClockTime(artifact.createdAt, resolveFamilyTimeZone(timeZone)),
       typeWord: wordFor(artifact.type, audience),
       rowLabel: row ? evidenceRowLabel(row.label) : null,
       title: artifact.title?.trim() ?? '',
-      details: evidenceDetails(artifact),
+      details: evidenceDetails(artifact, audience),
       fileMissing: artifactMediaMissing(artifact),
       artifact,
     }
