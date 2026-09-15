@@ -63,11 +63,11 @@ logs. No number, fold, rounding or stored row was changed by this run.
 ## 3. The derived numbers
 
 ```
-source files scanned (non-test, src/ + functions/src/): 882
-surfaces naming a time or evidence collection: 61
-by role: {"WRITE":15,"READ":22,"BOTH":24}
-by collection: {"hours":16,"hoursAdjustments":9,"days":29,"artifacts":32}
-census rows: 61
+source files scanned (non-test, src/ + functions/src/): 883
+surfaces naming a time or evidence collection: 62
+by role: {"WRITE":15,"READ":22,"BOTH":25}
+by collection: {"hours":16,"hoursAdjustments":9,"days":30,"artifacts":32}
+census rows: 62
 census problems: 0
 date-rule call sites (9 distinct rules): 34
    13  getWeekRange
@@ -89,8 +89,10 @@ consumers of the shared counting path: 7
        src/features/weekly-review/weekBySubject.ts
 ```
 
-Re-derived by `npm run census:time-ledger` on 2026-09-15 (`FIX-238` / `UX-367`).
-The artifact reader moved from `TodayPage.tsx` to `useTodayArtifacts.ts`, so §5 now
+Re-derived by `npm run census:time-ledger` on 2026-09-15 (`FIX-239` / `UX-415`).
+Parent-requested identity preparation makes `TodayPage.tsx` a direct `days`
+surface again; its new §5 row is classified from the same source derivation.
+In `FIX-238` / `UX-367`, the artifact reader moved from `TodayPage.tsx` to `useTodayArtifacts.ts`, so §5
 names the hook as `READ` and records its selected-day query. The page's former
 `BOTH` classification included its unrelated writes under the per-file rule below.
 The hook changes only the read/display handoff; all persistence and hours math stay
@@ -222,6 +224,7 @@ no document.
 | `src/features/today/LessonVideoDialog.tsx` | hoursAdjustments | WRITE | the day's own date — local | **WRITER.** *Log watch time*: an `hoursAdjustments` row, `reason` = *“Watched video: <topic>”* |
 | `src/features/today/liveDayEdit.ts` | days | BOTH | the edited day's key — local | **WRITER.** Today's live day edits, all through `setDayLogGuarded`; mirrors the DATA-14 item↔block correspondence |
 | `src/features/today/TeachBackSection.tsx` | artifacts | WRITE | — (no range rule) | **WRITER.** The parent-side teach-back artifact |
+| `src/features/today/TodayPage.tsx` | days | BOTH | the selected family/child/day through `dayLogDocId` — local | **WRITER.** Parent-requested legacy scan preparation (`FIX-239`) reaches the day only through `prepareDayChecklistIdentitiesGuarded`: adds existing optional row IDs after an exact identity-only proof, preserving all non-ID fields. The normal saved-day subscription renders the result and a fresh parent tap establishes scan intent. No minutes are written. Role is per file and includes the page's unrelated reads/writes |
 | `src/features/today/UnifiedCaptureCard.tsx` | hours · artifacts | WRITE | the selected day — local | **WRITER, and the door in the owner's report.** One tap writes an `artifacts` document **and** an `hours` document carrying the activity's name in `notes` — and **no checklist item**, which is why *what got done* could not name it (`UX-408`) |
 | `src/features/today/useDayLog.ts` | days | BOTH | `getWeekRange(new Date())` (`UX-366`) | **WRITER.** The day document's read and its one write lane, `persistDayLogImmediate` (`UX-351`) |
 | `src/features/today/useRolloverUnchecked.ts` | days | READ | yesterday's key — local | Reads the previous day to roll unchecked items forward |
