@@ -53,6 +53,8 @@ interface ScanResultsPanelProps {
   onSkipToNext?: (nextLesson: number) => void
   /** Called when user accepts an AI skip recommendation (advances position + marks item skipped). */
   onAcceptSkip?: () => Promise<boolean>
+  /** Stable identity of the scan and row this acceptance belongs to. */
+  acceptScopeKey?: string
   /** Child name for the "Update Progress" button label. */
   childName?: string
   /** Hide action buttons (e.g. when viewing history). */
@@ -73,16 +75,18 @@ export default function ScanResultsPanel({
   onUpdatePosition,
   onSkipToNext,
   onAcceptSkip,
+  acceptScopeKey,
   childName,
   hideActions,
   configSyncStatus,
   overrideRecommendation,
 }: ScanResultsPanelProps) {
   const [skipState, setSkipState] = useState<{
-    results: ScanResult
+    scope: string | ScanResult
     status: 'pending' | 'accepted' | 'failed'
   } | null>(null)
-  const currentSkipStatus = skipState?.results === results ? skipState.status : null
+  const acceptScope = acceptScopeKey ?? results
+  const currentSkipStatus = skipState?.scope === acceptScope ? skipState.status : null
   const skipAccepted = currentSkipStatus === 'accepted'
   const skipPending = currentSkipStatus === 'pending'
   if (isCertificateScan(results)) {
@@ -212,7 +216,7 @@ export default function ScanResultsPanel({
                   color="success"
                   disabled={skipPending}
                   onClick={async () => {
-                    const attempt = { results, status: 'pending' as const }
+                    const attempt = { scope: acceptScope, status: 'pending' as const }
                     setSkipState(attempt)
                     let accepted = false
                     try {
@@ -221,7 +225,7 @@ export default function ScanResultsPanel({
                       // A failed write must never become an Accepted receipt.
                     }
                     setSkipState((current) => current === attempt
-                      ? { results, status: accepted ? 'accepted' : 'failed' }
+                      ? { scope: acceptScope, status: accepted ? 'accepted' : 'failed' }
                       : current)
                   }}
                   sx={{ textTransform: 'none' }}

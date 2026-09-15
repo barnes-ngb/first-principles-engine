@@ -96,6 +96,7 @@ import {
 } from './dayProgressLabels'
 import { kidPalette } from '../../app/tokens'
 import { TodayDecision } from './todayScope'
+import { checklistItemKey } from './dayWriteGuard'
 
 const subjectBucketColor: Record<string, string> = {
   Reading: '#3b82f6',
@@ -1308,6 +1309,7 @@ export default function TodayChecklist({
                     onUpdatePosition={onUpdatePosition}
                     onSkipToNext={onSkipToNext}
                     onAcceptSkip={onAcceptSkip}
+                    acceptScopeKey={JSON.stringify([familyId, selectedChildId, dayLog.date, checklistItemKey(item), scanResult.id])}
                     onScanAnother={() => { onClearScan() }}
                     childName={selectedChild.name}
                   />

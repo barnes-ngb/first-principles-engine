@@ -1,8 +1,39 @@
 import { render, screen, fireEvent, act } from '@testing-library/react'
+import React from 'react'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import ts from 'typescript'
 import { describe, expect, it, vi } from 'vitest'
 
 import ScanResultsPanel from './ScanResultsPanel'
 import type { WorksheetScanResult } from '../core/types'
+import { checklistItemKey } from '../features/today/dayWriteGuard'
+
+// Execute the actual JSX call site so losing one of its scope dimensions makes
+// this regression fail even when the isolated panel still handles a made-up key.
+const callerSource = readFileSync(join(process.cwd(), 'src/features/today/TodayChecklist.tsx'), 'utf8')
+const callerAst = ts.createSourceFile('TodayChecklist.tsx', callerSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+let callSite = ''
+function findCall(node: ts.Node) {
+  if (ts.isJsxSelfClosingElement(node) && node.tagName.getText(callerAst) === 'ScanResultsPanel') callSite = node.getText(callerAst)
+  ts.forEachChild(node, findCall)
+}
+findCall(callerAst)
+if (!callSite) throw new Error('TodayChecklist ScanResultsPanel call not found')
+const callerJs = ts.transpileModule(`const panel = ${callSite}`, {
+  compilerOptions: { jsx: ts.JsxEmit.React, target: ts.ScriptTarget.ES2022 },
+}).outputText
+function actualCaller(onAcceptSkip: () => Promise<boolean>, scope: Partial<{ family: string; child: string; day: string; row: string; scan: string }> = {}) {
+  const values = {
+    React, ScanResultsPanel, checklistItemKey, onAcceptSkip,
+    familyId: scope.family ?? 'family', selectedChildId: scope.child ?? 'child', dayLog: { date: scope.day ?? '2026-09-15' },
+    item: { id: scope.row ?? 'row-A', label: 'workbook', completed: false },
+    scanResult: { id: scope.scan ?? 'scan', results: makeSkipResult(), imageUrl: '' },
+    selectedChild: { name: 'Synthetic child' }, onScanAddToPlan: undefined,
+    onScanSkip: undefined, onUpdatePosition: undefined, onSkipToNext: undefined, onClearScan: vi.fn(),
+  }
+  return new Function(...Object.keys(values), `${callerJs}; return panel`)(...Object.values(values)) as React.ReactElement
+}
 
 function makeSkipResult(overrides: Partial<WorksheetScanResult> = {}): WorksheetScanResult {
   return {
@@ -126,5 +157,27 @@ describe('ScanResultsPanel — Accept AI skip', () => {
     await act(async () => finish(true))
     expect(screen.queryByText(/✓ Accepted/)).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /accept & advance/i })).toBeEnabled()
+  })
+
+  it.each(['family', 'child', 'day', 'row', 'scan'] as const)('actual Today caller cannot put an old receipt on a different %s', async (dimension) => {
+    let finish!: (result: boolean) => void
+    const pending = () => new Promise<boolean>((resolve) => { finish = resolve })
+    const { rerender } = render(actualCaller(pending))
+    fireEvent.click(screen.getByRole('button', { name: /accept & advance/i }))
+    // Same mounted position; React keeps the panel across a row-index reuse.
+    rerender(actualCaller(pending, { [dimension]: 'different' }))
+    await act(async () => finish(true))
+    expect(screen.queryByText(/✓ Accepted/)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /accept & advance/i })).toBeEnabled()
+  })
+
+  it('actual Today caller keeps pending through fresh result objects and callback churn for the same target', async () => {
+    let finish!: (result: boolean) => void
+    const { rerender } = render(actualCaller(() => new Promise<boolean>((resolve) => { finish = resolve })))
+    fireEvent.click(screen.getByRole('button', { name: /accept & advance/i }))
+    rerender(actualCaller(vi.fn().mockResolvedValue(false)))
+    expect(screen.getByRole('button', { name: /Accepting/ })).toBeDisabled()
+    await act(async () => finish(true))
+    expect(screen.getByText(/✓ Accepted/)).toBeInTheDocument()
   })
 })
