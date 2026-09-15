@@ -113,7 +113,7 @@ import { useUnifiedCapture } from './useUnifiedCapture'
 import { useTodayArtifacts } from './useTodayArtifacts'
 import SectionErrorBoundary from '../../components/SectionErrorBoundary'
 import DraftReadyCard from '../monthly-review/DraftReadyCard'
-import { captureRowWriteNotice, writeCaptureRow } from './captureRowWrite'
+import { captureRowWriteNotice, skipRowWriteNotice, writeChecklistRow } from './dayChecklistRowWrite'
 import {
   captureMayRouteToCurriculum,
   resolveTodayRow,
@@ -1091,7 +1091,7 @@ export default function TodayPage() {
     // stood before an AI scan call that takes seconds, so writing it whole put
     // back every edit made in between. One row, on the live document.
     if (record?.results && item) {
-      const outcome = await writeCaptureRow({
+      const outcome = await writeChecklistRow({
         familyId,
         childId: selectedChildId,
         dateKey: today,
@@ -1200,29 +1200,42 @@ export default function TodayPage() {
   )
 
   const handleAcceptSkip = useCallback(
-    async () => {
-      if (!familyId || !selectedChildId || !dayLog || !scanResult?.results || scanItemIndex == null) return
+    async (): Promise<boolean> => {
+      if (!familyId || !selectedChildId || !dayLog || !scanResult?.results || scanItemIndex == null) return false
       const results = scanResult.results
-      if (results.pageType === 'certificate') return
+      if (results.pageType === 'certificate') return false
 
       const curriculum = results.curriculumDetected
-      if (!curriculum?.lessonNumber) return
+      if (!curriculum?.lessonNumber) return false
+
+      const item = dayLog.checklist?.[scanItemIndex]
+      if (!item) {
+        setSnackMessage({ text: "That row is no longer on this day's plan.", severity: 'warning' })
+        return false
+      }
+      const itemKey = checklistItemKey(item)
+      if ((dayLog.checklist ?? []).filter((row) => checklistItemKey(row) === itemKey).length > 1) {
+        setSnackMessage({ text: 'More than one row matches this scan, so it was not accepted. Review those rows before trying again.', severity: 'warning' })
+        return false
+      }
+      // Capture identity before either await. The row patch reads the latest
+      // saved checklist, while navigation cannot redirect this confirmed work.
+      const target = {
+        familyId,
+        childId: selectedChildId,
+        dateKey: today,
+        itemKey,
+        hint: { index: scanItemIndex, completed: !!item.completed },
+      }
 
       try {
-        // 1. Mark checklist item as skipped with ai-recommended reason
-        const updatedChecklist = (dayLog.checklist ?? []).map((ci, i) =>
-          i === scanItemIndex
-            ? { ...ci, skipped: true, skipReason: SkipReason.AiRecommended }
-            : ci,
-        )
-
-        // 2. Advance currentPosition by +1
+        // Advance currentPosition by +1, as explicitly confirmed by this tap.
         await syncScanToConfig(selectedChildId, {
           ...results,
           curriculumDetected: { ...curriculum, lessonNumber: curriculum.lessonNumber + 1 },
         })
 
-        // 3. Record parentOverride on the scan record
+        // Record parentOverride on the scan record.
         if (scanResult.id) {
           const override = {
             recommendation: 'skip' as const,
@@ -1233,14 +1246,27 @@ export default function TodayPage() {
           await updateDoc(doc(scansCollection(familyId), scanResult.id), { parentOverride: override })
         }
 
-        persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
+        const outcome = await writeChecklistRow({
+          ...target,
+          hint: target.hint,
+          requireUniqueIdentity: true,
+          patch: { skipped: true, skipReason: SkipReason.AiRecommended },
+          context: 'today-accept-skip',
+        })
+        const notice = skipRowWriteNotice(outcome)
+        if (notice) {
+          setSnackMessage({ text: notice, severity: 'warning' })
+          return false
+        }
         setSnackMessage({ text: 'Skipped. Moving forward.', severity: 'success' })
+        return true
       } catch (err) {
         console.error('[TodayPage] Failed to accept skip recommendation', err)
-        setSnackMessage({ text: 'Failed to accept skip', severity: 'error' })
+        setSnackMessage({ text: 'Failed to finish accepting the skip. Curriculum progress may already have advanced; check it before trying again.', severity: 'error' })
+        return false
       }
     },
-    [familyId, selectedChildId, dayLog, scanResult, scanItemIndex, syncScanToConfig, persistDayLogImmediate, setSnackMessage],
+    [familyId, selectedChildId, dayLog, scanResult, scanItemIndex, syncScanToConfig, today, setSnackMessage],
   )
 
   // --- Loading state ---

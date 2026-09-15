@@ -52,7 +52,9 @@ interface ScanResultsPanelProps {
   /** Called when user wants to skip ahead to the next lesson (for skip/quick-review). */
   onSkipToNext?: (nextLesson: number) => void
   /** Called when user accepts an AI skip recommendation (advances position + marks item skipped). */
-  onAcceptSkip?: () => void
+  onAcceptSkip?: () => Promise<boolean>
+  /** Stable identity of the scan and row this acceptance belongs to. */
+  acceptScopeKey?: string
   /** Child name for the "Update Progress" button label. */
   childName?: string
   /** Hide action buttons (e.g. when viewing history). */
@@ -73,12 +75,20 @@ export default function ScanResultsPanel({
   onUpdatePosition,
   onSkipToNext,
   onAcceptSkip,
+  acceptScopeKey,
   childName,
   hideActions,
   configSyncStatus,
   overrideRecommendation,
 }: ScanResultsPanelProps) {
-  const [skipAccepted, setSkipAccepted] = useState(false)
+  const [skipState, setSkipState] = useState<{
+    scope: string | ScanResult
+    status: 'pending' | 'accepted' | 'failed'
+  } | null>(null)
+  const acceptScope = acceptScopeKey ?? results
+  const currentSkipStatus = skipState?.scope === acceptScope ? skipState.status : null
+  const skipAccepted = currentSkipStatus === 'accepted'
+  const skipPending = currentSkipStatus === 'pending'
   if (isCertificateScan(results)) {
     return (
       <CertificateResultsView
@@ -204,13 +214,23 @@ export default function ScanResultsPanel({
                   size="small"
                   variant="outlined"
                   color="success"
-                  onClick={() => {
-                    onAcceptSkip()
-                    setSkipAccepted(true)
+                  disabled={skipPending}
+                  onClick={async () => {
+                    const attempt = { scope: acceptScope, status: 'pending' as const }
+                    setSkipState(attempt)
+                    let accepted = false
+                    try {
+                      accepted = await onAcceptSkip()
+                    } catch {
+                      // A failed write must never become an Accepted receipt.
+                    }
+                    setSkipState((current) => current === attempt
+                      ? { scope: acceptScope, status: accepted ? 'accepted' : 'failed' }
+                      : current)
                   }}
                   sx={{ textTransform: 'none' }}
                 >
-                  Accept &amp; advance
+                  {skipPending ? 'Accepting…' : 'Accept & advance'}
                 </Button>
               )}
               {skipAccepted && (
@@ -226,6 +246,7 @@ export default function ScanResultsPanel({
                   size="small"
                   variant="text"
                   color="success"
+                  disabled={skipPending}
                   onClick={() => onSkipToNext((results.curriculumDetected!.lessonNumber ?? 0) + 1)}
                   sx={{ textTransform: 'none' }}
                 >
@@ -233,6 +254,11 @@ export default function ScanResultsPanel({
                 </Button>
               )}
             </Stack>
+            {currentSkipStatus === 'failed' && (
+              <Typography variant="body2" sx={{ mt: 0.5 }}>
+                Skip wasn't fully saved. Check curriculum progress before trying again.
+              </Typography>
+            )}
           </Alert>
         )}
 

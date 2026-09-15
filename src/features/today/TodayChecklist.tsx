@@ -96,6 +96,7 @@ import {
 } from './dayProgressLabels'
 import { kidPalette } from '../../app/tokens'
 import { TodayDecision } from './todayScope'
+import { checklistItemKey } from './dayWriteGuard'
 
 const subjectBucketColor: Record<string, string> = {
   Reading: '#3b82f6',
@@ -274,7 +275,7 @@ interface TodayChecklistProps {
   onClearScan: () => void
   onUpdatePosition?: (curriculum: CurriculumDetected) => void
   onSkipToNext?: (nextLesson: number) => void
-  onAcceptSkip?: () => void
+  onAcceptSkip?: () => Promise<boolean>
   onPrintMaterials: () => void
   printingMaterials: boolean
   scanFeedbackBySubject?: Record<string, { topic: string; recommendation: 'do' | 'skip' | 'quick-review' | 'modify'; estimatedMinutes?: number }>
@@ -1308,6 +1309,7 @@ export default function TodayChecklist({
                     onUpdatePosition={onUpdatePosition}
                     onSkipToNext={onSkipToNext}
                     onAcceptSkip={onAcceptSkip}
+                    acceptScopeKey={JSON.stringify([familyId, selectedChildId, dayLog.date, checklistItemKey(item), scanResult.id])}
                     onScanAnother={() => { onClearScan() }}
                     childName={selectedChild.name}
                   />

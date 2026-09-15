@@ -99,7 +99,7 @@ unchanged. The registry guard and its source derivation are unchanged.
 The prior re-derivation was run on 2026-09-13 and pasted from the same script
 (`FIX-235`, re-run by `FIX-236`: `hoursAdjustments` moves 7 → 9 because the two AI-side
 readers `UX-410` fixed now read the third additive source, and `promptHours.ts` is the
-seventh consumer of the shared counting path). Two things moved: `src/features/today/captureRowWrite.ts` is the new row-scoped
+seventh consumer of the shared counting path). Two things moved: `src/features/today/dayChecklistRowWrite.ts` is the new row-scoped
 day writer `UX-404` added, and the **date-rule** line was already stale on `main` — the script
 prints 34 call sites across 9 rules where the block said 33, because a sixth
 `weekRangeFromDateKey` call arrived after the census was written and nothing re-derived the
@@ -210,7 +210,7 @@ no document.
 | `src/features/settings/DevAdminTab.tsx` | days | BOTH | `getWeekRange()` for the Sunday sweep | **WRITER.** The admin Sunday cleanup deletes day logs through `deleteDayLogGuarded` |
 | `src/features/shelly-chat/useChatWeekDays.ts` | days | READ | `getWeekRange(now, 1)` — Monday-start | Reads the chat's week of days. **The one caller that starts its week on MONDAY**, because it is building a Mon–Fri card set, not counting a compliance week |
 | `src/features/shelly-chat/useShellyChatFlows.ts` | days | BOTH | 14 days back, `toISOString().slice(0,10)` | Reads recent days for chat context; writes day edits through the guard |
-| `src/features/today/captureRowWrite.ts` | days | WRITE | the captured day's key — local | **WRITER.** The capture's own row-scoped lane (`UX-404`): patches the one row the photo was taken for, resolved by `checklistItemKey`, and writes `checklist` alone. The read, the patch and the write are ONE transaction through `dayWriteGuard.patchDayChecklistGuarded`, so `blocks` and `xpTotal` are never in the payload and an edit landing mid-write is not overwritten. No minutes |
+| `src/features/today/dayChecklistRowWrite.ts` | days | WRITE | the captured day's key — local | **WRITER.** The shared row-scoped lane (`UX-404` / `UX-415`): patches evidence or confirmed skip fields on the originating row, resolved by `checklistItemKey` (the existing index/completion hint for captures; a unique identity for skips), and writes `checklist` alone. The read, the patch and the write are ONE transaction through `dayWriteGuard.patchDayChecklistGuarded`, so `blocks` and `xpTotal` are never in the payload and an edit landing mid-write is not overwritten. No minutes |
 | `src/features/today/ExplorerMap.tsx` | days | READ | — (recent days) | Reads day logs for the kid map |
 | `src/features/today/KidCaptureForm.tsx` | artifacts | WRITE | — (no range rule) | **WRITER.** A kid's captured artifact. No minutes |
 | `src/features/today/KidChapterPool.tsx` | artifacts | BOTH | — (no range rule) | Chapter answers as artifacts |
@@ -225,7 +225,7 @@ no document.
 | `src/features/today/useRolloverUnchecked.ts` | days | READ | yesterday's key — local | Reads the previous day to roll unchecked items forward |
 | `src/features/today/useTodayArtifacts.ts` | artifacts | READ | `dayLogId` + `childId` equality on the selected day | Parent Today's evidence read/display handoff (`FIX-238` / `UX-367`). The originating family/child/day visit guards saves and reads; stale results are ignored, repeated ids deduped, and only a successful read clears failure. No record writes or minutes fold |
 | `src/features/today/useTodayMiningMinutes.ts` | hours | READ | one day, `hours` only | A cap, not a record: Knowledge Mine minutes for today, for the daily mining limit |
-| `src/features/today/useUnifiedCapture.ts` | artifacts | BOTH | the selected day — local | **WRITER.** The capture pipeline behind the card: the artifact, the scan, and FEAT-184's kid/parent lane split. Its day write goes through `captureRowWrite.ts` (`UX-404`), and only a row resolving to a **workbook** may reach the curriculum route at all (`UX-403`) |
+| `src/features/today/useUnifiedCapture.ts` | artifacts | BOTH | the selected day — local | **WRITER.** The capture pipeline behind the card: the artifact, the scan, and FEAT-184's kid/parent lane split. Its day write goes through `dayChecklistRowWrite.ts` (`UX-404`), and only a row resolving to a **workbook** may reach the curriculum route at all (`UX-403`) |
 | `src/features/today/WeekFocusCard.tsx` | artifacts | WRITE | the week's key | **WRITER.** The conundrum's artifact |
 | `src/features/today/WeekRibbon.tsx` | days | READ | `getWeekRange(…, 1)` — Monday-start | `formatHoursChip`: progress through the week's **planned** checklist against a planned denominator. A different question, excluded from the agreement test **by name** (`UX-211`) |
 | `src/features/watch/useWatchHistory.ts` | days | READ | a rolling window back from today | Reads day logs for watch history |
@@ -355,7 +355,7 @@ Three shapes, hand-checked, stated rather than hidden:
    `deleteDayLogGuarded` / `patchDayChecklistGuarded`) are in the write-verb list for exactly this reason — without them
    four of this repo's day writers read as readers, `watch/writeWatchItemToDay.ts` (a file
    whose entire job is the write) among them. `updateDayLogGuarded` was the one missing
-   until `FIX-235`, and `UX-404`'s `captureRowWrite.ts` — a file whose entire job is also the
+   until `FIX-235`, and `UX-404`'s `dayChecklistRowWrite.ts` — a file whose entire job is also the
    write — is the first that reaches `days` through a guarded writer alone, so it published as
    a READER until the rule was completed; `patchDayChecklistGuarded` is that run's own new
    writer and went in with it. There is no equivalent for `hours`, because
