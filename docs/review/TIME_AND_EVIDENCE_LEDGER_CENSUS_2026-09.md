@@ -224,7 +224,7 @@ no document.
 | `src/features/watch/useWatchHistory.ts` | days | READ | a rolling window back from today | Reads day logs for watch history |
 | `src/features/watch/useWatchItemCompletion.ts` | artifacts | WRITE | — (no range rule) | **WRITER.** The watched-video artifact; mirrors the DATA-14 correspondence when it completes the item |
 | `src/features/watch/writeWatchItemToDay.ts` | days | BOTH | the chosen day's key — local | **WRITER.** Adds a watch row to a live day, through `setDayLogGuarded`. Its whole job is the write, and it names no raw verb |
-| `src/features/weekly-review/useWeekBySubject.ts` | artifacts | READ | `weekRangeFromDateKey` on `createdAt` | Reads the week's evidence for the by-subject rollup. **Ranges on `createdAt` while the minutes range on `date`** — `UX-413` |
+| `src/features/weekly-review/useWeekBySubject.ts` | artifacts | READ | `weekRangeFromDateKey` on separate `dayLogId` and `createdAt` ranges | `FIX-237` addresses `UX-413(a)`: valid bare activity-day keys decide evidence membership; unlinked book/sketch evidence and unsupported links retain the existing upload-date range. Deduplicated by document ID; hours still use the unchanged `date` reader and shared fold |
 | `src/features/weekly-review/useWeekHoursInputs.ts` | hours · hoursAdjustments · days | READ | `weekRangeFromDateKey` → the shared fold | The ONE read behind both weekly sections (`UX-388`). Deliberately does **not** run the DATA-09 migration: a read-only review surface has no business writing to the hours record |
 | `src/features/workshop/MyGamesGallery.tsx` | artifacts | BOTH | — (no range rule) | Reads game artifacts |
 | `src/features/workshop/workshopUtils.ts` | hours · days · artifacts | BOTH | `toISOString().slice(0,10)` — **UTC** | **WRITER.** Play minutes split proportionally by challenge bucket, plus a day-log mark. **Every date here is UTC**, so an evening session is stamped tomorrow — `UX-412` |
@@ -320,7 +320,7 @@ exclusion list that is a heuristic is an exclusion list that grows silently.
 | `UX-410` | 2 | **FIXED** by `FIX-236` | `loadHoursSummary` is a fourth definition of hours, read into two AI prompts, with a 1000-hour target and a percentage. All three AI-side readers now fold through the shared rule and the target line is gone |
 | `UX-411` | 2 | FILED | Two school years: July 1 in the app, August 1 in the Cloud Function |
 | `UX-412` | 2 | FILED | The Workshop and Knowledge Mine date their `hours` / `days` writes in **UTC**, so an evening session is stamped tomorrow |
-| `UX-413` | 3 | FILED | The week's evidence is range-queried on `createdAt` while its minutes are range-queried on `date` |
+| `UX-413` | 3 | PARTIAL — `FIX-237` | (a) Weekly by-subject evidence now uses valid explicit activity days, preserving upload-date fallback for unlinked evidence. (b) Day documents missing `date` remain an open investigation |
 | `UX-414` | 3 | FILED | With a week selector, *"Was that enough this week?"* can now be answered about a week still ahead |
 
 Full bodies are in `docs/review/REVIEW_HOME_BASE.md` §6.
