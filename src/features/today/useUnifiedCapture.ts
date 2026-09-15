@@ -16,8 +16,8 @@ import { deriveScanContentNote, pickArtifactContentNote } from '../../core/utils
 import type { CaptureContext } from '../../core/utils/contentNote'
 import { withTimeout, UploadTimeoutError } from '../foundations-review/uploadTimeout'
 import { batchExtraSummary } from './unifiedCaptureBatch'
-import { captureRowWriteNotice, writeCaptureRow } from './captureRowWrite'
-import type { CaptureRowPatch } from './captureRowWrite'
+import { captureRowWriteNotice, writeChecklistRow } from './dayChecklistRowWrite'
+import type { CaptureRowPatch } from './dayChecklistRowWrite'
 import { checklistItemKey } from './dayWriteGuard'
 import {
   captureMayRouteToCurriculum,
@@ -43,7 +43,7 @@ export interface UseUnifiedCaptureOptions {
    * It is not what gets written. A capture takes seconds to compress, scan and
    * upload, and this document is the one that existed when the camera opened; the
    * write re-reads the live document and patches one row (`UX-404`, see
-   * `captureRowWrite.ts`).
+   * `dayChecklistRowWrite.ts`).
    */
   dayLog: DayLog | null
   /**
@@ -169,7 +169,7 @@ export interface UseUnifiedCaptureResult {
  *
  * **And the write is row-scoped (`UX-404`).** No path here hands back a whole
  * `dayLog` composed at capture time; each patches its own row on the live
- * document through `captureRowWrite.ts`. A box ticked while the upload ran used
+ * document through `dayChecklistRowWrite.ts`. A box ticked while the upload ran used
  * to be un-ticked by the photo landing, taking its block's `actualMinutes` and
  * the day's `xpTotal` with it.
  */
@@ -288,13 +288,13 @@ export function useUnifiedCapture({
    * `dayLog` rebuilt from the snapshot the capture started with, so an edit made
    * during the upload was written back to what it had been. This patches the one
    * row, by identity, on the document as it stands now — see
-   * `captureRowWrite.ts`. A failure is reported rather than swallowed: the photo
+   * `dayChecklistRowWrite.ts`. A failure is reported rather than swallowed: the photo
    * is already saved by the time this runs, and silence would leave the parent
    * believing the row carries evidence it does not.
    */
   const linkCaptureToRow = useCallback(
     async (item: ChecklistItem, index: number, patch: CaptureRowPatch, context: string) => {
-      const outcome = await writeCaptureRow({
+      const outcome = await writeChecklistRow({
         familyId,
         childId,
         dateKey: today,

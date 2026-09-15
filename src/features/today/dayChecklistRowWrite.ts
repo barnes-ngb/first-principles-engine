@@ -6,7 +6,8 @@ import { dayLogDocId } from './daylog.model'
 import { checklistItemKey, patchDayChecklistGuarded } from './dayWriteGuard'
 
 /**
- * The capture's own write lane — `UX-404`.
+ * One-row writes onto the latest saved day — `UX-404` / `UX-415`.
+ * Captures add evidence; Accept skip adds only its confirmed skip fields.
  *
  * ── The defect ──────────────────────────────────────────────────────────────
  * `handleUnifiedCapture` closed over the `dayLog` as it stood when the photo was
@@ -63,30 +64,32 @@ export type CaptureRowPatch = Pick<
   | 'pendingScanId'
 >
 
+/** The confirmed row action's own fields; never completion or minutes. */
+export type ChecklistRowPatch = CaptureRowPatch | Pick<ChecklistItem, 'skipped' | 'skipReason'>
+
 /**
- * Why a capture's row write did not land.
+ * Why a row write did not land.
  *
  * `'no-day'` — the day document is gone (or was never created). `'row-gone'` —
  * the day no longer holds a row with this identity, which is what a rename or a
  * delete during the upload looks like. `'failed'` — the write itself was
- * rejected. All three are **reported**, never swallowed: the photo is already
- * saved by the time this runs, so silence would leave a parent believing the row
- * carries evidence it does not (`UX-351`'s rule, one door over).
+ * rejected. Callers report these with action-specific notices: a capture may
+ * already have saved a photo, while Accept skip may have advanced curriculum.
  */
-export type CaptureRowWriteOutcome =
+export type ChecklistRowWriteOutcome =
   | { status: 'done' }
   | { status: 'refused'; reason: 'no-day' | 'row-gone' }
   | { status: 'failed' }
 
 /**
- * What the caller knows about the row it opened the camera on, beyond its
+ * What the caller knows about the row its action started on, beyond its
  * identity — used only to tell IDENTICAL rows apart. See
- * {@link resolveCaptureRowIndex}.
+ * {@link resolveChecklistRowIndex}.
  */
-export interface CaptureRowHint {
-  /** The row's index when the capture started. Trusted only if it still matches. */
+export interface ChecklistRowHint {
+  /** The row's index when the action started. Trusted only if it still matches. */
   index?: number
-  /** Whether that row was ticked when the capture started. */
+  /** Whether that row was ticked when the action started. */
   completed?: boolean
 }
 
@@ -122,10 +125,10 @@ export interface CaptureRowHint {
  *
  * `-1` when the day no longer holds the row at all.
  */
-export function resolveCaptureRowIndex(
+export function resolveChecklistRowIndex(
   rows: readonly ChecklistItem[],
   itemKey: string,
-  hint: CaptureRowHint = {},
+  hint: ChecklistRowHint = {},
 ): number {
   const matches = (row: ChecklistItem) => checklistItemKey(row) === itemKey
   const { index, completed } = hint
@@ -154,34 +157,33 @@ export function resolveCaptureRowIndex(
 export function patchChecklistRow(
   checklist: ChecklistItem[] | undefined,
   itemKey: string,
-  patch: CaptureRowPatch,
-  hint: CaptureRowHint = {},
+  patch: ChecklistRowPatch,
+  hint: ChecklistRowHint = {},
 ): ChecklistItem[] | null {
   const rows = checklist ?? []
-  const index = resolveCaptureRowIndex(rows, itemKey, hint)
+  const index = resolveChecklistRowIndex(rows, itemKey, hint)
   if (index < 0) return null
   return rows.map((row, i) => (i === index ? { ...row, ...patch } : row))
 }
 
 /**
- * Write a capture's fields onto its own row of a saved day.
+ * Write an action's fields onto its own row of a saved day.
  *
- * See the module header. Never throws — the caller is mid-capture with a photo
- * already saved, and an outcome it can report is more use than an exception it
- * would have to translate.
+ * See the module header. Never throws: earlier steps may already have saved
+ * evidence or curriculum progress, so the caller needs a reportable outcome.
  */
-export async function writeCaptureRow(params: {
+export async function writeChecklistRow(params: {
   familyId: string
   childId: string
   dateKey: string
-  /** {@link checklistItemKey} of the row the photo was taken for. */
+  /** {@link checklistItemKey} of the row the action started for. */
   itemKey: string
-  patch: CaptureRowPatch
-  /** Tells identical rows apart. See {@link resolveCaptureRowIndex}. */
-  hint?: CaptureRowHint
+  patch: ChecklistRowPatch
+  /** Tells identical rows apart. See {@link resolveChecklistRowIndex}. */
+  hint?: ChecklistRowHint
   /** Names the door in the guard's log line. */
   context: string
-}): Promise<CaptureRowWriteOutcome> {
+}): Promise<ChecklistRowWriteOutcome> {
   const { familyId, childId, dateKey, itemKey, patch, hint, context } = params
   try {
     const ref = doc(daysCollection(familyId), dayLogDocId(dateKey, childId))
@@ -194,7 +196,7 @@ export async function writeCaptureRow(params: {
     if (outcome === 'no-row') return { status: 'refused', reason: 'row-gone' }
     return { status: 'done' }
   } catch (err) {
-    console.error('[captureRowWrite] could not link the capture to its row', err)
+    console.error('[dayChecklistRowWrite] could not patch the saved row', err)
     return { status: 'failed' }
   }
 }
@@ -207,7 +209,7 @@ export async function writeCaptureRow(params: {
  * `null` on success, so a caller cannot accidentally announce a failure.
  */
 export function captureRowWriteNotice(
-  outcome: CaptureRowWriteOutcome,
+  outcome: ChecklistRowWriteOutcome,
 ): string | null {
   if (outcome.status === 'done') return null
   if (outcome.status === 'refused' && outcome.reason === 'row-gone') {
@@ -217,4 +219,15 @@ export function captureRowWriteNotice(
     return "Photo saved, but this day's plan isn't there to attach it to."
   }
   return "Photo saved, but it couldn't be attached to the row. Try the photo again."
+}
+
+/** Earlier curriculum/scan writes may already have landed when this fails. */
+export function skipRowWriteNotice(outcome: ChecklistRowWriteOutcome): string | null {
+  if (outcome.status === 'done') return null
+  const reason = outcome.status === 'refused'
+    ? outcome.reason === 'row-gone'
+      ? "That row is no longer on this day's plan, so it wasn't marked skipped."
+      : "This day's plan is no longer there, so the row wasn't marked skipped."
+    : "The row couldn't be marked skipped."
+  return reason + ' Curriculum progress may already have advanced; check it before trying again.'
 }

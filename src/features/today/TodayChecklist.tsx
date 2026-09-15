@@ -274,7 +274,7 @@ interface TodayChecklistProps {
   onClearScan: () => void
   onUpdatePosition?: (curriculum: CurriculumDetected) => void
   onSkipToNext?: (nextLesson: number) => void
-  onAcceptSkip?: () => void
+  onAcceptSkip?: () => Promise<boolean>
   onPrintMaterials: () => void
   printingMaterials: boolean
   scanFeedbackBySubject?: Record<string, { topic: string; recommendation: 'do' | 'skip' | 'quick-review' | 'modify'; estimatedMinutes?: number }>
