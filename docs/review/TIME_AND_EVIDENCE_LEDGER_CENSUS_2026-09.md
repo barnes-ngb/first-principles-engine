@@ -63,7 +63,7 @@ logs. No number, fold, rounding or stored row was changed by this run.
 ## 3. The derived numbers
 
 ```
-source files scanned (non-test, src/ + functions/src/): 881
+source files scanned (non-test, src/ + functions/src/): 882
 surfaces naming a time or evidence collection: 61
 by role: {"WRITE":15,"READ":22,"BOTH":24}
 by collection: {"hours":16,"hoursAdjustments":9,"days":29,"artifacts":32}
