@@ -78,7 +78,7 @@ export type ChecklistRowPatch = CaptureRowPatch | Pick<ChecklistItem, 'skipped' 
  */
 export type ChecklistRowWriteOutcome =
   | { status: 'done' }
-  | { status: 'refused'; reason: 'no-day' | 'row-gone' }
+  | { status: 'refused'; reason: 'no-day' | 'row-gone' | 'ambiguous-row' }
   | { status: 'failed' }
 
 /**
@@ -181,19 +181,29 @@ export async function writeChecklistRow(params: {
   patch: ChecklistRowPatch
   /** Tells identical rows apart. See {@link resolveChecklistRowIndex}. */
   hint?: ChecklistRowHint
+  /** Skip cannot guess between duplicates; captures retain their existing resolver. */
+  requireUniqueIdentity?: boolean
   /** Names the door in the guard's log line. */
   context: string
 }): Promise<ChecklistRowWriteOutcome> {
-  const { familyId, childId, dateKey, itemKey, patch, hint, context } = params
+  const { familyId, childId, dateKey, itemKey, patch, hint, requireUniqueIdentity, context } = params
   try {
     const ref = doc(daysCollection(familyId), dayLogDocId(dateKey, childId))
+    let refusal: 'row-gone' | 'ambiguous-row' = 'row-gone'
     const outcome = await patchDayChecklistGuarded(
       ref,
-      (checklist) => patchChecklistRow(checklist, itemKey, patch, hint),
+      (checklist) => {
+        // Re-evaluate on EVERY attempt: another matching row may be inserted
+        // during either earlier await or while the transaction is retrying.
+        const ambiguous = requireUniqueIdentity
+          && (checklist ?? []).filter((row) => checklistItemKey(row) === itemKey).length > 1
+        refusal = ambiguous ? 'ambiguous-row' : 'row-gone'
+        return ambiguous ? null : patchChecklistRow(checklist, itemKey, patch, hint)
+      },
       context,
     )
     if (outcome === 'no-day') return { status: 'refused', reason: 'no-day' }
-    if (outcome === 'no-row') return { status: 'refused', reason: 'row-gone' }
+    if (outcome === 'no-row') return { status: 'refused', reason: refusal }
     return { status: 'done' }
   } catch (err) {
     console.error('[dayChecklistRowWrite] could not patch the saved row', err)
@@ -225,9 +235,11 @@ export function captureRowWriteNotice(
 export function skipRowWriteNotice(outcome: ChecklistRowWriteOutcome): string | null {
   if (outcome.status === 'done') return null
   const reason = outcome.status === 'refused'
-    ? outcome.reason === 'row-gone'
-      ? "That row is no longer on this day's plan, so it wasn't marked skipped."
-      : "This day's plan is no longer there, so the row wasn't marked skipped."
+    ? outcome.reason === 'ambiguous-row'
+      ? "More than one row matches this scan, so none was marked skipped."
+      : outcome.reason === 'row-gone'
+        ? "That row is no longer on this day's plan, so it wasn't marked skipped."
+        : "This day's plan is no longer there, so the row wasn't marked skipped."
     : "The row couldn't be marked skipped."
   return reason + ' Curriculum progress may already have advanced; check it before trying again.'
 }

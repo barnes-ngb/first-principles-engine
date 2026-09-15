@@ -1213,13 +1213,18 @@ export default function TodayPage() {
         setSnackMessage({ text: "That row is no longer on this day's plan.", severity: 'warning' })
         return false
       }
+      const itemKey = checklistItemKey(item)
+      if ((dayLog.checklist ?? []).filter((row) => checklistItemKey(row) === itemKey).length > 1) {
+        setSnackMessage({ text: 'More than one row matches this scan, so it was not accepted. Review those rows before trying again.', severity: 'warning' })
+        return false
+      }
       // Capture identity before either await. The row patch reads the latest
       // saved checklist, while navigation cannot redirect this confirmed work.
       const target = {
         familyId,
         childId: selectedChildId,
         dateKey: today,
-        itemKey: checklistItemKey(item),
+        itemKey,
         hint: { index: scanItemIndex, completed: !!item.completed },
       }
 
@@ -1244,6 +1249,7 @@ export default function TodayPage() {
         const outcome = await writeChecklistRow({
           ...target,
           hint: target.hint,
+          requireUniqueIdentity: true,
           patch: { skipped: true, skipReason: SkipReason.AiRecommended },
           context: 'today-accept-skip',
         })

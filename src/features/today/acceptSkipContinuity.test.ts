@@ -157,19 +157,65 @@ describe('Accept skip preserves daily activity continuity', () => {
     expect(store.get(key())!.blocks).toBe(live.blocks)
   })
 
-  it('uses the existing completion hint for identical legacy rows', async () => {
-    const complete = row('ignored', { id: undefined, completed: true })
-    const fresh = { ...complete, completed: false }
-    const day = { ...startDay(), checklist: [complete, fresh] }
+  it.each([false, true])('refuses duplicate origin rows before either side effect (other completion=%s)', async (completed) => {
+    const scanned = row('same workbook', { id: undefined })
+    const twin = { ...scanned, completed }
+    const day = { ...startDay(), checklist: [twin, scanned] }
     store.set(key(), day)
     const h = setup(day, 1)
+    expect(await h.handler()).toBe(false)
+    // If the scanned twin disappears later, the remaining row must not become
+    // a newly unique target for an operation that started ambiguously.
+    store.set(key(), { ...day, checklist: [twin] })
+    expect(h.syncScanToConfig).not.toHaveBeenCalled()
+    expect(h.updateDoc).not.toHaveBeenCalled()
+    expect(writes).toHaveLength(0)
+    expect(h.notices.at(-1)!.text).toContain('More than one row')
+  })
+
+  it.each(['sync', 'override'] as const)('refuses an equal-state duplicate inserted/reordered during the %s await', async (boundary) => {
+    const scanned = row('same workbook', { id: undefined })
+    const day = { ...startDay(), checklist: [scanned, row('writing')] }
+    store.set(key(), day)
+    const h = setup(day)
     const pending = h.handler()
     await h.syncEntered.promise
-    store.set(key(), { ...day, checklist: [row('inserted'), complete, fresh] })
+    if (boundary === 'override') { h.sync.resolve(); await h.overrideEntered.promise }
+    const latest = { ...newerDay(), checklist: [{ ...scanned, engagement: 'okay' as const }, scanned, row('writing', { completed: true })] }
+    store.set(key(), latest)
+    h.sync.resolve(); h.override.resolve()
+    expect(await pending).toBe(false)
+    expect(store.get(key())).toBe(latest)
+    expect(writes).toHaveLength(0)
+    expect(h.notices.at(-1)!.text).toContain('More than one row')
+    expect(h.notices.at(-1)!.text).toContain('may already have advanced')
+  })
+
+  it('re-checks uniqueness when a duplicate appears during a transaction retry', async () => {
+    const h = setup()
+    const pending = h.handler()
+    await h.syncEntered.promise
+    const latest = { ...newerDay(), checklist: [row('scan-row'), row('scan-row'), row('writing', { completed: true })] }
+    contend = () => store.set(key(), latest)
+    h.sync.resolve(); h.override.resolve()
+    expect(await pending).toBe(false)
+    expect(attempts).toBe(2)
+    expect(store.get(key())).toBe(latest)
+    expect(writes).toHaveLength(0)
+    expect(h.notices.at(-1)!.text).toContain('More than one row')
+  })
+
+  it('still accepts a uniquely identified legacy row after reordering', async () => {
+    const scanned = row('unique workbook', { id: undefined })
+    const day = { ...startDay(), checklist: [scanned, row('writing')] }
+    store.set(key(), day)
+    const h = setup(day)
+    const pending = h.handler()
+    await h.syncEntered.promise
+    store.set(key(), { ...newerDay(), checklist: [row('writing', { completed: true }), scanned] })
     h.sync.resolve(); h.override.resolve()
     expect(await pending).toBe(true)
-    expect(store.get(key())!.checklist![1]).toBe(complete)
-    expect(store.get(key())!.checklist![2].skipped).toBe(true)
+    expect(store.get(key())!.checklist![1]).toEqual({ ...scanned, skipped: true, skipReason: SkipReason.AiRecommended })
   })
 
   it.each(['sync', 'override'] as const)('keeps the original family, child and day after navigation at %s', async (boundary) => {
