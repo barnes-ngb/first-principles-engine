@@ -63,9 +63,9 @@ logs. No number, fold, rounding or stored row was changed by this run.
 ## 3. The derived numbers
 
 ```
-source files scanned (non-test, src/ + functions/src/): 874
+source files scanned (non-test, src/ + functions/src/): 881
 surfaces naming a time or evidence collection: 61
-by role: {"WRITE":15,"READ":21,"BOTH":25}
+by role: {"WRITE":15,"READ":22,"BOTH":24}
 by collection: {"hours":16,"hoursAdjustments":9,"days":29,"artifacts":32}
 census rows: 61
 census problems: 0
@@ -89,7 +89,14 @@ consumers of the shared counting path: 7
        src/features/weekly-review/weekBySubject.ts
 ```
 
-Re-derived by `npm run census:time-ledger` on 2026-09-13 and pasted, never retyped
+Re-derived by `npm run census:time-ledger` on 2026-09-15 (`FIX-238` / `UX-367`).
+The artifact reader moved from `TodayPage.tsx` to `useTodayArtifacts.ts`, so §5 now
+names the hook as `READ` and records its selected-day query. The page's former
+`BOTH` classification included its unrelated writes under the per-file rule below.
+The hook changes only the read/display handoff; all persistence and hours math stay
+unchanged. The registry guard and its source derivation are unchanged.
+
+The prior re-derivation was run on 2026-09-13 and pasted from the same script
 (`FIX-235`, re-run by `FIX-236`: `hoursAdjustments` moves 7 → 9 because the two AI-side
 readers `UX-410` fixed now read the third additive source, and `promptHours.ts` is the
 seventh consumer of the shared counting path). Two things moved: `src/features/today/captureRowWrite.ts` is the new row-scoped
@@ -213,10 +220,10 @@ no document.
 | `src/features/today/LessonVideoDialog.tsx` | hoursAdjustments | WRITE | the day's own date — local | **WRITER.** *Log watch time*: an `hoursAdjustments` row, `reason` = *“Watched video: <topic>”* |
 | `src/features/today/liveDayEdit.ts` | days | BOTH | the edited day's key — local | **WRITER.** Today's live day edits, all through `setDayLogGuarded`; mirrors the DATA-14 item↔block correspondence |
 | `src/features/today/TeachBackSection.tsx` | artifacts | WRITE | — (no range rule) | **WRITER.** The parent-side teach-back artifact |
-| `src/features/today/TodayPage.tsx` | artifacts | BOTH | `getWeekRange(parsed, 1)` — Monday-start | The parent Today shell. Its own day total is the checklist's planned minutes, a different question from the counted hours (`weekRibbon.logic`) |
 | `src/features/today/UnifiedCaptureCard.tsx` | hours · artifacts | WRITE | the selected day — local | **WRITER, and the door in the owner's report.** One tap writes an `artifacts` document **and** an `hours` document carrying the activity's name in `notes` — and **no checklist item**, which is why *what got done* could not name it (`UX-408`) |
 | `src/features/today/useDayLog.ts` | days | BOTH | `getWeekRange(new Date())` (`UX-366`) | **WRITER.** The day document's read and its one write lane, `persistDayLogImmediate` (`UX-351`) |
 | `src/features/today/useRolloverUnchecked.ts` | days | READ | yesterday's key — local | Reads the previous day to roll unchecked items forward |
+| `src/features/today/useTodayArtifacts.ts` | artifacts | READ | `dayLogId` + `childId` equality on the selected day | Parent Today's evidence read/display handoff (`FIX-238` / `UX-367`). The originating family/child/day visit guards saves and reads; stale results are ignored, repeated ids deduped, and only a successful read clears failure. No record writes or minutes fold |
 | `src/features/today/useTodayMiningMinutes.ts` | hours | READ | one day, `hours` only | A cap, not a record: Knowledge Mine minutes for today, for the daily mining limit |
 | `src/features/today/useUnifiedCapture.ts` | artifacts | BOTH | the selected day — local | **WRITER.** The capture pipeline behind the card: the artifact, the scan, and FEAT-184's kid/parent lane split. Its day write goes through `captureRowWrite.ts` (`UX-404`), and only a row resolving to a **workbook** may reach the curriculum route at all (`UX-403`) |
 | `src/features/today/WeekFocusCard.tsx` | artifacts | WRITE | the week's key | **WRITER.** The conundrum's artifact |

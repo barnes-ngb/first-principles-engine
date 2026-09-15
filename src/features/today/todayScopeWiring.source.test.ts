@@ -20,6 +20,7 @@ function code(source: string): string {
 }
 
 const TODAY_PAGE_CODE = code(TODAY_PAGE)
+const TODAY_ARTIFACTS_CODE = code(readFileSync(resolve(__dirname, './useTodayArtifacts.ts'), 'utf8'))
 const KID_TODAY_CODE = code(KID_TODAY)
 // The two kid capture doors `UX-436` stamped and `UX-440` re-aimed at the day
 // being displayed.
@@ -166,7 +167,8 @@ describe('the capability boundary has one definition (UX-358)', () => {
     // A source scan because the property spans five files and one callback: the
     // page must EXPOSE a reload, and every writer that is not routed through
     // `useUnifiedCapture` must be handed it.
-    expect(TODAY_PAGE_CODE).toMatch(/const loadTodayArtifacts = useCallback/)
+    expect(TODAY_PAGE_CODE).toMatch(/\{ todayArtifacts, todayArtifactsFailed, setTodayArtifacts, loadTodayArtifacts \}\s*=\s*useTodayArtifacts\(familyId, selectedChildId, today, setSnackMessage\)/)
+    expect(TODAY_ARTIFACTS_CODE).toMatch(/const loadTodayArtifacts = useCallback/)
     const parentHandoffs = TODAY_PAGE_CODE.match(/onArtifactSaved=\{loadTodayArtifacts\}/g) ?? []
     expect(parentHandoffs.length).toBe(2) // WeekFocusCard + TeachBackSection
     const kidHandoffs = KID_TODAY_CODE.match(/onArtifactSaved=\{loadArtifacts\}/g) ?? []
@@ -195,8 +197,12 @@ describe('the capability boundary has one definition (UX-358)', () => {
     // capture feel instant) and a re-read settles the flag — clearing it on the
     // append alone would claim one local row is a faithful picture of the day.
     expect(TODAY_PAGE_CODE).toMatch(
-      /onArtifactCreated: \(artifact\) => \{[\s\S]*?setTodayArtifacts\([\s\S]*?loadTodayArtifacts\(\)/,
+      /onArtifactCreated: \(artifact\) => \{\s*setTodayArtifacts\(/,
     )
+    expect(TODAY_PAGE_CODE).toMatch(/setTodayArtifacts=\{setTodayArtifacts\}/)
+    // The scoped setter owns reconciliation for the card, hook and strand
+    // callback alike. todayArtifactsScope.test.tsx executes all three routes.
+    expect(TODAY_ARTIFACTS_CODE).toMatch(/const setTodayArtifacts:[\s\S]*?loadTodayArtifacts\(\)/)
   })
 
   it('BOTH Today surfaces report a failed artifact read, through the one list (UX-431)', () => {
@@ -205,11 +211,10 @@ describe('the capability boundary has one definition (UX-358)', () => {
     // a failed read rendered as an affirmative empty day, on a records surface.
     expect(KID_TODAY_CODE).toMatch(/<TodayEvidenceList/)
     expect(TODAY_PAGE_CODE).toMatch(/artifactsFailed=\{todayArtifactsFailed\}/)
-    expect(TODAY_PAGE_CODE).toMatch(/setTodayArtifactsFailed\(true\)/)
     // And the list is CLEARED on a failure, so stale records cannot be shown
     // under a sentence about a different day or child.
-    expect(TODAY_PAGE_CODE).toMatch(
-      /setTodayArtifacts\(\[\]\)\s*\n\s*setTodayArtifactsFailed\(true\)/,
+    expect(TODAY_ARTIFACTS_CODE).toMatch(
+      /artifacts: \[\], failed: true/,
     )
   })
 
