@@ -79,8 +79,8 @@ export class DayPreservationError extends Error {
 }
 
 // ── Identity keys ────────────────────────────────────────────────────────────
-// Items/blocks often have no stable `id` (planner-created ones never set one),
-// so identity falls back to a content key. Multiset counting below tolerates the
+// Legacy items and blocks may have no stable `id`; new planner rows have one.
+// Legacy identity falls back to a content key. Multiset counting below tolerates the
 // rare same-key collision without ever *under*-counting a preserved entity.
 
 /**
@@ -350,6 +350,63 @@ export async function patchDayChecklistGuarded(
     assertDayPreservation(before, { ...before, checklist }, context)
     tx.update(ref, { checklist, updatedAt: new Date().toISOString() })
     return 'done'
+  })
+}
+
+/**
+ * Prove the ONLY permitted legacy preparation: add IDs, changing nothing else.
+ * Nested values must be the original references, not reconstructed substitutes.
+ * This is separate from the default guard, whose identity rules stay strict.
+ */
+export function assertChecklistIdentityPreparation(
+  before: ChecklistItem[],
+  after: ChecklistItem[],
+  context: string,
+): void {
+  const ids = new Set<string>()
+  const valid = before.length === after.length && before.every((row, index) => {
+    const next = after[index]
+    if (typeof next.id !== 'string' || !next.id.trim() || ids.has(next.id)) return false
+    ids.add(next.id)
+    if (row.id !== undefined && (typeof row.id !== 'string' || !row.id.trim() || row.id !== next.id)) return false
+    const keys = Object.keys(row).filter((key) => key !== 'id') as (keyof ChecklistItem)[]
+    const nextKeys = Object.keys(next).filter((key) => key !== 'id')
+    return keys.length === nextKeys.length && keys.every((key) =>
+      Object.prototype.hasOwnProperty.call(next, key) && Object.is(row[key], next[key]),
+    )
+  })
+  if (!valid) throw new DayPreservationError(context, ['identity preparation changed fields or produced invalid/duplicate IDs'])
+}
+
+/**
+ * Parent-requested, identity-only preparation of this day's legacy rows.
+ * Never selects a scan target: the caller must wait for the identified realtime
+ * render and ask for a fresh tap. No arbitrary patch or full-day payload enters
+ * this lane. Every retry starts from its own latest saved checklist.
+ */
+export async function prepareDayChecklistIdentitiesGuarded(
+  ref: DocumentReference<DayLog>,
+  context: string,
+): Promise<'ready' | 'no-day'> {
+  return runTransaction(ref.firestore, async (tx) => {
+    const snap = await tx.get(ref)
+    if (!snap.exists()) return 'no-day'
+    const before = snap.data()
+    const rows = before.checklist ?? []
+    const checklist = rows.map((row) => row.id === undefined ? { ...row, id: crypto.randomUUID() } : row)
+    assertChecklistIdentityPreparation(rows, checklist, context)
+    // Only after the exact ID-only proof may newly added IDs be removed from
+    // this comparison. The ordinary preservation assertion is unchanged.
+    const comparison = checklist.map((row, index) => {
+      if (rows[index].id !== undefined) return row
+      const originalIdentity = { ...row }
+      if (Object.prototype.hasOwnProperty.call(rows[index], 'id')) originalIdentity.id = undefined
+      else delete originalIdentity.id
+      return originalIdentity
+    })
+    assertDayPreservation(before, { ...before, checklist: comparison }, context)
+    if (rows.some((row) => row.id === undefined)) tx.update(ref, { checklist })
+    return 'ready'
   })
 }
 

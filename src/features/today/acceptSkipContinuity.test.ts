@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { writeChecklistRow, skipRowWriteNotice } from './dayChecklistRowWrite'
 import { checklistItemKey } from './dayWriteGuard'
 import { dayLogDocId } from './daylog.model'
+import { resolvePreCompletionScanIndex } from './preCompletionScanIdentity'
 import type { DayLog, ChecklistItem } from '../../core/types'
 import { SkipReason } from '../../core/types/enums'
 import { collectHoursContributions } from '../../../functions/src/shared/hoursContributions'
@@ -101,6 +102,8 @@ function setup(dayLog = startDay(), index = 0) {
   const bindings = {
     familyId: FAMILY, selectedChildId: CHILD, today: DATE, dayLog,
     scanItemIndex: index,
+    preCompletionTarget: { familyId: FAMILY, childId: CHILD, dateKey: DATE, itemId: dayLog.checklist?.[index]?.id ?? '', scanId: 'synthetic-scan' },
+    resolvePreCompletionScanIndex,
     scanResult: { id: 'synthetic-scan', results: { pageType: 'worksheet', curriculumDetected: { name: 'Synthetic Workbook', lessonNumber: 4 } } },
     SkipReason, checklistItemKey, writeChecklistRow, skipRowWriteNotice,
     syncScanToConfig, updateDoc,
@@ -158,7 +161,7 @@ describe('Accept skip preserves daily activity continuity', () => {
   })
 
   it.each([false, true])('refuses duplicate origin rows before either side effect (other completion=%s)', async (completed) => {
-    const scanned = row('same workbook', { id: undefined })
+    const scanned = row('same workbook')
     const twin = { ...scanned, completed }
     const day = { ...startDay(), checklist: [twin, scanned] }
     store.set(key(), day)
@@ -170,11 +173,11 @@ describe('Accept skip preserves daily activity continuity', () => {
     expect(h.syncScanToConfig).not.toHaveBeenCalled()
     expect(h.updateDoc).not.toHaveBeenCalled()
     expect(writes).toHaveLength(0)
-    expect(h.notices.at(-1)!.text).toContain('More than one row')
+    expect(h.notices.at(-1)!.text).toContain('no longer linked to one row')
   })
 
   it.each(['sync', 'override'] as const)('refuses an equal-state duplicate inserted/reordered during the %s await', async (boundary) => {
-    const scanned = row('same workbook', { id: undefined })
+    const scanned = row('same workbook')
     const day = { ...startDay(), checklist: [scanned, row('writing')] }
     store.set(key(), day)
     const h = setup(day)
@@ -205,17 +208,38 @@ describe('Accept skip preserves daily activity continuity', () => {
     expect(h.notices.at(-1)!.text).toContain('More than one row')
   })
 
-  it('still accepts a uniquely identified legacy row after reordering', async () => {
+  it('refuses a legacy row before identity preparation and before either side effect', async () => {
     const scanned = row('unique workbook', { id: undefined })
     const day = { ...startDay(), checklist: [scanned, row('writing')] }
     store.set(key(), day)
     const h = setup(day)
+    expect(await h.handler()).toBe(false)
+    expect(h.syncScanToConfig).not.toHaveBeenCalled()
+    expect(h.updateDoc).not.toHaveBeenCalled()
+    expect(writes).toHaveLength(0)
+  })
+
+  it.each(['sync', 'override', 'retry'] as const)('never skips a fresh same-name replacement at %s', async (boundary) => {
+    const h = setup()
     const pending = h.handler()
     await h.syncEntered.promise
-    store.set(key(), { ...newerDay(), checklist: [row('writing', { completed: true }), scanned] })
+    if (boundary === 'override') { h.sync.resolve(); await h.overrideEntered.promise }
+    const replacement = { ...newerDay(), checklist: [{ ...startDay().checklist![0], id: 'fresh-planner-id' }, row('writing', { completed: true })] }
+    if (boundary === 'retry') contend = () => store.set(key(), replacement)
+    else store.set(key(), replacement)
     h.sync.resolve(); h.override.resolve()
-    expect(await pending).toBe(true)
-    expect(store.get(key())!.checklist![1]).toEqual({ ...scanned, skipped: true, skipReason: SkipReason.AiRecommended })
+    expect(await pending).toBe(false)
+    expect(store.get(key())).toBe(replacement)
+    expect(writes).toHaveLength(0)
+  })
+
+  it.each(['familyId', 'childId', 'dateKey', 'scanId', 'itemId'] as const)('refuses a mismatched bound %s before side effects', async (field) => {
+    const h = setup()
+    const handler = h.makeHandler({ ...h.bindings, preCompletionTarget: { ...h.bindings.preCompletionTarget, [field]: 'other' } })
+    expect(await handler()).toBe(false)
+    expect(h.syncScanToConfig).not.toHaveBeenCalled()
+    expect(h.updateDoc).not.toHaveBeenCalled()
+    expect(writes).toHaveLength(0)
   })
 
   it.each(['sync', 'override'] as const)('keeps the original family, child and day after navigation at %s', async (boundary) => {

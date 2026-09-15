@@ -105,6 +105,8 @@ prints 34 call sites across 9 rules where the block said 33, because a sixth
 `weekRangeFromDateKey` call arrived after the census was written and nothing re-derived the
 prose. Exactly the failure the derived-numbers rule exists for, found by running it.
 
+`FIX-239` adds parent-requested legacy identity preparation inside `dayWriteGuard`: one transaction adds only the existing optional row IDs, proves every non-ID value and existing ID unchanged, and writes `checklist` alone. The normal preservation guard stays strict. A fresh identified render and another parent tap establish scan intent; there is no on-load migration or continuation by old index. Newly applied planner rows receive fresh IDs at creation. No hours arithmetic changes.
+
 `ROLE` is per **file**: a file that both reads and writes is `BOTH`, because read/write
 intent per call site is not derivable by a scan. What the derivation guarantees is
 **completeness** — no file touching the time record is absent from §5 — which is the
@@ -210,7 +212,7 @@ no document.
 | `src/features/settings/DevAdminTab.tsx` | days | BOTH | `getWeekRange()` for the Sunday sweep | **WRITER.** The admin Sunday cleanup deletes day logs through `deleteDayLogGuarded` |
 | `src/features/shelly-chat/useChatWeekDays.ts` | days | READ | `getWeekRange(now, 1)` — Monday-start | Reads the chat's week of days. **The one caller that starts its week on MONDAY**, because it is building a Mon–Fri card set, not counting a compliance week |
 | `src/features/shelly-chat/useShellyChatFlows.ts` | days | BOTH | 14 days back, `toISOString().slice(0,10)` | Reads recent days for chat context; writes day edits through the guard |
-| `src/features/today/dayChecklistRowWrite.ts` | days | WRITE | the captured day's key — local | **WRITER.** The shared row-scoped lane (`UX-404` / `UX-415`): patches evidence or confirmed skip fields on the originating row, resolved by `checklistItemKey` (the existing index/completion hint for captures; a unique identity for skips), and writes `checklist` alone. The read, the patch and the write are ONE transaction through `dayWriteGuard.patchDayChecklistGuarded`, so `blocks` and `xpTotal` are never in the payload and an edit landing mid-write is not overwritten. No minutes |
+| `src/features/today/dayChecklistRowWrite.ts` | days | WRITE | the captured day's key — local | **WRITER.** The shared row-scoped lane (`UX-404` / `UX-415`): patches evidence or confirmed skip fields on the originating row, resolved by `checklistItemKey` (the existing index/completion hint for captures; a unique persistent row ID, bound to its actual scan and origin scope, for skips), and writes `checklist` alone. The read, the patch and the write are ONE transaction through `dayWriteGuard.patchDayChecklistGuarded`, so `blocks` and `xpTotal` are never in the payload and an edit landing mid-write is not overwritten. No minutes |
 | `src/features/today/ExplorerMap.tsx` | days | READ | — (recent days) | Reads day logs for the kid map |
 | `src/features/today/KidCaptureForm.tsx` | artifacts | WRITE | — (no range rule) | **WRITER.** A kid's captured artifact. No minutes |
 | `src/features/today/KidChapterPool.tsx` | artifacts | BOTH | — (no range rule) | Chapter answers as artifacts |

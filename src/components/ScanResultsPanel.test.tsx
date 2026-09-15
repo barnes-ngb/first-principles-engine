@@ -14,8 +14,26 @@ import { checklistItemKey } from '../features/today/dayWriteGuard'
 const callerSource = readFileSync(join(process.cwd(), 'src/features/today/TodayChecklist.tsx'), 'utf8')
 const callerAst = ts.createSourceFile('TodayChecklist.tsx', callerSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
 let callSite = ''
+let conditionalCallSite = ''
+let rowKeySource = ''
 function findCall(node: ts.Node) {
-  if (ts.isJsxSelfClosingElement(node) && node.tagName.getText(callerAst) === 'ScanResultsPanel') callSite = node.getText(callerAst)
+  if (ts.isJsxSelfClosingElement(node) && node.tagName.getText(callerAst) === 'ScanResultsPanel') {
+    callSite = node.getText(callerAst)
+    let expression: ts.Node = node
+    while (expression.parent && (ts.isBinaryExpression(expression.parent) || ts.isParenthesizedExpression(expression.parent))) expression = expression.parent
+    conditionalCallSite = expression.getText(callerAst)
+    let ancestor: ts.Node | undefined = node.parent
+    while (ancestor) {
+      if (ts.isJsxElement(ancestor)) {
+        const key = ancestor.openingElement.attributes.properties.find((attribute) => ts.isJsxAttribute(attribute) && attribute.name.getText(callerAst) === 'key')
+        if (key && ts.isJsxAttribute(key) && key.initializer && ts.isJsxExpression(key.initializer)) {
+          rowKeySource = key.initializer.expression!.getText(callerAst)
+          break
+        }
+      }
+      ancestor = ancestor.parent
+    }
+  }
   ts.forEachChild(node, findCall)
 }
 findCall(callerAst)
@@ -23,8 +41,11 @@ if (!callSite) throw new Error('TodayChecklist ScanResultsPanel call not found')
 const callerJs = ts.transpileModule(`const panel = ${callSite}`, {
   compilerOptions: { jsx: ts.JsxEmit.React, target: ts.ScriptTarget.ES2022 },
 }).outputText
-function actualCaller(onAcceptSkip: () => Promise<boolean>, scope: Partial<{ family: string; child: string; day: string; row: string; scan: string }> = {}) {
-  const values = {
+const conditionalCallerJs = ts.transpileModule(`const panel = ${conditionalCallSite}`, {
+  compilerOptions: { jsx: ts.JsxEmit.React, target: ts.ScriptTarget.ES2022 },
+}).outputText
+function callerValues(onAcceptSkip: () => Promise<boolean>, scope: Partial<{ family: string; child: string; day: string; row: string; scan: string }> = {}) {
+  return {
     React, ScanResultsPanel, checklistItemKey, onAcceptSkip,
     familyId: scope.family ?? 'family', selectedChildId: scope.child ?? 'child', dayLog: { date: scope.day ?? '2026-09-15' },
     item: { id: scope.row ?? 'row-A', label: 'workbook', completed: false },
@@ -32,7 +53,19 @@ function actualCaller(onAcceptSkip: () => Promise<boolean>, scope: Partial<{ fam
     selectedChild: { name: 'Synthetic child' }, onScanAddToPlan: undefined,
     onScanSkip: undefined, onUpdatePosition: undefined, onSkipToNext: undefined, onClearScan: vi.fn(),
   }
+}
+function actualCaller(onAcceptSkip: () => Promise<boolean>, scope: Parameters<typeof callerValues>[1] = {}) {
+  const values = callerValues(onAcceptSkip, scope)
   return new Function(...Object.keys(values), `${callerJs}; return panel`)(...Object.values(values)) as React.ReactElement
+}
+
+function actualRowList(ids: string[], onAcceptSkip: () => Promise<boolean>) {
+  return <>{ids.map((id, index) => {
+    const values = { ...callerValues(onAcceptSkip, { row: id }), index, scanResultItemIndex: ids.includes('row-A') ? ids.indexOf('row-A') : null, captureItemIndex: 0 }
+    const key = new Function(...Object.keys(values), `return ${rowKeySource}`)(...Object.values(values)) as React.Key
+    const panel = new Function(...Object.keys(values), `${conditionalCallerJs}; return panel`)(...Object.values(values)) as React.ReactNode
+    return <div key={key} data-row={id}>{panel}</div>
+  })}</>
 }
 
 function makeSkipResult(overrides: Partial<WorksheetScanResult> = {}): WorksheetScanResult {
@@ -179,5 +212,20 @@ describe('ScanResultsPanel — Accept AI skip', () => {
     expect(screen.getByRole('button', { name: /Accepting/ })).toBeDisabled()
     await act(async () => finish(true))
     expect(screen.getByText(/✓ Accepted/)).toBeInTheDocument()
+  })
+
+  it('actual row key and panel placement carry pending acceptance with the original row through reorder', async () => {
+    let finish!: (result: boolean) => void
+    const accept = vi.fn(() => new Promise<boolean>((resolve) => { finish = resolve }))
+    const { rerender } = render(actualRowList(['row-A', 'row-B'], accept))
+    fireEvent.click(screen.getByRole('button', { name: /accept & advance/i }))
+    rerender(actualRowList(['row-B', 'row-A'], accept))
+    expect(screen.getByRole('button', { name: /Accepting/ })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: /accept & advance/i })).not.toBeInTheDocument()
+    await act(async () => finish(true))
+    expect(screen.getByText(/✓ Accepted/).closest('[data-row]')).toHaveAttribute('data-row', 'row-A')
+    expect(accept).toHaveBeenCalledOnce()
+    rerender(actualRowList(['row-B', 'replacement'], accept))
+    expect(screen.queryByText(/✓ Accepted/)).not.toBeInTheDocument()
   })
 })
