@@ -11,6 +11,7 @@ import type { Artifact, Child } from '../../core/types'
 import UnifiedCaptureCard from './UnifiedCaptureCard'
 import { useUnifiedCapture } from './useUnifiedCapture'
 import { useTodayArtifacts } from './useTodayArtifacts'
+import { EVIDENCE_FAILED_LINE } from './todayEvidence'
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -97,7 +98,7 @@ const statements = page.body!.statements.filter((statement) => {
 }).map(s => s.getText(sourceFile)).join('\n')
 if (!statements.includes('handleLogStrandSession') || !statements.includes('loadTodayArtifacts')) throw new Error('Page evidence probe lost its real route')
 type PageEvidence = {
-  todayArtifacts: Artifact[]; todayArtifactsFailed: boolean
+  todayArtifacts: Artifact[]; todayArtifactsFailed: boolean; todayArtifactsLoading: boolean
   setTodayArtifacts: React.Dispatch<React.SetStateAction<Artifact[]>>
   loadTodayArtifacts: () => void
   handleUnifiedCapture: (file: File, index: number) => Promise<boolean>
@@ -119,6 +120,7 @@ const probe = ts.transpileModule(`return function usePageEvidence({ familyId, se
   const [, setStrandSessionError] = useState(null);
   ${statements}
   return { todayArtifacts, todayArtifactsFailed, setTodayArtifacts, loadTodayArtifacts,
+    todayArtifactsLoading: typeof todayArtifactsLoading === 'undefined' ? false : todayArtifactsLoading,
     handleUnifiedCapture, handleUnifiedCaptureBatch, handleLogStrandSession };
 }`, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText
 const usePageEvidence = new Function(...Object.keys(dependencies), probe)(...Object.values(dependencies)) as (scope: Scope) => PageEvidence
@@ -127,7 +129,7 @@ function Host(scope: Scope) {
   const evidence = usePageEvidence(scope)
   return <MemoryRouter><UnifiedCaptureCard {...scope} weekPlanId="week" selectableChildren={children}
     todayArtifacts={evidence.todayArtifacts} setTodayArtifacts={evidence.setTodayArtifacts}
-    artifactsFailed={evidence.todayArtifactsFailed} onSnackMessage={snack} />
+    artifactsFailed={evidence.todayArtifactsFailed} artifactsLoading={evidence.todayArtifactsLoading} onSnackMessage={snack} />
     <output data-testid="rows">{evidence.todayArtifacts.map(a => a.id).join(',')}</output>
   </MemoryRouter>
 }
@@ -151,6 +153,63 @@ async function saveCard(mode: 'note' | 'photo' | 'audio') {
 }
 
 describe('UX-367: actual Today evidence readers and save callbacks', () => {
+  it('does not declare the initial pending read an empty day', async () => {
+    render(<Host {...initial} />)
+    expect(screen.queryByText('Nothing captured yet today.')).not.toBeInTheDocument()
+    expect(screen.getByText('Loading evidence…')).toHaveAttribute('role', 'status')
+    await settle(reads[0])
+    expect(screen.queryByText('Loading evidence…')).not.toBeInTheDocument()
+    expect(screen.getByText('Nothing captured yet today.')).toBeInTheDocument()
+  })
+
+  it.each(changedScopes)('does not declare a pending new scope empty: %j', async (changed) => {
+    const { rerender } = render(<Host {...initial} />)
+    await settle(reads[0], [row('old-evidence')])
+    rerender(<Host {...changed} />)
+    expect(screen.queryByText('old-evidence')).not.toBeInTheDocument()
+    expect(screen.queryByText('Nothing captured yet today.')).not.toBeInTheDocument()
+    expect(screen.getByText('Loading evidence…')).toHaveAttribute('role', 'status')
+    await settle(reads[1], [row('new-evidence', changed.selectedChildId, changed.today)])
+    expect(screen.queryByText('Loading evidence…')).not.toBeInTheDocument()
+    expect(screen.getAllByText('new-evidence').length).toBeGreaterThan(0)
+  })
+
+  it('keeps the new scope loading when the previous scope read settles', async () => {
+    const { rerender } = render(<Host {...initial} />)
+    rerender(<Host {...changedScopes[0]} />)
+    await settle(reads[0])
+    expect(screen.getByText('Loading evidence…')).toHaveAttribute('role', 'status')
+    expect(screen.queryByText('Nothing captured yet today.')).not.toBeInTheDocument()
+    await settle(reads[1])
+    expect(screen.queryByText('Loading evidence…')).not.toBeInTheDocument()
+    expect(screen.getByText('Nothing captured yet today.')).toBeInTheDocument()
+  })
+
+  it('shows a local save during a pending read without declaring the read complete', async () => {
+    render(<Host {...initial} />)
+    await saveCard('note')
+    expect(screen.queryByText('Loading evidence…')).not.toBeInTheDocument()
+    expect(screen.getByText('Synthetic note')).toBeInTheDocument()
+    await settle(reads[0])
+    expect(screen.getByText('Synthetic note')).toBeInTheDocument()
+    expect(screen.queryByText('Nothing captured yet today.')).not.toBeInTheDocument()
+  })
+
+  it('keeps a failed-read notice during a pending retry after a local save', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    render(<Host {...initial} />)
+    await act(async () => reads[0].reject(new Error('synthetic read failure')))
+    expect(screen.queryByText('Loading evidence…')).not.toBeInTheDocument()
+    expect(screen.getByText(EVIDENCE_FAILED_LINE)).toBeInTheDocument()
+    await saveCard('note')
+    expect(screen.queryByText('Loading evidence…')).not.toBeInTheDocument()
+    expect(screen.getByText(EVIDENCE_FAILED_LINE)).toBeInTheDocument()
+    expect(screen.queryByText('Nothing captured yet today.')).not.toBeInTheDocument()
+    await settle(reads.at(-1)!, [row('saved-1')])
+    expect(screen.queryByText(EVIDENCE_FAILED_LINE)).not.toBeInTheDocument()
+    expect(screen.getAllByText('saved-1').length).toBeGreaterThan(0)
+  })
+
   it('keeps the explicit other-child note out of the displayed child and preserves its writes', async () => {
     render(<Host {...initial} />)
     await settle(reads[0])
@@ -247,7 +306,21 @@ describe('UX-367: actual Today evidence readers and save callbacks', () => {
     await settle(reads[0], [row('old')])
     rerender({ ...initial, [key]: '' })
     expect(result.current.todayArtifacts).toEqual([])
+    expect(result.current.todayArtifactsLoading).toBe(false)
     expect(reads).toHaveLength(1)
+  })
+
+  it('keeps an explicit refresh pending through an older same-scope result', async () => {
+    const { result } = renderHook(usePageEvidence, { initialProps: initial })
+    await settle(reads[0])
+    expect(result.current.todayArtifactsLoading).toBe(false)
+    act(() => result.current.loadTodayArtifacts())
+    expect(result.current.todayArtifactsLoading).toBe(true)
+    act(() => result.current.loadTodayArtifacts())
+    await settle(reads[1])
+    expect(result.current.todayArtifactsLoading).toBe(true)
+    await settle(reads[2])
+    expect(result.current.todayArtifactsLoading).toBe(false)
   })
 
   it('rejects an older same-scope reload, including a late failure', async () => {

@@ -639,7 +639,7 @@ export default function TodayPage() {
     weekDayDates[0]?.dateKey,
   )
 
-  const { todayArtifacts, todayArtifactsFailed, setTodayArtifacts, loadTodayArtifacts } =
+  const { todayArtifacts, todayArtifactsFailed, todayArtifactsLoading, setTodayArtifacts, loadTodayArtifacts } =
     useTodayArtifacts(familyId, selectedChildId, today, setSnackMessage)
 
   // --- Unified capture hook (shared with kid views) ---
@@ -1678,6 +1678,7 @@ export default function TodayPage() {
           setTodayArtifacts={setTodayArtifacts}
           todayChecklist={dayLog?.checklist ?? []}
           artifactsFailed={todayArtifactsFailed}
+          artifactsLoading={todayArtifactsLoading}
           familyTimeZone={selectedChild?.settings?.timeZone}
           onSnackMessage={handleSnackMessage}
         />

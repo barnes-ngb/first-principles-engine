@@ -4,7 +4,7 @@ import { getDocs, query, where } from 'firebase/firestore'
 import { artifactsCollection } from '../../core/firebase/firestore'
 import type { Artifact } from '../../core/types'
 
-type EvidenceState = { scope: string; visit: number; artifacts: Artifact[]; failed: boolean }
+type EvidenceState = { scope: string; visit: number; artifacts: Artifact[]; failed: boolean; loading: boolean }
 type ReadErrorNotice = { text: string; severity: 'error' }
 
 /** Parent Today's read/display handoff. No artifact or hours persistence. */
@@ -15,11 +15,12 @@ export function useTodayArtifacts(
   onError: (notice: ReadErrorNotice) => void,
 ) {
   const scope = JSON.stringify([familyId, childId, today])
-  const [state, setState] = useState<EvidenceState>({ scope, visit: 0, artifacts: [], failed: false })
+  const hasScope = Boolean(familyId && childId && today)
+  const [state, setState] = useState<EvidenceState>({ scope, visit: 0, artifacts: [], failed: false, loading: hasScope })
   // Hide the old array during render, before the new query can settle. A visit
   // never comes back: A → B → A cannot accept a callback from the first A.
   if (state.scope !== scope) {
-    setState({ scope, visit: state.visit + 1, artifacts: [], failed: false })
+    setState({ scope, visit: state.visit + 1, artifacts: [], failed: false, loading: hasScope })
   }
   const visit = state.visit
   const liveVisit = useRef(visit)
@@ -54,14 +55,22 @@ export function useTodayArtifacts(
       // did: data() already supplies the id (including a stored legacy id).
       const artifacts = matchingRows(snapshot.docs.map((docSnapshot) => docSnapshot.data()))
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-      setState((prev) => prev.visit === visit ? { ...prev, artifacts, failed: false } : prev)
+      setState((prev) => prev.visit === visit ? { ...prev, artifacts, failed: false, loading: false } : prev)
     }).catch((err) => {
       if (liveVisit.current !== visit || request.current !== sequence) return
       console.error('Failed to load artifacts', err)
-      setState((prev) => prev.visit === visit ? { ...prev, artifacts: [], failed: true } : prev)
+      setState((prev) => prev.visit === visit ? { ...prev, artifacts: [], failed: true, loading: false } : prev)
       onError({ text: 'Could not load artifacts.', severity: 'error' })
     })
   }, [familyId, childId, today, visit, matchingRows, onError])
+
+  // Scope changes already start pending during render. Explicit refreshes can
+  // mark their existing scope pending in the event that requested the read.
+  const reloadTodayArtifacts = useCallback(() => {
+    if (!familyId || !childId || !today || liveVisit.current !== visit) return
+    setState((prev) => prev.visit === visit ? { ...prev, loading: true } : prev)
+    loadTodayArtifacts()
+  }, [familyId, childId, today, visit, loadTodayArtifacts])
 
   // Retain the capture card's existing callback API. Each invocation holds the
   // originating family/child/day visit, even if a save finishes after a switch.
@@ -70,6 +79,7 @@ export function useTodayArtifacts(
     setState((prev) => prev.visit === visit ? {
       ...prev,
       artifacts: matchingRows(typeof update === 'function' ? update(prev.artifacts) : update),
+      loading: true,
     } : prev)
     // UX-438/441: a local save is not a successful day read. Keep any failure
     // until a read succeeds. Starting this read also invalidates pre-save reads,
@@ -82,7 +92,8 @@ export function useTodayArtifacts(
   return {
     todayArtifacts: state.scope === scope ? state.artifacts : [],
     todayArtifactsFailed: state.scope === scope && state.failed,
+    todayArtifactsLoading: state.scope === scope ? state.loading : hasScope,
     setTodayArtifacts,
-    loadTodayArtifacts,
+    loadTodayArtifacts: reloadTodayArtifacts,
   }
 }

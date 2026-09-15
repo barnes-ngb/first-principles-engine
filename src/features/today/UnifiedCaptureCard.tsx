@@ -123,6 +123,8 @@ interface UnifiedCaptureCardProps {
    * (UX-431) — the house rule, stated in four places on the weekly review.
    */
   artifactsFailed?: boolean
+  /** A pending read must not claim the displayed scope is an empty day. */
+  artifactsLoading?: boolean
   /**
    * The family's own `FamilySettings.timeZone` (Codex round 1, P2) — the clock
    * the evidence list reads each stamp in. Absent or unparseable falls back to
@@ -146,6 +148,7 @@ export default function UnifiedCaptureCard({
   setTodayArtifacts,
   todayChecklist = [],
   artifactsFailed = false,
+  artifactsLoading = false,
   familyTimeZone,
   onSnackMessage,
   variant = 'parent',
@@ -874,13 +877,19 @@ export default function UnifiedCaptureCard({
             >
               View all work in Portfolio →
             </Link>
-            <TodayEvidenceList
-              artifacts={todayArtifacts}
-              checklist={todayChecklist}
-              audience={EvidenceAudience.Parent}
-              failed={artifactsFailed}
-              timeZone={familyTimeZone}
-            />
+            {artifactsLoading && !artifactsFailed && todayArtifacts.length === 0 ? (
+              <Typography variant="body2" color="text.secondary" role="status">
+                Loading evidence…
+              </Typography>
+            ) : (
+              <TodayEvidenceList
+                artifacts={todayArtifacts}
+                checklist={todayChecklist}
+                audience={EvidenceAudience.Parent}
+                failed={artifactsFailed}
+                timeZone={familyTimeZone}
+              />
+            )}
           </Stack>
         </SectionCard>
       )}

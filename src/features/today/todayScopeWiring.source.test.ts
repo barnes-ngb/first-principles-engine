@@ -167,7 +167,8 @@ describe('the capability boundary has one definition (UX-358)', () => {
     // A source scan because the property spans five files and one callback: the
     // page must EXPOSE a reload, and every writer that is not routed through
     // `useUnifiedCapture` must be handed it.
-    expect(TODAY_PAGE_CODE).toMatch(/\{ todayArtifacts, todayArtifactsFailed, setTodayArtifacts, loadTodayArtifacts \}\s*=\s*useTodayArtifacts\(familyId, selectedChildId, today, setSnackMessage\)/)
+    expect(TODAY_PAGE_CODE).toMatch(/\{ todayArtifacts, todayArtifactsFailed, todayArtifactsLoading, setTodayArtifacts, loadTodayArtifacts \}\s*=\s*useTodayArtifacts\(familyId, selectedChildId, today, setSnackMessage\)/)
+    expect(TODAY_PAGE_CODE).toMatch(/artifactsLoading=\{todayArtifactsLoading\}/)
     expect(TODAY_ARTIFACTS_CODE).toMatch(/const loadTodayArtifacts = useCallback/)
     const parentHandoffs = TODAY_PAGE_CODE.match(/onArtifactSaved=\{loadTodayArtifacts\}/g) ?? []
     expect(parentHandoffs.length).toBe(2) // WeekFocusCard + TeachBackSection
