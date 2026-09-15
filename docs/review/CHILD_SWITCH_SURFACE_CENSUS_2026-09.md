@@ -262,6 +262,20 @@ feeds it. The one thing `FEAT-238` changed on that rail is that a **failed** art
 the list as well as flagging it, so records belonging to the previous child or the previous day can
 no longer be rendered under a sentence about this one.
 
+### Read/display handoff, 2026-09-15 (FIX-238 / UX-367)
+
+Parent Today's evidence now uses `useTodayArtifacts`: **HIDE** on a family/child/day
+change, with a new visit identity even when returning to the same scope. Loaded rows
+are hidden during render; save callbacks retain the originating visit and filter
+the row's own child/day. This matters for family changes because artifacts carry no
+`familyId`. A subsequent read retrieves work saved while another scope was on screen.
+The hook writes no records and holds no editable draft, so it adds no registry candidate;
+the existing TodayPage editor verdict remains in force. `UnifiedCaptureCard`'s explicit
+Child dropdown and all persistence stay unchanged.
+
+`npm run census:child-switch` on this change derives `candidates: 95 (hook arm 43,
+prop arm 52)`, `census rows: 95`, and `census problems: 0`.
+
 ### Re-derived 2026-09-14 (FEAT-237 / UX-425 — one place to choose the child)
 
 `npm run census:child-switch`, pasted:
