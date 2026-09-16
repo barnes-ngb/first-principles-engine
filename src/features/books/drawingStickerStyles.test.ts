@@ -18,6 +18,13 @@ describe('drawingStickerStyles', () => {
     expect(FANCY_STYLE_OPTIONS[0].theme).toBeUndefined()
   })
 
+  it('offers one truthful watercolor choice and a distinct comic recipe', () => {
+    expect(FANCY_STYLE_OPTIONS.filter(o => o.style === 'storybook').map(o => o.label)).toEqual(['Watercolor look'])
+    expect(FANCY_STYLE_OPTIONS.find(o => o.id === 'comic')?.label).toBe('Comic-book look')
+    expect(resolveFancyEnhanceParams('comic')).toMatchObject({ style: 'comic', transparent: true })
+    expect(resolveFancyEnhanceParams('comic').theme).toBeUndefined()
+  })
+
   it('always resolves transparent sticker output', () => {
     for (const option of FANCY_STYLE_OPTIONS) {
       expect(resolveFancyEnhanceParams(option.id).transparent).toBe(true)
@@ -44,6 +51,7 @@ describe('drawingStickerStyles', () => {
     const ids = FANCY_STYLE_OPTIONS.map((o) => o.id)
     expect(ids).toEqual([
       'cartoon',
+      'comic',
       'fantasy',
       'animals',
       'adventure',
@@ -111,6 +119,7 @@ describe('drawingStickerStyles — distinctness (FEAT-159)', () => {
     expect(DEFAULT_FANCY_STYLE_ID).toBe('cartoon')
     expect(FANCY_STYLE_OPTIONS.map((o) => o.id)).toEqual([
       'cartoon',
+      'comic',
       'fantasy',
       'animals',
       'adventure',
@@ -125,7 +134,7 @@ describe('drawingStickerStyles — distinctness (FEAT-159)', () => {
 
 describe('fancyStyleLabel (FEAT-159)', () => {
   it('names the style that made a saved version', () => {
-    expect(fancyStyleLabel('cartoon')).toBe('🎨 Cartoon')
+    expect(fancyStyleLabel('cartoon')).toBe('🎨 Watercolor look')
     expect(fancyStyleLabel('minecraft')).toContain('Blocky')
     expect(fancyStyleLabel('fantasy')).toContain('Fantasy')
   })

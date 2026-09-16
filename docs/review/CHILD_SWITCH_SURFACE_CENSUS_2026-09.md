@@ -328,6 +328,25 @@ the `[ledger-shape]` failure in reverse, a scan satisfied by prose. `stripCommen
 differently. The **candidate heuristic is untouched**: over-matching there costs a row with a reason,
 and narrowing it was not this run's decision to make.
 
+### Re-derived 2026-09-16 (FIX-246 / FIX-247 — stickers and review export)
+
+Pasted from `npm run census:child-switch` on the integrated source. Scanner now
+states BIND for captured work and its local For choice; the export remains SAFE
+through named row identity, fresh family-scoped reads and a download lifetime guard.
+The cleanup editor holds no child identity and is owned by the scanner session.
+
+```
+source files scanned (non-test, under src/, excluding src/test/): 803
+files reading useActiveChild: 73
+candidates: 95 (hook arm 43, prop arm 52)
+files rendering an in-page <ChildSelector>: 0
+feature files referencing setActiveChildId (any in-page child control): 3
+census rows: 95
+by verdict: {"BIND":9,"HIDE":3,"RESET":17,"GATE":10,"SAFE":56}
+by severity: {"P1":0,"P2":0,"P3":0,"—":95}
+census problems: 0
+```
+
 ## 5. The registry
 
 | Surface (file) | Child-scoped state it holds | What it writes, and to which collection | Reachable by a switch today? | Verdict | Severity |
@@ -353,7 +372,7 @@ and narrowing it was not this run's decision to make.
 | `src/features/books/DrawingGroupCard.tsx` | rename / delete / re-style draft for a sticker group | `stickerLibrary` — partial updates by document id | Shell only | **SAFE** — stickers are family-scoped and every write addresses a sticker by its own id | — |
 | `src/features/books/MakeStickerDialog.tsx` | a generated sticker awaiting save | `stickerLibrary` — `childId: null` by construction | Shell only | **SAFE** — the write stamps `childId: null`; a sticker belongs to the family, so there is no child to mis-target | — |
 | `src/features/books/SightWordDashboard.tsx` | one selected word | `sightWordProgress` via `confirmMastery` | Shell only | **SAFE** — `confirmMastery` is `useSightWordProgress`'s writer, which rebuilds the document id from the `childId` it currently holds; the selected word is a word, not a child-scoped draft | — |
-| `src/features/books/SketchScanner.tsx` | a captured sketch, its cleaned and fancy versions | `stickerLibrary` — `childId: null` by construction | Shell only | **SAFE** — same as above; the `profile` field it does write is a picker the person sets, not the active child | — |
+| `src/features/books/SketchScanner.tsx` | a captured sketch, cleanup marks and its cleaned/fancy versions | `stickerLibrary` — `childId: null` by construction | Shell only | **BIND** — capture retains the selected ID or requested locked profile while missing metadata resolves from existing child records; later header switches cannot supply another child's defaults. Explicit label/For edits win. First Save/Fancy finalizes displayed defaults even if still unresolved; save snapshots family/group/profile before awaits and blocks dismissal while pending. Close, retake and family replacement invalidate late preparation. Adjust cleanup locks after the single cleaned anchor is saved (FIX-246). | — |
 | `src/features/books/useBackgroundReimagine.ts` | a running reimagine job and its result | `stickerLibrary` + `artifacts`, stamped with the job's own `ownerChildId` | Shell only | **BIND** — `ReimagineJob.ownerChildId` / `ownerChildName` are captured at `startReimagine` and both auto-saves resolve through them, so a paid picture is filed under the child it was started for however the header moves. BIND rather than the RESET first prescribed here, on the `useCreativeTimer` reading (`UX-327`): the work is done and was paid for, so the WRITE is bound rather than the result discarded. Fixed by FIX-231 | — |
 | `src/features/books/useBook.ts` | the open book, save state | `books`, `hours`, `artifacts` | Shell only | **SAFE** — every write reads `book.childId` from the loaded document; `useBookshelf`'s `createBook` takes the `childId` it was called with | — |
 | `src/features/books/useBookGenerateChat.ts` | chat history, current story, level stretch, theme | `books/{bookId}` | Shell only | **SAFE** — a draft book is persisted as soon as a story exists and `bookId` pins every later write; the resume path reads the document's `childId` (FEAT-188) | — |
@@ -394,7 +413,7 @@ and narrowing it was not this run's decision to make.
 | `src/features/quest/KnowledgeMinePage.tsx` | which domain is open, a resumable session | `evaluationSessions` — marks a session abandoned | Shell only | **RESET** — the resume card held the previous child's session across the switch with both buttons live, and *Start fresh* writes `status: 'abandoned'` onto that document — closing out one boy's unfinished quest because a parent tidied up while looking at his brother. `resumeSession` and `activeDomain` are dropped during render rather than inside the load effect, which also re-runs on `quest.screen` and would blank the card on every return to the intro. No notice: nothing is lost, the session is safe in Firestore and reappears on switching back. Fixed by FIX-232 (UX-338) | — |
 | `src/features/quest/useQuestSession.ts` | a **running quest** — questions, answers, findings, fluency state | `evaluationSessions`, `skillSnapshots`, `hours`, `xpLedger`, `days`, `wordProgress` | Shell only | **BIND** — a quest in flight survived a switch and `endSession` wrote every one of those against the live child, while `bankAnswerReward` had already banked diamonds under its owner. The owner is captured at `startQuest` (and restored from the document a resume reopens) and resolved at the **top** of the hook through `questSessionOwner.ts`, so all thirty write sites follow the session rather than the header; the quest screen names whose it is before the last question. **No number changed** — the 5-minute hours bucket, its floor, `XP_PER_DIAMOND` and the 15-XP bonus are pinned by test with a positive control (`DOC-25` attribution-only, all four terms in PR #1823). Fixed by FIX-223 (UX-339) | — |
 | `src/features/records/ChapterResponsesTab.tsx` | a pending delete confirmation | `chapterResponses`, `artifacts` — deletes by document id | Selector (Records) | **SAFE** — the confirmation holds the response object itself and both deletes address documents by their own ids | — |
-| `src/features/records/DataReviewExportPanel.tsx` | per-child export state | nothing — it builds a file to download | Shell only (Progress, `?diag=1`) | **SAFE** — the state is a map **keyed by `childId`** and every build takes the id of the row whose button was tapped | — |
+| `src/features/records/DataReviewExportPanel.tsx` | per-child export state | nothing — it builds a file to download | Shell only (Records and diagnostic Progress) | **SAFE** — each button captures its named child's id and chosen scope; a fresh read-only child list is keyed to family, failed reads gate export, and parent/visibility/family unmount invalidates pending downloads. Header active-child changes cannot retarget a row (FIX-247). | — |
 | `src/features/records/EvaluationHistoryTab.tsx` | the loaded sessions and a selected one | nothing — read-only history | Selector (Records) | **GATE** — `loadedKey` is `${familyId}:${activeChildId}` and the list is not rendered as this child's until the key matches, so one child's sessions are never shown under another's | — |
 | `src/features/records/PortfolioPage.tsx` | a selection of artifacts for export | `artifacts` — one sketch upload | Selector (Records) | **SAFE** — the sketch write runs from the file picker's own change event with no draft held; `selectedIds` drives an export and reaches no write | — |
 | `src/features/records/QuickAddHours.tsx` | a picked activity and duration, a session receipt | `hours` — one entry per log | Selector (Records) | **RESET** — `formChildId` is compared during render; the selection and the receipt are cleared, and both the button and the receipt name the live child (UX-328) | — |

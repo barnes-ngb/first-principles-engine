@@ -68,6 +68,7 @@ import QuickAddHours from './QuickAddHours'
 import ChapterResponsesTab from './ChapterResponsesTab'
 import EvaluationHistoryTab from './EvaluationHistoryTab'
 import PortfolioPage from './PortfolioPage'
+import DataReviewExportPanel from './DataReviewExportPanel'
 import {
   assertAttributed,
   buildComplianceZip,
@@ -916,6 +917,7 @@ function HoursComplianceTab() {
 
   return (
     <Page>
+      <DataReviewExportPanel entry="records" />
       {/* Date Range & Totals */}
       <SectionCard title="Records">
         <Stack spacing={2}>

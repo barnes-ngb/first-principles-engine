@@ -733,7 +733,7 @@ function blurAlpha(data: Uint8ClampedArray, width: number, height: number, radiu
 }
 
 /** Crop canvas to the bounding box of non-transparent pixels. */
-function autoCrop(canvas: HTMLCanvasElement, padding = 4): HTMLCanvasElement {
+export function autoCrop(canvas: HTMLCanvasElement, padding = 4): HTMLCanvasElement {
   const ctx = canvas.getContext('2d')
   if (!ctx) return canvas
   const { width, height } = canvas
@@ -769,21 +769,8 @@ function autoCrop(canvas: HTMLCanvasElement, padding = 4): HTMLCanvasElement {
   return cropped
 }
 
-// ── Main entry point ──────────────────────────────────────────────
-
-/**
- * Remove the background from a photographed drawing and return a transparent
- * PNG cropped to the drawing's bounding box.
- *
- * Works on any consistent-color surface (white paper, brown table, lined
- * notebook, colored construction paper, wood, fabric) — not just paper. The
- * background color is detected by sampling the outer ring of pixels and
- * taking the per-channel median.
- */
-export async function cleanSketchBackground(
-  file: File,
-  options?: CleanSketchOptions,
-): Promise<File> {
+/** Existing automatic drawing cleanup, without decoding, cropping or encoding. Mutates data. */
+export function cleanSketchPixels(data: Uint8ClampedArray, width: number, height: number, options?: CleanSketchOptions): void {
   const border = options?.borderSampleSize ?? 20
   const tolerance = options?.tolerance ?? 60
   const featherMultiplier = options?.featherMultiplier ?? 1.5
@@ -799,6 +786,81 @@ export async function cleanSketchBackground(
   const knockOutRejected = options?.knockOutRejectedSurface ?? true
   const rejectedTolerance = options?.rejectedSurfaceTolerance ?? tolerance
   const minRejectedBorderRun = options?.minRejectedBorderRun ?? 0.15
+  // Sample inside the crop / inset from the edge, then pick the paper
+  // cluster rather than the median of paper-and-carpet (FEAT-159).
+  const samples = sampleBorderRgb(data, width, height, border, {
+    insetFraction,
+    region: sampleRegion,
+  })
+  const background = pickBackgroundSample(samples, { separation: bimodalSeparation })
+  const bgColor = background.color
+
+  if (background.stdDev > maxBgStdDev) {
+    // The chosen surface is itself too varied (busy tablecloth, hand in
+    // frame, etc.) — fall back to the conservative HSL paper-detect path.
+    applyHslPaperFallback(data)
+  } else {
+    removeBackgroundColor(data, bgColor, tolerance, featherMultiplier)
+    // Both surfaces in a bimodal ring are background (FEAT-160). The primary
+    // pass knocked out the paper; the table/carpet inside the crop is
+    // nowhere near paper colour, so it survives as a strip the island pass
+    // will never call dust. Clear it too — but only where it reaches the
+    // frame, so interior ink that happens to resemble it is untouched.
+    // Bimodal path only: a one-surface ring never reaches this.
+    // ...and only once the rejected colour has shown it IS an external
+    // surface: one long continuous stretch of the frame. Bold strokes that
+    // reach the ring can otherwise pose as the second cluster, and they
+    // touch the frame too, so connectivity alone would erase them whole
+    // (Codex P2, PR #1708). Failing this leaves the pre-FEAT-160 output.
+    if (knockOutRejected && background.bimodal && background.rejected) {
+      const borderRun = longestBorderRunFraction(
+        data,
+        width,
+        height,
+        background.rejected.color,
+        rejectedTolerance,
+      )
+      if (borderRun >= minRejectedBorderRun) {
+        removeBorderConnectedColor(
+          data,
+          width,
+          height,
+          background.rejected.color,
+          rejectedTolerance,
+        )
+      }
+    }
+  }
+
+  // Drop dust/flecks, then strengthen what's left. Both run before the alpha
+  // blur so specks aren't smeared into soft grey haze instead of removed.
+  // The dust bound is resolved against the largest island so it tracks the
+  // drawing, not the camera's megapixels.
+  const area = width * height
+  removeSmallIslands(data, width, height, (largest) =>
+    computeMinIslandPixels(area, largest, minIslandFraction, minIslandShareOfLargest),
+  )
+  boostInkContrast(data, bgColor, inkStrength, inkFullRange)
+
+  if (edgeSoftness > 0) blurAlpha(data, width, height, edgeSoftness)
+
+}
+
+// ── Main entry point ──────────────────────────────────────────────
+
+/**
+ * Remove the background from a photographed drawing and return a transparent
+ * PNG cropped to the drawing's bounding box.
+ *
+ * Works on any consistent-color surface (white paper, brown table, lined
+ * notebook, colored construction paper, wood, fabric) — not just paper. The
+ * background color is detected by sampling the outer ring of pixels and
+ * taking the per-channel median.
+ */
+export async function cleanSketchBackground(
+  file: File,
+  options?: CleanSketchOptions,
+): Promise<File> {
   const endTotal = startStep('cleanSketchBackground')
 
   return new Promise((resolve, reject) => {
@@ -809,6 +871,7 @@ export async function cleanSketchBackground(
       canvas.height = img.height
       const ctx = canvas.getContext('2d')
       if (!ctx) {
+        URL.revokeObjectURL(objectUrl)
         endTotal()
         resolve(file)
         return
@@ -817,64 +880,11 @@ export async function cleanSketchBackground(
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
       const data = imageData.data
 
-      // Sample inside the crop / inset from the edge, then pick the paper
-      // cluster rather than the median of paper-and-carpet (FEAT-159).
-      const samples = sampleBorderRgb(data, canvas.width, canvas.height, border, {
-        insetFraction,
-        region: sampleRegion,
-      })
-      const background = pickBackgroundSample(samples, { separation: bimodalSeparation })
-      const bgColor = background.color
-
-      if (background.stdDev > maxBgStdDev) {
-        // The chosen surface is itself too varied (busy tablecloth, hand in
-        // frame, etc.) — fall back to the conservative HSL paper-detect path.
-        applyHslPaperFallback(data)
-      } else {
-        removeBackgroundColor(data, bgColor, tolerance, featherMultiplier)
-        // Both surfaces in a bimodal ring are background (FEAT-160). The primary
-        // pass knocked out the paper; the table/carpet inside the crop is
-        // nowhere near paper colour, so it survives as a strip the island pass
-        // will never call dust. Clear it too — but only where it reaches the
-        // frame, so interior ink that happens to resemble it is untouched.
-        // Bimodal path only: a one-surface ring never reaches this.
-        // ...and only once the rejected colour has shown it IS an external
-        // surface: one long continuous stretch of the frame. Bold strokes that
-        // reach the ring can otherwise pose as the second cluster, and they
-        // touch the frame too, so connectivity alone would erase them whole
-        // (Codex P2, PR #1708). Failing this leaves the pre-FEAT-160 output.
-        if (knockOutRejected && background.bimodal && background.rejected) {
-          const borderRun = longestBorderRunFraction(
-            data,
-            canvas.width,
-            canvas.height,
-            background.rejected.color,
-            rejectedTolerance,
-          )
-          if (borderRun >= minRejectedBorderRun) {
-            removeBorderConnectedColor(
-              data,
-              canvas.width,
-              canvas.height,
-              background.rejected.color,
-              rejectedTolerance,
-            )
-          }
-        }
-      }
-
-      // Drop dust/flecks, then strengthen what's left. Both run before the alpha
-      // blur so specks aren't smeared into soft grey haze instead of removed.
-      // The dust bound is resolved against the largest island so it tracks the
-      // drawing, not the camera's megapixels.
-      const area = canvas.width * canvas.height
-      removeSmallIslands(data, canvas.width, canvas.height, (largest) =>
-        computeMinIslandPixels(area, largest, minIslandFraction, minIslandShareOfLargest),
-      )
-      boostInkContrast(data, bgColor, inkStrength, inkFullRange)
-
+      cleanSketchPixels(data, canvas.width, canvas.height, { ...options, edgeSoftness: 0 })
       ctx.putImageData(imageData, 0, 0)
-
+      // Keep the existing canvas round trip before softening: canvas normalizes
+      // premultiplied colors, so blurring the raw buffer changes edge colors.
+      const edgeSoftness = options?.edgeSoftness ?? 1
       if (edgeSoftness > 0) {
         const smoothData = ctx.getImageData(0, 0, canvas.width, canvas.height)
         blurAlpha(smoothData.data, canvas.width, canvas.height, edgeSoftness)
@@ -884,6 +894,7 @@ export async function cleanSketchBackground(
       const cropped = autoCrop(canvas)
       cropped.toBlob(
         (blob) => {
+          URL.revokeObjectURL(objectUrl)
           if (blob) {
             endTotal()
             resolve(new File([blob], file.name.replace(/\.\w+$/, '.png'), { type: 'image/png' }))
@@ -896,6 +907,7 @@ export async function cleanSketchBackground(
       )
     }
     img.onerror = () => {
+      URL.revokeObjectURL(objectUrl)
       endTotal()
       reject(new Error('Failed to load image'))
     }
