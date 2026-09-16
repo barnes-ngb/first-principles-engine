@@ -9,7 +9,11 @@ export interface EditorHistoryEntry {
   before: BookPage
   /** Snapshot of the page state after this change. */
   after: BookPage
+  /** A transform owns only this image's geometry, never later story/art edits. */
+  imageTransformId?: string
 }
+
+export type EditorHistoryRestore = { pageId: string; state: BookPage; imageTransformId?: string }
 
 const MAX_HISTORY = 20
 
@@ -19,9 +23,9 @@ export interface EditorHistory {
   /** Push a new history entry. Discards any redo branch. */
   push: (entry: Omit<EditorHistoryEntry, 'timestamp'>) => void
   /** Undo the last action. Returns the page state to restore, or null. */
-  undo: () => { pageId: string; state: BookPage } | null
+  undo: () => EditorHistoryRestore | null
   /** Redo the next action. Returns the page state to apply, or null. */
-  redo: () => { pageId: string; state: BookPage } | null
+  redo: () => EditorHistoryRestore | null
   /** Clear all history (e.g. on book change). */
   clear: () => void
 }
@@ -30,51 +34,61 @@ export interface EditorHistory {
 interface HistoryState {
   entries: EditorHistoryEntry[]
   index: number
+  scope: string
 }
 
-export function useEditorHistory(): EditorHistory {
-  const [state, setState] = useState<HistoryState>({ entries: [], index: -1 })
+export function useEditorHistory(scope = ''): EditorHistory {
+  const [state, setState] = useState<HistoryState>({ entries: [], index: -1, scope })
   // Mutable snapshot for synchronous reads in undo/redo (avoids stale closure)
   const stateSnap = useRef(state)
   useEffect(() => { stateSnap.current = state }, [state])
+  if (state.scope !== scope) {
+    const empty = { entries: [], index: -1, scope }
+    setState(empty)
+  }
 
   const canUndo = state.index >= 0
   const canRedo = state.index < state.entries.length - 1
 
   const push = useCallback(
     (entry: Omit<EditorHistoryEntry, 'timestamp'>) => {
-      setState((prev) => {
-        // Discard redo branch
-        const trimmed = prev.entries.slice(0, prev.index + 1)
-        const full: EditorHistoryEntry = { ...entry, timestamp: Date.now() }
-        trimmed.push(full)
-        // Cap at MAX_HISTORY
-        if (trimmed.length > MAX_HISTORY) trimmed.shift()
-        return { entries: trimmed, index: trimmed.length - 1 }
-      })
+      const prev = stateSnap.current
+      if (prev.scope !== scope) return
+      const trimmed = prev.entries.slice(0, prev.index + 1)
+      trimmed.push({ ...entry, timestamp: Date.now() })
+      if (trimmed.length > MAX_HISTORY) trimmed.shift()
+      const next = { entries: trimmed, index: trimmed.length - 1, scope }
+      stateSnap.current = next
+      setState(next)
     },
-    [],
+    [scope],
   )
 
-  const undo = useCallback((): { pageId: string; state: BookPage } | null => {
+  const undo = useCallback((): EditorHistoryRestore | null => {
     const s = stateSnap.current
-    if (s.index < 0) return null
+    if (s.scope !== scope || s.index < 0) return null
     const entry = s.entries[s.index]
-    setState((prev) => ({ ...prev, index: prev.index - 1 }))
-    return { pageId: entry.pageId, state: entry.before }
-  }, [])
+    const next = { ...s, index: s.index - 1 }
+    stateSnap.current = next
+    setState(next)
+    return { pageId: entry.pageId, state: entry.before, ...(entry.imageTransformId ? { imageTransformId: entry.imageTransformId } : {}) }
+  }, [scope])
 
-  const redo = useCallback((): { pageId: string; state: BookPage } | null => {
+  const redo = useCallback((): EditorHistoryRestore | null => {
     const s = stateSnap.current
-    if (s.index >= s.entries.length - 1) return null
+    if (s.scope !== scope || s.index >= s.entries.length - 1) return null
     const entry = s.entries[s.index + 1]
-    setState((prev) => ({ ...prev, index: prev.index + 1 }))
-    return { pageId: entry.pageId, state: entry.after }
-  }, [])
+    const next = { ...s, index: s.index + 1 }
+    stateSnap.current = next
+    setState(next)
+    return { pageId: entry.pageId, state: entry.after, ...(entry.imageTransformId ? { imageTransformId: entry.imageTransformId } : {}) }
+  }, [scope])
 
   const clear = useCallback(() => {
-    setState({ entries: [], index: -1 })
-  }, [])
+    const next = { entries: [], index: -1, scope }
+    stateSnap.current = next
+    setState(next)
+  }, [scope])
 
   return { canUndo, canRedo, push, undo, redo, clear }
 }

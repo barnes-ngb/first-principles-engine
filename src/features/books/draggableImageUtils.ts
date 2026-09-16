@@ -47,6 +47,64 @@ export function scaleAboutCenter(
   }
 }
 
+/** One proportional scale bound for pinch and corner handles. Percentages are
+ * relative to the image canvas, not the phone screen. A very narrow existing
+ * box cannot have both sides >= 10 and <= 100; preserve its ratio and upper
+ * bound, with the smaller side allowed below 10 in that case. */
+export function scaleImagePosition(pos: ImagePosition, requestedScale: number): ImagePosition {
+  if (pos.width <= 0 || pos.height <= 0 || !Number.isFinite(requestedScale)) return pos
+  const maximum = Math.min(100 / pos.width, 100 / pos.height)
+  const bothSidesMinimum = Math.max(10 / pos.width, 10 / pos.height)
+  const minimum = bothSidesMinimum <= maximum ? bothSidesMinimum : 10 / Math.max(pos.width, pos.height)
+  const scale = Math.max(minimum, Math.min(maximum, requestedScale))
+  const width = pos.width * scale
+  const height = pos.height * scale
+  const center = scaleAboutCenter(pos, width, height)
+  return { ...pos, width, height, ...clampPosition(center.x, center.y, width, height) }
+}
+
+/** Project the screen-space movement onto the rotated/flipped corner ray.
+ * Both axes contribute, in pixels, so this also works on non-square canvases. */
+export function cornerScaleFromDrag(
+  pos: ImagePosition,
+  canvas: { width: number; height: number },
+  dx: number,
+  dy: number,
+): number {
+  const x = pos.width * canvas.width / 200 * (pos.flipH ? -1 : 1)
+  const y = pos.height * canvas.height / 200 * (pos.flipV ? -1 : 1)
+  const angle = pos.rotation * Math.PI / 180
+  const rx = x * Math.cos(angle) - y * Math.sin(angle)
+  const ry = x * Math.sin(angle) + y * Math.cos(angle)
+  const squared = rx * rx + ry * ry
+  return squared > 0 ? 1 + (dx * rx + dy * ry) / squared : 1
+}
+
+/** Keep a recoverable part of the transformed box inside the canvas. The
+ * existing 80%-off-page allowance is retained for axis-aligned boxes. For an
+ * angled box, use its inscribed circle rather than its larger bounding box:
+ * overlapping bounding-box corners alone do not mean the picture is visible.
+ * This constrains geometry; transparent padding inside artwork is not measured. */
+export function keepImageVisible(pos: ImagePosition, canvas: { width: number; height: number }): ImagePosition {
+  if (!canvas.width || !canvas.height) return pos
+  const angle = wrapDegrees(pos.rotation) * Math.PI / 180
+  const w = pos.width * canvas.width / 200
+  const h = pos.height * canvas.height / 200
+  const c = Math.abs(Math.cos(angle))
+  const s = Math.abs(Math.sin(angle))
+  const marginX = 0.6 * (s < 1e-8 ? w : c < 1e-8 ? h : Math.min(w, h))
+  const marginY = 0.6 * (s < 1e-8 ? h : c < 1e-8 ? w : Math.min(w, h))
+  const cx = (pos.x + pos.width / 2) * canvas.width / 100
+  const cy = (pos.y + pos.height / 2) * canvas.height / 100
+  const clampedX = Math.max(-marginX, Math.min(canvas.width + marginX, cx))
+  const clampedY = Math.max(-marginY, Math.min(canvas.height + marginY, cy))
+  return {
+    ...pos,
+    x: clampedX === cx ? pos.x : clampedX / canvas.width * 100 - pos.width / 2,
+    y: clampedY === cy ? pos.y : clampedY / canvas.height * 100 - pos.height / 2,
+  }
+}
+
 /** Wrap degrees into [0, 360). */
 export function wrapDegrees(deg: number): number {
   return ((deg % 360) + 360) % 360

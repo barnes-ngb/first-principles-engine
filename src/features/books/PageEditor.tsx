@@ -282,7 +282,7 @@ export default function PageEditor({
               if (img.type === 'sticker') {
                 return (
                   <DraggableImage
-                    key={img.id}
+                    key={`${page.id}/${img.id}`}
                     image={img}
                     selected={selectedImageId === img.id}
                     onSelect={() => setSelectedImageId(img.id)}

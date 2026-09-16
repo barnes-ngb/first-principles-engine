@@ -94,6 +94,7 @@ import type { PrintSettings } from './PrintSettingsDialog'
 import { useBackgroundReimagine } from './useBackgroundReimagine'
 import ReimagineResultDialog from './ReimagineResultDialog'
 import { useEditorHistory, useUndoRedoKeys } from './useEditorHistory'
+import { restoreImageTransform } from './editorImageHistory'
 import UndoIcon from '@mui/icons-material/Undo'
 import RedoIcon from '@mui/icons-material/Redo'
 import { reimagineCaption } from './reimagineCaptions'
@@ -213,7 +214,7 @@ export default function BookEditorPage() {
   const isLincoln = childName.toLowerCase() === 'lincoln'
 
   // ── Undo / Redo ───────────────────────────────────────────────
-  const editorHistory = useEditorHistory()
+  const editorHistory = useEditorHistory(`${familyId}/${bookId}`)
 
   const bgReimagine = useBackgroundReimagine({
     familyId,
@@ -409,9 +410,19 @@ export default function BookEditorPage() {
   const handleImagePositionChange = useCallback(
     (imageId: string, position: ImagePosition) => {
       if (!activePage) return
+      const image = activePage.images.find((item) => item.id === imageId)
+      if (!image) return
+      // Capture both ends synchronously from this completed gesture. A queued
+      // read of bookRef can run before React has rendered the saved geometry.
+      const before = structuredClone(activePage)
+      const after = {
+        ...before,
+        images: before.images.map((item) => item.id === imageId ? { ...item, position: { ...position } } : item),
+      }
+      editorHistory.push({ pageId: activePage.id, action: 'image_transform', imageTransformId: imageId, before, after })
       updateImagePosition(activePage.id, imageId, position)
     },
-    [activePage, updateImagePosition],
+    [activePage, updateImagePosition, editorHistory],
   )
 
   const handleReorderImage = useCallback(
@@ -476,13 +487,17 @@ export default function BookEditorPage() {
   const handleUndo = useCallback(() => {
     const result = editorHistory.undo()
     if (!result) return
-    updatePage(result.pageId, result.state)
+    const current = bookRef.current?.pages.find((page) => page.id === result.pageId)
+    if (!current) return
+    updatePage(result.pageId, result.imageTransformId ? restoreImageTransform(current, result.state, result.imageTransformId) : result.state)
   }, [editorHistory, updatePage])
 
   const handleRedo = useCallback(() => {
     const result = editorHistory.redo()
     if (!result) return
-    updatePage(result.pageId, result.state)
+    const current = bookRef.current?.pages.find((page) => page.id === result.pageId)
+    if (!current) return
+    updatePage(result.pageId, result.imageTransformId ? restoreImageTransform(current, result.state, result.imageTransformId) : result.state)
   }, [editorHistory, updatePage])
 
   useUndoRedoKeys(handleUndo, handleRedo)
@@ -1376,6 +1391,7 @@ export default function BookEditorPage() {
           }}
         >
           <PageEditor
+            key={`${familyId}/${bookId}/${activePage.id}`}
             page={activePage}
             onUpdate={handleTrackedPageUpdate}
             onAddImage={handleAddImageFile}
