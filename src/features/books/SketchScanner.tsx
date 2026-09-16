@@ -255,6 +255,9 @@ function SketchScannerSession({
   }, [resetLabel, childProfile])
 
   const handleClose = useCallback(() => {
+    // A document save cannot be cancelled by dismissing this dialog. Keep its
+    // success/error visible, including Escape/backdrop before state re-renders.
+    if (saveInFlightRef.current) return
     reset()
     onClose()
   }, [reset, onClose])
@@ -940,7 +943,7 @@ function SketchScannerSession({
 
         {stage === 'preview' && (
           <>
-            {!anySaved && <Button onClick={handleClose}>Cancel</Button>}
+            {!anySaved && <Button onClick={handleClose} disabled={savingVersion !== null}>Cancel</Button>}
             <Button onClick={reset} disabled={savingVersion !== null}>
               Retake
             </Button>

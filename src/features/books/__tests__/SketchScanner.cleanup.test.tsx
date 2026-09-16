@@ -107,4 +107,54 @@ describe('scanner correction/save session boundaries', () => {
     expect(save.mock.calls[0][0]).toEqual({ familyId: 'f1' })
     expect(save.mock.calls[0][1].sourceDrawingId).toEqual(expect.any(String))
   })
+
+  it.each([['Cleaned', false], ['Fancy', false], ['Fancy', true]] as const)('keeps pending Save %s visible (already saved cleaned: %s)', async (version, alreadySavedCleaned) => {
+    let complete!: (value: { id: string }) => void
+    const user = userEvent.setup(), onClose = vi.fn(), onSaved = vi.fn()
+    render(<SketchScanner open familyId="f1" onClose={onClose} onSaved={onSaved} />)
+    await capture(user)
+    const priorSaves = alreadySavedCleaned ? 1 : 0
+    if (alreadySavedCleaned) {
+      await user.click(await screen.findByRole('button', { name: 'Save Cleaned' }))
+      await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1))
+    }
+    if (version === 'Fancy') {
+      await user.click(await screen.findByRole('tab', { name: /Fancy/ }))
+      await user.click(screen.getByRole('button', { name: 'Make it fancy' }))
+      await screen.findByAltText('Fancy version')
+    }
+    save.mockImplementationOnce(() => new Promise(resolve => { complete = resolve }))
+    await user.click(await screen.findByRole('button', { name: `Save ${version}` }))
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(priorSaves + 1))
+    const cancel = screen.getByRole('button', { name: alreadySavedCleaned ? 'Done' : 'Cancel' })
+    expect(cancel).toBeDisabled()
+    fireEvent.click(cancel)
+    await user.keyboard('{Escape}')
+    // Dialog's backdrop handler is reached through its actual container.
+    const container = screen.getByRole('dialog').parentElement!
+    fireEvent.mouseDown(container)
+    fireEvent.click(container)
+    expect(onClose).not.toHaveBeenCalled()
+    expect(onSaved).toHaveBeenCalledTimes(priorSaves)
+    await act(async () => complete({ id: 'saved' }))
+    expect(onSaved).toHaveBeenCalledTimes(priorSaves + 1)
+    expect(screen.getByRole('button', { name: 'Saved ✓' })).toBeDisabled()
+    await user.click(screen.getByRole('button', { name: 'Done' }))
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(save).toHaveBeenCalledTimes(priorSaves + 1)
+  })
+
+  it('allows Cancel again after a failed document save', async () => {
+    let reject!: (error: Error) => void
+    save.mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail }))
+    const user = userEvent.setup(), onClose = vi.fn()
+    render(<SketchScanner open familyId="f1" onClose={onClose} />)
+    await capture(user)
+    await user.click(await screen.findByRole('button', { name: 'Save Cleaned' }))
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1))
+    await act(async () => reject(new Error('offline')))
+    expect(screen.getByText('Failed to save sticker. Please try again.')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
 })
