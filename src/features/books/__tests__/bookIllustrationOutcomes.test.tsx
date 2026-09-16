@@ -263,6 +263,26 @@ describe('book picture outcomes through actual hooks and consumers', () => {
     expect(screen.getByRole('button', { name: /Open my book/ })).toBeEnabled()
   })
 
+  it('does not claim which picture is saved when the new picture saved but its reread failed', async () => {
+    const read = state.getDoc.getMockImplementation()!
+    state.getDoc.mockImplementation(async (ref: BookRef) => {
+      if (state.docs.get(`${ref.family}/${ref.id}`)?.pages[0].images[0].url === 'new-image') {
+        throw new Error('synthetic reread failure after successful image save')
+      }
+      return read(ref)
+    })
+    render(<BookReviewChat />)
+    await waitFor(() => expect(screen.getByRole('button', { name: /Change this/ })).toBeVisible())
+    fireEvent.click(screen.getByRole('button', { name: /Change this/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'voice-submit' }))
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Something went wrong with the picture on page 1'))
+    expect(state.docs.get('family-1/book-1')?.pages[0].images[0].url).toBe('new-image')
+    expect(screen.getByAltText('Page 1 picture')).toHaveAttribute('src', 'old-1')
+    expect(screen.getByRole('alert')).not.toHaveTextContent(/earlier picture is still there|could not finish/i)
+    expect(screen.getByRole('alert')).toHaveTextContent('You can keep reading.')
+    expect(state.record).toHaveBeenCalledTimes(1)
+  })
+
   it('does not let an old family/book result replace the active book or its notices', async () => {
     const image = deferred<ImageResult>()
     state.generateImage.mockReturnValueOnce(image.promise)

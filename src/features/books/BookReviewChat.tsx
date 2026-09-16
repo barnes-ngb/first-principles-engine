@@ -148,8 +148,8 @@ export default function BookReviewChat() {
 
   const pictureNotice = imageFailedPages.length > 0 ? (
     <Alert severity="warning" aria-live="polite">
-      We could not finish the {imageFailedPages.length === 1 ? 'picture on page' : 'pictures on pages'}{' '}
-      {imageFailedPages.join(', ')}. Any earlier picture is still there. You can keep reading.
+      Something went wrong with the {imageFailedPages.length === 1 ? 'picture on page' : 'pictures on pages'}{' '}
+      {imageFailedPages.join(', ')}. You can keep reading.
     </Alert>
   ) : null
 
