@@ -295,3 +295,22 @@ describe('SketchScanner — weekly art cap on "Make it fancy" (FEAT-166 / UX-95)
     expect(screen.queryByText(CAP_MESSAGE)).toBeNull()
   })
 })
+
+// The shared picker must send the pictured recipe through each actual door.
+describe('SketchScanner — named looks', () => {
+  it('selects comic for free and sends it only on Make it fancy', async () => {
+    const user = userEvent.setup()
+    cleanSketchMock.mockResolvedValue(new File(['cleaned'], 'cleaned.png', { type: 'image/png' }))
+    enhanceSketchMock.mockClear()
+    addDocMock.mockClear()
+    uploadBytesMock.mockResolvedValue({ ref: {} })
+    renderScanner()
+    await reachFancyTab(user)
+    expect(screen.getByText(/Watercolor look/)).toBeInTheDocument()
+    await user.click(screen.getByText(/Comic-book look/))
+    expect(enhanceSketchMock).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: /make it fancy/i }))
+    await waitFor(() => expect(enhanceSketchMock).toHaveBeenCalledWith(expect.objectContaining({ familyId: 'f1', style: 'comic', transparent: true })))
+    expect(addDocMock).not.toHaveBeenCalled()
+  })
+})

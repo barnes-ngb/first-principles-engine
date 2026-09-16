@@ -11,9 +11,9 @@
 // decision lives here so it is testable without mocking Firestore.
 //
 // **The §14 jargon scrub does NOT apply here.** The export is machine review
-// on a parent-only `?diag=1` surface (grandfathered out of the display rules),
-// so band numbers, node ids, counts, and percentages are deliberate. Nothing in
-// this file may be rendered on a kid-facing or normal parent surface.
+// in a parent-initiated downloaded file, so band numbers, node ids, counts, and
+// percentages are deliberate. Records exposes the download; the technical file
+// contents are never rendered in the normal parent or child interface.
 //
 // **No silent truncation.** Full history is the default. When a per-collection
 // cap is hit the loader reports it and the export NAMES it — "showing most
@@ -53,6 +53,8 @@ import {
   resolveNativePosition,
 } from '../../core/foundations/workbookBridge'
 import { artifactMediaMissing } from '../../core/utils/artifactMedia'
+import { buildReviewEvidenceAppendix } from './dataReviewExport.evidence'
+import type { FluencyPassage, SessionQuestion } from '../quest/questTypes'
 import { reportArtifactIds } from '../dad-lab/reportArtifacts'
 import {
   computeHoursSummary,
@@ -131,14 +133,23 @@ export interface DataReviewDisposition {
 export interface DataReviewEvaluationSession extends EvaluationSession {
   sessionType?: string
   questMode?: string
+  questions?: SessionQuestion[]
   finalLevel?: number
   totalCorrect?: number
   totalQuestions?: number
   diamondsMined?: number
+  streakDays?: number
+  timedOut?: boolean
+  skippedCount?: number
+  flaggedErrorCount?: number
+  passages?: FluencyPassage[]
+  totalReadingTimeSeconds?: number
   diamondsEarned?: number
 }
 
 export interface DataReviewExportInput {
+  /** Browser build identifier; absent for older callers or offline fixtures. */
+  appBuild?: string
   /** ISO stamp of when this file was generated (caller supplies the clock). */
   generatedAt: string
   mode: DataReviewExportMode
@@ -1749,6 +1760,8 @@ export const buildDataReviewExport = (input: DataReviewExportInput): string =>
     ...buildActivitySection(input),
     '',
     ...buildIntegritySection(input),
+    '',
+    ...buildReviewEvidenceAppendix(input),
   ].join('\n')
 
 /** Download filename for one child's export. */

@@ -13,7 +13,7 @@ import { normalizeCustomPictureNote } from '../../../functions/src/shared/custom
  * the book theme constant (rather than a hand-maintained parallel list) keeps
  * the two from drifting.
  *
- * The first entry is the default "clean cartoon house style" — the app's
+ * The first entry is the default Watercolor look — the app's
  * established `storybook` illustration default (see FEAT-28 house style) — which
  * is intentionally *not* a book theme.
  */
@@ -29,17 +29,18 @@ export interface FancyStyleOption {
 
 /**
  * Spec for a fancy option, resolved into a `FancyStyleOption` below. Either the
- * Cartoon house-style default (a literal, no theme) or a bookshelf theme
+ * Watercolor default (a literal, no theme) or a bookshelf theme
  * referenced by id (label/emoji derived from `PRESET_THEMES`).
  */
 type FancyOptionSpec =
   | { id: string; label: string; emoji: string; style: EnhanceSketchRequest['style'] }
   | { themeId: string; label?: string; style?: EnhanceSketchRequest['style'] }
 
-// Cartoon (default) first, then the bookshelf themes in display order. Trim or
+// Watercolor (legacy cartoon ID, default) first, then the bookshelf themes in display order. Trim or
 // extend by editing this list — every `themeId` must be a real bookshelf theme.
 const FANCY_OPTION_SPECS: FancyOptionSpec[] = [
-  { id: 'cartoon', label: 'Cartoon', emoji: '🎨', style: 'storybook' },
+  { id: 'cartoon', label: 'Watercolor look', emoji: '🎨', style: 'storybook' },
+  { id: 'comic', label: 'Comic-book look', emoji: '💥', style: 'comic' },
   { themeId: 'fantasy' },
   { themeId: 'animals' },
   { themeId: 'adventure' },
@@ -67,7 +68,7 @@ function resolveSpec(spec: FancyOptionSpec): FancyStyleOption {
 
 export const FANCY_STYLE_OPTIONS: FancyStyleOption[] = FANCY_OPTION_SPECS.map(resolveSpec)
 
-/** Default style id — the clean cartoon house style. */
+/** Default style id — retain the saved cartoon ID for the watercolor recipe. */
 export const DEFAULT_FANCY_STYLE_ID = FANCY_STYLE_OPTIONS[0].id
 
 /**

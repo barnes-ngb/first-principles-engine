@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -8,14 +8,16 @@ import FormControlLabel from '@mui/material/FormControlLabel'
 import Typography from '@mui/material/Typography'
 
 import { useFamilyId } from '../../core/auth/useAuth'
-import { useChildren } from '../../core/hooks/useChildren'
 import { useProfile } from '../../core/profile/useProfile'
+import { APP_BUILD } from '../../core/observability/buildInfo'
 import {
   buildDataReviewExport,
   DataReviewExportMode,
   dataReviewExportFilename,
+  type DataReviewChild,
 } from './dataReviewExport.logic'
 import { loadDataReviewExportInput } from './dataReviewExportLoader'
+import { loadReviewExportChildren } from './dataReviewExportChildren'
 
 interface ChildExportState {
   building: boolean
@@ -25,7 +27,7 @@ interface ChildExportState {
 }
 
 /**
- * Flag-gated ( `?diag=1` ) parent-only data-review export (FEAT-120). Renders a
+ * Parent-only data-review export (FEAT-120), also available at `?diag=1`. Renders a
  * per-child "Download review export" button that reads the child's stored data
  * and downloads one markdown file, formatted for an LLM to audit.
  *
@@ -33,10 +35,8 @@ interface ChildExportState {
  * collection, no Cloud Function, no AI call. It reads existing collections
  * through the typed helpers in `core/firebase/firestore.ts` and builds a string.
  *
- * It lives on the diag panel deliberately — that surface is grandfathered out of
- * the §14 display rules, and this file is for machine review, so it MAY carry
- * band numbers, node ids, counts, and percentages. None of this belongs on a
- * kid-facing or normal parent surface.
+ * Records offers a normal parent entry; the original diagnostic entry remains.
+ * Technical details belong in the downloaded file, not this control's UI.
  *
  * **Parent gate (capability, never a name).** `?diag=1` is NOT an access control
  * — `/progress` sits OUTSIDE the `RequireParent` block in `app/router.tsx`, so a
@@ -50,16 +50,64 @@ interface ChildExportState {
  * Full history is the default; the "current school year only" checkbox collapses
  * prior-year detail to rollups for later recurring audits.
  */
-export default function DataReviewExportPanel() {
+export default function DataReviewExportPanel({ entry = 'diagnostic' }: {
+  entry?: 'diagnostic' | 'records'
+}) {
   const [searchParams] = useSearchParams()
   const familyId = useFamilyId()
   const { canEdit } = useProfile()
-  const { children } = useChildren()
+  // Gating unmounts the scoped download controller, invalidating pending work.
+  if (!canEdit || !familyId) return null
+  if (entry === 'diagnostic' && searchParams.get('diag') !== '1') return null
+  return <FamilyReviewExport
+    key={familyId}
+    familyId={familyId}
+    diagnostic={entry === 'diagnostic'}
+  />
+}
+
+/** Do not use useChildren here: its auto-create effect is not a read-only operation. */
+function FamilyReviewExport({ familyId, diagnostic }: { familyId: string; diagnostic: boolean }) {
+  const [children, setChildren] = useState<DataReviewChild[] | null>(null)
+  const [error, setError] = useState(false)
+  const [attempt, setAttempt] = useState(0)
+  useEffect(() => {
+    let cancelled = false
+    loadReviewExportChildren(familyId).then(result => {
+      if (!cancelled) setChildren(result)
+    }).catch(() => { if (!cancelled) setError(true) })
+    return () => { cancelled = true }
+  }, [familyId, attempt])
+  if (error) return <Box sx={{ m: 2 }} role="alert">
+    <Typography>Could not load children for the review export.</Typography>
+    <Button onClick={() => { setError(false); setAttempt(value => value + 1) }}>Try again</Button>
+  </Box>
+  if (!children) return <Typography role="status" sx={{ m: 2 }}>Loading review export…</Typography>
+  if (children.length === 0) return <Typography sx={{ m: 2 }}>No children are available for a review export.</Typography>
+  return <ScopedReviewExport familyId={familyId} children={children} diagnostic={diagnostic} />
+}
+
+function ScopedReviewExport({ familyId, children, diagnostic }: {
+  familyId: string
+  children: DataReviewChild[]
+  diagnostic: boolean
+}) {
   const [currentYearOnly, setCurrentYearOnly] = useState(false)
   const [byChild, setByChild] = useState<Record<string, ChildExportState>>({})
+  const lifetime = useRef<object | null>(null)
+  const pending = useRef(new Set<string>())
+  useLayoutEffect(() => {
+    const token = {}
+    lifetime.current = token
+    return () => { lifetime.current = null }
+  }, [])
 
   const handleExport = useCallback(
     async (childId: string, name: string, grade?: string, birthdate?: string) => {
+      const token = lifetime.current
+      if (!token || pending.current.has(childId) || !children.some(child => child.id === childId)) return
+      pending.current.add(childId)
+      const isCurrent = () => lifetime.current === token
       setByChild((prev) => ({
         ...prev,
         [childId]: { building: true, error: null, lastFile: prev[childId]?.lastFile ?? null },
@@ -73,7 +121,8 @@ export default function DataReviewExportPanel() {
           { id: childId, name, grade, birthdate },
           mode,
         )
-        const markdown = buildDataReviewExport(input)
+        if (!isCurrent()) return
+        const markdown = buildDataReviewExport({ ...input, appBuild: APP_BUILD })
         const filename = dataReviewExportFilename(name, input.generatedAt, mode)
 
         // Same download path the portfolio markdown export uses.
@@ -82,16 +131,20 @@ export default function DataReviewExportPanel() {
         const link = document.createElement('a')
         link.href = url
         link.setAttribute('download', filename)
-        document.body.appendChild(link)
-        link.click()
-        link.remove()
-        window.URL.revokeObjectURL(url)
+        try {
+          document.body.appendChild(link)
+          link.click()
+        } finally {
+          link.remove()
+          window.URL.revokeObjectURL(url)
+        }
 
         setByChild((prev) => ({
           ...prev,
           [childId]: { building: false, error: null, lastFile: filename },
         }))
       } catch (err) {
+        if (!isCurrent()) return
         setByChild((prev) => ({
           ...prev,
           [childId]: {
@@ -100,36 +153,37 @@ export default function DataReviewExportPanel() {
             lastFile: prev[childId]?.lastFile ?? null,
           },
         }))
+      } finally {
+        pending.current.delete(childId)
       }
     },
-    [familyId, currentYearOnly],
+    [familyId, currentYearOnly, children],
   )
-
-  // Capability gate FIRST — `?diag=1` is a surface flag, not access control.
-  if (!canEdit) return null
-  if (searchParams.get('diag') !== '1') return null
 
   return (
     <Box
       sx={{
         m: 2,
         p: 2,
-        bgcolor: 'warning.50',
-        border: '1px dashed',
-        borderColor: 'warning.main',
+        bgcolor: diagnostic ? 'warning.50' : 'background.paper',
+        border: diagnostic ? '1px dashed' : '1px solid',
+        borderColor: diagnostic ? 'warning.main' : 'divider',
         borderRadius: 1,
       }}
     >
-      <Typography variant="overline" sx={{ fontWeight: 700 }}>
-        Diagnostic — Data review export
+      <Typography component="h2" variant={diagnostic ? 'overline' : 'h6'} sx={{ fontWeight: 700 }}>
+        {diagnostic ? 'Diagnostic — Data review export' : 'Export for review'}
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-        Downloads one markdown file per child describing what is actually stored —
-        workbook configs, learner model, skill snapshot, sight words, hours,
-        artifacts, Dad Lab, evaluations, quests, dispositions, XP — plus a
-        deterministic integrity appendix. Read-only: this writes nothing and calls
-        no AI. Drop the file into the design chat to audit for missing or
-        mis-connected data.
+        Download one file per child with learning progress, supporting evidence,
+        recorded hours and checks for missing links. You can attach it to your
+        design chat for review. Downloading changes no records and sends nothing to AI.
+      </Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+        The file contains private child details, notes and media links. Review it
+        before sharing. Images and recordings are not downloaded into the file.
+        Its scope is chosen below, separately from the Records date filters.
+        Learning progress keeps its earlier supporting evidence in either scope.
       </Typography>
 
       <FormControlLabel
@@ -142,8 +196,7 @@ export default function DataReviewExportPanel() {
         }
         label={
           <Typography variant="body2">
-            Current school year only (default off — the full history is the
-            default; this collapses prior years to rollups)
+            Current school year only (keeps older-year totals)
           </Typography>
         }
         sx={{ mb: 1, alignItems: 'flex-start' }}
@@ -153,13 +206,14 @@ export default function DataReviewExportPanel() {
         const state = byChild[child.id]
         return (
           <Box key={child.id} sx={{ mb: 2 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
               <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
                 {child.name}
               </Typography>
               <Button
                 size="small"
                 variant="outlined"
+                sx={{ minHeight: 48 }}
                 disabled={state?.building}
                 onClick={() =>
                   void handleExport(

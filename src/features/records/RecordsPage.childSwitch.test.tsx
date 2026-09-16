@@ -1,6 +1,13 @@
-import { render, screen } from '@testing-library/react'
+import { render as renderInTest, screen } from '@testing-library/react'
+import type { ReactElement } from 'react'
+import { MemoryRouter } from 'react-router-dom'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+// Records now mounts the real export control, which reads the route's flag.
+const render = (element: ReactElement) => renderInTest(element, { wrapper: MemoryRouter })
+const loadExportChildren = vi.fn(async () => [] as Array<{ id: string; name: string }>)
+vi.mock('./dataReviewExportChildren', () => ({ loadReviewExportChildren: () => loadExportChildren() }))
 
 /**
  * UX-329 — the Historical Hours dialog must not write one child's typed
@@ -108,6 +115,15 @@ describe('RecordsPage — a child switch does not re-target typed historical hou
   beforeEach(() => {
     addDoc.mockClear()
     setActive(LINCOLN)
+  })
+
+  it('mounts the parent review export in Records without a diagnostic flag', async () => {
+    loadExportChildren.mockResolvedValueOnce([LINCOLN])
+    const { default: RecordsPage } = await import('./RecordsPage')
+    render(<RecordsPage />)
+    expect(await screen.findByRole('heading', { name: 'Export for review' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /download review export/i })).toBeInTheDocument()
+    expect(addDoc).not.toHaveBeenCalled()
   })
 
   it('clears the per-month draft and says the figures were not saved', async () => {

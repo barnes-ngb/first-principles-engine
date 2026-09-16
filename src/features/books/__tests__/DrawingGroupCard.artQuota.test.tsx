@@ -211,3 +211,18 @@ describe('DrawingGroupCard — weekly art cap (FEAT-165 / UX-95)', () => {
     expect(recordGeneration).toHaveBeenCalledTimes(1)
   })
 })
+
+it('Add version offers Watercolor and sends Comic-book only after confirmation', async () => {
+  enhanceSketchMock.mockReset().mockResolvedValue({ url: 'https://x.test/comic.png', storagePath: 'p/comic.png' })
+  addDocMock.mockReset().mockResolvedValue({ id: 'comic-version' })
+  const user = userEvent.setup()
+  render(<DrawingGroupCard group={makeGroup()} familyId="f1" onChanged={() => {}} />)
+  await openPicker(user)
+  expect(screen.getByText(/Watercolor look/)).toBeInTheDocument()
+  await user.click(screen.getByText(/Comic-book look/))
+  expect(enhanceSketchMock).not.toHaveBeenCalled()
+  await user.click(screen.getByRole('button', { name: 'Make it' }))
+  await waitFor(() => expect(addDocMock).toHaveBeenCalledTimes(1))
+  expect(enhanceSketchMock).toHaveBeenCalledWith(expect.objectContaining({ familyId: 'f1', style: 'comic', transparent: true }))
+  expect(addDocMock.mock.calls[0][1]).toMatchObject({ sourceDrawingId: 'd1', theme: 'comic', childProfile: 'both' })
+})

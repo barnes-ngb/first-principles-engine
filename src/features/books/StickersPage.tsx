@@ -33,18 +33,30 @@ import { useStickerArtQuota } from './useStickerArtQuota'
 export default function StickersPage() {
   const navigate = useNavigate()
   const familyId = useFamilyId()
-  const { activeChild, isChildProfile } = useActiveChild()
+  const { activeChild, activeChildId, children, isChildProfile } = useActiveChild()
   const { profile } = useProfile()
   // Pricing/publishing is parent-only (catalog design §6) — gates the FEAT-82
   // "Add to catalog" affordance on stickers.
   const isParent = profile === UserProfile.Parents
   const childName = activeChild?.name ?? ''
-  const childProfile: 'lincoln' | 'london' | undefined =
-    childName.toLowerCase() === 'lincoln'
+  const profileForName = (name: string): 'lincoln' | 'london' | undefined =>
+    name.toLowerCase() === 'lincoln'
       ? 'lincoln'
-      : childName.toLowerCase() === 'london'
+      : name.toLowerCase() === 'london'
         ? 'london'
         : undefined
+  const childProfile = profileForName(childName)
+  const captureChildren = (children ?? (activeChild ? [activeChild] : [])).map(child => ({
+    id: child.id, name: child.name, profile: profileForName(child.name),
+  }))
+  const lockedCaptureProfile = isChildProfile && (profile === UserProfile.Lincoln || profile === UserProfile.London)
+    ? profile : undefined
+  // While a child profile loads, useActiveChild can still expose the parent's
+  // selected child. Only its actual matching child is a capture default.
+  const captureChild = isChildProfile
+    ? lockedCaptureProfile ? captureChildren.find(child => child.profile === lockedCaptureProfile) : undefined
+    : captureChildren.find(child => child.id === (activeChildId || activeChild?.id))
+  const captureChildId = isChildProfile ? captureChild?.id : activeChildId || activeChild?.id
   const isLincoln = childProfile === 'lincoln'
 
   // Cost guard (FEAT-165 / UX-95): every control on this page that spends a
@@ -218,8 +230,9 @@ export default function StickersPage() {
         open={showDrawing}
         onClose={() => setShowDrawing(false)}
         familyId={familyId}
-        childProfile={childProfile}
-        childName={childName}
+        childProfile={captureChild?.profile}
+        childName={captureChild?.name}
+        ownerContext={{ activeChildId: captureChildId, pendingProfile: lockedCaptureProfile, children: captureChildren }}
         onSaved={() => setRefreshSignal((n) => n + 1)}
         capReached={artCapReached}
         recordGeneration={recordGeneration}
