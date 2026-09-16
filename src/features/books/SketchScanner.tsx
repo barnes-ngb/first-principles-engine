@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import { addDoc } from 'firebase/firestore'
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 import Dialog from '@mui/material/Dialog'
@@ -28,6 +28,8 @@ import {
   WHOLE_IMAGE_BORDER_INSET_FRACTION,
 } from './cleanSketch'
 import SketchCropStage from './SketchCropStage'
+import StickerCleanupEditor from './StickerCleanupEditor'
+import type { CleanupEdits } from './cleanupMask'
 import { cropImageToRegion, type CropFraction } from './cropImage'
 import { CHECKERBOARD_BG } from './DrawingChoiceDialog'
 import { STICKER_TAGS_ORDERED, suggestTagsFromPrompt } from './stickerTagging'
@@ -115,7 +117,12 @@ async function uploadToStorage(familyId: string, file: File, subfolder: string) 
  * product lines per drawing). Tagging is shared with the rest of the sticker
  * UIs via `stickerTagging.ts`.
  */
-export default function SketchScanner({
+/** Family changes/close invalidate work; header child changes keep its local For. */
+export default function SketchScanner(props: SketchScannerProps) {
+  return props.open ? <SketchScannerSession key={props.familyId} {...props} /> : null
+}
+
+function SketchScannerSession({
   open,
   onClose,
   familyId,
@@ -131,7 +138,8 @@ export default function SketchScanner({
   // The active child can resolve *after* this dialog mounts with its page, so
   // the default label follows `childName` until the kid types their own — a
   // plain useState initializer froze it at "My drawing" (FEAT-160).
-  const { label, setLabel, resetLabel, defaultLabel } = useStickerLabel(childName)
+  const [captureOwner, setCaptureOwner] = useState<{ name?: string } | null>(null)
+  const { label, setLabel, resetLabel, defaultLabel } = useStickerLabel(captureOwner ? captureOwner.name : childName)
 
   const [stage, setStage] = useState<Stage>('capture')
   const [previewTab, setPreviewTab] = useState<PreviewTab>('cleaned')
@@ -142,6 +150,10 @@ export default function SketchScanner({
   const [originalStoragePath, setOriginalStoragePath] = useState<string | null>(null)
   const [cleanedFile, setCleanedFile] = useState<File | null>(null)
   const [cleanedUrl, setCleanedUrl] = useState<string | null>(null)
+  const [adjusting, setAdjusting] = useState(false)
+  const [cleanupEdits, setCleanupEdits] = useState<CleanupEdits | undefined>(undefined)
+  const [cleanupSmallerCopy, setCleanupSmallerCopy] = useState(false)
+  const [cleanupInset, setCleanupInset] = useState(WHOLE_IMAGE_BORDER_INSET_FRACTION)
 
   // Manual crop (between capture and cleaning) — fractions of the captured image.
   const [cropFraction, setCropFraction] = useState<CropFraction>(DEFAULT_CROP)
@@ -184,7 +196,19 @@ export default function SketchScanner({
   // Group key shared by every version saved from one drawing (the cleaned
   // original + any fancy versions). Minted when a new drawing is captured.
   const sourceDrawingIdRef = useRef<string | null>(null)
+  // Capture is retained separately when a crop becomes the working original.
+  const capturedFileRef = useRef<File | null>(null)
+  const sessionRef = useRef(0)
+  const aliveRef = useRef(true)
+  const saveInFlightRef = useRef(false)
+  const enhanceInFlightRef = useRef(false)
   const { enhanceSketch, imageFailureRef } = useAI()
+  useEffect(() => {
+    aliveRef.current = true
+    return () => { aliveRef.current = false }
+  }, [])
+  useEffect(() => () => { if (originalUrl) URL.revokeObjectURL(originalUrl) }, [originalUrl])
+  useEffect(() => () => { if (cleanedUrl) URL.revokeObjectURL(cleanedUrl) }, [cleanedUrl])
 
   // A note is the only free text this door has (FEAT-197), so it decides both
   // whether the retry card's advice can be about wording and whether a tapped
@@ -195,6 +219,14 @@ export default function SketchScanner({
   const drawnAs = drawnAsLine(customNote, revisedNote, audience)
 
   const reset = useCallback(() => {
+    sessionRef.current++
+    saveInFlightRef.current = false
+    enhanceInFlightRef.current = false
+    capturedFileRef.current = null
+    setCaptureOwner(null)
+    setAdjusting(false)
+    setCleanupEdits(undefined)
+    setCleanupSmallerCopy(false)
     setStage('capture')
     setPreviewTab('cleaned')
     setOriginalFile(null)
@@ -234,6 +266,10 @@ export default function SketchScanner({
       e.target.value = ''
       if (!file) return
 
+      sessionRef.current++
+      capturedFileRef.current = file
+      setCaptureOwner({ name: childName })
+      setProfile(childProfile ?? 'both')
       setError(null)
       setOriginalFile(file)
       setOriginalUrl(URL.createObjectURL(file))
@@ -244,7 +280,7 @@ export default function SketchScanner({
       setCropFraction(DEFAULT_CROP)
       setStage('crop')
     },
-    [],
+    [childName, childProfile],
   )
 
   // Transparent cleanup → preview. Shared by both crop paths (cropped + whole).
@@ -254,14 +290,16 @@ export default function SketchScanner({
   // background ring is pulled further in (FEAT-159).
   const runClean = useCallback(
     async (file: File, fromCrop: boolean) => {
+      const session = sessionRef.current
       setStage('cleaning')
       setError(null)
       try {
+        const inset = fromCrop ? DEFAULT_BORDER_INSET_FRACTION : WHOLE_IMAGE_BORDER_INSET_FRACTION
         const cleaned = await cleanSketchBackground(file, {
-          borderInsetFraction: fromCrop
-            ? DEFAULT_BORDER_INSET_FRACTION
-            : WHOLE_IMAGE_BORDER_INSET_FRACTION,
+          borderInsetFraction: inset,
         })
+        if (!aliveRef.current || session !== sessionRef.current) return
+        setCleanupInset(inset)
         setCleanedFile(cleaned)
         setCleanedUrl(URL.createObjectURL(cleaned))
         // Seed tags from the default label so saving is one tap if they don't edit.
@@ -269,6 +307,7 @@ export default function SketchScanner({
         setStage('preview')
         setPreviewTab('cleaned')
       } catch {
+        if (!aliveRef.current || session !== sessionRef.current) return
         setError('Couldn’t use that picture. Please try again.')
         setStage('capture')
       }
@@ -286,15 +325,20 @@ export default function SketchScanner({
   // transform both operate on the chosen region.
   const handleConfirmCrop = useCallback(async () => {
     if (!originalFile) return
+    const session = sessionRef.current
+    setStage('cleaning')
     try {
       const cropped = await cropImageToRegion(originalFile, cropFraction)
+      if (!aliveRef.current || session !== sessionRef.current) return
       setOriginalFile(cropped)
       setOriginalUrl(URL.createObjectURL(cropped))
       // Force a re-upload of the cropped original if a fancy transform is requested.
       setOriginalStoragePath(null)
       await runClean(cropped, true)
     } catch {
+      if (!aliveRef.current || session !== sessionRef.current) return
       setError('Couldn’t crop that picture. Please try again.')
+      setStage('crop')
     }
   }, [originalFile, cropFraction, runClean])
 
@@ -302,8 +346,10 @@ export default function SketchScanner({
   const ensureOriginalUploaded = useCallback(async (): Promise<string | null> => {
     if (originalStoragePath) return originalStoragePath
     if (!originalFile) return null
+    const session = sessionRef.current
     try {
       const { storagePath } = await uploadToStorage(familyId, originalFile, 'sketches')
+      if (!aliveRef.current || session !== sessionRef.current) return null
       setOriginalStoragePath(storagePath)
       return storagePath
     } catch {
@@ -316,7 +362,9 @@ export default function SketchScanner({
     // Storage upload behind it: the guard sits ahead of `ensureOriginalUploaded`
     // so a capped tap costs nothing at all. The style controls already show the
     // nudge instead of a button; this holds the rule for real.
-    if (enhancing || capReached) return
+    if (enhanceInFlightRef.current || enhancing || capReached) return
+    const session = sessionRef.current
+    enhanceInFlightRef.current = true
     setEnhancing(true)
     setEnhanceError(null)
     setFancyFailure(null)
@@ -332,6 +380,7 @@ export default function SketchScanner({
 
     try {
       const storagePath = await ensureOriginalUploaded()
+      if (!aliveRef.current || session !== sessionRef.current) return
       if (!storagePath) {
         setEnhanceError('Failed to upload drawing. Please try again.')
         return
@@ -342,6 +391,9 @@ export default function SketchScanner({
         sketchStoragePath: storagePath,
         ...resolveFancyEnhanceParams(styleId, note),
       })
+      // A completed paid request still belongs to its originating quota callback.
+      if (result?.url) recordStickerArtGeneration(recordGeneration)
+      if (!aliveRef.current || session !== sessionRef.current) return
 
       if (result?.url) {
         setFancyUrl(result.url)
@@ -361,7 +413,6 @@ export default function SketchScanner({
         //
         // FEAT-167 moved that discipline into the wrapper itself — it returns
         // `void` now, so the `void` operator here would be meaningless.
-        recordStickerArtGeneration(recordGeneration)
         // A fresh transform replaces any previously-saved fancy version.
         setSavedVersions((prev) => {
           if (!prev.has('fancy')) return prev
@@ -378,9 +429,9 @@ export default function SketchScanner({
         setFancyAlternatives(imageFailureAlternatives(imageFailureRef.current))
       }
     } catch (err) {
-      setEnhanceError(err instanceof Error ? err.message : 'Transform failed')
+      if (aliveRef.current && session === sessionRef.current) setEnhanceError(err instanceof Error ? err.message : 'Transform failed')
     } finally {
-      setEnhancing(false)
+      if (aliveRef.current && session === sessionRef.current) { enhanceInFlightRef.current = false; setEnhancing(false) }
     }
   }, [
     enhancing,
@@ -397,7 +448,10 @@ export default function SketchScanner({
   const saveSticker = useCallback(
     async (version: SaveVersion) => {
       const url = version === 'cleaned' ? cleanedUrl : fancyUrl
-      if (savingVersion || savedVersions.has(version)) return
+      if (saveInFlightRef.current || savingVersion || savedVersions.has(version)) return
+      const session = sessionRef.current
+      const sourceDrawingId = sourceDrawingIdRef.current
+      saveInFlightRef.current = true
 
       setSavingVersion(version)
       setError(null)
@@ -408,6 +462,7 @@ export default function SketchScanner({
         if (version === 'cleaned') {
           if (!cleanedFile) return
           const uploaded = await uploadToStorage(familyId, cleanedFile, 'stickers')
+          if (!aliveRef.current || session !== sessionRef.current) return
           saveUrl = uploaded.url
           savePath = uploaded.storagePath
         } else {
@@ -415,7 +470,7 @@ export default function SketchScanner({
           savePath = fancyStoragePath
         }
 
-        if (!saveUrl) return
+        if (!saveUrl || !aliveRef.current || session !== sessionRef.current) return
 
         const newSticker: Omit<Sticker, 'id'> = {
           url: saveUrl,
@@ -429,18 +484,19 @@ export default function SketchScanner({
           // Link this version to its source drawing (FEAT-33 slice 3). The
           // cleaned version is the original group anchor; the fancy version
           // records which theme/style it is.
-          ...(sourceDrawingIdRef.current
-            ? { sourceDrawingId: sourceDrawingIdRef.current }
+          ...(sourceDrawingId
+            ? { sourceDrawingId }
             : {}),
           ...(version === 'cleaned' ? { isOriginal: true } : { theme: styleId }),
         }
         await addDoc(stickerLibraryCollection(familyId), newSticker as Sticker)
+        if (!aliveRef.current || session !== sessionRef.current) return
         setSavedVersions((prev) => new Set(prev).add(version))
         onSaved?.()
       } catch {
-        setError('Failed to save sticker. Please try again.')
+        if (aliveRef.current && session === sessionRef.current) setError('Failed to save sticker. Please try again.')
       } finally {
-        setSavingVersion(null)
+        if (aliveRef.current && session === sessionRef.current) { saveInFlightRef.current = false; setSavingVersion(null) }
       }
     },
     [
@@ -710,6 +766,17 @@ export default function SketchScanner({
               )}
             </Box>
 
+            {previewTab === 'cleaned' && originalFile && (
+              <Stack spacing={0.5}>
+                {savedVersions.has('cleaned') ? (
+                  <Typography variant="body2" color="text.secondary">Cleaned sticker saved. Start another drawing to make a new cleanup.</Typography>
+                ) : (
+                  <Button variant="outlined" onClick={() => setAdjusting(true)} disabled={savingVersion !== null} sx={{ minHeight: 44, alignSelf: 'flex-start' }}>Adjust cleanup</Button>
+                )}
+                {cleanupSmallerCopy && <Typography variant="caption" color="text.secondary">Cleanup uses the smaller editable copy. Your original picture is unchanged.</Typography>}
+              </Stack>
+            )}
+
             {/* Re-style controls once a fancy version exists */}
             {previewTab === 'fancy' && fancyUrl && !enhancing && (
               <Stack spacing={1}>
@@ -816,7 +883,7 @@ export default function SketchScanner({
 
             <Box>
               <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>
-                For:
+                For — this drawing keeps your choice even if you switch child above:
               </Typography>
               <Box sx={{ display: 'flex', gap: 0.75 }}>
                 {(['lincoln', 'london', 'both'] as const).map((p) => (
@@ -851,6 +918,7 @@ export default function SketchScanner({
 
       <DialogActions sx={{ px: 3, pb: 2 }}>
         {stage === 'capture' && <Button onClick={handleClose}>Cancel</Button>}
+        {stage === 'cleaning' && <Button onClick={handleClose}>Cancel</Button>}
 
         {stage === 'crop' && (
           <>
@@ -872,6 +940,7 @@ export default function SketchScanner({
 
         {stage === 'preview' && (
           <>
+            {!anySaved && <Button onClick={handleClose}>Cancel</Button>}
             <Button onClick={reset} disabled={savingVersion !== null}>
               Retake
             </Button>
@@ -907,6 +976,23 @@ export default function SketchScanner({
           </>
         )}
       </DialogActions>
+
+      {adjusting && originalFile && !savedVersions.has('cleaned') && (
+        <StickerCleanupEditor
+          file={originalFile}
+          borderInsetFraction={cleanupInset}
+          initialEdits={cleanupEdits}
+          initialSmallerCopy={cleanupSmallerCopy}
+          onCancel={() => setAdjusting(false)}
+          onApply={(file, edits, smallerCopy) => {
+            setCleanedFile(file)
+            setCleanedUrl(URL.createObjectURL(file))
+            setCleanupEdits(edits)
+            setCleanupSmallerCopy(smallerCopy)
+            setAdjusting(false)
+          }}
+        />
+      )}
 
       <ArtHelpSheet
         surface="sketch"
