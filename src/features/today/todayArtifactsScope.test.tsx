@@ -56,7 +56,7 @@ vi.mock('../../core/hooks/useScan', () => ({
 vi.mock('../../core/hooks/useScanToActivityConfig', () => ({
   useScanToActivityConfig: () => ({ syncScanToConfig: vi.fn() }),
 }))
-vi.mock('./captureRowWrite', () => ({ writeCaptureRow: async () => ({ status: 'done' }), captureRowWriteNotice: () => null }))
+vi.mock('./dayChecklistRowWrite', () => ({ writeChecklistRow: async () => ({ status: 'done' }), captureRowWriteNotice: () => null }))
 vi.mock('../../core/utils/downscaleImage', () => ({ downscaleImage: async (file: File) => file }))
 vi.mock('../../components/PhotoCapture', () => ({
   default: ({ onCaptureBatch }: { onCaptureBatch: (files: File[]) => void }) =>

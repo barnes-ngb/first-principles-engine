@@ -96,6 +96,8 @@ import {
 } from './dayProgressLabels'
 import { kidPalette } from '../../app/tokens'
 import { TodayDecision } from './todayScope'
+import { checklistItemKey } from './dayWriteGuard'
+import { hasPersistentChecklistId } from './preCompletionScanIdentity'
 
 const subjectBucketColor: Record<string, string> = {
   Reading: '#3b82f6',
@@ -265,6 +267,9 @@ interface TodayChecklistProps {
   /** The configs read failed. A failure is never rendered as an empty result. */
   configsFailed?: boolean
   onPreCompletionScan: (file: File, index: number) => void
+  onPreparePreCompletionScan?: () => void
+  preparingScanRows?: boolean
+  scanResultItemIndex?: number | null
   captureLoading: boolean
   captureItemIndex: number | null
   scanResult: ScanRecord | null
@@ -274,7 +279,7 @@ interface TodayChecklistProps {
   onClearScan: () => void
   onUpdatePosition?: (curriculum: CurriculumDetected) => void
   onSkipToNext?: (nextLesson: number) => void
-  onAcceptSkip?: () => void
+  onAcceptSkip?: () => Promise<boolean>
   onPrintMaterials: () => void
   printingMaterials: boolean
   scanFeedbackBySubject?: Record<string, { topic: string; recommendation: 'do' | 'skip' | 'quick-review' | 'modify'; estimatedMinutes?: number }>
@@ -314,6 +319,9 @@ export default function TodayChecklist({
   configsLoading = false,
   configsFailed = false,
   onPreCompletionScan,
+  onPreparePreCompletionScan,
+  preparingScanRows = false,
+  scanResultItemIndex = null,
   captureLoading,
   captureItemIndex,
   scanResult,
@@ -985,7 +993,7 @@ export default function TodayChecklist({
               captureMayRouteToCurriculum(row.kind) && !!row.configId
 
             return (
-              <Box key={index}>
+              <Box key={item.id ?? index}>
                 {showBlockHeader && blockHeaderLabel && (
                   <Typography
                     variant="caption"
@@ -1235,8 +1243,14 @@ export default function TodayChecklist({
                       startIcon={captureLoading && captureItemIndex === index
                         ? <CircularProgress size={14} />
                         : <CameraAltIcon sx={{ fontSize: 16 }} />}
-                      disabled={captureLoading && captureItemIndex === index}
+                      disabled={preparingScanRows || (captureLoading && captureItemIndex === index)}
                       onClick={() => {
+                        // Legacy preparation is its own tap. A new render must
+                        // supply the persistent row ID before camera opens.
+                        if (!hasPersistentChecklistId(item.id)) {
+                          onPreparePreCompletionScan?.()
+                          return
+                        }
                         const input = document.createElement('input')
                         input.type = 'file'
                         input.accept = 'image/*'
@@ -1299,7 +1313,7 @@ export default function TodayChecklist({
                   </Button>
                 )}
                 {/* Scan results panel (from pre-completion scans) */}
-                {captureItemIndex === index && scanResult?.results && (
+                {scanResultItemIndex === index && scanResult?.results && (
                   <ScanResultsPanel
                     results={scanResult.results}
                     imageUrl={scanResult.imageUrl}
@@ -1308,6 +1322,7 @@ export default function TodayChecklist({
                     onUpdatePosition={onUpdatePosition}
                     onSkipToNext={onSkipToNext}
                     onAcceptSkip={onAcceptSkip}
+                    acceptScopeKey={JSON.stringify([familyId, selectedChildId, dayLog.date, checklistItemKey(item), scanResult.id])}
                     onScanAnother={() => { onClearScan() }}
                     childName={selectedChild.name}
                   />

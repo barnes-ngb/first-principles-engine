@@ -3,9 +3,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   captureRowWriteNotice,
   patchChecklistRow,
-  resolveCaptureRowIndex,
-  writeCaptureRow,
-} from './captureRowWrite'
+  resolveChecklistRowIndex,
+  writeChecklistRow,
+} from './dayChecklistRowWrite'
 import { dayLogDocId } from './daylog.model'
 import { findDayPreservationViolations } from './dayWriteGuard'
 import type { ChecklistItem, DayLog } from '../../core/types'
@@ -159,12 +159,12 @@ describe('patchChecklistRow', () => {
   })
 })
 
-describe('writeCaptureRow — the capture writes only its own row', () => {
+describe('writeChecklistRow — the capture writes only its own row', () => {
   it('a tick that lands between capture-start and capture-write SURVIVES', async () => {
     // Stored: the tick already landed. In hand: the pre-tick snapshot.
     daysStore.set(DAY_ID, dayAfterTheTick())
 
-    const outcome = await writeCaptureRow({
+    const outcome = await writeChecklistRow({
       familyId: FAMILY,
       childId: CHILD,
       dateKey: DATE,
@@ -181,7 +181,7 @@ describe('writeCaptureRow — the capture writes only its own row', () => {
 
   it('writes the checklist and nothing else — blocks and xpTotal are not in the payload', async () => {
     daysStore.set(DAY_ID, dayAfterTheTick())
-    await writeCaptureRow({
+    await writeChecklistRow({
       familyId: FAMILY,
       childId: CHILD,
       dateKey: DATE,
@@ -218,7 +218,7 @@ describe('writeCaptureRow — the capture writes only its own row', () => {
   it('the hours fold is byte-unchanged by the capture write', async () => {
     daysStore.set(DAY_ID, dayAfterTheTick())
     const before = collectHoursContributions([dayAfterTheTick() as never], [], [], CHILD)
-    await writeCaptureRow({
+    await writeChecklistRow({
       familyId: FAMILY,
       childId: CHILD,
       dateKey: DATE,
@@ -236,7 +236,7 @@ describe('writeCaptureRow — the capture writes only its own row', () => {
 
   it('refuses — and says so — when the row is gone, the day is gone, or the write fails', async () => {
     expect(
-      await writeCaptureRow({
+      await writeChecklistRow({
         familyId: FAMILY, childId: CHILD, dateKey: DATE,
         itemKey: 'anything::', patch: {}, context: 'test',
       }),
@@ -244,7 +244,7 @@ describe('writeCaptureRow — the capture writes only its own row', () => {
 
     daysStore.set(DAY_ID, dayAfterTheTick())
     expect(
-      await writeCaptureRow({
+      await writeChecklistRow({
         familyId: FAMILY, childId: CHILD, dateKey: DATE,
         itemKey: 'Renamed mid-upload::', patch: {}, context: 'test',
       }),
@@ -252,7 +252,7 @@ describe('writeCaptureRow — the capture writes only its own row', () => {
 
     updateShouldThrow = true
     expect(
-      await writeCaptureRow({
+      await writeChecklistRow({
         familyId: FAMILY, childId: CHILD, dateKey: DATE,
         itemKey: 'GATB Math (30m)::', patch: {}, context: 'test',
       }),
@@ -277,7 +277,7 @@ describe('writeCaptureRow — the capture writes only its own row', () => {
 
 // ── Codex round 1, P1: identical rows ───────────────────────────────────────
 
-describe('resolveCaptureRowIndex — two rows can share one identity', () => {
+describe('resolveChecklistRowIndex — two rows can share one identity', () => {
   // `retainChecklistForApply` keeps a completed row and Apply appends the
   // freshly-planned one with the same title and duration, so `label::subject` is
   // the same string for both. `liveDayEdit` documents this shape.
@@ -288,14 +288,14 @@ describe('resolveCaptureRowIndex — two rows can share one identity', () => {
   const KEY = 'Handwriting (15m)::'
 
   it('takes the index the capture started from when it still holds that identity', () => {
-    expect(resolveCaptureRowIndex(twins(), KEY, { index: 1, completed: false })).toBe(1)
-    expect(resolveCaptureRowIndex(twins(), KEY, { index: 0, completed: true })).toBe(0)
+    expect(resolveChecklistRowIndex(twins(), KEY, { index: 1, completed: false })).toBe(1)
+    expect(resolveChecklistRowIndex(twins(), KEY, { index: 0, completed: true })).toBe(0)
   })
 
   it('falls back to the matching completed state when the list has shifted', () => {
     const shifted = [row({ label: 'New row (5m)' }), ...twins()]
     // The remembered index now points at a different row, so it is not trusted.
-    expect(resolveCaptureRowIndex(shifted, KEY, { index: 1, completed: false })).toBe(2)
+    expect(resolveChecklistRowIndex(shifted, KEY, { index: 1, completed: false })).toBe(2)
   })
 
   it('POSITIVE CONTROL — the old first-match rule sends the fresh row to the completed twin', () => {
@@ -304,7 +304,7 @@ describe('resolveCaptureRowIndex — two rows can share one identity', () => {
     // link the capture would have overwritten.
     const rows = twins()
     expect(rows.findIndex((r) => `${r.label}::${r.subjectBucket ?? ''}` === KEY)).toBe(0)
-    expect(resolveCaptureRowIndex(rows, KEY, { index: 1, completed: false })).toBe(1)
+    expect(resolveChecklistRowIndex(rows, KEY, { index: 1, completed: false })).toBe(1)
   })
 
   it('patches the resolved twin and leaves the other one alone', () => {
@@ -323,17 +323,17 @@ describe('resolveCaptureRowIndex — two rows can share one identity', () => {
       row({ label: 'Handwriting (15m)', completed: true, evidenceArtifactId: 'art-old' }),
       row({ label: 'Handwriting (15m)', completed: true }),
     ]
-    expect(resolveCaptureRowIndex(ticked, KEY, { index: 1, completed: false })).toBe(1)
+    expect(resolveChecklistRowIndex(ticked, KEY, { index: 1, completed: false })).toBe(1)
   })
 
   it('still answers -1 when the day holds no row with this identity', () => {
-    expect(resolveCaptureRowIndex(twins(), 'Gone::', { index: 1 })).toBe(-1)
+    expect(resolveChecklistRowIndex(twins(), 'Gone::', { index: 1 })).toBe(-1)
   })
 })
 
 // ── Codex round 1, P1: the write is atomic ──────────────────────────────────
 
-describe('writeCaptureRow — an edit landing mid-write is not overwritten', () => {
+describe('writeChecklistRow — an edit landing mid-write is not overwritten', () => {
   it('re-runs against the changed document rather than sending the older array', async () => {
     daysStore.set(DAY_ID, dayAtCaptureStart())
     // The parent ticks Handwriting after the transaction reads and before it
@@ -341,7 +341,7 @@ describe('writeCaptureRow — an edit landing mid-write is not overwritten', () 
     // and put the tick back; the transaction sees the document move and re-runs.
     contendOnce = () => daysStore.set(DAY_ID, dayAfterTheTick())
 
-    const outcome = await writeCaptureRow({
+    const outcome = await writeChecklistRow({
       familyId: FAMILY,
       childId: CHILD,
       dateKey: DATE,

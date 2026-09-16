@@ -45,6 +45,7 @@ import { useScrollToHash } from '../../core/hooks/useScrollToHash'
 import { useAI, TaskType } from '../../core/ai/useAI'
 import {
   chapterBooksCollection,
+  daysCollection,
   scansCollection,
   skillSnapshotsCollection,
 } from '../../core/firebase/firestore'
@@ -82,7 +83,9 @@ import WatchLibraryPicker from '../watch/WatchLibraryPicker'
 import { useWatchLibrary } from '../watch/useWatchLibrary'
 import { useWatchItemCompletion } from '../watch/useWatchItemCompletion'
 import { appendWatchItemToDayLog } from '../watch/watchDayItem'
-import { checklistItemKey } from './dayWriteGuard'
+import { checklistItemKey, prepareDayChecklistIdentitiesGuarded } from './dayWriteGuard'
+import { dayLogDocId } from './daylog.model'
+import { hasPersistentChecklistId, resolvePreCompletionScanIndex, type PreCompletionScanTarget } from './preCompletionScanIdentity'
 import {
   liveDayEditLockReason,
   moveItemToLiveDay,
@@ -113,7 +116,7 @@ import { useUnifiedCapture } from './useUnifiedCapture'
 import { useTodayArtifacts } from './useTodayArtifacts'
 import SectionErrorBoundary from '../../components/SectionErrorBoundary'
 import DraftReadyCard from '../monthly-review/DraftReadyCard'
-import { captureRowWriteNotice, writeCaptureRow } from './captureRowWrite'
+import { captureRowWriteNotice, skipRowWriteNotice, writeChecklistRow } from './dayChecklistRowWrite'
 import {
   captureMayRouteToCurriculum,
   resolveTodayRow,
@@ -670,6 +673,13 @@ export default function TodayPage() {
     configsState: activityConfigsState,
   })
 
+  const [preCompletionTarget, setPreCompletionTarget] = useState<PreCompletionScanTarget | null>(null)
+  const preCompletionRequestRef = useRef<object | null>(null)
+  const [preparingScanRows, setPreparingScanRows] = useState(false)
+  const scanResultItemIndex = resolvePreCompletionScanIndex(
+    preCompletionTarget, { familyId, childId: selectedChildId, dateKey: today }, scanResult?.id, dayLog,
+  )
+
   const { chat: aiChat } = useAI()
 
   // Parent recap of the child's latest Knowledge Mine session dated today (read-only).
@@ -1040,9 +1050,40 @@ export default function TodayPage() {
   // resolved kind, at the write as well as at the button. A row that is not a
   // workbook still gets the scan and its advice, and is still stamped `scanned`;
   // what it no longer does is write the family's curriculum.
+  const handlePreparePreCompletionScan = useCallback(async () => {
+    if (!canEditLiveDay || !familyId || !selectedChildId || preparingScanRows) return
+    setPreparingScanRows(true)
+    try {
+      const outcome = await prepareDayChecklistIdentitiesGuarded(
+        doc(daysCollection(familyId), dayLogDocId(today, selectedChildId)), 'today-prepare-scan-identities',
+      )
+      setSnackMessage({
+        text: outcome === 'ready'
+          ? 'The rows are ready. Tap Scan lesson again when the list updates.'
+          : "That day's plan is no longer available. Refresh before scanning.",
+        severity: outcome === 'ready' ? 'success' : 'warning',
+      })
+    } catch (err) {
+      console.error('[TodayPage] Failed to prepare scan rows', err)
+      setSnackMessage({ text: "Couldn't prepare the rows for scanning. Refresh and try again.", severity: 'warning' })
+    } finally {
+      setPreparingScanRows(false)
+    }
+  }, [canEditLiveDay, familyId, selectedChildId, today, preparingScanRows, setSnackMessage])
+
   const handlePreCompletionScan = useCallback(async (file: File, index: number) => {
-    setScanItemIndex(index)
+    // This callback is captured by the camera click's render. Never replace
+    // its row with a current index after the camera or identity preparation.
     const item = dayLog?.checklist?.[index]
+    if (!item || !hasPersistentChecklistId(item.id) || !familyId || !selectedChildId || dayLog?.childId !== selectedChildId || dayLog.date !== today) {
+      setSnackMessage({ text: 'Refresh the plan and tap Scan lesson again before taking the photo.', severity: 'warning' })
+      return
+    }
+    const origin = { familyId, childId: selectedChildId, dateKey: today, itemId: item.id }
+    const request = {}
+    preCompletionRequestRef.current = request
+    setPreCompletionTarget(null)
+    setScanItemIndex(index)
     const curriculumRouteAllowed = !!item && captureMayRouteToCurriculum(
       resolveTodayRow(item, activityConfigs, activityConfigsState).kind,
     )
@@ -1091,31 +1132,33 @@ export default function TodayPage() {
     // stood before an AI scan call that takes seconds, so writing it whole put
     // back every edit made in between. One row, on the live document.
     if (record?.results && item) {
-      const outcome = await writeCaptureRow({
+      const outcome = await writeChecklistRow({
         familyId,
         childId: selectedChildId,
         dateKey: today,
-        itemKey: checklistItemKey(item),
+        itemKey: origin.itemId,
+        requireUniqueIdentity: true,
         patch: { scanned: true },
-        // The duplicate-row hint the capture paths pass (Codex round 2, P2).
-        // Apply retains a completed row and appends a fresh one with the same
-        // label and subject, so without it `scanned: true` lands on the older
-        // completed twin rather than the row whose page was just scanned.
+        // Only the persistent origin can receive the scan, even after reapply.
         hint: { index, completed: !!item.completed },
         context: 'today-pre-completion-scan',
       })
       const notice = captureRowWriteNotice(outcome)
       if (notice) setSnackMessage({ text: notice, severity: 'warning' })
     }
+    // Publish the matched result after its initial scan writes have settled.
+    if (record?.id && preCompletionRequestRef.current === request) {
+      setPreCompletionTarget({ ...origin, scanId: record.id })
+    }
   }, [runScan, familyId, selectedChildId, syncScanToConfig, setSnackMessage, dayLog, setScanItemIndex, today, activityConfigs, activityConfigsState])
 
   const handleScanAddToPlan = useCallback(() => {
-    if (!scanResult?.results || scanItemIndex == null || !dayLog?.checklist) return
+    if (!scanResult?.results || scanResultItemIndex == null || !dayLog?.checklist) return
     const r = scanResult.results
     // Only worksheet/workbook scans can be added to plan — skip certificates
     if (r.pageType === 'certificate') return
     const updatedChecklist = (dayLog.checklist ?? []).map((ci, i) =>
-      i === scanItemIndex
+      i === scanResultItemIndex
         ? {
             ...ci,
             subjectBucket: (r.subject.charAt(0).toUpperCase() + r.subject.slice(1)) as SubjectBucket,
@@ -1131,17 +1174,24 @@ export default function TodayPage() {
     persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
     if (scanResult) void recordScanAction(familyId, scanResult, 'added')
     clearScan()
+    preCompletionRequestRef.current = null
+    setPreCompletionTarget(null)
     setScanItemIndex(null)
-  }, [scanResult, scanItemIndex, dayLog, familyId, persistDayLogImmediate, recordScanAction, clearScan, setScanItemIndex])
+  }, [scanResult, scanResultItemIndex, dayLog, familyId, persistDayLogImmediate, recordScanAction, clearScan, setScanItemIndex])
 
   const handleScanSkip = useCallback(() => {
+    if (scanResultItemIndex == null) return
     if (scanResult) void recordScanAction(familyId, scanResult, 'skipped')
     clearScan()
+    preCompletionRequestRef.current = null
+    setPreCompletionTarget(null)
     setScanItemIndex(null)
-  }, [scanResult, familyId, recordScanAction, clearScan, setScanItemIndex])
+  }, [scanResult, scanResultItemIndex, familyId, recordScanAction, clearScan, setScanItemIndex])
 
   const handleClearScan = useCallback(() => {
     clearScan()
+    preCompletionRequestRef.current = null
+    setPreCompletionTarget(null)
     setScanItemIndex(null)
   }, [clearScan, setScanItemIndex])
 
@@ -1200,29 +1250,41 @@ export default function TodayPage() {
   )
 
   const handleAcceptSkip = useCallback(
-    async () => {
-      if (!familyId || !selectedChildId || !dayLog || !scanResult?.results || scanItemIndex == null) return
+    async (): Promise<boolean> => {
+      if (!familyId || !selectedChildId || !dayLog || !scanResult?.results) return false
       const results = scanResult.results
-      if (results.pageType === 'certificate') return
+      if (results.pageType === 'certificate') return false
 
       const curriculum = results.curriculumDetected
-      if (!curriculum?.lessonNumber) return
+      if (!curriculum?.lessonNumber) return false
+
+      const index = resolvePreCompletionScanIndex(
+        preCompletionTarget, { familyId, childId: selectedChildId, dateKey: today }, scanResult.id, dayLog,
+      )
+      if (index == null) {
+        setSnackMessage({ text: 'This scan is no longer linked to one row in this plan. Scan the intended row again before accepting.', severity: 'warning' })
+        return false
+      }
+      const item = dayLog.checklist![index]
+      const itemKey = preCompletionTarget!.itemId
+      // Capture identity before either await. The row patch reads the latest
+      // saved checklist, while navigation cannot redirect this confirmed work.
+      const target = {
+        familyId,
+        childId: selectedChildId,
+        dateKey: today,
+        itemKey,
+        hint: { index, completed: !!item.completed },
+      }
 
       try {
-        // 1. Mark checklist item as skipped with ai-recommended reason
-        const updatedChecklist = (dayLog.checklist ?? []).map((ci, i) =>
-          i === scanItemIndex
-            ? { ...ci, skipped: true, skipReason: SkipReason.AiRecommended }
-            : ci,
-        )
-
-        // 2. Advance currentPosition by +1
+        // Advance currentPosition by +1, as explicitly confirmed by this tap.
         await syncScanToConfig(selectedChildId, {
           ...results,
           curriculumDetected: { ...curriculum, lessonNumber: curriculum.lessonNumber + 1 },
         })
 
-        // 3. Record parentOverride on the scan record
+        // Record parentOverride on the scan record.
         if (scanResult.id) {
           const override = {
             recommendation: 'skip' as const,
@@ -1233,14 +1295,27 @@ export default function TodayPage() {
           await updateDoc(doc(scansCollection(familyId), scanResult.id), { parentOverride: override })
         }
 
-        persistDayLogImmediate({ ...dayLog, checklist: updatedChecklist })
+        const outcome = await writeChecklistRow({
+          ...target,
+          hint: target.hint,
+          requireUniqueIdentity: true,
+          patch: { skipped: true, skipReason: SkipReason.AiRecommended },
+          context: 'today-accept-skip',
+        })
+        const notice = skipRowWriteNotice(outcome)
+        if (notice) {
+          setSnackMessage({ text: notice, severity: 'warning' })
+          return false
+        }
         setSnackMessage({ text: 'Skipped. Moving forward.', severity: 'success' })
+        return true
       } catch (err) {
         console.error('[TodayPage] Failed to accept skip recommendation', err)
-        setSnackMessage({ text: 'Failed to accept skip', severity: 'error' })
+        setSnackMessage({ text: 'Failed to finish accepting the skip. Curriculum progress may already have advanced; check it before trying again.', severity: 'error' })
+        return false
       }
     },
-    [familyId, selectedChildId, dayLog, scanResult, scanItemIndex, syncScanToConfig, persistDayLogImmediate, setSnackMessage],
+    [familyId, selectedChildId, dayLog, scanResult, preCompletionTarget, syncScanToConfig, today, setSnackMessage],
   )
 
   // --- Loading state ---
@@ -1567,6 +1642,9 @@ export default function TodayPage() {
           configsLoading={activityConfigsLoading}
           configsFailed={!!activityConfigsError}
           onPreCompletionScan={handlePreCompletionScan}
+          onPreparePreCompletionScan={handlePreparePreCompletionScan}
+          preparingScanRows={preparingScanRows}
+          scanResultItemIndex={scanResultItemIndex}
           captureLoading={scanLoading}
           captureItemIndex={scanItemIndex}
           scanResult={scanResult}
