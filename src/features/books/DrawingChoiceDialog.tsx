@@ -6,8 +6,11 @@ import Dialog from '@mui/material/Dialog'
 import DialogActions from '@mui/material/DialogActions'
 import DialogContent from '@mui/material/DialogContent'
 import DialogTitle from '@mui/material/DialogTitle'
+import FormControl from '@mui/material/FormControl'
 import FormControlLabel from '@mui/material/FormControlLabel'
-import Slider from '@mui/material/Slider'
+import FormLabel from '@mui/material/FormLabel'
+import Radio from '@mui/material/Radio'
+import RadioGroup from '@mui/material/RadioGroup'
 import Stack from '@mui/material/Stack'
 import Switch from '@mui/material/Switch'
 import Typography from '@mui/material/Typography'
@@ -20,7 +23,7 @@ import WallpaperIcon from '@mui/icons-material/Wallpaper'
 import { ART_QUOTA_MESSAGE } from '../business/useArtQuota'
 import { ArtHelpButton, GenerateHint } from './ArtHelpSheet'
 import type { ArtHelpAudience } from './artHelpContent'
-import { REIMAGINE_LEFT_LABEL, REIMAGINE_RIGHT_LABEL } from './reimagineCaptions'
+import { REIMAGINE_LOOK_CHOICES } from './reimagineCaptions'
 
 /** Checkerboard background to make transparent regions visible in previews. */
 export const CHECKERBOARD_BG =
@@ -110,24 +113,40 @@ const PAID_POST_CLEANUP_CHOICES: readonly PostCleanupChoice[] = [
   'reimagine-scene',
 ]
 
-/**
- * The reimagine slider's bands (FEAT-193 / UX-161a).
- *
- * The band labels describe how closely the prompt asks the redraw to follow the
- * original — a real difference in what is sent. The two END labels used to read
- * "Keep my style" ↔ "Full reimagine"; neither was true, so they now name the two
- * looks the slider actually reaches and live in `reimagineCaptions.ts` beside
- * the captions they have to agree with.
- *
- * That the first two bands resolve to the same style is a routing defect
- * (UX-161b, batch B), deliberately not papered over here.
- */
-const REIMAGINE_MARKS = [
-  { value: 0, label: 'Light' },
-  { value: 50, label: 'Medium' },
-  { value: 100, label: 'Full' },
-]
-
+/** Both drawing paths offer the same two looks through the existing callbacks. */
+function ReimagineLookChoice({
+  value,
+  onChange,
+}: {
+  value: number
+  onChange: (value: number) => void
+}) {
+  return (
+    <FormControl component="fieldset" fullWidth>
+      <FormLabel component="legend">Choose a look</FormLabel>
+      <RadioGroup
+        aria-label="Choose a look"
+        value={value}
+        onChange={(_, next) => onChange(Number(next))}
+        sx={{ gap: 1, mt: 1 }}
+      >
+        {REIMAGINE_LOOK_CHOICES.map((look) => (
+          <FormControlLabel
+            key={look.intensity}
+            value={look.intensity}
+            control={<Radio />}
+            label={look.label}
+            sx={{
+              m: 0, px: 1, minHeight: 48, border: '1px solid', borderRadius: 2,
+              borderColor: value === look.intensity ? 'primary.main' : 'divider',
+              bgcolor: value === look.intensity ? 'action.selected' : 'transparent',
+            }}
+          />
+        ))}
+      </RadioGroup>
+    </FormControl>
+  )
+}
 
 export default function DrawingChoiceDialog({
   open,
@@ -153,7 +172,7 @@ export default function DrawingChoiceDialog({
    * Tracks which post-cleanup reimagine path is open:
    * - 'sticker' → transparent toggle defaults ON
    * - 'scene'   → transparent toggle defaults OFF
-   * - null      → not in the post-cleanup reimagine intensity step
+   * - null      → not in the post-cleanup look choice step
    */
   const [postCleanupReimagineMode, setPostCleanupReimagineMode] =
     useState<'sticker' | 'scene' | null>(null)
@@ -227,7 +246,7 @@ export default function DrawingChoiceDialog({
     ? POST_CLEANUP_CHOICES.filter((c) => !PAID_POST_CLEANUP_CHOICES.includes(c.value))
     : POST_CLEANUP_CHOICES
 
-  // Post-cleanup reimagine intensity slider (sticker or scene path)
+  // Post-cleanup look choice (sticker or scene path)
   if (resultPreviewUrl && resultIsCleaned && postCleanupReimagineMode) {
     const isSticker = postCleanupReimagineMode === 'sticker'
     return (
@@ -251,23 +270,7 @@ export default function DrawingChoiceDialog({
                 background: CHECKERBOARD_BG,
               }}
             />
-            <Stack direction="row" alignItems="center" spacing={2} sx={{ px: 1 }}>
-              <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
-                {REIMAGINE_LEFT_LABEL}
-              </Typography>
-              <Slider
-                value={reimagineIntensity}
-                onChange={(_, v) => setReimagineIntensity(v as number)}
-                marks={REIMAGINE_MARKS}
-                step={null}
-                min={0}
-                max={100}
-                sx={{ flex: 1 }}
-              />
-              <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
-                {REIMAGINE_RIGHT_LABEL}
-              </Typography>
-            </Stack>
+            <ReimagineLookChoice value={reimagineIntensity} onChange={setReimagineIntensity} />
             <FormControlLabel
               sx={{ mt: 2, ml: 0.5 }}
               control={
@@ -423,13 +426,13 @@ export default function DrawingChoiceDialog({
     )
   }
 
-  // Show reimagine intensity slider
+  // Show the two reimagine looks
   if (selectedChoice === 'reimagine' && !processing) {
     return (
       <Dialog open={open} onClose={handleClose} fullWidth maxWidth="sm">
         <DialogTitle>
           <Stack direction="row" alignItems="center" spacing={0.5}>
-            <span>Reimagine intensity</span>
+            <span>Reimagine your drawing</span>
             {/* The "?" for this paid door (UX-147). */}
             {onOpenArtHelp && <ArtHelpButton onClick={onOpenArtHelp} />}
           </Stack>
@@ -445,23 +448,7 @@ export default function DrawingChoiceDialog({
                 ...(transparent ? { background: CHECKERBOARD_BG } : {}),
               }}
             />
-            <Stack direction="row" alignItems="center" spacing={2} sx={{ px: 1 }}>
-              <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
-                {REIMAGINE_LEFT_LABEL}
-              </Typography>
-              <Slider
-                value={reimagineIntensity}
-                onChange={(_, v) => setReimagineIntensity(v as number)}
-                marks={REIMAGINE_MARKS}
-                step={null}
-                min={0}
-                max={100}
-                sx={{ flex: 1 }}
-              />
-              <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
-                {REIMAGINE_RIGHT_LABEL}
-              </Typography>
-            </Stack>
+            <ReimagineLookChoice value={reimagineIntensity} onChange={setReimagineIntensity} />
             <FormControlLabel
               sx={{ mt: 2, ml: 0.5 }}
               control={

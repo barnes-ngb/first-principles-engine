@@ -139,6 +139,19 @@ than ported into it):
   exact strings the prompt teaches, so a change to either syntax fails to build a passing
   test rather than silently leaking `[[BOUNDARY:…]]` into a sentence a parent reads.
 
+Additional consolidation (UX-296):
+
+- `foundations/` — the static reading/math concept spine and pure selectors, formerly
+  client-owned graphs plus a manually generated server mirror. The existing client
+  files retain compatibility exports, and `ai/data/foundationsGraphSummary.ts`
+  derives its projection in spine order with independent edge arrays. The current
+  values agreed before this change; it removes the manual regeneration step that
+  could leave later edits inconsistent. Graph content, versions and runtime exports
+  are unchanged. The server version constant now infers `string`, as its value is
+  derived. The obsolete `scripts/genFoundationsSummary.ts` is retired. Shared-source
+  identity and server projection tests guard the relationship. This consolidation
+  does not change the separately listed Dad Lab copy below.
+
 Still a hand-kept copy (named while consolidating slice 4, out of all four slices'
 scope):
 
