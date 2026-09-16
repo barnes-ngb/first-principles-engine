@@ -142,7 +142,11 @@ export function useStoryGenerator() {
           role: 'user',
           content: JSON.stringify({
             sightWords,
-            theme,
+            // This surface's "theme" argument is the typed/default story
+            // idea. Keep that content separate from the practice preset ID.
+            ...(sightWords.length > 0
+              ? { storyIdea: theme, theme: 'sight_words' }
+              : { theme }),
             pageCount: pageCount ?? 10,
           }),
         }],

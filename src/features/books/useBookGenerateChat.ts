@@ -1161,9 +1161,12 @@ export function useBookGenerateChat(
               // default) is byte-for-byte the pre-FEAT-191 request. Off the
               // ref, so a tap in the same tick as the confirm still counts.
               levelStretch: levelStretchRef.current,
-              // Deliberately `[]`: with words, inferBookTheme returns
-              // `sight_words` and the picked style's theme guidance is lost.
-              theme: inferBookTheme(pendingIdea, [], illustrationStyle),
+              // An explicit requested list asks for a practice book. Words
+              // merely woven into an ordinary story keep its idea/style
+              // guidance. Persisted and image theme selection stay separate.
+              theme: storyWordSource === StoryWordSource.Requested && storyWords.length > 0
+                ? 'sight_words'
+                : inferBookTheme(pendingIdea, [], illustrationStyle),
               // The parent's one-off note (FEAT-194). Spread conditionally so a
               // book without one sends a payload byte-identical to before this
               // run. The server prefers it over `theme` above — that id is
