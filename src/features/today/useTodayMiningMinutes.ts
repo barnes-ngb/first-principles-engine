@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { getDocs, query, where } from 'firebase/firestore'
 
 import { hoursCollection } from '../../core/firebase/firestore'
@@ -19,11 +19,21 @@ export function useTodayMiningMinutes(
   familyId: string,
   childId: string,
   todayDateKey: string,
-): number {
-  const [minutes, setMinutes] = useState(0)
+) {
+  const scope = JSON.stringify([familyId, childId, todayDateKey])
+  const [state, setState] = useState<{
+    scope: string; visit: number; attempt: number
+    status: 'loading' | 'ready' | 'unavailable'; minutes: number | null
+  }>({ scope, visit: 0, attempt: 0, status: 'loading', minutes: null })
+  // Reset during render: the new child/day never borrows the previous total.
+  if (state.scope !== scope) {
+    setState({ scope, visit: state.visit + 1, attempt: 0, status: 'loading', minutes: null })
+  }
+  const { visit, attempt } = state
 
   useEffect(() => {
     if (!familyId || !childId || !todayDateKey) return
+    let active = true
     const q = query(
       hoursCollection(familyId),
       where('childId', '==', childId),
@@ -32,14 +42,27 @@ export function useTodayMiningMinutes(
     )
     getDocs(q)
       .then((snap) => {
+        if (!active) return
         const total = snap.docs.reduce(
           (sum, d) => sum + (d.data().minutes ?? 0),
           0,
         )
-        setMinutes(total > 0 ? roundToFiveMinutes(total) : 0)
+        setState((prev) => prev.visit === visit && prev.attempt === attempt ? {
+          ...prev, status: 'ready', minutes: total > 0 ? roundToFiveMinutes(total) : 0,
+        } : prev)
       })
-      .catch((err) => console.error('[MiningCard] Load hours failed:', err))
-  }, [familyId, childId, todayDateKey])
+      .catch((err) => {
+        if (!active) return
+        console.error('[MiningCard] Load hours failed:', err)
+        setState((prev) => prev.visit === visit && prev.attempt === attempt ? { ...prev, status: 'unavailable', minutes: null } : prev)
+      })
+    return () => { active = false }
+  }, [familyId, childId, todayDateKey, visit, attempt])
 
-  return minutes
+  const retry = useCallback(() => {
+    setState((prev) => prev.scope === scope && prev.visit === visit && prev.status === 'unavailable'
+      ? { ...prev, attempt: prev.attempt + 1, status: 'loading', minutes: null } : prev)
+  }, [scope, visit])
+
+  return { status: state.status, minutes: state.minutes, retry }
 }

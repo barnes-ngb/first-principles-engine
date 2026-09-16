@@ -283,8 +283,11 @@ interface TodayChecklistProps {
   onPrintMaterials: () => void
   printingMaterials: boolean
   scanFeedbackBySubject?: Record<string, { topic: string; recommendation: 'do' | 'skip' | 'quick-review' | 'modify'; estimatedMinutes?: number }>
+  /** Unknown guidance must not invite another scan as though none exists. */
+  scanFeedbackAvailable?: boolean
   /** Recent scan records for looking up scan analysis on captured items. */
   recentScans?: ScanRecord[]
+  recentScansAvailable?: boolean
   /**
    * UX-343 — which of this component's own dialogs/drafts are open right now.
    *
@@ -335,7 +338,9 @@ export default function TodayChecklist({
   onPrintMaterials,
   printingMaterials,
   scanFeedbackBySubject = {},
+  scanFeedbackAvailable = true,
   recentScans = [],
+  recentScansAvailable = true,
   onOpenDecisionsChange,
 }: TodayChecklistProps) {
   const navigate = useNavigate()
@@ -746,7 +751,7 @@ export default function TodayChecklist({
   // openChatWithContext is kept for other callers but no longer used here.)
   const handleFindVideo = (item: ChecklistItemType) => {
     const bucket = item.subjectBucket ?? inferSubjectBucket(item.label)
-    const scanTopic = bucket ? scanFeedbackBySubject[bucket]?.topic : undefined
+    const scanTopic = scanFeedbackAvailable && bucket ? scanFeedbackBySubject[bucket]?.topic : undefined
     const rawTitle = (item as ChecklistItemType & { title?: string }).title
     // Best topic = scan-feedback topic ?? title ?? label (minutes suffix stripped).
     const cleanLabel = item.label.replace(/\s*\(\d+m\)\s*$/, '').trim()
@@ -1166,7 +1171,7 @@ export default function TodayChecklist({
                 {/* Scan-based feedback (specific — from photographed page) */}
                 {!item.completed && getSparkleMode(item) === 'scan' && isScannableWorkbook(item) && (() => {
                   const bucket = item.subjectBucket ?? inferSubjectBucket(item.label)
-                  const fb = bucket ? scanFeedbackBySubject[bucket] : undefined
+                  const fb = scanFeedbackAvailable && bucket ? scanFeedbackBySubject[bucket] : undefined
                   if (!fb) return null
                   const styles = {
                     'skip': { bg: 'success.50', color: 'success.main', label: 'Skip \u2014 already knows this' },
@@ -1193,8 +1198,8 @@ export default function TodayChecklist({
                 {/* "No scan yet" prompt for workbook items */}
                 {!item.completed && getSparkleMode(item) === 'scan' && isScannableWorkbook(item) && (() => {
                   const bucket = item.subjectBucket ?? inferSubjectBucket(item.label)
-                  const hasFeedback = bucket ? !!scanFeedbackBySubject[bucket] : false
-                  if (hasFeedback || item.skipGuidance) return null
+                  const hasFeedback = scanFeedbackAvailable && bucket ? !!scanFeedbackBySubject[bucket] : false
+                  if (!scanFeedbackAvailable || hasFeedback || item.skipGuidance) return null
                   return (
                     <Typography
                       variant="caption"
@@ -1207,7 +1212,7 @@ export default function TodayChecklist({
                 {/* Skip guidance (parent-only, not shown in kid view) — hidden when scan feedback exists */}
                 {item.skipGuidance && !item.completed && !(() => {
                   const bucket = item.subjectBucket ?? inferSubjectBucket(item.label)
-                  return bucket ? !!scanFeedbackBySubject[bucket] : false
+                  return scanFeedbackAvailable && bucket ? !!scanFeedbackBySubject[bucket] : false
                 })() && (
                   <Typography
                     variant="caption"
@@ -1417,19 +1422,20 @@ export default function TodayChecklist({
                   // page keeps its analysis on the scan doc but acts on nothing;
                   // `pendingScanId` surfaces it here as "Review this" on the
                   // same expandable chip a parent's own scan already gets.
-                  const scanDoc = item.evidenceCollection === 'scans'
+                  const scanDoc = !recentScansAvailable ? undefined : item.evidenceCollection === 'scans'
                     ? recentScans.find((s) => s.id === item.evidenceArtifactId)
                     : item.pendingScanId
                       ? recentScans.find((s) => s.id === item.pendingScanId)
                       : undefined
                   const isExpandable = !!scanDoc?.results
-                  const needsReview = !!item.pendingScanId && isExpandable
-                  const chipWord = needsReview ? 'Review this' : 'Captured ✓'
+                  const reviewPending = !!item.pendingScanId && !recentScansAvailable
+                  const needsReview = !!item.pendingScanId && (isExpandable || reviewPending)
+                  const chipWord = reviewPending ? 'Review pending' : needsReview ? 'Review this' : 'Captured ✓'
                   return (
                     <>
                       <Chip
                         size="small"
-                        label={isExpandable ? (expandedCaptureIndex === index ? `${chipWord} ▴` : `${chipWord} ▾`) : 'Captured ✓'}
+                        label={isExpandable ? (expandedCaptureIndex === index ? `${chipWord} ▴` : `${chipWord} ▾`) : chipWord}
                         variant="outlined"
                         color={needsReview ? 'warning' : 'success'}
                         onClick={isExpandable ? () => setExpandedCaptureIndex(expandedCaptureIndex === index ? null : index) : undefined}

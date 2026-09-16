@@ -298,7 +298,7 @@ export default function KidTodayView({
   const avatarProfile = useAvatarProfile(familyId, child.id)
   const [dailyArmorSession, setDailyArmorSession] = useState<DailyArmorSession | null>(null)
 
-  const todayMinedMinutes = useTodayMiningMinutes(familyId, child.id, today)
+  const miningRead = useTodayMiningMinutes(familyId, child.id, today)
   // The mining row is gated exactly as the Hero Hub tile (`MyAvatarPage.tsx`
   // `hideKnowledgeMine`) and the `/quest` route: on the child's calibration
   // data, never on a name (FEAT-184 / UX-150). Before this, the row rendered
@@ -885,10 +885,15 @@ export default function KidTodayView({
         <KidRitualRow
           icon="⛏️"
           title="Knowledge Mine"
-          subtitle={todayMinedMinutes > 0 ? `${todayMinedMinutes} min today` : 'No mining yet today'}
+          subtitle={miningRead.status === 'loading' ? 'Checking mining time…'
+            : miningRead.status === 'unavailable' ? 'Mining time is unavailable.'
+            : (miningRead.minutes ?? 0) > 0 ? `${miningRead.minutes} min today` : 'No mining yet today'}
           isLincoln={isLincoln}
           alwaysOpen
         >
+          {miningRead.status === 'unavailable' && (
+            <Button onClick={miningRead.retry} size="small">Try again</Button>
+          )}
           <Button
             fullWidth
             size="large"

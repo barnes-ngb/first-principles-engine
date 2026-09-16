@@ -19,10 +19,12 @@ export function hasUnappliedDraftItems(
 }
 
 /** Which context banner (if any) the Today day-switcher shows for a viewed day. */
-export type TodayDayBanner = 'draft' | 'past' | 'upcoming-empty' | null
+export type TodayDayBanner = 'draft' | 'draft-loading' | 'draft-unavailable' | 'past' | 'upcoming-empty' | null
 
 /**
- * Pure selector for Today's day-context banner (FEAT-111 P2 + P4). Priority:
+ * Pure selector for Today's day-context banner (FEAT-111 P2 + P4). A pending
+ * or failed draft read reports its state before making any claim about a plan.
+ * Once the read succeeds, priority is:
  *   1. `draft` — an unapplied draft exists AND the viewed day is empty or
  *      upcoming (actionable "review and apply"); this wins so Today never
  *      renders a silently empty day.
@@ -35,9 +37,12 @@ export function selectTodayDayBanner(params: {
   isToday: boolean
   isPast: boolean
   dayIsEmpty: boolean
-  hasUnappliedDraft: boolean
+  hasUnappliedDraft: boolean | null
+  draftStatus?: 'loading' | 'ready' | 'unavailable'
 }): TodayDayBanner {
-  const { isToday, isPast, dayIsEmpty, hasUnappliedDraft } = params
+  const { isToday, isPast, dayIsEmpty, hasUnappliedDraft, draftStatus = 'ready' } = params
+  if (draftStatus === 'loading') return 'draft-loading'
+  if (draftStatus === 'unavailable') return 'draft-unavailable'
   const isUpcoming = !isToday && !isPast
   if (hasUnappliedDraft && (isUpcoming || dayIsEmpty)) return 'draft'
   if (!isToday && isPast) return 'past'

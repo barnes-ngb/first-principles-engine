@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -109,6 +109,7 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
     currentStory,
     illustrationStyle,
     isLoading,
+    isCommitting,
     error,
     clarificationPhase,
     pendingRefinement,
@@ -154,8 +155,24 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
   const [composerText, setComposerText] = useState('')
   const tts = useTTS()
 
+  const [pendingCommit, setPendingCommit] = useState<{ id: string; scope: object } | null>(null)
+  const commitScope = useMemo(() => ({ familyId, childId, resumeBookId }), [familyId, childId, resumeBookId])
+  const pendingCommitId = pendingCommit?.scope === commitScope ? pendingCommit.id : null
+  const activeCommitScope = useRef(commitScope)
+  useLayoutEffect(() => { activeCommitScope.current = commitScope }, [commitScope])
+  const mounted = useRef(true)
+  useEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false }
+  }, [])
+  const handedOff = useRef<string | null>(null)
+  const failedPages = illustrationProgress.failedPages ?? []
+  const hasPictureNotice = illustrationProgress.capReached || failedPages.length > 0
+
   const composerDisabled =
     isLoading ||
+    isCommitting ||
+    pendingCommitId !== null ||
     isIllustrating ||
     (clarificationPhase === 'clarifying' && pendingRefinement !== null)
 
@@ -249,30 +266,34 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
   // ── Commit / abandon ──────────────────────────────────────────
 
   /**
-   * The finished book, held back from the hand-off while the cap notice is on
+   * The finished book, held back from the hand-off while a picture notice is on
    * screen (FEAT-168, Codex P2 on PR #1720).
    *
    * `commitAndClose` sets `illustrationProgress` as it finishes, so a notice
    * rendered off that state used to be unmounted by `onCommit`'s navigation in
    * the same tick — a kid landed in an unillustrated book with no explanation.
    * Parking the id here lets the effect below decide: navigate as before when
-   * the pictures were made, or wait for a tap when the budget refused them.
+   * the pictures were made, or wait for a tap after a failure or quota refusal.
    */
-  const [pendingCommitId, setPendingCommitId] = useState<string | null>(null)
-
   const handleCommit = useCallback(async () => {
     tts.cancel()
     const id = await commitAndClose()
-    if (id) setPendingCommitId(id)
-  }, [commitAndClose, tts])
+    if (id && mounted.current && activeCommitScope.current === commitScope) {
+      setPendingCommit({ id, scope: commitScope })
+    }
+  }, [commitAndClose, commitScope, tts])
 
-  // Hand off immediately unless the day's art budget has something to say.
-  // Reading `capReached` here rather than inside `handleCommit` keeps it off a
-  // closure captured before `commitAndClose` ran.
-  useEffect(() => {
-    if (!pendingCommitId || illustrationProgress.capReached) return
+  const openCommittedBook = useCallback(() => {
+    if (!pendingCommitId || handedOff.current === pendingCommitId) return
+    handedOff.current = pendingCommitId
     onCommit(pendingCommitId)
-  }, [pendingCommitId, illustrationProgress.capReached, onCommit])
+  }, [pendingCommitId, onCommit])
+
+  // Read the settled progress after the commit, not its pre-commit closure.
+  useEffect(() => {
+    if (hasPictureNotice) return
+    openCommittedBook()
+  }, [hasPictureNotice, openCommittedBook])
 
   const handleAbandon = useCallback(async () => {
     tts.cancel()
@@ -282,7 +303,7 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
 
   // Abandon allowed any time before an AI story-draft turn exists.
   const canAbandon = currentStory === null
-  const canCommit = currentStory !== null && !isLoading && !isIllustrating
+  const canCommit = currentStory !== null && !isLoading && !isCommitting && !isIllustrating && !pendingCommitId
 
   const lastAiKind = useMemo(() => {
     for (let i = chatHistory.length - 1; i >= 0; i--) {
@@ -506,17 +527,25 @@ export default function BookGenerateChat({ onCommit, onAbandon, resumeBookId }: 
           ceiling — so this is a warm nudge in `text.secondary`, never an error.
           The hand-off to the book waits on the tap, so the kid actually reads
           it instead of being navigated past it. */}
-      {illustrationProgress.capReached && (
+      {hasPictureNotice && (
         <Stack spacing={1} sx={{ py: 1 }} aria-live="polite">
-          <Typography variant="body2" color="text.secondary">
-            Your story is saved! {ART_QUOTA_MESSAGE} You can add photos or
-            drawings in the editor.
-          </Typography>
+          {failedPages.length > 0 && (
+            <Alert severity="warning">
+              Your story is saved. We could not finish the {failedPages.length === 1 ? 'picture on page' : 'pictures on pages'}{' '}
+              {failedPages.join(', ')}. You can add a photo or drawing in your book.
+            </Alert>
+          )}
+          {illustrationProgress.capReached && (
+            <Typography variant="body2" color="text.secondary">
+              Your story is saved! {ART_QUOTA_MESSAGE} You can add photos or
+              drawings in the editor.
+            </Typography>
+          )}
           {pendingCommitId && (
             <Box>
               <Button
                 variant="contained"
-                onClick={() => onCommit(pendingCommitId)}
+                onClick={openCommittedBook}
                 sx={{ minHeight: 44, textTransform: 'none' }}
               >
                 Okay — take me to my book

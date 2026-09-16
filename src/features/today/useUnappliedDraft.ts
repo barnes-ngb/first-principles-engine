@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { doc, onSnapshot } from 'firebase/firestore'
 
 import {
@@ -20,20 +20,23 @@ export function useUnappliedDraft(
   familyId: string | undefined,
   childId: string | undefined,
   weekStartKey: string | undefined,
-): boolean {
-  const [hasDraft, setHasDraft] = useState(false)
-  const key = `${familyId ?? ''}|${childId ?? ''}|${weekStartKey ?? ''}`
-  const [lastKey, setLastKey] = useState(key)
+) {
+  const scope = JSON.stringify([familyId, childId, weekStartKey])
+  const [state, setState] = useState<{
+    scope: string; visit: number; attempt: number
+    status: 'loading' | 'ready' | 'unavailable'; hasDraft: boolean | null
+  }>({ scope, visit: 0, attempt: 0, status: 'loading', hasDraft: null })
 
   // Reset synchronously when the week/child changes so a reader never shows a
   // stale week's draft banner for a frame (repo pattern — see useLearnerModel).
-  if (lastKey !== key) {
-    setLastKey(key)
-    setHasDraft(false)
+  if (state.scope !== scope) {
+    setState({ scope, visit: state.visit + 1, attempt: 0, status: 'loading', hasDraft: null })
   }
+  const { visit, attempt } = state
 
   useEffect(() => {
     if (!familyId || !childId || !weekStartKey) return
+    let active = true
     const ref = doc(
       plannerConversationsCollection(familyId),
       plannerConversationDocId(weekStartKey, childId),
@@ -41,15 +44,24 @@ export function useUnappliedDraft(
     const unsub = onSnapshot(
       ref,
       (snap) => {
-        setHasDraft(hasUnappliedDraftItems(snap.exists() ? snap.data() : null))
+        if (!active) return
+        setState((prev) => prev.visit === visit && prev.attempt === attempt ? {
+          ...prev, status: 'ready', hasDraft: hasUnappliedDraftItems(snap.exists() ? snap.data() : null),
+        } : prev)
       },
       (err) => {
+        if (!active) return
         console.warn('[useUnappliedDraft] snapshot error:', err)
-        setHasDraft(false)
+        setState((prev) => prev.visit === visit && prev.attempt === attempt ? { ...prev, status: 'unavailable', hasDraft: null } : prev)
       },
     )
-    return unsub
-  }, [familyId, childId, weekStartKey])
+    return () => { active = false; unsub() }
+  }, [familyId, childId, weekStartKey, visit, attempt])
 
-  return hasDraft
+  const retry = useCallback(() => {
+    setState((prev) => prev.scope === scope && prev.visit === visit && prev.status === 'unavailable'
+      ? { ...prev, attempt: prev.attempt + 1, status: 'loading', hasDraft: null } : prev)
+  }, [scope, visit])
+
+  return { status: state.status, hasDraft: state.hasDraft, retry }
 }

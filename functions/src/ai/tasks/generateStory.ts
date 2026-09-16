@@ -20,7 +20,7 @@ const PRESET_THEME_MAP: Record<string, {
   storyTone: string;
   storyWorldDescription: string;
   storyVocabularyLevel: string;
-  imageStylePrefix: string;
+  imageStylePrefix?: string;
 }> = {
   adventure: {
     storyTone: "adventurous and exciting with brave heroes",
@@ -34,6 +34,11 @@ const PRESET_THEME_MAP: Record<string, {
     storyVocabularyLevel: "simple sentences with animal vocabulary",
     imageStylePrefix: "A warm, friendly children's book illustration of animals in nature.",
   },
+  family: {
+    storyTone: "warm, loving, and relatable with family moments",
+    storyWorldDescription: "a loving home where a family shares everyday adventures together",
+    storyVocabularyLevel: "simple sentences about daily life and emotions",
+  },
   fantasy: {
     storyTone: "whimsical and magical with wonder and discovery",
     storyWorldDescription: "an enchanted realm with dragons, fairies, magic spells, and glowing forests",
@@ -45,6 +50,21 @@ const PRESET_THEME_MAP: Record<string, {
     storyWorldDescription: "a blocky world made of cubes where heroes mine resources, craft tools, and explore caves",
     storyVocabularyLevel: "simple action-oriented sentences",
     imageStylePrefix: "A blocky pixel-art Minecraft-style scene.",
+  },
+  science: {
+    storyTone: "curious and educational with discovery and experimentation",
+    storyWorldDescription: "a world where young scientists explore nature, conduct experiments, and make discoveries",
+    storyVocabularyLevel: "medium complexity with age-appropriate science vocabulary",
+  },
+  sight_words: {
+    storyTone: "simple and repetitive for reading practice",
+    storyWorldDescription: "everyday scenes that naturally use common sight words in context",
+    storyVocabularyLevel: "very simple with high-frequency sight words repeated throughout",
+  },
+  faith: {
+    storyTone: "gentle, reverent, and encouraging with faith themes",
+    storyWorldDescription: "a world that reflects God's creation, kindness, and the beauty of faith",
+    storyVocabularyLevel: "simple sentences with age-appropriate faith vocabulary",
   },
   space: {
     storyTone: "exciting and wonder-filled with space exploration",
