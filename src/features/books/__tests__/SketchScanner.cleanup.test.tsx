@@ -66,6 +66,118 @@ describe('scanner correction/save session boundaries', () => {
     expect(save.mock.calls[0][1]).toMatchObject({ childProfile: 'lincoln', label: "Lincoln's drawing" })
   })
 
+  it('fills a late capture owner once, then keeps it through later header changes', async () => {
+    const user = userEvent.setup()
+    const view = render(<SketchScanner open familyId="f1" childName="" onClose={() => {}} />)
+    await capture(user)
+    await screen.findByRole('button', { name: 'Save Cleaned' })
+    view.rerender(<SketchScanner open familyId="f1" childName="Lincoln" childProfile="lincoln" onClose={() => {}} />)
+    expect(screen.getByRole('textbox', { name: 'Sticker label' })).toHaveValue("Lincoln's drawing")
+    view.rerender(<SketchScanner open familyId="f1" childName="London" childProfile="london" onClose={() => {}} />)
+    await user.click(screen.getByRole('button', { name: 'Save Cleaned' }))
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1))
+    expect(save.mock.calls[0][1]).toMatchObject({ childProfile: 'lincoln', label: "Lincoln's drawing" })
+  })
+
+  it.each(['London', 'Both'])('late owner metadata preserves an explicit For %s and edited label', async choice => {
+    const user = userEvent.setup()
+    const view = render(<SketchScanner open familyId="f1" childName="" onClose={() => {}} />)
+    await capture(user)
+    const label = await screen.findByRole('textbox', { name: 'Sticker label' })
+    await user.clear(label)
+    await user.type(label, 'Our dragon')
+    await user.click(screen.getByRole('button', { name: choice }))
+    view.rerender(<SketchScanner open familyId="f1" childName="Lincoln" childProfile="lincoln" onClose={() => {}} />)
+    await user.click(screen.getByRole('button', { name: 'Save Cleaned' }))
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1))
+    expect(save.mock.calls[0][1]).toMatchObject({ childProfile: choice.toLowerCase(), label: 'Our dragon' })
+  })
+
+  it('an explicit For choice does not prevent the missing default label from filling', async () => {
+    const user = userEvent.setup()
+    const view = render(<SketchScanner open familyId="f1" childName="" onClose={() => {}} />)
+    await capture(user)
+    await user.click(await screen.findByRole('button', { name: 'Both' }))
+    view.rerender(<SketchScanner open familyId="f1" childName="Lincoln" childProfile="lincoln" onClose={() => {}} />)
+    expect(screen.getByRole('textbox', { name: 'Sticker label' })).toHaveValue("Lincoln's drawing")
+    await user.click(screen.getByRole('button', { name: 'Save Cleaned' }))
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1))
+    expect(save.mock.calls[0][1].childProfile).toBe('both')
+  })
+
+  it('binds a newly known ID while its name is missing, then resolves it while another child is active', async () => {
+    const user = userEvent.setup()
+    const props = { open: true, familyId: 'f1', onClose: () => {} }
+    const view = render(<SketchScanner {...props} ownerContext={{ children: [] }} />)
+    await capture(user)
+    await screen.findByRole('button', { name: 'Save Cleaned' })
+    view.rerender(<SketchScanner {...props} ownerContext={{ activeChildId: 'a', children: [] }} />)
+    view.rerender(<SketchScanner {...props} childName="London" childProfile="london" ownerContext={{ activeChildId: 'b', children: [{ id: 'b', name: 'London', profile: 'london' }] }} />)
+    expect(screen.getByRole('textbox', { name: 'Sticker label' })).toHaveValue('My drawing')
+    view.rerender(<SketchScanner {...props} childName="London" childProfile="london" ownerContext={{ activeChildId: 'b', children: [{ id: 'b', name: 'London', profile: 'london' }, { id: 'a', name: 'Lincoln', profile: 'lincoln' }] }} />)
+    expect(screen.getByRole('textbox', { name: 'Sticker label' })).toHaveValue("Lincoln's drawing")
+    await user.click(screen.getByRole('button', { name: 'Save Cleaned' }))
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1))
+    expect(save.mock.calls[0][1]).toMatchObject({ childProfile: 'lincoln', label: "Lincoln's drawing" })
+  })
+
+  it('resolves the pending locked profile without adopting another child fallback', async () => {
+    const user = userEvent.setup(), props = { open: true, familyId: 'f1', onClose: () => {} }
+    const view = render(<SketchScanner {...props} ownerContext={{ pendingProfile: 'lincoln', children: [{ id: 'b', name: 'London', profile: 'london' }] }} />)
+    await capture(user)
+    await screen.findByRole('button', { name: 'Save Cleaned' })
+    expect(screen.getByRole('textbox', { name: 'Sticker label' })).toHaveValue('My drawing')
+    view.rerender(<SketchScanner {...props} ownerContext={{ activeChildId: 'a', pendingProfile: 'lincoln', children: [{ id: 'b', name: 'London', profile: 'london' }, { id: 'a', name: 'Lincoln', profile: 'lincoln' }] }} />)
+    expect(screen.getByRole('textbox', { name: 'Sticker label' })).toHaveValue("Lincoln's drawing")
+    await user.click(screen.getByRole('button', { name: 'Save Cleaned' }))
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1))
+    expect(save.mock.calls[0][1].childProfile).toBe('lincoln')
+  })
+
+  it('a save started before resolution keeps the submitted label and For snapshot', async () => {
+    let complete!: (value: { ref: object }) => void
+    upload.mockImplementationOnce(() => new Promise(resolve => { complete = resolve }))
+    const user = userEvent.setup(), props = { open: true, familyId: 'f1', onClose: () => {} }
+    const view = render(<SketchScanner {...props} ownerContext={{ activeChildId: 'a', children: [] }} />)
+    await capture(user)
+    await user.click(await screen.findByRole('button', { name: 'Save Cleaned' }))
+    view.rerender(<SketchScanner {...props} ownerContext={{ activeChildId: 'a', children: [{ id: 'a', name: 'Lincoln', profile: 'lincoln' }] }} />)
+    await act(async () => complete({ ref: {} }))
+    expect(save).toHaveBeenCalledTimes(1)
+    expect(save.mock.calls[0][1]).toMatchObject({ childProfile: 'both', label: 'My drawing' })
+    expect(screen.getByRole('textbox', { name: 'Sticker label' })).toHaveValue('My drawing')
+  })
+
+  it('a paid transform begun before resolution keeps its displayed defaults with the returned picture', async () => {
+    let complete!: (value: { url: string; storagePath: string }) => void
+    enhance.mockImplementationOnce(() => new Promise(resolve => { complete = resolve }))
+    const user = userEvent.setup(), props = { open: true, familyId: 'f1', onClose: () => {} }
+    const view = render(<SketchScanner {...props} ownerContext={{ activeChildId: 'a', children: [] }} />)
+    await capture(user)
+    await user.click(await screen.findByRole('tab', { name: /Fancy/ }))
+    await user.click(screen.getByRole('button', { name: 'Make it fancy' }))
+    await waitFor(() => expect(enhance).toHaveBeenCalledTimes(1))
+    view.rerender(<SketchScanner {...props} ownerContext={{ activeChildId: 'b', children: [{ id: 'a', name: 'Lincoln', profile: 'lincoln' }, { id: 'b', name: 'London', profile: 'london' }] }} />)
+    await act(async () => complete({ url: 'https://example.test/fancy.png', storagePath: 'families/f1/fancy.png' }))
+    expect(screen.getByRole('textbox', { name: 'Sticker label' })).toHaveValue('My drawing')
+    await user.click(screen.getByRole('button', { name: 'Save Fancy' }))
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1))
+    expect(save.mock.calls[0][1]).toMatchObject({ childProfile: 'both', label: 'My drawing' })
+  })
+
+  it('retaking drops an unresolved identity binding and starts from the new selection', async () => {
+    const user = userEvent.setup(), props = { open: true, familyId: 'f1', onClose: () => {} }
+    const view = render(<SketchScanner {...props} ownerContext={{ activeChildId: 'a', children: [] }} />)
+    await capture(user)
+    await user.click(await screen.findByRole('button', { name: 'Retake' }))
+    view.rerender(<SketchScanner {...props} ownerContext={{ activeChildId: 'b', children: [{ id: 'b', name: 'London', profile: 'london' }] }} />)
+    await capture(user)
+    expect(await screen.findByRole('textbox', { name: 'Sticker label' })).toHaveValue("London's drawing")
+    await user.click(screen.getByRole('button', { name: 'Save Cleaned' }))
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1))
+    expect(save.mock.calls[0][1].childProfile).toBe('london')
+  })
+
   it('closing a pending cleanup cannot reopen or repopulate a new capture', async () => {
     let complete!: (file: File) => void
     clean.mockImplementationOnce(() => new Promise<File>(resolve => { complete = resolve }))

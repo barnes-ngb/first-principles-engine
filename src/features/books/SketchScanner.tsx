@@ -65,6 +65,8 @@ interface SketchScannerProps {
   childProfile?: 'lincoln' | 'london'
   /** Used for the default sticker label. */
   childName?: string
+  /** Existing host identities, so a selected ID can resolve after capture. */
+  ownerContext?: CaptureOwnerContext
   /** Fired after each sticker (raw cleaned or fancy) is saved to the library. */
   onSaved?: () => void
   /**
@@ -122,12 +124,46 @@ export default function SketchScanner(props: SketchScannerProps) {
   return props.open ? <SketchScannerSession key={props.familyId} {...props} /> : null
 }
 
+type StickerProfile = 'lincoln' | 'london'
+interface CaptureOwnerContext {
+  activeChildId?: string
+  /** A locked child profile must not bind the hook's temporary parent fallback. */
+  pendingProfile?: StickerProfile
+  children: readonly { id: string; name: string; profile?: StickerProfile }[]
+}
+interface CaptureOwner {
+  id?: string
+  pendingProfile?: StickerProfile
+  name?: string
+  profile?: StickerProfile
+  resolved: boolean
+}
+
+/** Resolve only the captured identity. Once complete, later header changes are inert. */
+function resolveCaptureOwner(owner: CaptureOwner, context: CaptureOwnerContext | undefined, name: string | undefined, profile: StickerProfile | undefined): CaptureOwner {
+  if (owner.resolved) return owner
+  if (context) {
+    const id = owner.id ?? (owner.pendingProfile
+      ? context.children.find(child => child.profile === owner.pendingProfile)?.id
+      : context.activeChildId)
+    const child = id ? context.children.find(candidate => candidate.id === id) : undefined
+    if (child?.name.trim()) return { ...owner, id, name: child.name, profile: child.profile, resolved: true }
+    return id !== owner.id ? { ...owner, id } : owner
+  }
+  // Compatibility for standalone callers without host IDs. A known profile is
+  // still a binding; never fill its missing name from a different profile.
+  if (name?.trim() && (!owner.profile || owner.profile === profile)) return { ...owner, name, profile, resolved: true }
+  if (!owner.profile && profile) return { ...owner, profile }
+  return owner
+}
+
 function SketchScannerSession({
   open,
   onClose,
   familyId,
   childProfile,
   childName,
+  ownerContext,
   onSaved,
   capReached = false,
   recordGeneration,
@@ -135,10 +171,10 @@ function SketchScannerSession({
   artBudget = { limit: 0, remaining: Infinity, capped: false },
 }: SketchScannerProps) {
   const [showHelp, setShowHelp] = useState(false)
-  // The active child can resolve *after* this dialog mounts with its page, so
-  // the default label follows `childName` until the kid types their own — a
-  // plain useState initializer froze it at "My drawing" (FEAT-160).
-  const [captureOwner, setCaptureOwner] = useState<{ name?: string } | null>(null)
+  // Missing capture metadata may arrive late (FEAT-160). Fill it for the bound
+  // identity once; later header switches must not relabel this drawing. The
+  // label hook keeps an explicit typed label authoritative throughout.
+  const [captureOwner, setCaptureOwner] = useState<CaptureOwner | null>(null)
   const { label, setLabel, resetLabel, defaultLabel } = useStickerLabel(captureOwner ? captureOwner.name : childName)
 
   const [stage, setStage] = useState<Stage>('capture')
@@ -185,6 +221,17 @@ function SketchScannerSession({
   // Shared tagging (applies to whichever version is saved)
   const [tags, setTags] = useState<StickerTag[]>([])
   const [profile, setProfile] = useState<'lincoln' | 'london' | 'both'>(childProfile ?? 'both')
+  const [profileEdited, setProfileEdited] = useState(false)
+  // Resolve during the props/state transition, before a save handler can see a
+  // new name with stale defaults. Explicit label edits live in useStickerLabel;
+  // explicit For (including Both) is independently authoritative.
+  if (captureOwner && !captureOwner.resolved) {
+    const resolved = resolveCaptureOwner(captureOwner, ownerContext, childName, childProfile)
+    if (resolved !== captureOwner) {
+      setCaptureOwner(resolved)
+      if (resolved.resolved && !profileEdited) setProfile(resolved.profile ?? 'both')
+    }
+  }
 
   // Save state
   const [savingVersion, setSavingVersion] = useState<SaveVersion | null>(null)
@@ -217,6 +264,11 @@ function SketchScannerSession({
     ? ImageRetryDoor.RedrawNote
     : ImageRetryDoor.Redraw
   const drawnAs = drawnAsLine(customNote, revisedNote, audience)
+  const finalizeCaptureDefaults = useCallback(() => {
+    // The first submitted save/paid transform owns the defaults shown at that
+    // moment. Later metadata must not silently relabel its result or anchor.
+    setCaptureOwner(owner => owner && !owner.resolved ? { ...owner, resolved: true } : owner)
+  }, [])
 
   const reset = useCallback(() => {
     sessionRef.current++
@@ -224,6 +276,7 @@ function SketchScannerSession({
     enhanceInFlightRef.current = false
     capturedFileRef.current = null
     setCaptureOwner(null)
+    setProfileEdited(false)
     setAdjusting(false)
     setCleanupEdits(undefined)
     setCleanupSmallerCopy(false)
@@ -271,8 +324,15 @@ function SketchScannerSession({
 
       sessionRef.current++
       capturedFileRef.current = file
-      setCaptureOwner({ name: childName })
-      setProfile(childProfile ?? 'both')
+      const owner = resolveCaptureOwner({
+        id: ownerContext?.activeChildId,
+        pendingProfile: ownerContext?.pendingProfile,
+        profile: ownerContext ? undefined : childProfile,
+        resolved: false,
+      }, ownerContext, childName, childProfile)
+      setCaptureOwner(owner)
+      setProfile(owner.profile ?? 'both')
+      setProfileEdited(false)
       setError(null)
       setOriginalFile(file)
       setOriginalUrl(URL.createObjectURL(file))
@@ -283,7 +343,7 @@ function SketchScannerSession({
       setCropFraction(DEFAULT_CROP)
       setStage('crop')
     },
-    [childName, childProfile],
+    [childName, childProfile, ownerContext],
   )
 
   // Transparent cleanup → preview. Shared by both crop paths (cropped + whole).
@@ -366,6 +426,7 @@ function SketchScannerSession({
     // so a capped tap costs nothing at all. The style controls already show the
     // nudge instead of a button; this holds the rule for real.
     if (enhanceInFlightRef.current || enhancing || capReached) return
+    finalizeCaptureDefaults()
     const session = sessionRef.current
     enhanceInFlightRef.current = true
     setEnhancing(true)
@@ -446,12 +507,14 @@ function SketchScannerSession({
     customNote,
     recordGeneration,
     imageFailureRef,
+    finalizeCaptureDefaults,
   ])
 
   const saveSticker = useCallback(
     async (version: SaveVersion) => {
       const url = version === 'cleaned' ? cleanedUrl : fancyUrl
       if (saveInFlightRef.current || savingVersion || savedVersions.has(version)) return
+      finalizeCaptureDefaults()
       const session = sessionRef.current
       const sourceDrawingId = sourceDrawingIdRef.current
       saveInFlightRef.current = true
@@ -516,6 +579,7 @@ function SketchScannerSession({
       profile,
       styleId,
       onSaved,
+      finalizeCaptureDefaults,
     ],
   )
 
@@ -895,7 +959,7 @@ function SketchScannerSession({
                     label={p === 'both' ? 'Both' : p.charAt(0).toUpperCase() + p.slice(1)}
                     size="small"
                     variant={profile === p ? 'filled' : 'outlined'}
-                    onClick={() => setProfile(p)}
+                    onClick={() => { setProfile(p); setProfileEdited(true) }}
                   />
                 ))}
               </Box>
