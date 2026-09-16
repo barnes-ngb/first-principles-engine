@@ -36,7 +36,7 @@ describe('UX-147 — the Reimagine doors say what they spend', () => {
     )
     await user.click(screen.getByText('Reimagine'))
 
-    expect(screen.getByText('Reimagine intensity')).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Reimagine your drawing' })).toBeTruthy()
     expect(screen.getByText(/1 paid image call/)).toBeTruthy()
     expect(screen.getByRole('button', { name: /how this works/i })).toBeTruthy()
   })

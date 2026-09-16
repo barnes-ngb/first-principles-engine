@@ -636,7 +636,7 @@ export default function TodayPage() {
   // --- Unapplied-draft awareness (FEAT-111 P2): does a drafted-but-unapplied
   // plan exist for this week? Drives the actionable "review and apply" banner on
   // empty/upcoming days so Today never shows a silently empty day. ---
-  const hasUnappliedDraft = useUnappliedDraft(
+  const draftRead = useUnappliedDraft(
     familyId,
     selectedChildId,
     weekDayDates[0]?.dateKey,
@@ -784,11 +784,20 @@ export default function TodayPage() {
   }, [familyId, selectedChildId])
 
   // Load recent scan feedback for today's checklist items
-  const [scanFeedbackBySubject, setScanFeedbackBySubject] = useState<
-    Record<string, { topic: string; recommendation: 'do' | 'skip' | 'quick-review' | 'modify'; estimatedMinutes?: number }>
-  >({})
+  const scanScope = JSON.stringify([familyId, selectedChildId])
+  const [feedbackRead, setFeedbackRead] = useState<{
+    scope: string; visit: number; attempt: number; status: 'loading' | 'ready' | 'unavailable'
+    data: Record<string, { topic: string; recommendation: 'do' | 'skip' | 'quick-review' | 'modify'; estimatedMinutes?: number }>
+  }>({ scope: scanScope, visit: 0, attempt: 0, status: 'loading', data: {} })
+  if (feedbackRead.scope !== scanScope) {
+    setFeedbackRead({ scope: scanScope, visit: feedbackRead.visit + 1, attempt: 0, status: 'loading', data: {} })
+  }
+  const feedbackVisit = feedbackRead.visit
+  const feedbackAttempt = feedbackRead.attempt
+  const scanFeedbackBySubject = feedbackRead.status === 'ready' ? feedbackRead.data : {}
   useEffect(() => {
     if (!familyId || !selectedChildId) return
+    let active = true
     const q = query(
       scansCollection(familyId),
       where('childId', '==', selectedChildId),
@@ -796,6 +805,7 @@ export default function TodayPage() {
       limit(20),
     )
     getDocs(q).then((snap) => {
+      if (!active) return
       const feedback: typeof scanFeedbackBySubject = {}
       for (const d of snap.docs) {
         const scan = { ...d.data(), id: d.id } as ScanRecord
@@ -819,14 +829,32 @@ export default function TodayPage() {
           }
         }
       }
-      setScanFeedbackBySubject(feedback)
-    }).catch(() => { /* ignore */ })
-  }, [familyId, selectedChildId])
+      setFeedbackRead((prev) => prev.visit === feedbackVisit && prev.attempt === feedbackAttempt ? { ...prev, status: 'ready', data: feedback } : prev)
+    }).catch((err) => {
+      if (!active) return
+      console.error('[TodayPage] Failed to load scan guidance', err)
+      setFeedbackRead((prev) => prev.visit === feedbackVisit && prev.attempt === feedbackAttempt ? { ...prev, status: 'unavailable', data: {} } : prev)
+    })
+    return () => { active = false }
+  }, [familyId, selectedChildId, feedbackVisit, feedbackAttempt])
+  const retryScanFeedback = useCallback(() => {
+    setFeedbackRead((prev) => prev.scope === scanScope && prev.visit === feedbackVisit && prev.status === 'unavailable'
+      ? { ...prev, attempt: prev.attempt + 1, status: 'loading', data: {} } : prev)
+  }, [scanScope, feedbackVisit])
 
   // Real-time recent scans for inline analysis panels
-  const [todayRecentScans, setTodayRecentScans] = useState<ScanRecord[]>([])
+  const [recentScansRead, setRecentScansRead] = useState<{
+    scope: string; visit: number; attempt: number; status: 'loading' | 'ready' | 'unavailable'; data: ScanRecord[]
+  }>({ scope: scanScope, visit: 0, attempt: 0, status: 'loading', data: [] })
+  if (recentScansRead.scope !== scanScope) {
+    setRecentScansRead({ scope: scanScope, visit: recentScansRead.visit + 1, attempt: 0, status: 'loading', data: [] })
+  }
+  const recentScansVisit = recentScansRead.visit
+  const recentScansAttempt = recentScansRead.attempt
+  const todayRecentScans = recentScansRead.status === 'ready' ? recentScansRead.data : []
   useEffect(() => {
     if (!familyId || !selectedChildId) return
+    let active = true
     const q = query(
       scansCollection(familyId),
       where('childId', '==', selectedChildId),
@@ -836,12 +864,22 @@ export default function TodayPage() {
     const unsub = onSnapshot(
       q,
       (snap) => {
-        setTodayRecentScans(snap.docs.map((d) => ({ ...(d.data() as ScanRecord), id: d.id })))
+        if (!active) return
+        const data = snap.docs.map((d) => ({ ...(d.data() as ScanRecord), id: d.id }))
+        setRecentScansRead((prev) => prev.visit === recentScansVisit && prev.attempt === recentScansAttempt ? { ...prev, status: 'ready', data } : prev)
       },
-      (err) => console.error('[TodayPage] Failed to load scans', err),
+      (err) => {
+        if (!active) return
+        console.error('[TodayPage] Failed to load scans', err)
+        setRecentScansRead((prev) => prev.visit === recentScansVisit && prev.attempt === recentScansAttempt ? { ...prev, status: 'unavailable', data: [] } : prev)
+      },
     )
-    return unsub
-  }, [familyId, selectedChildId])
+    return () => { active = false; unsub() }
+  }, [familyId, selectedChildId, recentScansVisit, recentScansAttempt])
+  const retryRecentScans = useCallback(() => {
+    setRecentScansRead((prev) => prev.scope === scanScope && prev.visit === recentScansVisit && prev.status === 'unavailable'
+      ? { ...prev, attempt: prev.attempt + 1, status: 'loading', data: [] } : prev)
+  }, [scanScope, recentScansVisit])
 
   /** Map energy level to plan type: normal → Normal Day, low/overwhelmed → MVD. */
   const energyToPlanType = (level: EnergyLevel): PlanType =>
@@ -1506,8 +1544,20 @@ export default function TodayPage() {
           isToday,
           isPast,
           dayIsEmpty,
-          hasUnappliedDraft,
+          hasUnappliedDraft: draftRead.hasDraft,
+          draftStatus: draftRead.status,
         })
+
+        if (banner === 'draft-loading') {
+          return <Typography role="status" variant="body2" sx={{ mb: 1 }}>Checking this week's plan…</Typography>
+        }
+        if (banner === 'draft-unavailable') {
+          return (
+            <Alert severity="warning" sx={{ mb: 1 }} action={<Button color="inherit" size="small" onClick={draftRead.retry}>Try again</Button>}>
+              Couldn't check this week's draft plan.
+            </Alert>
+          )
+        }
 
         // FEAT-111 P2: a plan is drafted but never applied → actionable,
         // non-blaming prompt (charter) deep-linking to the planner (which lands
@@ -1600,6 +1650,22 @@ export default function TodayPage() {
       {/* --- Today's Plan checklist (PRIMARY) --- */}
       {selectedChild && planType !== PlanType.Life && (
         <SectionErrorBoundary section="checklist">
+        {feedbackRead.status === 'loading' && (
+          <Typography role="status" variant="body2">Checking scan guidance…</Typography>
+        )}
+        {feedbackRead.status === 'unavailable' && (
+          <Alert severity="warning" action={<Button color="inherit" size="small" onClick={retryScanFeedback}>Try again</Button>}>
+            Couldn't load scan guidance.
+          </Alert>
+        )}
+        {recentScansRead.status === 'loading' && (
+          <Typography role="status" variant="body2">Loading recent scans…</Typography>
+        )}
+        {recentScansRead.status === 'unavailable' && (
+          <Alert severity="warning" action={<Button color="inherit" size="small" onClick={retryRecentScans}>Try again</Button>}>
+            Couldn't load recent scans.
+          </Alert>
+        )}
         <TodayChecklist
           // UX-343 — the checklist's own dialogs and drafts (a lesson-video
           // search with an hours logger in it, a row's photo dialog, a typed
@@ -1658,7 +1724,9 @@ export default function TodayPage() {
           onPrintMaterials={handlePrintTodayMaterials}
           printingMaterials={printingMaterials}
           scanFeedbackBySubject={scanFeedbackBySubject}
+          scanFeedbackAvailable={feedbackRead.status === 'ready'}
           recentScans={todayRecentScans}
+          recentScansAvailable={recentScansRead.status === 'ready'}
         />
         </SectionErrorBoundary>
       )}

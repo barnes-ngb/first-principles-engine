@@ -74,6 +74,7 @@ export default function BookReviewChat() {
     reviewedCount,
     imageRegenerating,
     imageCapReached,
+    imageFailedPages = [],
     playCurrentPage,
     approveCurrentPage,
     reviseCurrentPage,
@@ -145,6 +146,13 @@ export default function BookReviewChat() {
 
   // ── Completion screen ────────────────────────────────────────────
 
+  const pictureNotice = imageFailedPages.length > 0 ? (
+    <Alert severity="warning" aria-live="polite">
+      Something went wrong with the {imageFailedPages.length === 1 ? 'picture on page' : 'pictures on pages'}{' '}
+      {imageFailedPages.join(', ')}. You can keep reading.
+    </Alert>
+  ) : null
+
   if (phase === 'completed') {
     return (
       <Stack spacing={3} sx={{ p: 3, textAlign: 'center', maxWidth: 480, mx: 'auto' }}>
@@ -164,6 +172,15 @@ export default function BookReviewChat() {
         <Typography variant="body2" color="text.secondary">
           {totalPages} pages are ready to read or print.
         </Typography>
+        {imageRegenerating && (
+          <Typography role="status" aria-live="polite">Finishing a picture…</Typography>
+        )}
+        {pictureNotice}
+        {imageCapReached && (
+          <Typography variant="body2" color="text.secondary" aria-live="polite">
+            {ART_QUOTA_MESSAGE}
+          </Typography>
+        )}
         <Stack direction="row" spacing={2} justifyContent="center">
           <Button
             variant="contained"
@@ -270,6 +287,7 @@ export default function BookReviewChat() {
       )}
 
       {/* Page text */}
+      {pictureNotice}
       <Typography variant="h6" sx={{ lineHeight: 1.5, fontWeight: 500, minHeight: 48 }}>
         {currentPage?.text ?? ''}
       </Typography>
@@ -368,6 +386,7 @@ export default function BookReviewChat() {
               size="large"
               fullWidth
               onClick={handleChangeThis}
+              disabled={imageRegenerating}
               sx={{ minHeight: 56, textTransform: 'none', fontWeight: 700 }}
             >
               🎤 Change this

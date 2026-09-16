@@ -1,6 +1,5 @@
 /**
- * What each band of the "Reimagine intensity" slider asks the picture model for
- * (FEAT-193 / UX-161a).
+ * Captions for the existing numeric reimagine contract (FEAT-193 / UX-161a).
  *
  * **Why these are here.** They were three string literals inline in
  * `BookEditorPage`, and all three described something the code does not do. The
@@ -15,11 +14,9 @@
  * `reimagineCaptions.test.ts` holds the two in step against
  * {@link reimagineStyleFor} — the routing this text has to stay true to.
  *
- * **What is deliberately NOT fixed here.** Two of the three bands resolve to the
- * *same* style, so the middle band differs from the left only by how closely
- * this text asks the redraw to follow the original. That is a routing defect
- * (UX-161b, batch B) and papering over it in copy would hide it. These captions
- * are honest about the look; they do not pretend the middle band is a third one.
+ * The dialog now offers two named looks (UX-161b), using 50 for the existing
+ * default watercolor request and 100 for comic. Legacy callers keep all three
+ * caption bands, including the closer-composition request at low intensity.
  *
  * Copy only — nothing here picks a style, spends a generation or reads state.
  */
@@ -41,15 +38,19 @@ const CAPTIONS: Record<ReimagineBand, string> = {
     'Redraw this child\'s drawing in the bold comic-book look — heavy black ink outline, flat comic primaries and halftone dots — keeping the subject matter.',
 }
 
-/** The caption sent for a slider position. */
+/** The caption sent for an existing numeric intensity. */
 export function reimagineCaption(intensity: number): string {
   return CAPTIONS[reimagineBand(intensity)]
 }
 
 /**
- * The two ends of the slider, named by the look each end actually reaches —
- * which is the one real difference across it. They used to read "Keep my style"
- * ↔ "Full reimagine".
+ * Existing label exports retained for callers of the former slider.
  */
 export const REIMAGINE_LEFT_LABEL = 'Watercolor look'
 export const REIMAGINE_RIGHT_LABEL = 'Comic-book look'
+
+/** Each offered look reaches a distinct existing server style; 50 stays default. */
+export const REIMAGINE_LOOK_CHOICES = [
+  { intensity: 50, label: REIMAGINE_LEFT_LABEL },
+  { intensity: 100, label: REIMAGINE_RIGHT_LABEL },
+] as const

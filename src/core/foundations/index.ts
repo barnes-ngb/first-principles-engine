@@ -48,33 +48,19 @@ export {
 } from './tagConceptBridge'
 export { LESSONS_PER_PEAK } from './fastPhonicsBridge'
 
-import type { ConceptGraph, ConceptNode, FoundationDomain } from './types'
-import { readingGraph } from './readingGraph'
-import { mathGraph } from './mathGraph'
-
-/** Both domain graphs, in spine order (reading, then math). */
-export const foundationGraphs: ConceptGraph[] = [readingGraph, mathGraph]
-
-/** Every foundation node across both domains, flattened. */
-export const allFoundationNodes: ConceptNode[] = foundationGraphs.flatMap(
-  (g) => g.nodes,
-)
-
-/** Flat lookup of foundation nodes by id (both domains). */
-export const FOUNDATION_NODE_MAP: Record<string, ConceptNode> = Object.fromEntries(
-  allFoundationNodes.map((n) => [n.id, n]),
-)
-
 /**
- * A single combined version tag for "which spine this model was synthesized
- * against" (stored on `LearnerModel.graphVersion`). Both domain graphs move
- * together, so the tag names both.
+ * The spine and its derivations now have ONE definition, in
+ * `functions/src/shared/foundations/graph.ts`, compiled by both this app and the
+ * Cloud Functions project (UX-296). The barrel keeps every name it exported, so
+ * no consumer moved: `foundationGraphs` (spine order — reading, then math),
+ * `allFoundationNodes`, `FOUNDATION_NODE_MAP`, `foundationGraphVersion` (the
+ * `reading@1+math@1` tag stored on `LearnerModel.graphVersion`) and
+ * `foundationNodesForDomain`.
  */
-export function foundationGraphVersion(): string {
-  return `reading@${readingGraph.version}+math@${mathGraph.version}`
-}
-
-/** The nodes for one domain. */
-export function foundationNodesForDomain(domain: FoundationDomain): ConceptNode[] {
-  return foundationGraphs.find((g) => g.domain === domain)?.nodes ?? []
-}
+export {
+  foundationGraphs,
+  allFoundationNodes,
+  FOUNDATION_NODE_MAP,
+  foundationGraphVersion,
+  foundationNodesForDomain,
+} from '../../../functions/src/shared/foundations/graph'
