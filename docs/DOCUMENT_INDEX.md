@@ -8,6 +8,7 @@
 
 | Document | Status | Notes |
 |---|---|---|
+| `review/BOOK_EDITOR_RELIABILITY_2026-09.md` | **CURRENT** (2026-09-16) | FIX-248/249 — book transforms, scoped Undo/Redo, background/layer preservation, validation limits and family trial |
 | `review/STICKER_CLEANUP_AND_REVIEW_EXPORT_2026-09.md` | **CURRENT** (2026-09-16) | FIX-246/247 — in-session sticker correction, shared Watercolor/Comic-book choices, parent review export scope and family trial |
 | `MASTER_OUTLINE.md` | **CURRENT** (v16) | Single source of truth: features, status, sprint history. Updated July 16, 2026 (v16): added the **Learner Model & adaptive loop-closing arc** section (FEAT-44→72) and known-open items; charter-alignment sweep filed. Prior feature sections current as of April 13, 2026. |
 | `design-pass-v1/` | **CURRENT** | 10 mobile + 6 tablet design mocks + handoff README for v1 refine pass (May 26, 2026) |
