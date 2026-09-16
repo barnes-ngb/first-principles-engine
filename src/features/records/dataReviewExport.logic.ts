@@ -54,6 +54,7 @@ import {
 } from '../../core/foundations/workbookBridge'
 import { artifactMediaMissing } from '../../core/utils/artifactMedia'
 import { buildReviewEvidenceAppendix } from './dataReviewExport.evidence'
+import type { FluencyPassage, SessionQuestion } from '../quest/questTypes'
 import { reportArtifactIds } from '../dad-lab/reportArtifacts'
 import {
   computeHoursSummary,
@@ -132,10 +133,17 @@ export interface DataReviewDisposition {
 export interface DataReviewEvaluationSession extends EvaluationSession {
   sessionType?: string
   questMode?: string
+  questions?: SessionQuestion[]
   finalLevel?: number
   totalCorrect?: number
   totalQuestions?: number
   diamondsMined?: number
+  streakDays?: number
+  timedOut?: boolean
+  skippedCount?: number
+  flaggedErrorCount?: number
+  passages?: FluencyPassage[]
+  totalReadingTimeSeconds?: number
   diamondsEarned?: number
 }
 

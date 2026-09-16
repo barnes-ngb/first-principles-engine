@@ -47,8 +47,8 @@ export function buildReviewEvidence(input: DataReviewExportInput) {
       reads: input.reads,
       limitedReads: input.reads.filter(read => read.cap != null || read.note || read.total == null
         || read.total != null && read.scanned != null && read.scanned < read.total),
-      meaning: 'Complete stored fields for the references below, not a complete database backup. Read caps and unknown counts remain limitations.',
-      excluded: ['Full conversations', 'Image and recording bytes', 'Sticker cleanup diagnostics', 'Collections not listed in the read report'],
+      meaning: 'Full stored learner-model references and supported session evidence below, not a complete database backup. Read caps and unknown counts remain limitations.',
+      excluded: ['Full conversations', 'Image and recording bytes', 'Sticker cleanup diagnostics', 'Quest resume snapshots (savedQuestState, savedCurrentQuestion, bonusRoundUsed)', 'Collections not listed in the read report'],
     },
     interpretation: {
       assistance: 'Not recorded unless explicitly present in the source evidence. Support defaults do not establish help used on an attempt.',
@@ -65,7 +65,24 @@ export function buildReviewEvidence(input: DataReviewExportInput) {
       evaluatedAt: session.evaluatedAt ?? null,
       findings: session.findings,
       recommendations: session.recommendations,
+      summary: session.summary,
       frontier: session.frontier,
+      nextEvalDate: session.nextEvalDate,
+      // Preserve completed attempt evidence verbatim, including partial-session
+      // answers and recording references. Conversations and resume state stay out.
+      questMode: session.questMode,
+      questions: session.questions,
+      finalLevel: session.finalLevel,
+      totalCorrect: session.totalCorrect,
+      totalQuestions: session.totalQuestions,
+      diamondsMined: session.diamondsMined,
+      streakDays: session.streakDays,
+      timedOut: session.timedOut,
+      skippedCount: session.skippedCount,
+      flaggedErrorCount: session.flaggedErrorCount,
+      passages: session.passages,
+      totalReadingTimeSeconds: session.totalReadingTimeSeconds,
+      diamondsEarned: session.diamondsEarned,
     })),
   })
 }

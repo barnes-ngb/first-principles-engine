@@ -69,4 +69,80 @@ describe('review evidence appendix', () => {
     expect(empty.appBuild).toBe('not recorded')
     expect(empty.evaluations).toEqual([])
   })
+
+  it('retains ordered quest answers, their provenance and partial-session outcomes in the downloaded file', () => {
+    const data = input()
+    const questions = [{
+      id: 'answer-1', type: 'multiple-choice' as const, level: 2, skill: 'reading.phonics',
+      prompt: 'Choose the word', stimulus: 'cat', options: ['cat', 'cap'], correctAnswer: 'cat',
+      childAnswer: 'cap', correct: false, responseTimeMs: 2400, timestamp: '2026-09-01T10:00:00Z',
+      inputMethod: 'voice' as const, targetConceptId: 'reading.phonics.cvc', targetedBlockerId: 'blocker-1',
+      assistance: { kind: 'hint', source: 'parent observation' }, confidence: 'not recorded',
+    }, {
+      id: 'answer-2', type: 'multiple-choice' as const, level: 2, skill: 'reading.phonics',
+      prompt: 'Choose another word', options: ['dog', 'dot'], correctAnswer: 'dog', childAnswer: '',
+      correct: false, skipped: true, flaggedAsError: true, responseTimeMs: 0, timestamp: '2026-09-01T10:01:00Z',
+    }]
+    const session = {
+      id: 'quest-partial', childId: 'child-a', domain: 'reading' as const, status: 'partial' as const,
+      sessionType: 'interactive', questMode: 'phonics', questions, finalLevel: 2, totalCorrect: 0,
+      totalQuestions: 2, diamondsMined: 0, streakDays: 1, timedOut: false, skippedCount: 1, flaggedErrorCount: 1,
+      summary: 'Stopped early; one question flagged.', findings: [], recommendations: [],
+      evaluatedAt: '2026-09-01T10:02:00Z',
+      messages: [{ id: 'secret', role: 'user' as const, text: 'PRIVATE CHAT', createdAt: '2026-09-01T10:00:00Z' }],
+      savedQuestState: { currentLevel: 2 }, savedCurrentQuestion: { prompt: 'UNANSWERED RESUME PROMPT' }, bonusRoundUsed: false,
+    }
+    data.evaluationSessions = [session]
+    const before = JSON.stringify(data)
+    const markdown = buildDataReviewExport(data)
+    const result = JSON.parse(markdown.split('## Structured learning evidence')[1].split('```json\n')[1].split('\n```')[0])
+    const evidence = { ...session }
+    for (const key of ['messages', 'savedQuestState', 'savedCurrentQuestion', 'bonusRoundUsed']) Reflect.deleteProperty(evidence, key)
+    expect(result.evaluations).toEqual([evidence])
+    expect(result.evaluations[0].questions[1]).not.toHaveProperty('assistance')
+    expect(result.evaluations[0].questions[1]).not.toHaveProperty('confidence')
+    expect(result.completeness.excluded.join(' ')).toContain('savedQuestState')
+    expect(markdown).not.toContain('PRIVATE CHAT')
+    expect(markdown).not.toContain('UNANSWERED RESUME PROMPT')
+    expect(JSON.stringify(data)).toBe(before)
+  })
+
+  it('retains fluency passages and every reading attempt without fetching recordings', () => {
+    const data = input()
+    const passages = [{ text: 'A cat sat. '.repeat(80), targetWords: ['cat'], speechWords: ['sat'], wordCount: 240,
+      readingLevel: 'L1', attempts: [
+        { recordingUrl: 'gs://synthetic/attempt-1', selfRating: 'hard' as const, durationSeconds: 12.5, timestamp: '2026-09-01T11:00:00Z' },
+        { recordingUrl: null, selfRating: 'easy' as const, durationSeconds: 0, timestamp: '2026-09-01T11:02:00Z' },
+      ] }, { text: 'The dog ran.', targetWords: [], speechWords: [], wordCount: 3, readingLevel: 'L1', attempts: [] }]
+    data.evaluationSessions = [{
+      id: 'fluency-1', childId: 'child-a', domain: 'reading', status: 'complete', sessionType: 'fluency',
+      questMode: 'fluency', passages, totalReadingTimeSeconds: 12.5, diamondsEarned: 0,
+      evaluatedAt: '2026-09-01T11:03:00Z', messages: [], findings: [], recommendations: [], summary: 'Two passages read.',
+    }]
+    const markdown = buildDataReviewExport(data)
+    const result = JSON.parse(markdown.split('## Structured learning evidence')[1].split('```json\n')[1].split('\n```')[0])
+    expect(result.evaluations[0]).toEqual({
+      id: 'fluency-1', childId: 'child-a', domain: 'reading', status: 'complete', sessionType: 'fluency',
+      questMode: 'fluency', passages, totalReadingTimeSeconds: 12.5, diamondsEarned: 0,
+      evaluatedAt: '2026-09-01T11:03:00Z', findings: [], recommendations: [], summary: 'Two passages read.',
+    })
+    expect(result.evaluations[0]).not.toHaveProperty('questions')
+    expect(result.evaluations[0]).not.toHaveProperty('finalLevel')
+  })
+
+  it('preserves guided summary and next review date while applying the same scope to session details', () => {
+    const data = input()
+    const session = { childId: 'child-a', domain: 'reading' as const, status: 'complete' as const,
+      messages: [], findings: [], recommendations: [], summary: 'Observed evidence. '.repeat(80),
+      nextEvalDate: '2026-10-01', evaluatedAt: '2026-09-01T00:00:00Z' }
+    data.evaluationSessions = [{ ...session, id: 'guided-now' }, { ...session, id: 'old-quest',
+      sessionType: 'interactive', questMode: 'math', questions: [], evaluatedAt: '2025-09-01T00:00:00Z' }]
+    const full = JSON.parse(JSON.stringify(buildReviewEvidence(data)))
+    expect(full.evaluations[0]).toMatchObject({ summary: session.summary, nextEvalDate: session.nextEvalDate })
+    expect(full.evaluations[1]).toMatchObject({ id: 'old-quest', questMode: 'math', questions: [] })
+    data.mode = 'current-year'
+    const current = JSON.parse(JSON.stringify(buildReviewEvidence(data)))
+    expect(current.evaluations.map((item: { id: string }) => item.id)).toEqual(['guided-now'])
+    expect(current.scope.excludedOutsideSchoolYearEvaluations).toBe(1)
+  })
 })

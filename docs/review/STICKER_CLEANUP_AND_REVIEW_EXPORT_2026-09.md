@@ -18,6 +18,8 @@ Records exposes Export for review without a diagnostic flag. The existing diagno
 
 The downloaded Markdown keeps its readable summary and adds structured learning evidence: full stored model/references, provenance/disagreements, evaluation findings, build/schema/graph versions and read limitations. Missing assistance or confidence stays unknown. Usage, XP and recorded hours do not establish mastery. Full history stays the default. Current-year mode filters evaluation detail while the current model retains older evidence references; read caps and unknown totals remain explicit. No new assessment is performed.
 
+Session evidence includes ordered quest answers with their original question/answer, timing, input method and concept/blocker attribution; stored partial-session outcomes; full fluency passages and each recorded reading attempt; and guided-review summaries/frontiers/next review dates. Missing legacy fields remain absent, and recorded false/zero values are preserved. Quest resume snapshots (`savedQuestState`, `savedCurrentQuestion`, `bonusRoundUsed`) are explicitly excluded: an unanswered resume question is not a completed attempt. Recording references are included without fetching their media.
+
 The file contains private child details, notes and media links. It does not fetch media bytes, include complete conversations or provide sticker diagnostics. The parent reviews and manually shares it. Export code makes no AI call or database write. Existing unrelated Records page migrations remain unchanged; this is not a claim that mounting the whole Records route has no side effects.
 
 ## Verification and remaining family trial
