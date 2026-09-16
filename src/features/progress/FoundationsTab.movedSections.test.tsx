@@ -50,6 +50,9 @@ vi.mock('../foundations-review/writeReviewAction', () => ({
 vi.mock('../records/dataReviewExportLoader', () => ({
   loadDataReviewExportInput: vi.fn(),
 }))
+vi.mock('../records/dataReviewExportChildren', () => ({
+  loadReviewExportChildren: vi.fn(async () => [{ id: 'lincoln', name: 'Lincoln' }]),
+}))
 
 // Firestore boundaries — the panels must reach none of them on this render.
 vi.mock('../../core/firebase/firestore', () => ({
@@ -109,7 +112,7 @@ describe('FoundationsTab — the sections UX-326 moved in', () => {
   it('reveals BOTH diagnostic panels with ?diag=1', async () => {
     renderTab('?diag=1')
     await waitFor(() => expect(diagPanel()).toBeInTheDocument())
-    expect(exportPanel()).toBeInTheDocument()
+    await waitFor(() => expect(exportPanel()).toBeInTheDocument())
   })
 
   it('still refuses both panels to a non-parent, flag or no flag', async () => {
