@@ -1169,10 +1169,10 @@ export function useBookGenerateChat(
                 : inferBookTheme(pendingIdea, [], illustrationStyle),
               // The parent's one-off note (FEAT-194). Spread conditionally so a
               // book without one sends a payload byte-identical to before this
-              // run. The server prefers it over `theme` above — that id is
-              // INFERRED from the idea, and a note is what a parent actually
-              // said — and threads it into the STORY prompt only; it can never
-              // reach an image prompt (see `customStoryTheme.ts`).
+              // run. The server prefers the parent's note over either preset
+              // source above: inferred idea/style or explicit word practice.
+              // It reaches the STORY prompt only, never an image prompt
+              // (see `customStoryTheme.ts`).
               ...(customThemeRef.current ? { customTheme: customThemeRef.current } : {}),
             }),
           },
