@@ -126,7 +126,7 @@ describe("buildEnhancePrompt", () => {
 // ── FEAT-159: styles you can tell apart ────────────────────────────
 
 /**
- * The nine "Make it fancy" options exactly as the client sends them — mirrors
+ * The "Make it fancy" options exactly as the client sends them — mirrors
  * `FANCY_STYLE_OPTIONS` / `resolveFancyEnhanceParams` in
  * `src/features/books/drawingStickerStyles.ts`. That file's own suite asserts
  * this id list, so a change on either side breaks a test rather than silently
@@ -138,6 +138,7 @@ const FANCY_PAYLOADS: Array<{
   theme?: string;
 }> = [
   { id: "cartoon", style: "storybook" },
+  { id: "comic", style: "comic" },
   { id: "fantasy", theme: "fantasy" },
   { id: "animals", theme: "animals" },
   { id: "adventure", theme: "adventure" },
