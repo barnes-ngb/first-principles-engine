@@ -142,11 +142,11 @@ export default function StickerCleanupEditor({ file, borderInsetFraction, initia
   const cancel = () => { active.current = false; onCancel() }
 
   return (
-    <Dialog open onClose={cancel} maxWidth="md" fullWidth>
+    <Dialog open onClose={cancel} maxWidth="md" fullWidth sx={{ '& .MuiDialog-paper': { m: { xs: 1, sm: 4 }, width: { xs: 'calc(100% - 16px)', sm: 'calc(100% - 64px)' }, maxHeight: { xs: 'calc(100% - 16px)', sm: 'calc(100% - 64px)' } } }}>
       <DialogTitle>Adjust cleanup</DialogTitle>
-      <DialogContent>
+      <DialogContent sx={{ px: { xs: 2, sm: 3 } }}>
         <Stack spacing={1.5}>
-          <Typography variant="body2">Tap the background to clear one area. Use Keep to bring back part of your picture.</Typography>
+          <Typography variant="body2">Tap to clear an area. Keep brings back your picture.</Typography>
           <Stack direction="row" useFlexGap flexWrap="wrap" gap={1}>
             <Button disabled={!source || busy} onClick={() => commit({ ...edits, auto: true })} sx={{ minHeight: 44 }}>Auto cleanup</Button>
             <Button disabled={!source || busy || history.length === 0} onClick={() => {
