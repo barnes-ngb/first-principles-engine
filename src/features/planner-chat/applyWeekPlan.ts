@@ -293,6 +293,8 @@ export function buildApplyChecklist(
         ? undefined
         : findStrandConfigId({ label: item.title }, activityConfigs)
     return {
+      // A fresh apply creates a new row even when its title is unchanged.
+      id: crypto.randomUUID(),
       label: `${item.title} (${item.estimatedMinutes}m)`,
       ...(item.activityConfigId ? { activityConfigId: item.activityConfigId } : {}),
       ...(strandConfigId ? { strandConfigId } : {}),

@@ -228,6 +228,54 @@ census problems: 0
 
 The Planner add dialog is bound to its displayed child and day. The shared activity form now resets on a child change; this addresses the form risk recorded in UX-335. Earlier dated counts above remain historical readings.
 
+### Re-derived 2026-09-14 (FEAT-238 / UX-431 — Today's evidence)
+
+`npm run census:child-switch`, pasted:
+
+```
+source files scanned (non-test, under src/, excluding src/test/): 795
+files reading useActiveChild: 73
+candidates: 95 (hook arm 43, prop arm 52)
+files rendering an in-page <ChildSelector>: 0
+feature files referencing setActiveChildId (any in-page child control): 3
+census rows: 95
+by verdict: {"BIND":8,"HIDE":3,"RESET":17,"GATE":10,"SAFE":57}
+by severity: {"P1":0,"P2":0,"P3":0,"—":95}
+census problems: 0
+```
+
+**Five files scanned, and the candidate set did not move.** `FEAT-238` adds
+`features/today/TodayEvidenceList.tsx`, `features/today/todayEvidence.ts`,
+`components/ArtifactMedia.tsx`, `core/utils/clockTime.ts` and `core/utils/artifactMedia.ts`, and
+**none of them is a candidate** — by the heuristic and, more usefully, in fact. The pure modules hold
+no React state and write nothing; the two components are presentational, hold no `useState`, take no
+`childId`, subscribe to nothing and render no control that changes anything. There is no draft to
+re-target, so a switch has nothing to do to them.
+
+**So no row was added, and that is the correct outcome rather than an omission.** The registry holds
+one row per *derived candidate*, and `childSwitchSurfaces.invariant.test.ts` fails on a row naming a
+file that is not one — so writing a SAFE row for a non-candidate would have broken the guard in the
+name of satisfying it. The honest statement of the same fact is this paragraph: the section is a
+**read with no draft**, its child scope is the one `TodayPage` and `KidTodayView` already declare, and
+the `TodayPage` row above (RESET, keyed on `childId|date`) is what re-keys the artifact read that
+feeds it. The one thing `FEAT-238` changed on that rail is that a **failed** artifact read now clears
+the list as well as flagging it, so records belonging to the previous child or the previous day can
+no longer be rendered under a sentence about this one.
+
+### Read/display handoff, 2026-09-15 (FIX-238 / UX-367)
+
+Parent Today's evidence now uses `useTodayArtifacts`: **HIDE** on a family/child/day
+change, with a new visit identity even when returning to the same scope. Loaded rows
+are hidden during render; save callbacks retain the originating visit and filter
+the row's own child/day. This matters for family changes because artifacts carry no
+`familyId`. A subsequent read retrieves work saved while another scope was on screen.
+The hook writes no records and holds no editable draft, so it adds no registry candidate;
+the existing TodayPage editor verdict remains in force. `UnifiedCaptureCard`'s explicit
+Child dropdown and all persistence stay unchanged.
+
+`npm run census:child-switch` on this change derives `candidates: 95 (hook arm 43,
+prop arm 52)`, `census rows: 95`, and `census problems: 0`.
+
 ### Re-derived 2026-09-14 (FEAT-237 / UX-425 — one place to choose the child)
 
 `npm run census:child-switch`, pasted:

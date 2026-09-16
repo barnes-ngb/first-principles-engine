@@ -20,7 +20,16 @@ function code(source: string): string {
 }
 
 const TODAY_PAGE_CODE = code(TODAY_PAGE)
+const TODAY_ARTIFACTS_CODE = code(readFileSync(resolve(__dirname, './useTodayArtifacts.ts'), 'utf8'))
 const KID_TODAY_CODE = code(KID_TODAY)
+// The two kid capture doors `UX-436` stamped and `UX-440` re-aimed at the day
+// being displayed.
+const KID_CHAPTER_POOL_CODE = code(
+  readFileSync(resolve(__dirname, './KidChapterPool.tsx'), 'utf8'),
+)
+const KID_CONUNDRUM_CODE = code(
+  readFileSync(resolve(__dirname, './KidConundrumResponse.tsx'), 'utf8'),
+)
 
 /**
  * UX-343 and UX-358 — two structural properties of the heaviest write surface in
@@ -135,8 +144,79 @@ describe('the capability boundary has one definition (UX-358)', () => {
   it('the kid artifact list is scoped, and its failure does not need an empty list', () => {
     // Codex round 2 (P2): stale items from another day must never render as this
     // day's, and a refresh that fails must say so even when the list is full.
+    //
+    // UX-431 moved the RENDERING of that flag into `TodayEvidenceList`, which
+    // both Today surfaces share, so the inline `{artifactsFailed ? (` ternary
+    // this line used to read no longer exists. The property is unchanged and is
+    // asserted in two places rather than one: here, that the kid view still
+    // HANDS the flag over — a list that is never told cannot report — and in
+    // `TodayEvidenceList.test.tsx` ("a failed read shows no stale rows either"),
+    // that being told it, the component says so ahead of any row it holds.
     expect(KID_TODAY_CODE).toMatch(/artifactScopeRef\.current !== scope/)
-    expect(KID_TODAY_CODE).toMatch(/\{artifactsFailed \? \(/)
+    expect(KID_TODAY_CODE).toMatch(/failed=\{artifactsFailed\}/)
+  })
+
+  it('every Today-side artifact write refreshes the evidence list (UX-438)', () => {
+    // Codex round 2 (P2): `UX-436` made a teach-back, a conundrum note and a
+    // chapter recording ELIGIBLE for *Today's evidence*, and none of those save
+    // paths told the list — `TodayPage` loaded it once in an effect keyed to
+    // family/day/child, so the section stayed stale until a page reload. A list
+    // that is eligible-but-stale lies about the day, which is worse than the
+    // omission it replaced.
+    //
+    // A source scan because the property spans five files and one callback: the
+    // page must EXPOSE a reload, and every writer that is not routed through
+    // `useUnifiedCapture` must be handed it.
+    expect(TODAY_PAGE_CODE).toMatch(/\{ todayArtifacts, todayArtifactsFailed, todayArtifactsLoading, setTodayArtifacts, loadTodayArtifacts \}\s*=\s*useTodayArtifacts\(familyId, selectedChildId, today, setSnackMessage\)/)
+    expect(TODAY_PAGE_CODE).toMatch(/artifactsLoading=\{todayArtifactsLoading\}/)
+    expect(TODAY_ARTIFACTS_CODE).toMatch(/const loadTodayArtifacts = useCallback/)
+    const parentHandoffs = TODAY_PAGE_CODE.match(/onArtifactSaved=\{loadTodayArtifacts\}/g) ?? []
+    expect(parentHandoffs.length).toBe(2) // WeekFocusCard + TeachBackSection
+    const kidHandoffs = KID_TODAY_CODE.match(/onArtifactSaved=\{loadArtifacts\}/g) ?? []
+    expect(kidHandoffs.length).toBe(2) // KidChapterPool + KidConundrumResponse
+  })
+
+  it('kid artifact writes stamp the DISPLAYED day, not the device clock (UX-440)', () => {
+    // Codex round 3 (P2): `KidTodayView` takes `today` because a kid can be on
+    // `/today?date=…`. A `todayKey()` stamp would both misfile the record and
+    // make it vanish the instant it was saved, since the refresh queries the
+    // displayed day. `KidChapterPool` reads it off the `dayLog` it is already
+    // handed (nothing for a caller to pass wrongly); `KidConundrumResponse`
+    // takes `dayKey`, being handed no day log.
+    expect(KID_CHAPTER_POOL_CODE).toMatch(/dayLogId: dayLog\.date/)
+    expect(KID_CHAPTER_POOL_CODE).not.toMatch(/dayLogId: todayKey\(\)/)
+    const conundrumStamps = KID_CONUNDRUM_CODE.match(/dayLogId: dayKey/g) ?? []
+    expect(conundrumStamps.length).toBe(2) // the answer and the drawing
+    expect(KID_CONUNDRUM_CODE).not.toMatch(/dayLogId: todayKey\(\)/)
+    expect(KID_TODAY_CODE).toMatch(/dayKey=\{today\}/)
+  })
+
+  it('a successful local save RECONCILES the failed-read flag (UX-441)', () => {
+    // Codex round 3 (P2): `TodayEvidenceList` returns the load-error line ahead
+    // of any row it holds, so a capture appended after a failed read was saved
+    // into a list nobody could see. The append stays (it is what makes a
+    // capture feel instant) and a re-read settles the flag — clearing it on the
+    // append alone would claim one local row is a faithful picture of the day.
+    expect(TODAY_PAGE_CODE).toMatch(
+      /onArtifactCreated: \(artifact\) => \{\s*setTodayArtifacts\(/,
+    )
+    expect(TODAY_PAGE_CODE).toMatch(/setTodayArtifacts=\{setTodayArtifacts\}/)
+    // The scoped setter owns reconciliation for the card, hook and strand
+    // callback alike. todayArtifactsScope.test.tsx executes all three routes.
+    expect(TODAY_ARTIFACTS_CODE).toMatch(/const setTodayArtifacts:[\s\S]*?loadTodayArtifacts\(\)/)
+  })
+
+  it('BOTH Today surfaces report a failed artifact read, through the one list (UX-431)', () => {
+    // The parent half had no such report at all before this: a dropped query
+    // showed a four-second snackbar and then *"Nothing captured yet today."* —
+    // a failed read rendered as an affirmative empty day, on a records surface.
+    expect(KID_TODAY_CODE).toMatch(/<TodayEvidenceList/)
+    expect(TODAY_PAGE_CODE).toMatch(/artifactsFailed=\{todayArtifactsFailed\}/)
+    // And the list is CLEARED on a failure, so stale records cannot be shown
+    // under a sentence about a different day or child.
+    expect(TODAY_ARTIFACTS_CODE).toMatch(
+      /artifacts: \[\], failed: true/,
+    )
   })
 
   it('the kid view reads its capability from the same hook', () => {

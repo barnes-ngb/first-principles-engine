@@ -161,6 +161,15 @@ beforeEach(() => {
 // ── Pure core ────────────────────────────────────────────────────────────────
 
 describe('buildApplyChecklist', () => {
+  it('gives duplicate labels and identical reapplies distinct persistent row IDs', () => {
+    const first = buildApplyChecklist([item(), item()], [], new Map())
+    const second = buildApplyChecklist([item(), item()], [], new Map())
+    const ids = [...first, ...second].map((row) => row.id)
+    expect(ids.every((id) => typeof id === 'string' && id.length > 0)).toBe(true)
+    expect(new Set(ids).size).toBe(4)
+    const withoutId = (row: ChecklistItem) => { const value = { ...row }; delete value.id; return value }
+    expect(first.map(withoutId)).toEqual(second.map(withoutId))
+  })
   it('writes the "(Nm)" label shape the rest of the app matches on', () => {
     const [row] = buildApplyChecklist([item()], [], new Map())
     expect(row.label).toBe('GATB Math (30m)')

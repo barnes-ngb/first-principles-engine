@@ -141,11 +141,11 @@ describe('the effect of that gate on what a row claims', () => {
 
 // ── Codex round 2 (P2): every row write passes the duplicate-row hint ───────
 
-describe('every writeCaptureRow call site tells identical rows apart', () => {
+describe('every writeChecklistRow call site tells identical rows apart', () => {
   it('TodayPage\'s pre-completion scan passes the hint the capture paths pass', () => {
     // Apply retains a completed row and appends a fresh one with the same label
     // and subject, so both carry the same `checklistItemKey`. Without the hint,
-    // `resolveCaptureRowIndex` falls back to the first match and stamps
+    // `resolveChecklistRowIndex` falls back to the first match and stamps
     // `scanned: true` on the older completed twin rather than on the row whose
     // page was just scanned.
     const call = TODAY_PAGE.slice(
@@ -155,7 +155,7 @@ describe('every writeCaptureRow call site tells identical rows apart', () => {
     expect(call).toMatch(/hint: \{ index, completed: !!item\.completed \}/)
   })
 
-  it('no writeCaptureRow call site is left without one', () => {
+  it('no writeChecklistRow call site is left without one', () => {
     // Stated as a property rather than as a case: a new door that forgets the
     // hint is the same defect again, on a row shape that really exists.
     const CAPTURE_HOOK = readFileSync(
@@ -163,7 +163,7 @@ describe('every writeCaptureRow call site tells identical rows apart', () => {
       'utf8',
     )
     for (const source of [TODAY_PAGE, CAPTURE_HOOK]) {
-      const calls = source.match(/writeCaptureRow\(\{[\s\S]*?\n {6}\}\)/g) ?? []
+      const calls = source.match(/writeChecklistRow\(\{[\s\S]*?\n {6}\}\)/g) ?? []
       for (const call of calls) expect(call).toMatch(/hint:/)
     }
   })

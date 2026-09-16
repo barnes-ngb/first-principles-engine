@@ -7,8 +7,8 @@
  *   • `days` / `hours` / `hoursAdjustments` — through the shared
  *     {@link useWeekHoursInputs}, so this section and the hours line below it
  *     fold the same documents with the same mapping;
- *   • `artifacts` — the week's evidence, range-queried on `createdAt` exactly as
- *     `PortfolioPage` does;
+ *   • `artifacts` — explicit activity days plus the existing upload-date range,
+ *     reconciled by `selectWeekArtifacts` so unlinked book evidence stays visible;
  *   • `activityConfigs` — through the read-only `useChatActivityConfigs`, the
  *     one subscribe in the app that reads configs without seeding or migrating
  *     anything. A third copy of that subscribe is what its own header exists to
@@ -44,6 +44,7 @@ import { useChatActivityConfigs } from '../shelly-chat/useChatActivityConfigs'
 import { groupWeekBySubject } from './weekBySubject'
 import type { WeekSubjectSummary } from './weekBySubject'
 import { useWeekHoursInputs } from './useWeekHoursInputs'
+import { selectWeekArtifacts } from './weekArtifactSelection'
 
 export interface UseWeekBySubjectResult {
   subjects: WeekSubjectSummary[]
@@ -92,19 +93,35 @@ export function useWeekBySubject(
 
     const { start, end } = weekRangeFromDateKey(weekKey)
 
-    // `createdAt` is a full ISO timestamp, so the upper bound carries the end of
-    // the day — the same range `PortfolioPage` uses for a month of evidence.
-    getDocs(
-      query(
-        artifactsCollection(familyId),
-        where('createdAt', '>=', start),
-        where('createdAt', '<=', `${end}T23:59:59`),
+    // Separate single-field ranges use the existing indexes. The upload range
+    // preserves unlinked book/sketch evidence; the day range finds captures
+    // uploaded outside their activity week. Neither read alone is complete.
+    Promise.all([
+      getDocs(
+        query(
+          artifactsCollection(familyId),
+          where('dayLogId', '>=', start),
+          where('dayLogId', '<=', end),
+        ),
       ),
-    )
-      .then((snap) => {
+      getDocs(
+        query(
+          artifactsCollection(familyId),
+          where('createdAt', '>=', start),
+          where('createdAt', '<=', `${end}T23:59:59`),
+        ),
+      ),
+    ])
+      .then((snapshots) => {
         if (cancelled) return
         setArtifacts(
-          snap.docs.map((d) => ({ ...(d.data() as Artifact), id: d.id })),
+          selectWeekArtifacts(
+            snapshots.flatMap((snap) =>
+              snap.docs.map((d) => ({ ...(d.data() as Artifact), id: d.id })),
+            ),
+            start,
+            end,
+          ),
         )
         setArtifactsFailed(false)
         setArtifactsLoading(false)

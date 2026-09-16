@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ChecklistItem, DayBlock, DayLog } from '../../core/types'
+import { collectHoursContributions } from '../../../functions/src/shared/hoursContributions'
 
 // ── Firestore mocks ──────────────────────────────────────────────────────────
 // Guard writers read the live doc, assert preservation, then write. We mock the
@@ -10,11 +11,13 @@ const getDoc = vi.fn()
 const setDoc = vi.fn()
 const updateDoc = vi.fn()
 const deleteDoc = vi.fn()
+const runTransaction = vi.fn()
 vi.mock('firebase/firestore', () => ({
   getDoc: (...a: unknown[]) => getDoc(...a),
   setDoc: (...a: unknown[]) => setDoc(...a),
   updateDoc: (...a: unknown[]) => updateDoc(...a),
   deleteDoc: (...a: unknown[]) => deleteDoc(...a),
+  runTransaction: (...a: unknown[]) => runTransaction(...a),
 }))
 
 import {
@@ -26,6 +29,8 @@ import {
   mergeDayLogGuarded,
   setDayLogGuarded,
   updateDayLogGuarded,
+  assertChecklistIdentityPreparation,
+  prepareDayChecklistIdentitiesGuarded,
 } from './dayWriteGuard'
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -46,6 +51,103 @@ const day = (over: Partial<DayLog>): DayLog => ({
 })
 
 const ref = { id: '2026-07-20_lincoln1' } as never
+
+describe('parent-requested identity-only preparation', () => {
+  function setup(before: DayLog | undefined, retryWith?: DayLog) {
+    let saved = before
+    const payloads: Partial<DayLog>[] = []
+    let attempts = 0
+    runTransaction.mockImplementation(async (_db: unknown, body: (tx: unknown) => Promise<unknown>) => {
+      for (;;) {
+        attempts++
+        const read = saved
+        try {
+          return await body({
+            get: async () => ({ exists: () => !!read, data: () => read }),
+            update: (_ref: unknown, payload: Partial<DayLog>) => {
+              if (retryWith) { saved = retryWith; retryWith = undefined; throw new Error('retry') }
+              payloads.push(payload)
+              saved = { ...saved!, ...payload }
+            },
+          })
+        } catch (err) {
+          if ((err as Error).message !== 'retry') throw err
+        }
+      }
+    })
+    return { saved: () => saved, payloads, attempts: () => attempts }
+  }
+
+  it('adds only IDs and preserves completed/evidence/nested values and canonical hours', async () => {
+    const before = day({
+      checklist: [item({ completed: true, evidenceArtifactId: 'proof', evidenceCollection: 'scans', skillTags: ['reading'], actualMinutes: 12 }), item({ id: 'existing' })],
+      blocks: [block({ title: 'Item', actualMinutes: 12 })], xpTotal: 13, updatedAt: 'unchanged',
+    })
+    const h = setup(before)
+    expect(await prepareDayChecklistIdentitiesGuarded(ref, 'test')).toBe('ready')
+    const saved = h.saved()!
+    expect(Object.keys(h.payloads[0])).toEqual(['checklist'])
+    expect(saved.checklist![1]).toBe(before.checklist![1])
+    expect(saved.checklist![0].skillTags).toBe(before.checklist![0].skillTags)
+    expect(saved.checklist![0]).toEqual({ ...before.checklist![0], id: expect.any(String) })
+    expect({ ...saved, checklist: before.checklist }).toEqual(before)
+    expect(collectHoursContributions([saved], [], [], before.childId)).toEqual(collectHoursContributions([before], [], [], before.childId))
+    // Positive control: ordinary writers still reject this identity promotion.
+    expect(() => assertDayPreservation(before, saved, 'ordinary')).toThrow(DayPreservationError)
+    expect(await prepareDayChecklistIdentitiesGuarded(ref, 'again')).toBe('ready')
+    expect(h.payloads).toHaveLength(1)
+  })
+
+  it.each(['reorder', 'reapply'] as const)('rebuilds only from the latest transaction after concurrent %s', async (kind) => {
+    const before = day({ checklist: [item({ label: 'A' }), item({ id: 'keep', completed: true })] })
+    const latest = day({ checklist: kind === 'reorder'
+      ? [before.checklist![1], { ...before.checklist![0], engagement: 'engaged' }]
+      : [before.checklist![1], item({ label: 'A', id: 'fresh-plan-id' })], xpTotal: 21 })
+    const h = setup(before, latest)
+    expect(await prepareDayChecklistIdentitiesGuarded(ref, 'test')).toBe('ready')
+    expect(h.attempts()).toBe(2)
+    expect(h.saved()!.checklist![0]).toBe(latest.checklist![0])
+    expect(h.saved()!.xpTotal).toBe(21)
+    expect(h.saved()!.checklist![1]).toEqual({ ...latest.checklist![1], id: kind === 'reapply' ? 'fresh-plan-id' : expect.any(String) })
+  })
+
+  it.each([undefined, day({})])('handles missing day/checklist without a write', async (before) => {
+    const h = setup(before)
+    expect(await prepareDayChecklistIdentitiesGuarded(ref, 'test')).toBe(before ? 'ready' : 'no-day')
+    expect(h.payloads).toHaveLength(0)
+  })
+
+  it.each([{ ids: ['same', 'same'] }, { ids: ['', 'valid'] }, { ids: [' ', 'valid'] }])('refuses invalid existing identities $ids', async ({ ids }) => {
+    const before = day({ checklist: ids.map((id) => item({ id })) })
+    const h = setup(before)
+    await expect(prepareDayChecklistIdentitiesGuarded(ref, 'test')).rejects.toThrow(DayPreservationError)
+    expect(h.saved()).toBe(before)
+    expect(h.payloads).toHaveLength(0)
+  })
+
+  it('refuses a generated ID collision rather than renumbering an existing row', async () => {
+    const before = day({ checklist: [item({}), item({ id: 'existing' })] })
+    const h = setup(before)
+    const generate = vi.spyOn(crypto, 'randomUUID').mockReturnValue('existing' as ReturnType<typeof crypto.randomUUID>)
+    try {
+      await expect(prepareDayChecklistIdentitiesGuarded(ref, 'test')).rejects.toThrow(DayPreservationError)
+      expect(h.payloads).toHaveLength(0)
+      expect(h.saved()).toBe(before)
+    } finally { generate.mockRestore() }
+  })
+
+  it.each(['completion', 'minutes', 'nested-copy', 'dropped-key', 'reorder', 'existing-id'] as const)('strictly rejects a %s change in the identity proof', (change) => {
+    const before = [item({ completed: true, actualMinutes: 18, skillTags: ['math'] }), item({ id: 'retained', label: 'Other' })]
+    const after = [{ ...before[0], id: 'prepared' }, before[1]]
+    if (change === 'completion') after[0].completed = false
+    if (change === 'minutes') after[0].actualMinutes = 3
+    if (change === 'nested-copy') after[0].skillTags = ['math']
+    if (change === 'dropped-key') delete after[0].actualMinutes
+    if (change === 'reorder') after.reverse()
+    if (change === 'existing-id') after[1] = { ...after[1], id: 'replacement' }
+    expect(() => assertChecklistIdentityPreparation(before, after, 'test')).toThrow(DayPreservationError)
+  })
+})
 
 // ── Pure comparison: findDayPreservationViolations ───────────────────────────
 describe('findDayPreservationViolations', () => {
