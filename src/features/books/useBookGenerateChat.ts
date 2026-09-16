@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { addDoc, doc, getDoc, setDoc } from 'firebase/firestore'
 
 import { useAI } from '../../core/ai/useAI'
@@ -89,6 +89,8 @@ export interface UseBookGenerateChat {
   currentStory: GeneratedStory | null
   illustrationStyle: string
   isLoading: boolean
+  /** Includes the initial save, before illustration progress can start. */
+  isCommitting: boolean
   error: string | null
   bookId: string | null
 
@@ -334,6 +336,17 @@ export function useBookGenerateChat(
   const [customTheme, setCustomThemeState] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const commitScope = useMemo(() => ({ familyId, childId, resumeBookId }), [familyId, childId, resumeBookId])
+  const activeCommitScope = useRef(commitScope)
+  useLayoutEffect(() => { activeCommitScope.current = commitScope }, [commitScope])
+  const mounted = useRef(true)
+  useEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false }
+  }, [])
+  const committing = useRef<{ scope: object; promise: Promise<string | null> } | null>(null)
+  const committed = useRef<{ scope: object; id: string } | null>(null)
+  const [committingScope, setCommittingScope] = useState<object | null>(null)
 
   const [clarificationPhase, setClarificationPhase] =
     useState<ClarificationPhase>('clarifying')
@@ -510,15 +523,18 @@ export function useBookGenerateChat(
     storyWordSource !== StoryWordSource.Requested &&
     resumedStoryWords === null
 
-  const [illustrationProgress, setIllustrationProgress] =
-    useState<IllustrationProgress>({
+  const [illustrationState, setIllustrationState] =
+    useState<{ scope: object; progress: IllustrationProgress } | null>(null)
+  const illustrationProgress: IllustrationProgress = illustrationState?.scope === commitScope
+    ? illustrationState.progress
+    : {
       phase: 'idle',
       currentPage: 0,
       totalPages: 0,
       failedPages: [],
       capReached: false,
       unillustratedPages: [],
-    })
+    }
 
   // Track whether we've initialized from a resume so we don't keep refetching.
   const initializedRef = useRef(false)
@@ -1293,42 +1309,58 @@ export function useBookGenerateChat(
 
   // ── Commit + abandon ─────────────────────────────────────────
 
-  const commitAndClose = useCallback(async (): Promise<string | null> => {
-    if (!currentStory) return null
-    const finalId = await persistStory(
-      currentStory,
-      chatHistory,
-      illustrationStyle,
-      'completed',
-      'ready',
-      pendingIdea,
-      null,
-    )
-    const resolvedId = finalId ?? bookId
-    if (!resolvedId) return null
+  const commitAndClose = useCallback((): Promise<string | null> => {
+    if (committing.current) return committing.current.promise
+    if (committed.current?.scope === commitScope) return Promise.resolve(committed.current.id)
+    if (!currentStory) return Promise.resolve(null)
+    const isCurrent = () => mounted.current && activeCommitScope.current === commitScope
+    setCommittingScope(commitScope)
+    const promise = (async () => {
+      const finalId = await persistStory(
+        currentStory,
+        chatHistory,
+        illustrationStyle,
+        'completed',
+        'ready',
+        pendingIdea,
+        null,
+      )
+      const resolvedId = finalId ?? bookId
+      if (!resolvedId || !isCurrent()) return null
 
-    // A noted book has no preset id, so its pictures get no theme prefix — the
-    // picked illustration style owns the look outright (FEAT-174), which is
-    // what a note asked for anyway.
-    const themeId = themeIdForNote(
-      inferBookTheme(pendingIdea, [], illustrationStyle),
-      customThemeRef.current,
-    )
+      // A noted book has no preset id, so its pictures get no theme prefix —
+      // the picked illustration style owns the look outright (FEAT-174).
+      const themeId = themeIdForNote(
+        inferBookTheme(pendingIdea, [], illustrationStyle),
+        customThemeRef.current,
+      )
 
-    await illustrate({
-      bookId: resolvedId,
-      pages: currentStory.pages.map((p) => ({
-        pageNumber: p.pageNumber,
-        sceneDescription: p.sceneDescription ?? '',
-      })),
-      style: illustrationStyle,
-      bookTheme: themeId,
-      familyId,
-      onProgress: setIllustrationProgress,
+      await illustrate({
+        bookId: resolvedId,
+        pages: currentStory.pages.map((p) => ({
+          pageNumber: p.pageNumber,
+          sceneDescription: p.sceneDescription ?? '',
+        })),
+        style: illustrationStyle,
+        bookTheme: themeId,
+        familyId,
+        onProgress: (progress) => {
+          if (isCurrent()) setIllustrationState({ scope: commitScope, progress })
+        },
+      })
+
+      if (!isCurrent()) return null
+      committed.current = { scope: commitScope, id: resolvedId }
+      return resolvedId
+    })().finally(() => {
+      if (committing.current?.promise === promise) committing.current = null
+      if (mounted.current) setCommittingScope(null)
     })
-
-    return resolvedId
+    // Synchronous reservation covers two taps before React renders the spinner.
+    committing.current = { scope: commitScope, promise }
+    return promise
   }, [
+    commitScope,
     currentStory,
     chatHistory,
     illustrationStyle,
@@ -1362,6 +1394,7 @@ export function useBookGenerateChat(
     currentStory,
     illustrationStyle,
     isLoading,
+    isCommitting: committingScope !== null,
     error,
     bookId,
     clarificationPhase,

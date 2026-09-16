@@ -248,6 +248,10 @@ export function useBookIllustrator() {
               console.warn(`Failed to save illustration for page ${i + 1}:`, saveErr)
               failedPages.push(i + 1)
             }
+          } else {
+            // A refusal or empty provider reply made no picture. It spends no
+            // quota, but must reach the same failed-page outcome as a throw.
+            failedPages.push(i + 1)
           }
         } catch (err) {
           console.warn(`Illustration failed for page ${i + 1}:`, err)

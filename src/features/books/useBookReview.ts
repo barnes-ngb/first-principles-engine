@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { doc, getDoc, setDoc } from 'firebase/firestore'
 
 import { useAI } from '../../core/ai/useAI'
@@ -63,6 +63,8 @@ export interface UseBookReview {
   imageRegenerating: boolean
   /** The day's art budget refused a page's image regeneration (FEAT-168). */
   imageCapReached: boolean
+  /** Book page positions whose latest requested picture did not finish. */
+  imageFailedPages: number[]
 
   playCurrentPage: () => Promise<void>
   approveCurrentPage: () => Promise<void>
@@ -120,7 +122,17 @@ export function useBookReview(opts: UseBookReviewOptions): UseBookReview {
   const { illustrate } = useBookIllustrator()
   const tts = useTTS()
 
-  const [book, setBook] = useState<Book | null>(null)
+  const scope = useMemo(() => ({ familyId, bookId }), [familyId, bookId])
+  const activeScope = useRef(scope)
+  useLayoutEffect(() => { activeScope.current = scope }, [scope])
+  const mounted = useRef(true)
+  useEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false }
+  }, [])
+  const [loadedBook, setBook] = useState<Book | null>(null)
+  const [loadedScope, setLoadedScope] = useState<object | null>(null)
+  const book = loadedScope === scope ? loadedBook : null
   const [currentPageIndex, setCurrentPageIndex] = useState(0)
   const [phase, setPhase] = useState<ReviewPhase>('idle')
   const [isLoading, setIsLoading] = useState(!!familyId && !!bookId)
@@ -132,6 +144,8 @@ export function useBookReview(opts: UseBookReviewOptions): UseBookReview {
    * a nudge to a grown-up, not a failure, and retrying would only refuse again.
    */
   const [imageCapReached, setImageCapReached] = useState(false)
+  const [imageFailedPages, setImageFailedPages] = useState<number[]>([])
+  const revisionInFlight = useRef<{ scope: object } | null>(null)
 
   const phaseRef = useRef<ReviewPhase>('idle')
   useEffect(() => {
@@ -148,10 +162,15 @@ export function useBookReview(opts: UseBookReviewOptions): UseBookReview {
   }, [familyId, bookId])
 
   useEffect(() => {
+    setImageFailedPages([])
+    setImageCapReached(false)
+    setImageRegenerating(false)
+    setError(null)
     if (!familyId || !bookId) {
       setIsLoading(false)
       return
     }
+    setIsLoading(true)
     let cancelled = false
     void (async () => {
       const loaded = await loadBook()
@@ -161,6 +180,7 @@ export function useBookReview(opts: UseBookReviewOptions): UseBookReview {
         return
       }
       setBook(loaded)
+      setLoadedScope(scope)
       const reviewed = loaded.reviewState?.reviewedPages ?? []
       if (loaded.reviewState?.completedAt) {
         setPhase('completed')
@@ -178,7 +198,7 @@ export function useBookReview(opts: UseBookReviewOptions): UseBookReview {
     return () => {
       cancelled = true
     }
-  }, [familyId, bookId, loadBook])
+  }, [familyId, bookId, loadBook, scope])
 
   // ── TTS end detection: playing → awaiting when speech finishes ──
 
@@ -281,12 +301,17 @@ export function useBookReview(opts: UseBookReviewOptions): UseBookReview {
 
   const reviseCurrentPage = useCallback(
     async (feedback: string) => {
+      if (revisionInFlight.current?.scope === scope) return
       if (!book) return
       const idx = currentPageIndex
       const page = book.pages?.[idx]
       if (!page) return
       const trimmed = feedback.trim()
       if (!trimmed) return
+      const operation = { scope }
+      revisionInFlight.current = operation
+      const isCurrent = () => mounted.current && activeScope.current === scope
+      let imagePending = false
 
       tts.cancel()
       setPhase('revising')
@@ -326,6 +351,7 @@ export function useBookReview(opts: UseBookReviewOptions): UseBookReview {
             },
           ],
         })
+        if (!isCurrent()) return
 
         const parsed = result?.message ? parseRevisePageResult(result.message) : null
         if (!parsed) {
@@ -371,6 +397,7 @@ export function useBookReview(opts: UseBookReviewOptions): UseBookReview {
         }
         setBook(updatedBook)
         await persist(updatedBook)
+        if (!isCurrent()) return
 
         // Auto-play the revised page so the kid hears the new version.
         const text = parsed.newText
@@ -390,9 +417,10 @@ export function useBookReview(opts: UseBookReviewOptions): UseBookReview {
             updatedBook.coverStyle ??
             'storybook'
           setImageRegenerating(true)
+          imagePending = true
           void (async () => {
             try {
-              const { capReached } = await illustrate({
+              const { capReached, failedPages } = await illustrate({
                 bookId: updatedBook.id ?? (bookId as string),
                 familyId,
                 // Full-length array; only the target index carries a scene so
@@ -404,6 +432,7 @@ export function useBookReview(opts: UseBookReviewOptions): UseBookReview {
                 style: rawStyle,
                 ...(updatedBook.theme ? { bookTheme: updatedBook.theme } : {}),
               })
+              if (!isCurrent()) return
               // The day's art budget refused the regeneration (FEAT-168, Codex
               // P2 on PR #1720). Without this the spinner just clears over an
               // unchanged picture and the kid is never told why — a refusal
@@ -411,19 +440,33 @@ export function useBookReview(opts: UseBookReviewOptions): UseBookReview {
               // through `error`: that renders a warning Alert whose "Try again"
               // would only refuse a second time.
               setImageCapReached(capReached)
+              setImageFailedPages((previous) => {
+                if (failedPages.includes(idx + 1)) {
+                  return [...new Set([...previous, idx + 1])].sort((a, b) => a - b)
+                }
+                // A quota refusal did not try this page again, so an earlier
+                // failed request still belongs in the book's outcome.
+                return capReached ? previous : previous.filter((p) => p !== idx + 1)
+              })
               if (capReached) return
+              if (failedPages.length > 0) return
 
               // Re-read so the new image URL surfaces on the page.
               const refreshed = await loadBook()
-              if (refreshed) setBook(refreshed)
+              if (refreshed && isCurrent()) setBook(refreshed)
             } catch (err) {
               console.warn('Per-page image regen failed:', err)
+              if (isCurrent()) {
+                setImageFailedPages((previous) => [...new Set([...previous, idx + 1])].sort((a, b) => a - b))
+              }
             } finally {
-              setImageRegenerating(false)
+              if (revisionInFlight.current === operation) revisionInFlight.current = null
+              if (isCurrent()) setImageRegenerating(false)
             }
           })()
         }
       } catch {
+        if (!isCurrent()) return
         // The call threw — nothing came back at all (UX-112).
         setError(
           storyGenerationFailureMessage(
@@ -432,6 +475,8 @@ export function useBookReview(opts: UseBookReviewOptions): UseBookReview {
           ),
         )
         setPhase('awaiting')
+      } finally {
+        if (!imagePending && revisionInFlight.current === operation) revisionInFlight.current = null
       }
     },
     [
@@ -447,6 +492,7 @@ export function useBookReview(opts: UseBookReviewOptions): UseBookReview {
       illustrationStyle,
       bookId,
       loadBook,
+      scope,
     ],
   )
 
@@ -504,10 +550,11 @@ export function useBookReview(opts: UseBookReviewOptions): UseBookReview {
     totalPages: book?.pages?.length ?? 0,
     phase,
     isLoading,
-    error,
+    error: loadedScope === scope ? error : null,
     reviewedCount: book?.reviewState?.reviewedPages?.length ?? 0,
-    imageRegenerating,
-    imageCapReached,
+    imageRegenerating: loadedScope === scope && imageRegenerating,
+    imageCapReached: loadedScope === scope && imageCapReached,
+    imageFailedPages: loadedScope === scope ? imageFailedPages : [],
     playCurrentPage,
     approveCurrentPage,
     reviseCurrentPage,
