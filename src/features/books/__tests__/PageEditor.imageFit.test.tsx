@@ -116,11 +116,9 @@ describe('PageEditor background fit toggle (FEAT-177)', () => {
   })
 
   it('offers no fit toggle when the only non-sticker is a FEAT-116 placed element', () => {
-    // A placed element is a composed overlay, not a page canvas — the menu still
-    // opens (Change/Remove picture), but the fit row is not offered.
+    // A placed element uses its own transform controls, not background actions.
     renderEditor([image('e', { type: 'photo', layerType: 'element' })])
-    openBackgroundMenu()
-    expect(screen.getByText('Change picture')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /change picture/i })).toBeNull()
     expect(screen.queryByText('Show the whole picture')).toBeNull()
     expect(screen.queryByText('Fill the page')).toBeNull()
   })

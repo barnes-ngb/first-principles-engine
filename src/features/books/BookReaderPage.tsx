@@ -31,7 +31,7 @@ import { addDiamondEvent } from '../../core/xp/addDiamondEvent'
 import { DIAMOND_EVENTS } from '../../core/types'
 import { useBook } from './useBook'
 import { practiceWordsUsedIn } from './storyPracticeWords'
-import { stackOrder } from './draggableImageUtils'
+import { stackOrder, imageGeometry } from './draggableImageUtils'
 import { hasFitBackdrop, resolveImageFit } from './imageFit'
 import ImageFitBackdrop from './ImageFitBackdrop'
 import { printBook } from './printBook'
@@ -623,7 +623,7 @@ export default function BookReaderPage() {
                   }}
                 >
                   {stackOrder(contentPage.images).map((img, stackIdx) => {
-                    const pos = img.position ?? { x: 0, y: 0, width: 100, height: 100 }
+                    const pos = imageGeometry(img)
                     const transforms: string[] = []
                     if (pos.rotation) transforms.push(`rotate(${pos.rotation}deg)`)
                     if (pos.flipH) transforms.push('scaleX(-1)')

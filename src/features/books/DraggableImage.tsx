@@ -20,7 +20,7 @@ import OpenInFullIcon from '@mui/icons-material/OpenInFull'
 import type { PageImage } from '../../core/types'
 import { hasFitBackdrop, resolveImageFit } from './imageFit'
 import ImageFitBackdrop from './ImageFitBackdrop'
-import { clampPosition, scaleImagePosition, cornerScaleFromDrag, keepImageVisible, rotationFromDrag, DEFAULT_IMAGE_GEOMETRY } from './draggableImageUtils'
+import { clampPosition, scaleImagePosition, cornerScaleFromDrag, keepImageVisible, rotationFromDrag, imageGeometry } from './draggableImageUtils'
 import type { ImagePosition } from './draggableImageUtils'
 export type { ImagePosition } from './draggableImageUtils'
 
@@ -34,8 +34,6 @@ interface DraggableImageProps {
   onReorder?: (direction: 'up' | 'down') => void
   style?: React.CSSProperties
 }
-
-const DEFAULT_POSITIONS = DEFAULT_IMAGE_GEOMETRY
 
 /** Rotation increment per tap (degrees). */
 const ROTATION_STEP = 15
@@ -58,7 +56,7 @@ export default function DraggableImage({
   const ref = useRef<HTMLDivElement>(null)
   // Saved/restored geometry is authoritative while idle. Only an active
   // gesture has a local draft, so same-ID Undo does not require a remount.
-  const base = image.position ?? DEFAULT_POSITIONS[image.type]
+  const base = imageGeometry(image)
   const saved: ImagePosition = {
     ...base,
     rotation: image.position?.rotation ?? 0,

@@ -11,9 +11,10 @@ export interface EditorHistoryEntry {
   after: BookPage
   /** A transform owns only this image's geometry, never later story/art edits. */
   imageTransformId?: string
+  imageChanges?: boolean
 }
 
-export type EditorHistoryRestore = { pageId: string; state: BookPage; imageTransformId?: string }
+export type EditorHistoryRestore = { pageId: string; state: BookPage; imageTransformId?: string; imageChangesFrom?: BookPage }
 
 const MAX_HISTORY = 20
 
@@ -71,7 +72,7 @@ export function useEditorHistory(scope = ''): EditorHistory {
     const next = { ...s, index: s.index - 1 }
     stateSnap.current = next
     setState(next)
-    return { pageId: entry.pageId, state: entry.before, ...(entry.imageTransformId ? { imageTransformId: entry.imageTransformId } : {}) }
+    return { pageId: entry.pageId, state: entry.before, ...(entry.imageTransformId ? { imageTransformId: entry.imageTransformId } : {}), ...(entry.imageChanges ? { imageChangesFrom: entry.after } : {}) }
   }, [scope])
 
   const redo = useCallback((): EditorHistoryRestore | null => {
@@ -81,7 +82,7 @@ export function useEditorHistory(scope = ''): EditorHistory {
     const next = { ...s, index: s.index + 1 }
     stateSnap.current = next
     setState(next)
-    return { pageId: entry.pageId, state: entry.after, ...(entry.imageTransformId ? { imageTransformId: entry.imageTransformId } : {}) }
+    return { pageId: entry.pageId, state: entry.after, ...(entry.imageTransformId ? { imageTransformId: entry.imageTransformId } : {}), ...(entry.imageChanges ? { imageChangesFrom: entry.before } : {}) }
   }, [scope])
 
   const clear = useCallback(() => {

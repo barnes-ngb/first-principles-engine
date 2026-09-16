@@ -1,3 +1,5 @@
+import type { PageImage } from '../../core/types'
+
 /** Extended position including rotation (degrees), zIndex, and flip flags. */
 export interface ImagePosition {
   x: number
@@ -171,6 +173,34 @@ export const DEFAULT_IMAGE_GEOMETRY: Record<
   photo: { x: 10, y: 10, width: 40, height: 40 },
   sticker: { x: 25, y: 15, width: 30, height: 30 },
   sketch: { x: 0, y: 0, width: 100, height: 100 },
+}
+
+/** One fallback for editor, reader, print and writers. A photo's role, rather
+ * than its file type, determines whether missing bounds mean a full page. */
+export function imageGeometry(image: PageImage): NonNullable<PageImage['position']> {
+  const fallback = layerTypeOf(image) === 'background'
+    ? DEFAULT_IMAGE_GEOMETRY['ai-generated']
+    : DEFAULT_IMAGE_GEOMETRY[image.type]
+  return { ...fallback, ...image.position }
+}
+
+/** The selected background, or the one actually painted on top of that plane. */
+export function backgroundTarget(images: PageImage[], selectedId?: string | null): PageImage | undefined {
+  const backgrounds = stackOrder(images).filter((image) => layerTypeOf(image) === 'background')
+  return backgrounds.find((image) => image.id === selectedId) ?? backgrounds.at(-1)
+}
+
+/** Reordering owns z only. The other plane remains byte-for-byte untouched;
+ * materialized bounds in this plane match the shared rendering fallback. */
+export function reorderPageImages(images: PageImage[], imageId: string, direction: 'up' | 'down'): PageImage[] {
+  const image = images.find((item) => item.id === imageId)
+  if (!image) return images
+  const order = moveInStack(images, imageId, direction)
+  if (order.every((id, index) => id === stackOrder(images)[index].id)) return images
+  const plane = layerTypeOf(image)
+  const members = new Set(images.filter((item) => layerTypeOf(item) === plane).map((item) => item.id))
+  const z = normalizedStackZ(order.filter((id) => members.has(id)))
+  return images.map((item) => members.has(item.id) ? { ...item, position: { ...imageGeometry(item), zIndex: z[item.id] } } : item)
 }
 
 // An unset image sorts into a band far above any normalized (small-integer)
