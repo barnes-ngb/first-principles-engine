@@ -59,7 +59,7 @@ describe('cleanup editor user actions', () => {
   it('touch Keep restores the displayed source location; Auto keeps the manual mark', async () => {
     const { user } = setup()
     const canvas = await screen.findByRole('img')
-    await user.click(screen.getByRole('button', { name: 'Keep', exact: true }))
+    await user.click(screen.getByRole('button', { name: 'Keep' }))
     fireEvent.pointerDown(canvas, { pointerId: 7, pointerType: 'touch', clientX: 205, clientY: 305 })
     fireEvent.pointerUp(canvas, { pointerId: 7, pointerType: 'touch', clientX: 205, clientY: 305 })
     await user.click(screen.getByRole('button', { name: 'Auto cleanup' }))
@@ -73,7 +73,7 @@ describe('cleanup editor user actions', () => {
   it('lost pointer capture discards the partial stroke and allows acceptance', async () => {
     const { user, onApply } = setup()
     const canvas = await screen.findByRole('img')
-    await user.click(screen.getByRole('button', { name: 'Keep', exact: true }))
+    await user.click(screen.getByRole('button', { name: 'Keep' }))
     fireEvent.pointerDown(canvas, { pointerId: 7, clientX: 205, clientY: 305 })
     fireEvent.lostPointerCapture(canvas, { pointerId: 7 })
     await user.click(screen.getByRole('button', { name: 'Use cleanup' }))
@@ -145,7 +145,7 @@ describe('cleanup editor user actions', () => {
   it('a long stroke stops visibly at the point limit and remains saveable', async () => {
     const { user, onApply } = setup()
     const canvas = await screen.findByRole('img')
-    await user.click(screen.getByRole('button', { name: 'Keep', exact: true }))
+    await user.click(screen.getByRole('button', { name: 'Keep' }))
     fireEvent.pointerDown(canvas, { pointerId: 8, clientX: 205, clientY: 305 })
     for (let i = 0; i < MAX_STROKE_POINTS; i++) fireEvent.pointerMove(canvas, { pointerId: 8, clientX: i % 2 === 0 ? 220 : 205, clientY: 305 })
     expect(screen.getByText(/That stroke is long/)).toBeInTheDocument()
