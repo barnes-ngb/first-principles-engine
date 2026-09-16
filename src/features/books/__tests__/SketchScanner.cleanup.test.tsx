@@ -129,7 +129,8 @@ describe('scanner correction/save session boundaries', () => {
     const cancel = screen.getByRole('button', { name: alreadySavedCleaned ? 'Done' : 'Cancel' })
     expect(cancel).toBeDisabled()
     fireEvent.click(cancel)
-    await user.keyboard('{Escape}')
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape', keyCode: 27 })
+    expect(onClose).not.toHaveBeenCalled()
     // Dialog's backdrop handler is reached through its actual container.
     const container = screen.getByRole('dialog').parentElement!
     fireEvent.mouseDown(container)
