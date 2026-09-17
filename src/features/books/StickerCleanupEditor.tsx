@@ -28,6 +28,7 @@ interface Props {
 }
 
 export default function StickerCleanupEditor({ file, borderInsetFraction, initialEdits, initialSmallerCopy = false, onApply, onCancel }: Props) {
+  const [originalPreview, setOriginalPreview] = useState<{ file: File; url: string } | null>(null)
   const [source, setSource] = useState<CleanupSource | null>(null)
   const [edits, setEdits] = useState(initialEdits ?? INITIAL_CLEANUP)
   const [history, setHistory] = useState<CleanupEdits[]>([])
@@ -50,8 +51,17 @@ export default function StickerCleanupEditor({ file, borderInsetFraction, initia
   const automatic = useMemo(() => source ? renderCleanup(source, { auto: edits.auto, strength: edits.strength, marks: [] }, borderInsetFraction) : null, [source, edits.auto, edits.strength, borderInsetFraction])
 
   useEffect(() => {
+    const url = URL.createObjectURL(file)
+    setOriginalPreview({ file, url })
+    return () => URL.revokeObjectURL(url)
+  }, [file])
+
+  useEffect(() => {
     active.current = true
     let cancelled = false
+    setSource(null)
+    setError(null)
+    setTooLarge(false)
     loadCleanupSource(file, allowSmallerCopy).then(value => { if (!cancelled) { setSource(value); setError(null); setTooLarge(false) } }).catch(reason => {
       if (!cancelled) { setError(reason instanceof Error ? reason.message : 'Could not open this picture.'); setTooLarge(reason instanceof Error && reason.name === 'PictureTooLarge') }
     })
@@ -146,6 +156,23 @@ export default function StickerCleanupEditor({ file, borderInsetFraction, initia
       <DialogTitle>Adjust cleanup</DialogTitle>
       <DialogContent sx={{ px: { xs: 2, sm: 3 } }}>
         <Stack spacing={1.5}>
+          {tooLarge && !allowSmallerCopy && <Stack spacing={1.5}>
+            <Alert severity="info">This picture is large. Edit a smaller copy to adjust cleanup. Your original stays unchanged.</Alert>
+            <Button variant="outlined" onClick={() => { setAllowSmallerCopy(true); setTooLarge(false); setError(null) }} sx={{ minHeight: 44 }}>Use smaller editable copy</Button>
+            {originalPreview?.file === file && <Box component="img" src={originalPreview.url} alt="Original picture before cleanup" sx={{ display: 'block', width: '100%', maxHeight: '42vh', objectFit: 'contain', background: CHECKERBOARD_BG }} />}
+          </Stack>}
+          {!source && !error && <CircularProgress aria-label="Opening picture" />}
+          {source && <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'minmax(0, 1fr)', sm: 'minmax(0, 1fr) minmax(0, 1fr)' }, gap: 2, alignItems: 'start' }}>
+            <Stack spacing={1} sx={{ minWidth: 0 }}>
+              <Box sx={{ overflow: zoom === 2 ? 'auto' : 'visible', maxHeight: zoom === 2 ? '52vh' : 'none', border: '1px solid', borderColor: 'divider' }}>
+                <Box sx={{ width: zoom === 2 ? '200%' : 'min(100%, ' + (source.width / source.height * 42) + 'vh)', mx: zoom === 1 ? 'auto' : 0, background: CHECKERBOARD_BG }}>
+                  <canvas ref={canvas} width={source.width} height={source.height} role="img" aria-label={compare ? 'Original for comparison' : 'Cleanup preview - use Tap background, Keep or Remove'} style={{ display: 'block', width: '100%', height: 'auto', touchAction: compare || panning ? 'auto' : 'none', cursor: compare || panning ? 'default' : 'crosshair' }} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={event => finishStroke(event)} onPointerCancel={event => finishStroke(event, true)} onLostPointerCapture={event => finishStroke(event, true)} />
+                </Box>
+              </Box>
+              <Typography variant="caption">Choose Move picture to scroll without making marks.</Typography>
+              {source.smallerCopy && <Alert severity="info">Editing a smaller copy. Reset and Keep restore this copy; your full-size original stays unchanged.</Alert>}
+            </Stack>
+            <Stack spacing={1.5} sx={{ minWidth: 0 }}>
           <Typography variant="body2">Tap to clear an area. Keep brings back your picture.</Typography>
           <Stack direction="row" useFlexGap flexWrap="wrap" gap={1}>
             <Button disabled={!source || busy} onClick={() => commit({ ...edits, auto: true })} sx={{ minHeight: 44 }}>Auto cleanup</Button>
@@ -170,20 +197,13 @@ export default function StickerCleanupEditor({ file, borderInsetFraction, initia
             <Button disabled={!source || busy} aria-pressed={zoom === 2} onClick={() => setZoom(zoom === 1 ? 2 : 1)} sx={{ minHeight: 44 }}>{zoom === 1 ? 'Zoom in' : 'Fit picture'}</Button>
           </Stack>
           {compare && <Typography variant="caption">Original — choose Show result to keep editing.</Typography>}
-          {source?.smallerCopy && <Alert severity="info">Editing a smaller copy. Reset and Keep restore this copy; your full-size original stays unchanged.</Alert>}
-          {!source && !error && <CircularProgress aria-label="Opening picture" />}
-          {source && <Box sx={{ overflow: 'auto', maxHeight: '52vh', border: '1px solid', borderColor: 'divider' }}>
-            <Box sx={{ width: `${zoom * 100}%`, background: CHECKERBOARD_BG }}>
-              <canvas ref={canvas} width={source.width} height={source.height} role="img" aria-label={compare ? 'Original for comparison' : 'Cleanup preview — use Tap background, Keep or Remove'} style={{ display: 'block', width: '100%', height: 'auto', touchAction: compare || panning ? 'auto' : 'none', cursor: compare || panning ? 'default' : 'crosshair' }} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={event => finishStroke(event)} onPointerCancel={event => finishStroke(event, true)} onLostPointerCapture={event => finishStroke(event, true)} />
-            </Box>
+            </Stack>
           </Box>}
-          <Typography variant="caption">Choose Move picture to scroll without making marks.</Typography>
-          {error && <Alert severity="warning">{error}</Alert>}
-          {tooLarge && !allowSmallerCopy && <Button variant="outlined" onClick={() => { setAllowSmallerCopy(true); setTooLarge(false); setError(null) }} sx={{ minHeight: 44 }}>Use smaller editable copy</Button>}
+          {error && !tooLarge && <Alert severity="warning">{error}</Alert>}
           <Typography variant="caption" color="text.secondary">Changes stay here until you choose Use cleanup, then Save Cleaned.</Typography>
         </Stack>
       </DialogContent>
-      <DialogActions><Button onClick={cancel} sx={{ minHeight: 44 }}>Cancel</Button><Button variant="contained" disabled={!source || busy || compare} onClick={() => { void accept() }} sx={{ minHeight: 44 }}>{busy ? 'Preparing…' : 'Use cleanup'}</Button></DialogActions>
+      <DialogActions><Button onClick={cancel} sx={{ minHeight: 44 }}>Cancel</Button><Button variant="contained" disabled={!source || busy || compare} onClick={() => { void accept() }} sx={{ minHeight: 44 }}>{busy ? 'Preparing.' : 'Use cleanup'}</Button></DialogActions>
     </Dialog>
   )
 }
