@@ -1,25 +1,15 @@
 import { useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import Box from '@mui/material/Box'
 import IconButton from '@mui/material/IconButton'
-import Paper from '@mui/material/Paper'
-import Stack from '@mui/material/Stack'
-import Tooltip from '@mui/material/Tooltip'
-import Typography from '@mui/material/Typography'
 import CloseIcon from '@mui/icons-material/Close'
-import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward'
-import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward'
-import ArrowBackIcon from '@mui/icons-material/ArrowBack'
-import ArrowForwardIcon from '@mui/icons-material/ArrowForward'
-import RotateLeftIcon from '@mui/icons-material/RotateLeft'
 import RotateRightIcon from '@mui/icons-material/RotateRight'
-import FlipIcon from '@mui/icons-material/Flip'
-import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp'
-import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
 import OpenWithIcon from '@mui/icons-material/OpenWith'
 import OpenInFullIcon from '@mui/icons-material/OpenInFull'
 import type { PageImage } from '../../core/types'
 import { hasFitBackdrop, resolveImageFit } from './imageFit'
 import ImageFitBackdrop from './ImageFitBackdrop'
+import PictureControls from './PictureControls'
 import { clampPosition, scaleImagePosition, cornerScaleFromDrag, keepImageVisible, rotationFromDrag, imageGeometry } from './draggableImageUtils'
 import type { ImagePosition } from './draggableImageUtils'
 export type { ImagePosition } from './draggableImageUtils'
@@ -32,6 +22,9 @@ interface DraggableImageProps {
   onRemove?: () => void
   /** Move this element one step in the layer stack ('up' = toward the top). */
   onReorder?: (direction: 'up' | 'down') => void
+  /** When supplied, render actions outside the artwork. Null means the host
+   * is not mounted yet; undefined preserves standalone inline controls. */
+  controlsContainer?: HTMLElement | null
   style?: React.CSSProperties
 }
 
@@ -51,6 +44,7 @@ export default function DraggableImage({
   onPositionChange,
   onRemove,
   onReorder,
+  controlsContainer,
   style,
 }: DraggableImageProps) {
   const ref = useRef<HTMLDivElement>(null)
@@ -187,6 +181,20 @@ export default function DraggableImage({
     commit({ ...pos, [axis]: !pos[axis] })
   }
 
+  const controls = <PictureControls
+    label={image.label?.trim() || (image.type === 'sticker' ? 'Sticker' : 'Picture')}
+    position={pos}
+    busy={draft !== null}
+    canTransform={!!onPositionChange}
+    onNudge={handleNudge}
+    onRotate={handleRotate}
+    onFlip={handleFlip}
+    onScale={(factor) => commit(scaleImagePosition(pos, factor))}
+    onCenter={() => commit({ ...pos, x: (100 - pos.width) / 2, y: (100 - pos.height) / 2 })}
+    onRemove={onRemove}
+    onReorder={onReorder}
+  />
+
   // Determine if toolbar should appear below (sticker is near top edge)
   const nearTopEdge = pos.y < 15
 
@@ -254,7 +262,7 @@ export default function DraggableImage({
       />
 
       {/* Remove button */}
-      {selected && onRemove && (
+      {selected && onRemove && controlsContainer === undefined && (
         <IconButton
           size="small"
           onPointerDown={(e) => e.stopPropagation()}
@@ -367,115 +375,13 @@ export default function DraggableImage({
         </>
       )}
 
-      {/* Sticker toolbar — only for stickers when selected */}
-      {selected && isSticker && (
-        <Paper
-          elevation={4}
-          onClick={(e) => e.stopPropagation()}
-          onPointerDown={(e) => e.stopPropagation()}
-          sx={{
-            position: 'absolute',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            ...(nearTopEdge
-              ? { top: 'calc(100% + 8px)' }
-              : { bottom: 'calc(100% + 8px)' }),
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            gap: 0.5,
-            p: 0.75,
-            borderRadius: 2,
-            bgcolor: 'background.paper',
-            zIndex: 999,
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {/* Move row */}
-          <Stack direction="row" alignItems="center" spacing={0.25}>
-            <Tooltip title="Move left">
-              <IconButton size="small" onClick={() => handleNudge('x', -1)} sx={{ p: 0.5 }}>
-                <ArrowBackIcon sx={{ fontSize: 14 }} />
-              </IconButton>
-            </Tooltip>
-            <Stack spacing={0}>
-              <Tooltip title="Move up">
-                <IconButton size="small" onClick={() => handleNudge('y', -1)} sx={{ p: 0.5 }}>
-                  <ArrowUpwardIcon sx={{ fontSize: 14 }} />
-                </IconButton>
-              </Tooltip>
-              <Tooltip title="Move down">
-                <IconButton size="small" onClick={() => handleNudge('y', 1)} sx={{ p: 0.5 }}>
-                  <ArrowDownwardIcon sx={{ fontSize: 14 }} />
-                </IconButton>
-              </Tooltip>
-            </Stack>
-            <Tooltip title="Move right">
-              <IconButton size="small" onClick={() => handleNudge('x', 1)} sx={{ p: 0.5 }}>
-                <ArrowForwardIcon sx={{ fontSize: 14 }} />
-              </IconButton>
-            </Tooltip>
-          </Stack>
-
-          {/* Rotate row */}
-          <Stack direction="row" alignItems="center" spacing={0.5}>
-            <Tooltip title="Rotate left 15°">
-              <IconButton size="small" onClick={() => handleRotate(-1)} sx={{ p: 0.5 }}>
-                <RotateLeftIcon sx={{ fontSize: 14 }} />
-              </IconButton>
-            </Tooltip>
-            <Typography variant="caption" sx={{ minWidth: 30, textAlign: 'center', fontSize: '0.6rem' }}>
-              {Math.round(pos.rotation)}°
-            </Typography>
-            <Tooltip title="Rotate right 15°">
-              <IconButton size="small" onClick={() => handleRotate(1)} sx={{ p: 0.5 }}>
-                <RotateRightIcon sx={{ fontSize: 14 }} />
-              </IconButton>
-            </Tooltip>
-          </Stack>
-
-          {/* Flip row */}
-          <Stack direction="row" alignItems="center" spacing={0.5}>
-            <Tooltip title="Flip horizontal">
-              <IconButton
-                size="small"
-                onClick={() => handleFlip('flipH')}
-                sx={{ p: 0.5, bgcolor: pos.flipH ? 'action.selected' : undefined }}
-              >
-                <FlipIcon sx={{ fontSize: 14 }} />
-              </IconButton>
-            </Tooltip>
-            <Tooltip title="Flip vertical">
-              <IconButton
-                size="small"
-                onClick={() => handleFlip('flipV')}
-                sx={{ p: 0.5, bgcolor: pos.flipV ? 'action.selected' : undefined }}
-              >
-                <FlipIcon sx={{ fontSize: 14, transform: 'rotate(90deg)' }} />
-              </IconButton>
-            </Tooltip>
-          </Stack>
-
-          {/* Layer row */}
-          {onReorder && (
-            <Stack direction="row" alignItems="center" spacing={0.25}>
-              <Tooltip title="Send backward">
-                <IconButton size="small" onClick={() => onReorder('down')} sx={{ p: 0.5 }}>
-                  <KeyboardArrowDownIcon sx={{ fontSize: 14 }} />
-                </IconButton>
-              </Tooltip>
-              <Typography variant="caption" sx={{ fontSize: '0.6rem' }}>
-                Layer
-              </Typography>
-              <Tooltip title="Bring forward">
-                <IconButton size="small" onClick={() => onReorder('up')} sx={{ p: 0.5 }}>
-                  <KeyboardArrowUpIcon sx={{ fontSize: 14 }} />
-                </IconButton>
-              </Tooltip>
-            </Stack>
-          )}
-        </Paper>
-      )}
+      {/* In the editor these actions live below the canvas, outside every
+          artwork transform/stack. A portal retains this gesture's callbacks. */}
+      {selected && (controlsContainer
+        ? createPortal(controls, controlsContainer)
+        : controlsContainer === undefined && isSticker
+          ? <Box sx={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)', width: 280, ...(nearTopEdge ? { top: 'calc(100% + 8px)' } : { bottom: 'calc(100% + 8px)' }), zIndex: 999 }}>{controls}</Box>
+          : null)}
     </Box>
   )
 }
