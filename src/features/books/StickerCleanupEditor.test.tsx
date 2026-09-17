@@ -29,7 +29,42 @@ function setup() {
 }
 
 describe('cleanup editor user actions', () => {
+  it('N2 shows the untouched original and consent before editing tools; cancel never downsamples', async () => {
+    const error = new Error('This picture is large. Use a smaller editable copy?')
+    error.name = 'PictureTooLarge'
+    load.mockRejectedValue(error)
+    const { user, onApply, onCancel, unmount } = setup()
+    const preview = await screen.findByRole('img', { name: 'Original picture before cleanup' })
+    expect(preview).toHaveAttribute('src', 'blob:original-preview')
+    expect(screen.queryByRole('group', { name: 'Cleanup tools' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Use cleanup' })).toBeDisabled()
+    expect(load).toHaveBeenCalledTimes(1)
+    expect(load).toHaveBeenCalledWith(sourceFile, false)
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(onCancel).toHaveBeenCalledTimes(1)
+    expect(onApply).not.toHaveBeenCalled()
+    expect(encode).not.toHaveBeenCalled()
+    unmount()
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:original-preview')
+  })
+
+  it('N2 keeps a manual correction through compare, zoom and fit view changes', async () => {
+    const { user, onApply } = setup()
+    const canvas = await screen.findByRole('img')
+    await user.click(screen.getByRole('button', { name: 'Keep' }))
+    fireEvent.pointerDown(canvas, { pointerId: 7, pointerType: 'touch', clientX: 205, clientY: 305 })
+    fireEvent.pointerUp(canvas, { pointerId: 7, pointerType: 'touch', clientX: 205, clientY: 305 })
+    await user.click(screen.getByRole('button', { name: 'Compare original' }))
+    await user.click(screen.getByRole('button', { name: 'Zoom in' }))
+    await user.click(screen.getByRole('button', { name: 'Fit picture' }))
+    await user.click(screen.getByRole('button', { name: 'Show result' }))
+    await user.click(screen.getByRole('button', { name: 'Use cleanup' }))
+    await waitFor(() => expect(onApply).toHaveBeenCalledTimes(1))
+    expect(onApply.mock.calls[0][1].marks).toHaveLength(1)
+    expect(encode.mock.calls[0][1][(10 * 20 + 10) * 4 + 3]).toBe(255)
+  })
   beforeEach(() => {
+    vi.stubGlobal('URL', { ...URL, createObjectURL: vi.fn(() => 'blob:original-preview'), revokeObjectURL: vi.fn() })
     load.mockReset().mockResolvedValue(fixture())
     encode.mockReset().mockResolvedValue(outputFile)
     vi.stubGlobal('PointerEvent', TestPointer)

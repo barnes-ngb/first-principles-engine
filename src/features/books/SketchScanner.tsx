@@ -37,6 +37,7 @@ import { useStickerLabel } from './useStickerLabel'
 import {
   FANCY_STYLE_OPTIONS,
   DEFAULT_FANCY_STYLE_ID,
+  fancyStyleLabel,
   resolveFancyEnhanceParams,
 } from './drawingStickerStyles'
 import { ART_QUOTA_MESSAGE } from '../business/useArtQuota'
@@ -100,6 +101,43 @@ type Stage = 'capture' | 'crop' | 'cleaning' | 'preview'
 const DEFAULT_CROP: CropFraction = { x: 0.06, y: 0.06, width: 0.88, height: 0.88 }
 type PreviewTab = 'original' | 'cleaned' | 'fancy'
 type SaveVersion = 'cleaned' | 'fancy'
+
+/**
+ * The fancy picture that actually came back, as ONE coherent record
+ * (LOCAL-CLAUDE-PILOT-001).
+ *
+ * The style chips and the note field under a finished picture are a draft of the
+ * **next** request: tapping one is free, spends nothing, and must not re-describe
+ * — or re-file — the picture already on screen. Before this, the saved `theme`
+ * was read off the live `styleId` at save time, so generating in Comic, then
+ * tapping Watercolor without generating, then Save Fancy wrote `theme: 'cartoon'`
+ * beside the comic image's URL and storage path: a library row that named a look
+ * the picture was never drawn in. The "Drawn as:" line had the same shape, since
+ * it read the draft note against the completed request's rewrite.
+ *
+ * So the look, the note that was sent, and what the server said it drew are
+ * captured *with* the image they belong to, at the tap, before any await. This is
+ * component state and nothing more — no new stored field, no schema change; the
+ * document written is the same shape it always was, with the look it was actually
+ * drawn in.
+ *
+ * The saved marker is the other half of that record, and it is NOT carried here:
+ * `savedVersions` has one `'fancy'` slot for whichever picture is on screen, so
+ * it only stays true while a FANCY save and a generation cannot overlap. That is
+ * what the two guards below enforce — see `handleMakeFancy` / `saveSticker`. A
+ * *cleaned* save owns a different slot and a different picture, so it is not part
+ * of that rule and never blocks a generation.
+ */
+interface FancyResult {
+  url: string
+  storagePath: string | null
+  /** The look tapped for the generation that produced THIS picture. */
+  styleId: string
+  /** The note sent with it (`''` when none) — what `revisedNote` is a rewrite of. */
+  requestNote: string
+  /** The rewriter's version of that note, when it changed the words (FEAT-197). */
+  revisedNote?: string
+}
 
 /** Upload a file to Firebase Storage and return { url, storagePath }. */
 async function uploadToStorage(familyId: string, file: File, subfolder: string) {
@@ -194,10 +232,11 @@ function SketchScannerSession({
   // Manual crop (between capture and cleaning) — fractions of the captured image.
   const [cropFraction, setCropFraction] = useState<CropFraction>(DEFAULT_CROP)
 
-  // Fancy (theme-transformed) version
+  // Fancy (theme-transformed) version. `styleId` is the PENDING choice — what the
+  // next "Make it fancy" would ask for; `fancyResult` is the picture that came
+  // back and the request that made it. They are deliberately separate.
   const [styleId, setStyleId] = useState<string>(DEFAULT_FANCY_STYLE_ID)
-  const [fancyUrl, setFancyUrl] = useState<string | null>(null)
-  const [fancyStoragePath, setFancyStoragePath] = useState<string | null>(null)
+  const [fancyResult, setFancyResult] = useState<FancyResult | null>(null)
   const [enhancing, setEnhancing] = useState(false)
   const [enhanceError, setEnhanceError] = useState<string | null>(null)
   /**
@@ -215,8 +254,6 @@ function SketchScannerSession({
    * is cleared with the rest of the dialog's state on reset.
    */
   const [customNote, setCustomNote] = useState('')
-  /** The rewriter's version of the note, when it changed the words (FEAT-197). */
-  const [revisedNote, setRevisedNote] = useState<string | undefined>(undefined)
 
   // Shared tagging (applies to whichever version is saved)
   const [tags, setTags] = useState<StickerTag[]>([])
@@ -247,7 +284,26 @@ function SketchScannerSession({
   const capturedFileRef = useRef<File | null>(null)
   const sessionRef = useRef(0)
   const aliveRef = useRef(true)
-  const saveInFlightRef = useRef(false)
+  /**
+   * The two in-flight flags are refs as well as state because a tap has to be
+   * refused *synchronously* — `enhancing` / `savingVersion` only reach the DOM on
+   * the next render, and two taps inside one tick would both read the old value.
+   * They also guard each OTHER (LOCAL-CLAUDE-PILOT-001): a fancy save and a fancy
+   * generation may not overlap, because the "Saved ✓" marker names the picture on
+   * screen and a generation that lands mid-save would hand the previous picture's
+   * marker to a brand-new picture that was never written.
+   *
+   * The save flag carries WHICH version is in flight rather than a bare boolean,
+   * because only the fancy one is party to that rule. A cleaned save writes a
+   * different row, holds a different marker, and shares nothing with the picture
+   * the generator is about to replace — so blocking a generation on it bought no
+   * protection and cost the whole paid door: an `addDoc` resolves on server ack,
+   * so a cleaned save started offline stays pending indefinitely and "Make it
+   * fancy" never came back (the same never-settles shape the quota callback is
+   * deliberately not awaited for). The flag stays a ref, and stays read before
+   * any await, so the synchronous refusal is unchanged for the case it is for.
+   */
+  const saveInFlightRef = useRef<SaveVersion | null>(null)
   const enhanceInFlightRef = useRef(false)
   const { enhanceSketch, imageFailureRef } = useAI()
   useEffect(() => {
@@ -263,7 +319,14 @@ function SketchScannerSession({
   const retryDoor = hasCustomPictureNote(customNote)
     ? ImageRetryDoor.RedrawNote
     : ImageRetryDoor.Redraw
-  const drawnAs = drawnAsLine(customNote, revisedNote, audience)
+  const fancyUrl = fancyResult?.url ?? null
+  // Both read the COMPLETED request, never the draft: what the picture maker was
+  // asked for is a fact about the picture on screen, so editing the note or
+  // tapping another look leaves it alone, and so does a redo that never arrived.
+  const drawnAs = fancyResult
+    ? drawnAsLine(fancyResult.requestNote, fancyResult.revisedNote, audience)
+    : null
+  const resultLook = fancyResult ? fancyStyleLabel(fancyResult.styleId) : null
   const finalizeCaptureDefaults = useCallback(() => {
     // The first submitted save/paid transform owns the defaults shown at that
     // moment. Later metadata must not silently relabel its result or anchor.
@@ -272,7 +335,7 @@ function SketchScannerSession({
 
   const reset = useCallback(() => {
     sessionRef.current++
-    saveInFlightRef.current = false
+    saveInFlightRef.current = null
     enhanceInFlightRef.current = false
     capturedFileRef.current = null
     setCaptureOwner(null)
@@ -289,15 +352,13 @@ function SketchScannerSession({
     setCleanedUrl(null)
     setCropFraction(DEFAULT_CROP)
     setStyleId(DEFAULT_FANCY_STYLE_ID)
-    setFancyUrl(null)
-    setFancyStoragePath(null)
+    setFancyResult(null)
     setEnhancing(false)
     setEnhanceError(null)
     setFancyFailure(null)
     setFancyAlternatives([])
     // One-off, so it never survives a dialog (FEAT-197).
     setCustomNote('')
-    setRevisedNote(undefined)
     resetLabel()
     setTags([])
     setProfile(childProfile ?? 'both')
@@ -310,7 +371,9 @@ function SketchScannerSession({
   const handleClose = useCallback(() => {
     // A document save cannot be cancelled by dismissing this dialog. Keep its
     // success/error visible, including Escape/backdrop before state re-renders.
-    if (saveInFlightRef.current) return
+    // Either version holds the dialog open — this guard is about the write, not
+    // about which picture it is for.
+    if (saveInFlightRef.current !== null) return
     reset()
     onClose()
   }, [reset, onClose])
@@ -426,6 +489,20 @@ function SketchScannerSession({
     // so a capped tap costs nothing at all. The style controls already show the
     // nudge instead of a button; this holds the rule for real.
     if (enhanceInFlightRef.current || enhancing || capReached) return
+    // A submitted FANCY save owns the picture it was submitted for until it
+    // settles. Starting a generation underneath it would replace that picture —
+    // and clear the fancy saved marker — while the write for the old one is still
+    // on its way, so the marker the save then sets would land on a picture nobody
+    // wrote. Refused HERE as well as on the buttons, because the retry card's own
+    // buttons call this function directly.
+    //
+    // A pending CLEANED save is not that situation and is not refused: it is
+    // saving the cleaned bytes, which no generation touches, and it marks only
+    // its own slot when it lands. Blocking on it made the two product lines per
+    // drawing one queue — and, since a Firestore write only resolves on server
+    // ack, an offline cleaned save closed the paid door for the rest of the
+    // session with no way to reopen it.
+    if (saveInFlightRef.current === 'fancy' || savingVersion === 'fancy') return
     finalizeCaptureDefaults()
     const session = sessionRef.current
     enhanceInFlightRef.current = true
@@ -433,7 +510,6 @@ function SketchScannerSession({
     setEnhanceError(null)
     setFancyFailure(null)
     setFancyAlternatives([])
-    setRevisedNote(undefined)
     setPreviewTab('fancy')
 
     // A tapped alternative from the retry card IS the new note (FEAT-197 ×
@@ -441,6 +517,10 @@ function SketchScannerSession({
     // and the generation it starts counts as one like any other.
     const note = noteOverride ?? customNote
     if (noteOverride !== undefined) setCustomNote(noteOverride)
+    // The request is fixed HERE, before the first await: whatever is tapped or
+    // typed while this one is in flight belongs to the next request, not this
+    // picture. Nothing below reads `styleId` or `customNote` again.
+    const requestedStyleId = styleId
 
     try {
       const storagePath = await ensureOriginalUploaded()
@@ -453,16 +533,23 @@ function SketchScannerSession({
       const result = await enhanceSketch({
         familyId,
         sketchStoragePath: storagePath,
-        ...resolveFancyEnhanceParams(styleId, note),
+        ...resolveFancyEnhanceParams(requestedStyleId, note),
       })
       // A completed paid request still belongs to its originating quota callback.
       if (result?.url) recordStickerArtGeneration(recordGeneration)
       if (!aliveRef.current || session !== sessionRef.current) return
 
       if (result?.url) {
-        setFancyUrl(result.url)
-        setFancyStoragePath(result.storagePath)
-        setRevisedNote(result.revisedNote)
+        // The image and the request that produced it replace the previous pair
+        // together. A redo that fails leaves this untouched, so the picture on
+        // screen keeps its own look, its own note and its own "Drawn as:" line.
+        setFancyResult({
+          url: result.url,
+          storagePath: result.storagePath ?? null,
+          styleId: requestedStyleId,
+          requestNote: note,
+          revisedNote: result.revisedNote,
+        })
         // A real image came back: count the paid call (FEAT-166). A redo with
         // another style counts again — each is another real call.
         //
@@ -499,6 +586,7 @@ function SketchScannerSession({
     }
   }, [
     enhancing,
+    savingVersion,
     capReached,
     ensureOriginalUploaded,
     enhanceSketch,
@@ -512,18 +600,35 @@ function SketchScannerSession({
 
   const saveSticker = useCallback(
     async (version: SaveVersion) => {
-      const url = version === 'cleaned' ? cleanedUrl : fancyUrl
-      if (saveInFlightRef.current || savingVersion || savedVersions.has(version)) return
+      // The fancy row is written from the completed result, never from the
+      // pending picker: its URL, its storage path and the look it was drawn in
+      // are one record, so they cannot disagree in the library.
+      const saved = fancyResult
+      const url = version === 'cleaned' ? cleanedUrl : saved?.url ?? null
+      // Unchanged: ONE save at a time, whichever version, and never a second
+      // write of a version already saved.
+      if (saveInFlightRef.current !== null || savingVersion || savedVersions.has(version)) return
+      // The other direction of the same rule: while a generation is in flight the
+      // picture on screen is already on its way out, so saving it would mark a
+      // picture as saved that the very next render replaces. The spinner hides it
+      // anyway — the tap is refused rather than racing the result.
+      if (version === 'fancy' && (enhanceInFlightRef.current || enhancing)) return
       finalizeCaptureDefaults()
       const session = sessionRef.current
       const sourceDrawingId = sourceDrawingIdRef.current
-      saveInFlightRef.current = true
+      // Synchronously, before any await, and naming the version — so a tap on
+      // "Make it fancy" in the same tick is refused for a fancy save and allowed
+      // for a cleaned one, without waiting for `savingVersion` to render.
+      saveInFlightRef.current = version
 
       setSavingVersion(version)
       setError(null)
       try {
         let saveUrl = url
         let savePath: string
+        // Resolved in the same branch that resolves the bytes, so the look can
+        // never be read from somewhere the picture wasn't.
+        let versionFields: { isOriginal: true } | { theme: string }
 
         if (version === 'cleaned') {
           if (!cleanedFile) return
@@ -531,9 +636,11 @@ function SketchScannerSession({
           if (!aliveRef.current || session !== sessionRef.current) return
           saveUrl = uploaded.url
           savePath = uploaded.storagePath
+          versionFields = { isOriginal: true }
         } else {
-          if (!fancyUrl || !fancyStoragePath) return
-          savePath = fancyStoragePath
+          if (!saved?.url || !saved.storagePath) return
+          savePath = saved.storagePath
+          versionFields = { theme: saved.styleId }
         }
 
         if (!saveUrl || !aliveRef.current || session !== sessionRef.current) return
@@ -553,7 +660,7 @@ function SketchScannerSession({
           ...(sourceDrawingId
             ? { sourceDrawingId }
             : {}),
-          ...(version === 'cleaned' ? { isOriginal: true } : { theme: styleId }),
+          ...versionFields,
         }
         await addDoc(stickerLibraryCollection(familyId), newSticker as Sticker)
         if (!aliveRef.current || session !== sessionRef.current) return
@@ -562,14 +669,16 @@ function SketchScannerSession({
       } catch {
         if (aliveRef.current && session === sessionRef.current) setError('Failed to save sticker. Please try again.')
       } finally {
-        if (aliveRef.current && session === sessionRef.current) { saveInFlightRef.current = false; setSavingVersion(null) }
+        if (aliveRef.current && session === sessionRef.current) { saveInFlightRef.current = null; setSavingVersion(null) }
       }
     },
     [
       cleanedUrl,
-      fancyUrl,
-      fancyStoragePath,
+      // The completed result only — the pending `styleId` is deliberately NOT a
+      // dependency of the save, because it is not part of what gets written.
+      fancyResult,
       cleanedFile,
+      enhancing,
       savingVersion,
       savedVersions,
       familyId,
@@ -577,7 +686,6 @@ function SketchScannerSession({
       defaultLabel,
       tags,
       profile,
-      styleId,
       onSaved,
       finalizeCaptureDefaults,
     ],
@@ -792,6 +900,11 @@ function SketchScannerSession({
                               variant="contained"
                               startIcon={<AutoAwesomeIcon />}
                               onClick={() => void handleMakeFancy()}
+                              // A submitted FANCY save owns its picture until it
+                              // settles; the paid door reopens the moment it
+                              // does. A cleaned save is a different picture and
+                              // a different row, so it leaves this open.
+                              disabled={savingVersion === 'fancy'}
                               sx={{ minHeight: 44, textTransform: 'none' }}
                             >
                               Make it fancy
@@ -847,9 +960,20 @@ function SketchScannerSession({
             {/* Re-style controls once a fancy version exists */}
             {previewTab === 'fancy' && fancyUrl && !enhancing && (
               <Stack spacing={1}>
+                {/* Which look THIS picture was drawn in — a fact about
+                    the image above, not about the chips below it. Said out loud
+                    because the two can now differ: tapping another look changes
+                    what the next one would be and nothing about this one. */}
+                {resultLook && (
+                  <Typography variant="body2" color="text.secondary">
+                    This picture: {resultLook}
+                  </Typography>
+                )}
                 {/* What the picture maker was actually asked for, when the
                     copyright rewriter changed the note (FEAT-195 × FEAT-197).
-                    Parent audience only, and only when the words moved. */}
+                    Parent audience only, and only when the words moved. It
+                    describes the completed request, so editing the note below
+                    leaves it alone. */}
                 {drawnAs && (
                   <Typography variant="caption" color="text.secondary">
                     {drawnAs}
@@ -864,6 +988,14 @@ function SketchScannerSession({
                   </Typography>
                 ) : (
                   <>
+                    {/* The chips below are the NEXT request, and saying so is
+                        the honest half of keeping them free: picking one costs
+                        nothing and changes nothing on screen until the paid tap
+                        under them. */}
+                    <Typography variant="caption" color="text.secondary">
+                      Pick a look for the next picture — picking is free, and it
+                      doesn’t change the one above.
+                    </Typography>
                     <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75 }}>
                       {FANCY_STYLE_OPTIONS.map((option) => (
                         <Chip
@@ -888,6 +1020,10 @@ function SketchScannerSession({
                         size="small"
                         startIcon={<AutoAwesomeIcon />}
                         onClick={() => void handleMakeFancy()}
+                        // Same rule on the redo: a fancy save in flight is holding
+                        // this exact picture, and a new one would take its
+                        // marker. A pending cleaned save holds nothing here.
+                        disabled={savingVersion === 'fancy'}
                         sx={{ textTransform: 'none' }}
                       >
                         Make it with this style
@@ -897,6 +1033,18 @@ function SketchScannerSession({
                       <GenerateHint door="makeItFancy" audience={audience} />
                     </Box>
                   </>
+                )}
+                {/* A redo that didn't arrive costs the picture already made
+                    nothing. Say that, and say where it stands — a
+                    person looking at a failure needs to know whether the thing
+                    they can still see is safe, and whether it is already in the
+                    library or still waiting for a tap. */}
+                {(fancyFailure || enhanceError) && (
+                  <Typography variant="body2" color="text.secondary">
+                    {savedVersions.has('fancy')
+                      ? 'Your picture above hasn’t changed — it is already saved in your sticker library.'
+                      : 'Your picture above hasn’t changed — you can still save it.'}
+                  </Typography>
                 )}
                 {enhanceError && (
                   <Typography variant="body2" color="error">
@@ -1025,7 +1173,11 @@ function SketchScannerSession({
                   savingVersion !== null ||
                   !saveTargetReady ||
                   !label.trim() ||
-                  savedVersions.has(saveTarget)
+                  savedVersions.has(saveTarget) ||
+                  // The picture this button would save is behind the spinner and
+                  // about to be replaced — the offer comes back when it lands (or
+                  // when it fails and the old picture is still the one on screen).
+                  (saveTarget === 'fancy' && enhancing)
                 }
                 sx={{ minHeight: 44 }}
               >

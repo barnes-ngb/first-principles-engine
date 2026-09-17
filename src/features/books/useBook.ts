@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   addDoc,
   deleteDoc,
@@ -23,7 +23,12 @@ import { addDiamondEvent } from '../../core/xp/addDiamondEvent'
 import { DIAMOND_EVENTS } from '../../core/types'
 import { createEmptyPage, generateImageId } from './bookTypes'
 import { cleanSketchBackground } from './cleanSketch'
-import { moveInStack, normalizedStackZ, DEFAULT_IMAGE_GEOMETRY } from './draggableImageUtils'
+import { reorderPageImages } from './draggableImageUtils'
+
+export interface BookPageChange {
+  before: BookPage
+  after: BookPage
+}
 
 interface UseBookResult {
   book: Book | null
@@ -32,6 +37,8 @@ interface UseBookResult {
   /** When saveState is 'error', contains the actual error message for debugging. */
   saveErrorMessage: string | null
   updatePage: (pageId: string, changes: Partial<BookPage>) => void
+  /** Atomic, scoped page mutation and its actual accepted before/after pair. */
+  changePage: (pageId: string, mutate: (page: BookPage) => BookPage | undefined, options?: { usedAiGeneration?: boolean }) => BookPageChange | undefined
   addPage: () => void
   deletePage: (pageId: string) => void
   reorderPages: (fromIndex: number, toIndex: number) => void
@@ -42,6 +49,10 @@ interface UseBookResult {
    */
   updateBookMeta: (changes: Partial<Pick<Book, 'title' | 'status' | 'coverStyle' | 'coverImageUrl' | 'subjectBuckets' | 'isTogetherBook' | 'contributorIds' | 'theme' | 'createdBy' | 'createdFor' | 'childId' | 'generationConfig'>>) => void
   addImageToPage: (pageId: string, file: File, options?: { cleanBackground?: boolean }) => Promise<void>
+  /** Upload a replacement candidate without removing or changing current art. */
+  prepareBackgroundPhoto: (file: File) => Promise<PageImage | undefined>
+  /** Construct an image candidate; usage changes only when it is accepted. */
+  prepareAiPageImage: (url: string, storagePath: string, prompt: string) => PageImage
   removeImageFromPage: (pageId: string, imageId: string) => void
   uploadAudio: (pageId: string, blob: Blob) => Promise<void>
   addAiImageToPage: (pageId: string, url: string, storagePath: string, prompt: string) => void
@@ -49,11 +60,11 @@ interface UseBookResult {
   /** Upload a cleaned drawing (transparent PNG) and add it to a page as a sticker.
    *  Returns the storage URL + path so callers can also save it to the library. */
   addStickerFileToPage: (pageId: string, file: File, label: string) => Promise<{ url: string; storagePath: string } | undefined>
-  updateImagePosition: (pageId: string, imageId: string, position: PageImage['position']) => void
+  updateImagePosition: (pageId: string, imageId: string, position: PageImage['position']) => BookPageChange | undefined
   /** Move one image a single step in the layer stack ('up' = toward the top).
    *  Normalizes every image on the page to a contiguous zIndex so the order is
    *  explicit and survives reload. */
-  reorderImage: (pageId: string, imageId: string, direction: 'up' | 'down') => void
+  reorderImage: (pageId: string, imageId: string, direction: 'up' | 'down') => BookPageChange | undefined
   /** Add a hand-drawn sketch photo to a page. Returns the image ID and storage path for later enhancement. */
   addSketchToPage: (pageId: string, file: File) => Promise<{ imageId: string; storagePath: string } | undefined>
   /** Update a sketch PageImage after AI enhancement resolves. */
@@ -161,6 +172,10 @@ export function shouldTriggerBookCompletionRewards(
 
 export function useBook(familyId: string, bookId: string | undefined): UseBookResult {
   const [book, setBook] = useState<Book | null>(null)
+  const documentScope = useMemo(() => ({ familyId, bookId }), [familyId, bookId])
+  // Mutation authority, including calls batched before React renders. This is
+  // scoped to the document, and never advanced by an abandoned render.
+  const latestBook = useRef<{ scope: object; value: Book | null }>({ scope: documentScope, value: null })
   const [loading, setLoading] = useState(!!familyId && !!bookId)
   const [saveState, setSaveState] = useState<SaveState>('idle')
   const [saveErrorMessage, setSaveErrorMessage] = useState<string | null>(null)
@@ -181,20 +196,28 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
 
   // Load book
   useEffect(() => {
-    if (!familyId || !bookId) return
+    latestBook.current = { scope: documentScope, value: null }
+    setBook(null)
+    if (!familyId || !bookId) { setLoading(false); return }
+    setLoading(true)
     let cancelled = false
     const load = async () => {
       const docRef = doc(booksCollection(familyId), bookId)
       const snap = await getDoc(docRef)
       if (cancelled) return
       if (snap.exists()) {
-        setBook({ ...snap.data(), id: snap.id })
+        const loaded = { ...snap.data(), id: snap.id }
+        latestBook.current = { scope: documentScope, value: loaded }
+        setBook(loaded)
       }
       setLoading(false)
     }
     void load()
-    return () => { cancelled = true }
-  }, [familyId, bookId])
+    return () => {
+      cancelled = true
+      latestBook.current = { scope: documentScope, value: null }
+    }
+  }, [familyId, bookId, documentScope])
 
   // Persist to Firestore
   const persist = useCallback(
@@ -258,26 +281,37 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
 
   const applyUpdate = useCallback(
     (updater: (prev: Book) => Book) => {
-      setBook((prev) => {
-        if (!prev) return prev
-        const next = updater(prev)
-        debouncedPersist(next)
-        return next
-      })
+      const current = latestBook.current
+      if (current.scope !== documentScope || !current.value) return undefined
+      const previous = current.value
+      const next = updater(previous)
+      if (next === previous) return undefined
+      latestBook.current = { scope: documentScope, value: next }
+      setBook(next)
+      debouncedPersist(next)
+      return { before: previous, after: next }
     },
-    [debouncedPersist],
+    [debouncedPersist, documentScope],
   )
+
+  const changePage = useCallback((pageId: string, mutate: (page: BookPage) => BookPage | undefined, options?: { usedAiGeneration?: boolean }): BookPageChange | undefined => {
+    const change = applyUpdate((previous) => {
+      const page = previous.pages.find((item) => item.id === pageId)
+      if (!page) return previous
+      const result = mutate(page)
+      if (!result || result === page || JSON.stringify(result) === JSON.stringify(page)) return previous
+      return { ...previous, pages: previous.pages.map((item) => item.id === pageId ? { ...result, updatedAt: new Date().toISOString() } : item) }
+    })
+    if (!change) return undefined
+    if (options?.usedAiGeneration) setUsedAiGeneration(true)
+    return { before: change.before.pages.find((page) => page.id === pageId)!, after: change.after.pages.find((page) => page.id === pageId)! }
+  }, [applyUpdate])
 
   const updatePage = useCallback(
     (pageId: string, changes: Partial<BookPage>) => {
-      applyUpdate((prev) => ({
-        ...prev,
-        pages: prev.pages.map((p) =>
-          p.id === pageId ? { ...p, ...changes, updatedAt: new Date().toISOString() } : p,
-        ),
-      }))
+      changePage(pageId, (page) => ({ ...page, ...changes }))
     },
-    [applyUpdate],
+    [changePage],
   )
 
   const addPage = useCallback(() => {
@@ -418,6 +452,25 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
     [familyId, bookId, applyUpdate, book],
   )
 
+  const prepareBackgroundPhoto = useCallback(async (file: File): Promise<PageImage | undefined> => {
+    if (!familyId || !bookId) return undefined
+    try {
+      const { compressIfNeeded } = await import('../../core/utils/compressImage')
+      const processed = await compressIfNeeded(file, 500_000, { maxWidth: 1024, quality: 0.85 })
+      const id = generateImageId()
+      const ext = processed instanceof File ? processed.name.split('.').pop() ?? 'jpg' : 'jpg'
+      const storagePath = `families/${familyId}/books/${bookId}/${id}.${ext}`
+      const storageRef = ref(storage, storagePath)
+      await uploadBytes(storageRef, processed)
+      const url = await getDownloadURL(storageRef)
+      // No page write here: the editor first validates its original target.
+      return { id, url, storagePath, type: 'photo', layerType: 'background' }
+    } catch (err) {
+      console.error('Background upload failed:', err)
+      return undefined
+    }
+  }, [familyId, bookId])
+
   const removeImageFromPage = useCallback(
     (pageId: string, imageId: string) => {
       applyUpdate((prev) => ({
@@ -460,10 +513,8 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
     [familyId, bookId, applyUpdate],
   )
 
-  const addAiImageToPage = useCallback(
-    (pageId: string, url: string, storagePath: string, prompt: string) => {
-      setUsedAiGeneration(true)
-      const image: PageImage = {
+  const prepareAiPageImage = useCallback((url: string, storagePath: string, prompt: string): PageImage => {
+      return {
         id: generateImageId(),
         url,
         storagePath,
@@ -471,24 +522,19 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
         layerType: 'background',
         prompt,
       }
-      applyUpdate((prev) => ({
-        ...prev,
-        pages: prev.pages.map((p) =>
-          p.id === pageId
-            ? { ...p, images: [...p.images, image], updatedAt: new Date().toISOString() }
-            : p,
-        ),
-      }))
+  }, [])
+
+  const addAiImageToPage = useCallback(
+    (pageId: string, url: string, storagePath: string, prompt: string) => {
+      const image = prepareAiPageImage(url, storagePath, prompt)
+      changePage(pageId, (page) => ({ ...page, images: [...page.images, image] }), { usedAiGeneration: true })
     },
-    [applyUpdate],
+    [changePage, prepareAiPageImage],
   )
 
   const updateImagePosition = useCallback(
     (pageId: string, imageId: string, position: PageImage['position']) => {
-      applyUpdate((prev) => ({
-        ...prev,
-        pages: prev.pages.map((p) =>
-          p.id === pageId
+      return changePage(pageId, (p) => p.images.some((image) => image.id === imageId)
             ? {
                 ...p,
                 images: p.images.map((img) => {
@@ -507,45 +553,24 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
                 }),
                 updatedAt: new Date().toISOString(),
               }
-            : p,
-        ),
-      }))
+            : undefined)
     },
-    [applyUpdate],
+    [changePage],
   )
 
   const reorderImage = useCallback(
     (pageId: string, imageId: string, direction: 'up' | 'down') => {
-      applyUpdate((prev) => ({
-        ...prev,
-        pages: prev.pages.map((p) => {
-          if (p.id !== pageId) return p
-          const newOrder = moveInStack(p.images, imageId, direction)
-          const zById = normalizedStackZ(newOrder)
+      return changePage(pageId, (p) => {
+          const images = reorderPageImages(p.images, imageId, direction)
+          if (images === p.images) return undefined
           return {
             ...p,
-            images: p.images.map((img) => {
-              // Preserve each image's own geometry; only materialize per-type
-              // defaults when there is no stored position (never full-canvas).
-              const geom = DEFAULT_IMAGE_GEOMETRY[img.type]
-              return {
-                ...img,
-                position: {
-                  x: geom.x,
-                  y: geom.y,
-                  width: geom.width,
-                  height: geom.height,
-                  ...(img.position ?? {}),
-                  zIndex: zById[img.id] ?? img.position?.zIndex ?? 0,
-                },
-              }
-            }),
+            images,
             updatedAt: new Date().toISOString(),
           }
-        }),
-      }))
+        })
     },
-    [applyUpdate],
+    [changePage],
   )
 
   const addSketchToPage = useCallback(
@@ -779,11 +804,14 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
     saveState,
     saveErrorMessage,
     updatePage,
+    changePage,
     addPage,
     deletePage,
     reorderPages,
     updateBookMeta,
     addImageToPage,
+    prepareBackgroundPhoto,
+    prepareAiPageImage,
     removeImageFromPage,
     uploadAudio,
     addAiImageToPage,

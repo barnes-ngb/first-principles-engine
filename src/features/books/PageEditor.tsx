@@ -6,7 +6,6 @@ import TextField from '@mui/material/TextField'
 import ToggleButton from '@mui/material/ToggleButton'
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
-import IconButton from '@mui/material/IconButton'
 import Menu from '@mui/material/Menu'
 import MenuItem from '@mui/material/MenuItem'
 import ListItemIcon from '@mui/material/ListItemIcon'
@@ -32,7 +31,7 @@ import { PAGE_LAYOUTS, TEXT_SIZES, TEXT_FONTS, TEXT_SIZE_STYLES, TEXT_FONT_FAMIL
 import DraggableImage from './DraggableImage'
 import type { ImagePosition } from './DraggableImage'
 import LayersPanel from './LayersPanel'
-import { stackOrder } from './draggableImageUtils'
+import { stackOrder, layerTypeOf, backgroundTarget, imageGeometry } from './draggableImageUtils'
 import {
   applyBackgroundFit,
   backgroundFitOf,
@@ -60,7 +59,7 @@ interface PageEditorProps {
   onUpdate: (changes: Partial<BookPage>) => void
   onAddImage: (file: File) => void
   onRemoveImage?: (imageId: string) => void
-  onChangeBackground?: () => void
+  onChangeBackground?: (imageId?: string) => void
   onReRecord?: () => void
   onImagePositionChange?: (imageId: string, position: ImagePosition) => void
   /** Move an image one step in the layer stack ('up' = toward the top). */
@@ -69,7 +68,7 @@ interface PageEditorProps {
   /** Increment to deselect all images from parent (e.g. when action buttons are clicked) */
   deselectSignal?: number
   /** Notifies parent when the selected image changes (for contextual action bar). */
-  onSelectedImageChange?: (imageId: string | null, imageType: 'sticker' | 'background' | null) => void
+  onSelectedImageChange?: (imageId: string | null, imageType: 'sticker' | 'element' | 'background' | null) => void
   /** Called when user restores a previous version of an image. */
   onRestoreVersion?: (imageId: string, versionIndex: number) => void
 }
@@ -94,6 +93,7 @@ export default function PageEditor({
   const [bgMenuAnchor, setBgMenuAnchor] = useState<HTMLElement | null>(null)
   const [versionHistoryImageId, setVersionHistoryImageId] = useState<string | null>(null)
   const imageContainerRef = useRef<HTMLDivElement>(null)
+  const [controlsContainer, setControlsContainer] = useState<HTMLDivElement | null>(null)
 
   // Deselect when parent signals (action buttons, dialogs, etc.)
   // eslint-disable-next-line react-hooks/set-state-in-effect -- signal-driven deselect from parent
@@ -111,7 +111,7 @@ export default function PageEditor({
       onSelectedImageChange(null, null)
       return
     }
-    onSelectedImageChange(selectedImageId, img.type === 'sticker' ? 'sticker' : 'background')
+    onSelectedImageChange(selectedImageId, layerTypeOf(img) === 'background' ? 'background' : img.type === 'sticker' ? 'sticker' : 'element')
   }, [selectedImageId, page.images, onSelectedImageChange])
 
   const handleTextChange = useCallback(
@@ -161,7 +161,8 @@ export default function PageEditor({
   // Background images (scenes, photos, sketches, AI-generated) drive the
   // "Change background" menu. Stacking/render order over *all* images comes
   // from stackOrder — no fixed background-vs-sticker container split.
-  const backgroundImages = page.images.filter((img) => img.type !== 'sticker')
+  const backgroundImages = page.images.filter((img) => layerTypeOf(img) === 'background')
+  const targetBackground = backgroundTarget(page.images, selectedImageId)
   const orderedImages = stackOrder(page.images)
 
   // FEAT-177 — "show the whole picture" vs "fill the page", per background,
@@ -184,9 +185,7 @@ export default function PageEditor({
    */
   const removeOneBackground = () => {
     if (!onRemoveImage) return
-    const target =
-      backgroundImages.find((img) => img.id === selectedImageId) ??
-      backgroundImages[backgroundImages.length - 1]
+    const target = targetBackground
     if (!target) return
     onRemoveImage(target.id)
     setSelectedImageId(null)
@@ -201,14 +200,16 @@ export default function PageEditor({
       {/* Background edit icon — sits above the image container */}
       {backgroundImages.length > 0 && (onChangeBackground || onRemoveImage) && (
         <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 0.5, px: 1 }}>
-          <Tooltip title="Change picture">
-            <IconButton
+          <Tooltip title="Background options">
+            <Button
+              aria-label="Background options"
               size="small"
+              startIcon={<WallpaperIcon fontSize="small" />}
               onClick={(e) => setBgMenuAnchor(e.currentTarget)}
-              sx={{ opacity: 0.6, '&:hover': { opacity: 1 } }}
+              sx={{ minHeight: 44 }}
             >
-              <WallpaperIcon fontSize="small" />
-            </IconButton>
+              Background
+            </Button>
           </Tooltip>
           <Menu
             anchorEl={bgMenuAnchor}
@@ -216,7 +217,7 @@ export default function PageEditor({
             onClose={() => setBgMenuAnchor(null)}
           >
             {onChangeBackground && (
-              <MenuItem onClick={() => { setBgMenuAnchor(null); onChangeBackground() }}>
+              <MenuItem onClick={() => { setBgMenuAnchor(null); onChangeBackground(targetBackground?.id) }}>
                 <ListItemIcon><AutoFixHighIcon fontSize="small" /></ListItemIcon>
                 <ListItemText>Change picture</ListItemText>
               </MenuItem>
@@ -240,10 +241,10 @@ export default function PageEditor({
                 <ListItemText>Remove picture</ListItemText>
               </MenuItem>
             )}
-            {onRestoreVersion && backgroundImages.some((img) => (img.previousVersions?.length ?? 0) > 0) && (
+            {onRestoreVersion && (targetBackground?.previousVersions?.length ?? 0) > 0 && (
               <MenuItem onClick={() => {
                 setBgMenuAnchor(null)
-                const imgWithVersions = backgroundImages.find((img) => (img.previousVersions?.length ?? 0) > 0)
+                const imgWithVersions = targetBackground
                 if (imgWithVersions) setVersionHistoryImageId(imgWithVersions.id)
               }}>
                 <ListItemIcon><HistoryIcon fontSize="small" /></ListItemIcon>
@@ -279,21 +280,22 @@ export default function PageEditor({
               // element strictly ordered (no ties) while giving a fitted
               // background somewhere to put its backdrop.
               const renderZ = (stackIdx + 1) * 2
-              if (img.type === 'sticker') {
+              if (layerTypeOf(img) === 'element') {
                 return (
                   <DraggableImage
-                    key={img.id}
+                    key={`${page.id}/${img.id}`}
                     image={img}
                     selected={selectedImageId === img.id}
                     onSelect={() => setSelectedImageId(img.id)}
                     onPositionChange={(pos) => onImagePositionChange?.(img.id, pos)}
                     onRemove={onRemoveImage ? () => onRemoveImage(img.id) : undefined}
                     onReorder={onReorderImage ? (dir) => onReorderImage(img.id, dir) : undefined}
+                    controlsContainer={controlsContainer}
                     style={{ zIndex: renderZ, pointerEvents: 'auto' }}
                   />
                 )
               }
-              const pos = img.position ?? { x: 0, y: 0, width: 100, height: 100 }
+              const pos = imageGeometry(img)
               const transforms: string[] = []
               if (pos.rotation) transforms.push(`rotate(${pos.rotation}deg)`)
               if (pos.flipH) transforms.push('scaleX(-1)')
@@ -362,8 +364,11 @@ export default function PageEditor({
       )}
       </Box>
 
+      {/* Stable action host, never clipped/rotated/reordered with the artwork. */}
+      <Box ref={setControlsContainer} sx={{ mt: selectedImageId && page.images.some((image) => image.id === selectedImageId && layerTypeOf(image) === 'element') ? 1 : 0 }} />
+
       {/* Layers panel — reorder every placed element (collapsible, phone-first) */}
-      {page.images.length > 1 && onReorderImage && (
+      {page.images.length > 0 && (onReorderImage || onImagePositionChange) && (
         <Box sx={{ mt: 1 }}>
           <LayersPanel
             images={page.images}

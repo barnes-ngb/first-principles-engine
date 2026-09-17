@@ -18,7 +18,7 @@ interface LayersPanelProps {
   images: PageImage[]
   selectedImageId: string | null
   onSelect: (imageId: string) => void
-  onReorder: (imageId: string, direction: 'up' | 'down') => void
+  onReorder?: (imageId: string, direction: 'up' | 'down') => void
   open: boolean
   onToggle: () => void
 }
@@ -78,7 +78,7 @@ export default function LayersPanel({
       >
         <LayersIcon fontSize="small" color="action" />
         <Typography variant="subtitle2" sx={{ flex: 1 }}>
-          Layers ({images.length})
+          {open ? 'Hide layers' : 'Show layers'} ({images.length})
         </Typography>
         {open ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
       </Box>
@@ -120,10 +120,10 @@ export default function LayersPanel({
                 </Typography>
               )}
               <Stack
+                data-layer-id={img.id}
                 direction="row"
                 alignItems="center"
                 spacing={1}
-                onClick={() => onSelect(img.id)}
                 sx={{
                   px: 1,
                   py: 0.5,
@@ -134,6 +134,14 @@ export default function LayersPanel({
                   '&:hover': { bgcolor: selected ? 'primary.main' : 'action.hover' },
                 }}
               >
+                <Box
+                  component="button"
+                  type="button"
+                  aria-label={`Select ${img.label?.trim() || TYPE_LABEL[img.type]}`}
+                  aria-pressed={selected}
+                  onClick={() => onSelect(img.id)}
+                  sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1, minWidth: 0, minHeight: 44, p: 0, border: 0, bgcolor: 'transparent', color: 'inherit', cursor: 'pointer', textAlign: 'left', font: 'inherit', borderRadius: 1, '&:focus-visible': { outline: '2px solid', outlineOffset: 2 } }}
+                >
                 {img.url ? (
                   <Box
                     component="img"
@@ -172,16 +180,18 @@ export default function LayersPanel({
                 <Typography variant="body2" sx={{ flex: 1, minWidth: 0 }} noWrap>
                   {img.label?.trim() || TYPE_LABEL[img.type]}
                 </Typography>
+                </Box>
                 <Tooltip title="Move up">
                   <span>
                     <IconButton
                       size="small"
-                      disabled={!canMoveUp}
+                      aria-label={`Bring ${img.label?.trim() || TYPE_LABEL[img.type]} forward`}
+                      disabled={!canMoveUp || !onReorder}
                       onClick={(e) => {
                         e.stopPropagation()
-                        onReorder(img.id, 'up')
+                        onReorder?.(img.id, 'up')
                       }}
-                      sx={{ color: 'inherit' }}
+                      sx={{ color: 'inherit', minWidth: 44, minHeight: 44 }}
                     >
                       <KeyboardArrowUpIcon fontSize="small" />
                     </IconButton>
@@ -191,12 +201,13 @@ export default function LayersPanel({
                   <span>
                     <IconButton
                       size="small"
-                      disabled={!canMoveDown}
+                      aria-label={`Send ${img.label?.trim() || TYPE_LABEL[img.type]} backward`}
+                      disabled={!canMoveDown || !onReorder}
                       onClick={(e) => {
                         e.stopPropagation()
-                        onReorder(img.id, 'down')
+                        onReorder?.(img.id, 'down')
                       }}
-                      sx={{ color: 'inherit' }}
+                      sx={{ color: 'inherit', minWidth: 44, minHeight: 44 }}
                     >
                       <KeyboardArrowDownIcon fontSize="small" />
                     </IconButton>
