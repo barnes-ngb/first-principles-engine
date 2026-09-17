@@ -110,7 +110,7 @@ function renderEditor(images: PageImage[]) {
 describe('UX-129 — the background menu removes one picture, and does not ask', () => {
   it('removes without a confirm dialog — it is undoable', () => {
     const { onRemoveImage } = renderEditor([image('a')])
-    fireEvent.click(screen.getByRole('button', { name: /change picture/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Background options' }))
     fireEvent.click(screen.getByText('Remove picture'))
 
     expect(onRemoveImage).toHaveBeenCalledTimes(1)
@@ -119,7 +119,7 @@ describe('UX-129 — the background menu removes one picture, and does not ask',
 
   it('removes exactly ONE background, never every background on the page', () => {
     const { onRemoveImage } = renderEditor([image('a'), image('b'), image('c')])
-    fireEvent.click(screen.getByRole('button', { name: /change picture/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Background options' }))
     fireEvent.click(screen.getByText('Remove picture'))
 
     expect(onRemoveImage).toHaveBeenCalledTimes(1)
@@ -127,7 +127,7 @@ describe('UX-129 — the background menu removes one picture, and does not ask',
 
   it('leaves stickers alone', () => {
     const { onRemoveImage } = renderEditor([image('a'), image('s', { type: 'sticker' })])
-    fireEvent.click(screen.getByRole('button', { name: /change picture/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Background options' }))
     fireEvent.click(screen.getByText('Remove picture'))
 
     expect(onRemoveImage).toHaveBeenCalledTimes(1)
