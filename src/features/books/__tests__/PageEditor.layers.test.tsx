@@ -17,7 +17,7 @@ describe('background targeting and placed-photo editing', () => {
     const { onSelectedImageChange } = setup([image('placed', { layerType: 'element' })])
     fireEvent.click(screen.getByRole('img'))
     expect(screen.getByRole('button', { name: 'Resize' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Change picture' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Background options' })).not.toBeInTheDocument()
     expect(onSelectedImageChange.mock.calls.at(-1)).toEqual(['placed', 'element'])
   })
   it('removes the rendered top background rather than the last array entry', () => {
@@ -25,14 +25,14 @@ describe('background targeting and placed-photo editing', () => {
       image('top', { position: { x: 0, y: 0, width: 100, height: 100, zIndex: 5 } }),
       image('bottom', { position: { x: 0, y: 0, width: 100, height: 100, zIndex: 1 } }),
     ])
-    fireEvent.click(screen.getByRole('button', { name: 'Change picture' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Background options' }))
     fireEvent.click(screen.getByText('Remove picture'))
     expect(onRemoveImage).toHaveBeenCalledWith('top')
   })
   it('changes the selected background even when it is below another picture', () => {
     const { onChangeBackground } = setup([image('bottom'), image('top')])
     fireEvent.click(screen.getAllByRole('img')[0])
-    fireEvent.click(screen.getByRole('button', { name: 'Change picture' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Background options' }))
     fireEvent.click(screen.getByRole('menuitem', { name: 'Change picture' }))
     expect(onChangeBackground).toHaveBeenCalledWith('bottom')
   })

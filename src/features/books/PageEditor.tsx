@@ -6,7 +6,6 @@ import TextField from '@mui/material/TextField'
 import ToggleButton from '@mui/material/ToggleButton'
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
-import IconButton from '@mui/material/IconButton'
 import Menu from '@mui/material/Menu'
 import MenuItem from '@mui/material/MenuItem'
 import ListItemIcon from '@mui/material/ListItemIcon'
@@ -94,6 +93,7 @@ export default function PageEditor({
   const [bgMenuAnchor, setBgMenuAnchor] = useState<HTMLElement | null>(null)
   const [versionHistoryImageId, setVersionHistoryImageId] = useState<string | null>(null)
   const imageContainerRef = useRef<HTMLDivElement>(null)
+  const [controlsContainer, setControlsContainer] = useState<HTMLDivElement | null>(null)
 
   // Deselect when parent signals (action buttons, dialogs, etc.)
   // eslint-disable-next-line react-hooks/set-state-in-effect -- signal-driven deselect from parent
@@ -200,14 +200,16 @@ export default function PageEditor({
       {/* Background edit icon — sits above the image container */}
       {backgroundImages.length > 0 && (onChangeBackground || onRemoveImage) && (
         <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 0.5, px: 1 }}>
-          <Tooltip title="Change picture">
-            <IconButton
+          <Tooltip title="Background options">
+            <Button
+              aria-label="Background options"
               size="small"
+              startIcon={<WallpaperIcon fontSize="small" />}
               onClick={(e) => setBgMenuAnchor(e.currentTarget)}
-              sx={{ opacity: 0.6, '&:hover': { opacity: 1 } }}
+              sx={{ minHeight: 44 }}
             >
-              <WallpaperIcon fontSize="small" />
-            </IconButton>
+              Background
+            </Button>
           </Tooltip>
           <Menu
             anchorEl={bgMenuAnchor}
@@ -288,6 +290,7 @@ export default function PageEditor({
                     onPositionChange={(pos) => onImagePositionChange?.(img.id, pos)}
                     onRemove={onRemoveImage ? () => onRemoveImage(img.id) : undefined}
                     onReorder={onReorderImage ? (dir) => onReorderImage(img.id, dir) : undefined}
+                    controlsContainer={controlsContainer}
                     style={{ zIndex: renderZ, pointerEvents: 'auto' }}
                   />
                 )
@@ -361,8 +364,11 @@ export default function PageEditor({
       )}
       </Box>
 
+      {/* Stable action host, never clipped/rotated/reordered with the artwork. */}
+      <Box ref={setControlsContainer} sx={{ mt: selectedImageId && page.images.some((image) => image.id === selectedImageId && layerTypeOf(image) === 'element') ? 1 : 0 }} />
+
       {/* Layers panel — reorder every placed element (collapsible, phone-first) */}
-      {page.images.length > 1 && onReorderImage && (
+      {page.images.length > 0 && (onReorderImage || onImagePositionChange) && (
         <Box sx={{ mt: 1 }}>
           <LayersPanel
             images={page.images}
