@@ -123,8 +123,10 @@ type SaveVersion = 'cleaned' | 'fancy'
  *
  * The saved marker is the other half of that record, and it is NOT carried here:
  * `savedVersions` has one `'fancy'` slot for whichever picture is on screen, so
- * it only stays true while a save and a generation cannot overlap. That is what
- * the two guards below enforce — see `handleMakeFancy` / `saveSticker`.
+ * it only stays true while a FANCY save and a generation cannot overlap. That is
+ * what the two guards below enforce — see `handleMakeFancy` / `saveSticker`. A
+ * *cleaned* save owns a different slot and a different picture, so it is not part
+ * of that rule and never blocks a generation.
  */
 interface FancyResult {
   url: string
@@ -290,8 +292,18 @@ function SketchScannerSession({
    * generation may not overlap, because the "Saved ✓" marker names the picture on
    * screen and a generation that lands mid-save would hand the previous picture's
    * marker to a brand-new picture that was never written.
+   *
+   * The save flag carries WHICH version is in flight rather than a bare boolean,
+   * because only the fancy one is party to that rule. A cleaned save writes a
+   * different row, holds a different marker, and shares nothing with the picture
+   * the generator is about to replace — so blocking a generation on it bought no
+   * protection and cost the whole paid door: an `addDoc` resolves on server ack,
+   * so a cleaned save started offline stays pending indefinitely and "Make it
+   * fancy" never came back (the same never-settles shape the quota callback is
+   * deliberately not awaited for). The flag stays a ref, and stays read before
+   * any await, so the synchronous refusal is unchanged for the case it is for.
    */
-  const saveInFlightRef = useRef(false)
+  const saveInFlightRef = useRef<SaveVersion | null>(null)
   const enhanceInFlightRef = useRef(false)
   const { enhanceSketch, imageFailureRef } = useAI()
   useEffect(() => {
@@ -323,7 +335,7 @@ function SketchScannerSession({
 
   const reset = useCallback(() => {
     sessionRef.current++
-    saveInFlightRef.current = false
+    saveInFlightRef.current = null
     enhanceInFlightRef.current = false
     capturedFileRef.current = null
     setCaptureOwner(null)
@@ -359,7 +371,9 @@ function SketchScannerSession({
   const handleClose = useCallback(() => {
     // A document save cannot be cancelled by dismissing this dialog. Keep its
     // success/error visible, including Escape/backdrop before state re-renders.
-    if (saveInFlightRef.current) return
+    // Either version holds the dialog open — this guard is about the write, not
+    // about which picture it is for.
+    if (saveInFlightRef.current !== null) return
     reset()
     onClose()
   }, [reset, onClose])
@@ -475,13 +489,20 @@ function SketchScannerSession({
     // so a capped tap costs nothing at all. The style controls already show the
     // nudge instead of a button; this holds the rule for real.
     if (enhanceInFlightRef.current || enhancing || capReached) return
-    // A save that has already been submitted owns the picture it was submitted
-    // for until it settles. Starting a generation underneath it would replace
-    // that picture — and clear the fancy saved marker — while the write for the
-    // old one is still on its way, so the marker the save then sets would land on
-    // a picture nobody wrote. Refused HERE as well as on the buttons, because the
-    // retry card's own buttons call this function directly.
-    if (saveInFlightRef.current || savingVersion !== null) return
+    // A submitted FANCY save owns the picture it was submitted for until it
+    // settles. Starting a generation underneath it would replace that picture —
+    // and clear the fancy saved marker — while the write for the old one is still
+    // on its way, so the marker the save then sets would land on a picture nobody
+    // wrote. Refused HERE as well as on the buttons, because the retry card's own
+    // buttons call this function directly.
+    //
+    // A pending CLEANED save is not that situation and is not refused: it is
+    // saving the cleaned bytes, which no generation touches, and it marks only
+    // its own slot when it lands. Blocking on it made the two product lines per
+    // drawing one queue — and, since a Firestore write only resolves on server
+    // ack, an offline cleaned save closed the paid door for the rest of the
+    // session with no way to reopen it.
+    if (saveInFlightRef.current === 'fancy' || savingVersion === 'fancy') return
     finalizeCaptureDefaults()
     const session = sessionRef.current
     enhanceInFlightRef.current = true
@@ -584,7 +605,9 @@ function SketchScannerSession({
       // are one record, so they cannot disagree in the library.
       const saved = fancyResult
       const url = version === 'cleaned' ? cleanedUrl : saved?.url ?? null
-      if (saveInFlightRef.current || savingVersion || savedVersions.has(version)) return
+      // Unchanged: ONE save at a time, whichever version, and never a second
+      // write of a version already saved.
+      if (saveInFlightRef.current !== null || savingVersion || savedVersions.has(version)) return
       // The other direction of the same rule: while a generation is in flight the
       // picture on screen is already on its way out, so saving it would mark a
       // picture as saved that the very next render replaces. The spinner hides it
@@ -593,7 +616,10 @@ function SketchScannerSession({
       finalizeCaptureDefaults()
       const session = sessionRef.current
       const sourceDrawingId = sourceDrawingIdRef.current
-      saveInFlightRef.current = true
+      // Synchronously, before any await, and naming the version — so a tap on
+      // "Make it fancy" in the same tick is refused for a fancy save and allowed
+      // for a cleaned one, without waiting for `savingVersion` to render.
+      saveInFlightRef.current = version
 
       setSavingVersion(version)
       setError(null)
@@ -643,7 +669,7 @@ function SketchScannerSession({
       } catch {
         if (aliveRef.current && session === sessionRef.current) setError('Failed to save sticker. Please try again.')
       } finally {
-        if (aliveRef.current && session === sessionRef.current) { saveInFlightRef.current = false; setSavingVersion(null) }
+        if (aliveRef.current && session === sessionRef.current) { saveInFlightRef.current = null; setSavingVersion(null) }
       }
     },
     [
@@ -874,9 +900,11 @@ function SketchScannerSession({
                               variant="contained"
                               startIcon={<AutoAwesomeIcon />}
                               onClick={() => void handleMakeFancy()}
-                              // A submitted save owns its picture until it
-                              // settles; the paid door reopens the moment it does.
-                              disabled={savingVersion !== null}
+                              // A submitted FANCY save owns its picture until it
+                              // settles; the paid door reopens the moment it
+                              // does. A cleaned save is a different picture and
+                              // a different row, so it leaves this open.
+                              disabled={savingVersion === 'fancy'}
                               sx={{ minHeight: 44, textTransform: 'none' }}
                             >
                               Make it fancy
@@ -992,9 +1020,10 @@ function SketchScannerSession({
                         size="small"
                         startIcon={<AutoAwesomeIcon />}
                         onClick={() => void handleMakeFancy()}
-                        // Same rule on the redo: a save in flight is holding this
-                        // exact picture, and a new one would take its marker.
-                        disabled={savingVersion !== null}
+                        // Same rule on the redo: a fancy save in flight is holding
+                        // this exact picture, and a new one would take its
+                        // marker. A pending cleaned save holds nothing here.
+                        disabled={savingVersion === 'fancy'}
                         sx={{ textTransform: 'none' }}
                       >
                         Make it with this style
