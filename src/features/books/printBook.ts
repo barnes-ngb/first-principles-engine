@@ -2,7 +2,7 @@ import { jsPDF } from 'jspdf'
 import type { Book, BookPage } from '../../core/types'
 import { startStep } from '../../core/utils/perf'
 import { fetchAsDataUri } from './imageDataUri'
-import { stackOrder } from './draggableImageUtils'
+import { stackOrder, imageGeometry } from './draggableImageUtils'
 import { hasFitBackdrop, resolveImageFit } from './imageFit'
 import { duplexSides, imposeBooklet, type LogicalPage } from './bookletImposition'
 import type { PrintSettings } from './PrintSettingsDialog'
@@ -847,7 +847,7 @@ async function drawContentPage(
       if (!dataUri.startsWith('data:')) continue
       try {
         const dims = await getImageDimensions(dataUri)
-        const pos = img.position ?? { x: 0, y: 0, width: 100, height: 100 }
+        const pos = imageGeometry(img)
 
         // Convert percentage position to mm within the image area (using consistent aspect ratio).
         // Clamp negative positions so stickers don't render outside the container

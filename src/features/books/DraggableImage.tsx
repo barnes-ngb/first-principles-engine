@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import Box from '@mui/material/Box'
 import IconButton from '@mui/material/IconButton'
 import Paper from '@mui/material/Paper'
@@ -20,7 +20,7 @@ import OpenInFullIcon from '@mui/icons-material/OpenInFull'
 import type { PageImage } from '../../core/types'
 import { hasFitBackdrop, resolveImageFit } from './imageFit'
 import ImageFitBackdrop from './ImageFitBackdrop'
-import { clampPosition, scaleAboutCenter, rotationFromDrag, DEFAULT_IMAGE_GEOMETRY } from './draggableImageUtils'
+import { clampPosition, scaleImagePosition, cornerScaleFromDrag, keepImageVisible, rotationFromDrag, imageGeometry } from './draggableImageUtils'
 import type { ImagePosition } from './draggableImageUtils'
 export type { ImagePosition } from './draggableImageUtils'
 
@@ -35,16 +35,10 @@ interface DraggableImageProps {
   style?: React.CSSProperties
 }
 
-const DEFAULT_POSITIONS = DEFAULT_IMAGE_GEOMETRY
-
 /** Rotation increment per tap (degrees). */
 const ROTATION_STEP = 15
 /** Nudge per arrow button tap (px). Converted to % via container size. */
 const NUDGE_PX = 5
-
-function clamp(val: number, min: number, max: number) {
-  return Math.min(Math.max(val, min), max)
-}
 
 function wrapRotation(deg: number): number {
   return ((deg % 360) + 360) % 360
@@ -60,289 +54,138 @@ export default function DraggableImage({
   style,
 }: DraggableImageProps) {
   const ref = useRef<HTMLDivElement>(null)
-  const [pos, setPos] = useState<ImagePosition>(() => {
-    const base = image.position ?? DEFAULT_POSITIONS[image.type]
-    return {
-      x: base.x,
-      y: base.y,
-      width: base.width,
-      height: base.height,
-      rotation: image.position?.rotation ?? 0,
-      zIndex: image.position?.zIndex ?? 0,
-      flipH: image.position?.flipH ?? false,
-      flipV: image.position?.flipV ?? false,
-    }
-  })
+  // Saved/restored geometry is authoritative while idle. Only an active
+  // gesture has a local draft, so same-ID Undo does not require a remount.
+  const base = imageGeometry(image)
+  const saved: ImagePosition = {
+    ...base,
+    rotation: image.position?.rotation ?? 0,
+    zIndex: image.position?.zIndex ?? 0,
+    flipH: image.position?.flipH ?? false,
+    flipV: image.position?.flipV ?? false,
+  }
+  const [draft, setDraft] = useState<ImagePosition | null>(null)
   const [dragging, setDragging] = useState(false)
-  const [resizing, setResizing] = useState(false)
-  const [rotating, setRotating] = useState(false)
-  const [pinching, setPinching] = useState(false)
-  const dragStart = useRef({ px: 0, py: 0, startX: 0, startY: 0 })
-  // centerX/centerY are captured at gesture start so scaling stays anchored to
-  // the object's center (the invariant: center before === center after).
-  const resizeStart = useRef({ px: 0, py: 0, startW: 0, startH: 0, centerX: 0, centerY: 0 })
-  const pinchStart = useRef<{
-    initialDistance: number
-    initialWidth: number
-    initialHeight: number
-    centerX: number
-    centerY: number
+  const pos = draft ?? saved
+  const gesture = useRef<{
+    mode: 'drag' | 'pinch' | 'resize' | 'rotate'
+    before: ImagePosition
+    start: ImagePosition
+    current: ImagePosition
+    rect: DOMRect
+    pointer: { x: number; y: number }
+    pointerAngle: number
+    distance: number
+    pointers: Map<number, { x: number; y: number; target: HTMLElement }>
   } | null>(null)
-  // Pointer angle + rotation captured at rotate-handle grab, so the drag
-  // applies an angular delta (no jump from the handle's own start angle).
-  const rotateStart = useRef({ pointerAngle: 0, startRotation: 0 })
-  const activePointers = useRef<Map<number, { x: number; y: number }>>(new Map())
 
-  const getContainerRect = useCallback(() => {
-    const container = ref.current?.parentElement
-    return container?.getBoundingClientRect() ?? null
-  }, [])
+  const getContainerRect = () => ref.current?.parentElement?.getBoundingClientRect()
+  const differs = (a: ImagePosition, b: ImagePosition) =>
+    a.x !== b.x || a.y !== b.y || a.width !== b.width || a.height !== b.height
+    || a.rotation !== b.rotation || a.flipH !== b.flipH || a.flipV !== b.flipV
 
-  const updatePointer = useCallback((e: React.PointerEvent) => {
-    activePointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
-  }, [])
-
-  const removePointer = useCallback((e: React.PointerEvent) => {
-    activePointers.current.delete(e.pointerId)
-    if (activePointers.current.size < 2) {
-      setPinching(false)
-      pinchStart.current = null
+  function begin(e: React.PointerEvent, mode: 'drag' | 'resize' | 'rotate') {
+    e.stopPropagation()
+    if (e.button !== 0) return
+    const current = gesture.current
+    if (current) {
+      if (mode !== 'drag' || current.mode !== 'drag' || current.pointers.has(e.pointerId)) return
+      const target = e.currentTarget as HTMLElement
+      target.setPointerCapture(e.pointerId)
+      current.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, target })
+      const [a, b] = [...current.pointers.values()]
+      current.distance = Math.hypot(b.x - a.x, b.y - a.y)
+      current.start = current.current
+      current.mode = 'pinch'
+      setDragging(false)
+      return
     }
-  }, [])
+    const rect = getContainerRect()
+    if (!rect?.width || !rect.height) return
+    e.preventDefault()
+    onSelect()
+    const target = e.currentTarget as HTMLElement
+    target.setPointerCapture(e.pointerId)
+    const cx = rect.left + (pos.x + pos.width / 2) * rect.width / 100
+    const cy = rect.top + (pos.y + pos.height / 2) * rect.height / 100
+    gesture.current = {
+      mode, before: pos, start: pos, current: pos, rect,
+      pointer: { x: e.clientX, y: e.clientY },
+      pointerAngle: Math.atan2(e.clientY - cy, e.clientX - cx) * 180 / Math.PI,
+      distance: 0,
+      pointers: new Map([[e.pointerId, { x: e.clientX, y: e.clientY, target }]]),
+    }
+    setDraft(pos)
+    setDragging(mode === 'drag')
+  }
 
-  const handlePointerDown = useCallback(
-    (e: React.PointerEvent) => {
-      if (resizing || rotating) return
-      e.stopPropagation()
-      updatePointer(e)
+  function move(e: React.PointerEvent) {
+    const g = gesture.current
+    const pointer = g?.pointers.get(e.pointerId)
+    if (!g || !pointer) return
+    e.stopPropagation()
+    g.pointers.set(e.pointerId, { ...pointer, x: e.clientX, y: e.clientY })
+    const dx = e.clientX - g.pointer.x
+    const dy = e.clientY - g.pointer.y
+    let next: ImagePosition
+    if (g.mode === 'pinch') {
+      const [a, b] = [...g.pointers.values()]
+      if (!b || g.distance === 0) return
+      next = scaleImagePosition(g.start, Math.hypot(b.x - a.x, b.y - a.y) / g.distance)
+    } else if (g.mode === 'resize') {
+      next = scaleImagePosition(g.start, cornerScaleFromDrag(g.start, g.rect, dx, dy))
+    } else if (g.mode === 'rotate') {
+      const cx = g.rect.left + (g.start.x + g.start.width / 2) * g.rect.width / 100
+      const cy = g.rect.top + (g.start.y + g.start.height / 2) * g.rect.height / 100
+      const angle = Math.atan2(e.clientY - cy, e.clientX - cx) * 180 / Math.PI
+      next = { ...g.start, rotation: rotationFromDrag(g.start.rotation, g.pointerAngle, angle) }
+    } else {
+      next = { ...g.start, ...clampPosition(g.start.x + dx / g.rect.width * 100, g.start.y + dy / g.rect.height * 100, g.start.width, g.start.height) }
+    }
+    g.current = keepImageVisible(next, g.rect)
+    setDraft(g.current)
+  }
 
-      const el = ref.current
-      if (!el) return
-      el.setPointerCapture(e.pointerId)
+  function finish(e: React.PointerEvent, cancelled = false) {
+    const g = gesture.current
+    if (!g?.pointers.has(e.pointerId)) return
+    e.stopPropagation()
+    // Clear first: releasePointerCapture may synchronously trigger lost capture.
+    // The first lift ends a pinch; the other finger cannot start a stray drag.
+    gesture.current = null
+    for (const [id, pointer] of g.pointers) {
+      if (pointer.target.hasPointerCapture?.(id)) pointer.target.releasePointerCapture(id)
+    }
+    setDraft(null)
+    setDragging(false)
+    if (!cancelled && differs(g.before, g.current)) onPositionChange?.(g.current)
+  }
 
-      if (activePointers.current.size === 2) {
-        const [p1, p2] = [...activePointers.current.values()]
-        const distance = Math.hypot(p2.x - p1.x, p2.y - p1.y)
-        setPinching(true)
-        setDragging(false)
-        pinchStart.current = {
-          initialDistance: distance,
-          initialWidth: pos.width,
-          initialHeight: pos.height,
-          centerX: pos.x + pos.width / 2,
-          centerY: pos.y + pos.height / 2,
-        }
-        return
-      }
+  const handlePointerDown = (e: React.PointerEvent) => begin(e, 'drag')
+  const handleResizePointerDown = (e: React.PointerEvent) => begin(e, 'resize')
+  const handleRotatePointerDown = (e: React.PointerEvent) => begin(e, 'rotate')
+  const handlePointerUp = (e: React.PointerEvent) => finish(e)
+  const handlePointerCancel = (e: React.PointerEvent) => finish(e, true)
 
-      setDragging(true)
-      dragStart.current = { px: e.clientX, py: e.clientY, startX: pos.x, startY: pos.y }
-    },
-    [pos.x, pos.y, pos.width, pos.height, resizing, rotating, updatePointer],
-  )
-
-  const handlePointerMove = useCallback(
-    (e: React.PointerEvent) => {
-      updatePointer(e)
-
-      if (pinching && pinchStart.current && activePointers.current.size >= 2) {
-        const [p1, p2] = [...activePointers.current.values()]
-        const currentDistance = Math.hypot(p2.x - p1.x, p2.y - p1.y)
-        const scale = currentDistance / pinchStart.current.initialDistance
-
-        const newW = clamp(pinchStart.current.initialWidth * scale, 10, 100)
-        const aspectRatio = pinchStart.current.initialHeight / pinchStart.current.initialWidth
-        const newH = clamp(newW * aspectRatio, 10, 100)
-        // Anchor to the center captured at pinch start — scaling never drifts.
-        const { centerX, centerY } = pinchStart.current
-
-        setPos((prev) => ({ ...prev, width: newW, height: newH, x: centerX - newW / 2, y: centerY - newH / 2 }))
-        return
-      }
-
-      if (resizing) return
-      if (!dragging) return
-      const rect = getContainerRect()
-      if (!rect) return
-      const dx = ((e.clientX - dragStart.current.px) / rect.width) * 100
-      const dy = ((e.clientY - dragStart.current.py) / rect.height) * 100
-      const rawX = dragStart.current.startX + dx
-      const rawY = dragStart.current.startY + dy
-      const clamped = clampPosition(rawX, rawY, pos.width, pos.height)
-      setPos((prev) => ({ ...prev, x: clamped.x, y: clamped.y }))
-    },
-    [pinching, dragging, resizing, updatePointer, getContainerRect, pos.width, pos.height],
-  )
-
-  const handlePointerUp = useCallback(
-    (e: React.PointerEvent) => {
-      removePointer(e)
-
-      const el = ref.current
-      if (el) el.releasePointerCapture(e.pointerId)
-
-      if (pinching || dragging) {
-        setDragging(false)
-        setPinching(false)
-        setPos((curr) => {
-          onPositionChange?.(curr)
-          return curr
-        })
-      }
-    },
-    [pinching, dragging, onPositionChange, removePointer],
-  )
-
-  const handleResizePointerDown = useCallback(
-    (e: React.PointerEvent) => {
-      e.stopPropagation()
-      const el = e.currentTarget as HTMLElement
-      el.setPointerCapture(e.pointerId)
-      setResizing(true)
-      resizeStart.current = {
-        px: e.clientX,
-        py: e.clientY,
-        startW: pos.width,
-        startH: pos.height,
-        centerX: pos.x + pos.width / 2,
-        centerY: pos.y + pos.height / 2,
-      }
-    },
-    [pos.x, pos.y, pos.width, pos.height],
-  )
-
-  const handleResizePointerMove = useCallback(
-    (e: React.PointerEvent) => {
-      if (!resizing) return
-      const rect = getContainerRect()
-      if (!rect) return
-      // Corner drag scales about the object's center: grow symmetrically, so
-      // the dragged corner tracks the pointer while the center stays fixed.
-      const dx = ((e.clientX - resizeStart.current.px) / rect.width) * 100
-      const newW = clamp(resizeStart.current.startW + dx * 2, 15, 100)
-      const aspectRatio = resizeStart.current.startH / resizeStart.current.startW
-      const newH = clamp(newW * aspectRatio, 15, 100)
-      setPos((prev) => {
-        const { x, y } = scaleAboutCenter(
-          { x: prev.x, y: prev.y, width: prev.width, height: prev.height },
-          newW,
-          newH,
-        )
-        return { ...prev, width: newW, height: newH, x, y }
-      })
-    },
-    [resizing, getContainerRect],
-  )
-
-  const handleResizePointerUp = useCallback(
-    (e: React.PointerEvent) => {
-      if (!resizing) return
-      const el = e.currentTarget as HTMLElement
-      el.releasePointerCapture(e.pointerId)
-      setResizing(false)
-      setPos((curr) => {
-        onPositionChange?.(curr)
-        return curr
-      })
-    },
-    [resizing, onPositionChange],
-  )
-
-  // ── Rotate handle (drag) ────────────────────────────────────
-
-  const handleRotatePointerDown = useCallback(
-    (e: React.PointerEvent) => {
-      e.stopPropagation()
-      const el = e.currentTarget as HTMLElement
-      el.setPointerCapture(e.pointerId)
-      setRotating(true)
-      const box = ref.current?.getBoundingClientRect()
-      if (box) {
-        const cx = box.left + box.width / 2
-        const cy = box.top + box.height / 2
-        const pointerAngle = (Math.atan2(e.clientY - cy, e.clientX - cx) * 180) / Math.PI
-        rotateStart.current = { pointerAngle, startRotation: pos.rotation }
-      }
-    },
-    [pos.rotation],
-  )
-
-  const handleRotatePointerMove = useCallback(
-    (e: React.PointerEvent) => {
-      if (!rotating) return
-      const el = ref.current
-      if (!el) return
-      const r = el.getBoundingClientRect()
-      const cx = r.left + r.width / 2
-      const cy = r.top + r.height / 2
-      // Apply the angular delta from grab — the image continues from its
-      // current rotation instead of snapping to the handle's start angle.
-      const angle = (Math.atan2(e.clientY - cy, e.clientX - cx) * 180) / Math.PI
-      const rotation = rotationFromDrag(
-        rotateStart.current.startRotation,
-        rotateStart.current.pointerAngle,
-        angle,
-      )
-      setPos((prev) => ({ ...prev, rotation }))
-    },
-    [rotating],
-  )
-
-  const handleRotatePointerUp = useCallback(
-    (e: React.PointerEvent) => {
-      if (!rotating) return
-      const el = e.currentTarget as HTMLElement
-      el.releasePointerCapture(e.pointerId)
-      setRotating(false)
-      setPos((curr) => {
-        onPositionChange?.(curr)
-        return curr
-      })
-    },
-    [rotating, onPositionChange],
-  )
-
-  // ── Sticker toolbar actions ─────────────────────────────────
-
-  const handleNudge = useCallback(
-    (axis: 'x' | 'y', sign: 1 | -1) => {
-      const rect = getContainerRect()
-      const containerSize = rect ? (axis === 'x' ? rect.width : rect.height) : 800
-      const nudgePct = (NUDGE_PX / containerSize) * 100
-      setPos((prev) => {
-        const rawVal = (axis === 'x' ? prev.x : prev.y) + sign * nudgePct
-        const clamped = axis === 'x'
-          ? clampPosition(rawVal, prev.y, prev.width, prev.height)
-          : clampPosition(prev.x, rawVal, prev.width, prev.height)
-        const next = { ...prev, x: clamped.x, y: clamped.y }
-        onPositionChange?.(next)
-        return next
-      })
-    },
-    [getContainerRect, onPositionChange],
-  )
-
-  const handleRotate = useCallback(
-    (sign: 1 | -1) => {
-      setPos((prev) => {
-        const next = { ...prev, rotation: wrapRotation(prev.rotation + sign * ROTATION_STEP) }
-        onPositionChange?.(next)
-        return next
-      })
-    },
-    [onPositionChange],
-  )
-
-  const handleFlip = useCallback(
-    (axis: 'flipH' | 'flipV') => {
-      setPos((prev) => {
-        const next = { ...prev, [axis]: !prev[axis] }
-        onPositionChange?.(next)
-        return next
-      })
-    },
-    [onPositionChange],
-  )
+  // Discrete controls have one commit, outside React's replayable state updaters.
+  function commit(next: ImagePosition) {
+    const rect = getContainerRect()
+    const visible = rect ? keepImageVisible(next, rect) : next
+    if (!gesture.current && differs(pos, visible)) onPositionChange?.(visible)
+  }
+  function handleNudge(axis: 'x' | 'y', sign: 1 | -1) {
+    const rect = getContainerRect()
+    const containerSize = rect ? (axis === 'x' ? rect.width : rect.height) : 800
+    if (!containerSize) return
+    const amount = NUDGE_PX / containerSize * 100 * sign
+    commit({ ...pos, ...clampPosition(pos.x + (axis === 'x' ? amount : 0), pos.y + (axis === 'y' ? amount : 0), pos.width, pos.height) })
+  }
+  function handleRotate(sign: 1 | -1) {
+    commit({ ...pos, rotation: wrapRotation(pos.rotation + sign * ROTATION_STEP) })
+  }
+  function handleFlip(axis: 'flipH' | 'flipV') {
+    commit({ ...pos, [axis]: !pos[axis] })
+  }
 
   // Determine if toolbar should appear below (sticker is near top edge)
   const nearTopEdge = pos.y < 15
@@ -353,8 +196,10 @@ export default function DraggableImage({
     <Box
       ref={ref}
       onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
+      onPointerMove={move}
       onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerCancel}
+      onLostPointerCapture={handlePointerCancel}
       onClick={(e) => {
         e.stopPropagation()
         onSelect()
@@ -412,6 +257,7 @@ export default function DraggableImage({
       {selected && onRemove && (
         <IconButton
           size="small"
+          onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation()
             onRemove()
@@ -464,8 +310,10 @@ export default function DraggableImage({
             role="button"
             aria-label="Rotate"
             onPointerDown={handleRotatePointerDown}
-            onPointerMove={handleRotatePointerMove}
-            onPointerUp={handleRotatePointerUp}
+            onPointerMove={move}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={handlePointerCancel}
+            onLostPointerCapture={handlePointerCancel}
             sx={{
               position: 'absolute',
               bottom: -10,
@@ -492,8 +340,10 @@ export default function DraggableImage({
             role="button"
             aria-label="Resize"
             onPointerDown={handleResizePointerDown}
-            onPointerMove={handleResizePointerMove}
-            onPointerUp={handleResizePointerUp}
+            onPointerMove={move}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={handlePointerCancel}
+            onLostPointerCapture={handlePointerCancel}
             sx={{
               position: 'absolute',
               bottom: -10,

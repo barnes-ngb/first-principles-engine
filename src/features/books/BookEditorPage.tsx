@@ -64,7 +64,7 @@ import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useProfile } from '../../core/profile/useProfile'
 import { SubjectBucket, UserProfile } from '../../core/types/enums'
 import { useAI } from '../../core/ai/useAI'
-import type { Book, BookPage, BookTheme, Sticker } from '../../core/types'
+import type { Book, BookPage, BookTheme, PageImage, Sticker } from '../../core/types'
 import { BOOK_THEMES } from '../../core/types'
 import type { ImageGenRequest } from '../../core/ai/useAI'
 import { ART_QUOTA_MESSAGE } from '../business/useArtQuota'
@@ -94,6 +94,10 @@ import type { PrintSettings } from './PrintSettingsDialog'
 import { useBackgroundReimagine } from './useBackgroundReimagine'
 import ReimagineResultDialog from './ReimagineResultDialog'
 import { useEditorHistory, useUndoRedoKeys } from './useEditorHistory'
+import { restoreImageTransform, restoreImageChanges } from './editorImageHistory'
+import { backgroundTarget } from './draggableImageUtils'
+import { replacePageBackground } from './backgroundReplacement'
+import type { BackgroundReplacementTarget } from './backgroundReplacement'
 import UndoIcon from '@mui/icons-material/Undo'
 import RedoIcon from '@mui/icons-material/Redo'
 import { reimagineCaption } from './reimagineCaptions'
@@ -150,11 +154,13 @@ export default function BookEditorPage() {
     saveState,
     saveErrorMessage,
     updatePage,
+    changePage,
     addPage,
     deletePage,
     updateBookMeta,
     addImageToPage,
-    removeImageFromPage,
+    prepareBackgroundPhoto,
+    prepareAiPageImage,
     uploadAudio,
     addAiImageToPage,
     addStickerToPage,
@@ -213,7 +219,7 @@ export default function BookEditorPage() {
   const isLincoln = childName.toLowerCase() === 'lincoln'
 
   // ── Undo / Redo ───────────────────────────────────────────────
-  const editorHistory = useEditorHistory()
+  const editorHistory = useEditorHistory(`${familyId}/${bookId}`)
 
   const bgReimagine = useBackgroundReimagine({
     familyId,
@@ -301,7 +307,17 @@ export default function BookEditorPage() {
   }, [drawingProcessing])
 
   // Background replacement tracking
-  const [replacingBackgroundIds, setReplacingBackgroundIds] = useState<string[]>([])
+  const [replacingBackground, setReplacingBackground] = useState<(BackgroundReplacementTarget & { scope: number }) | null>(null)
+  const [backgroundNotice, setBackgroundNotice] = useState<string | null>(null)
+  const [backgroundUploading, setBackgroundUploading] = useState(false)
+  // Invalidate a pending chooser/upload when this editor changes documents or
+  // unmounts. A round trip back to the same IDs is still a different session.
+  const backgroundScope = useRef(0)
+  useEffect(() => {
+    backgroundScope.current += 1
+    setBackgroundUploading(false)
+    return () => { backgroundScope.current += 1 }
+  }, [familyId, bookId])
 
   // Background source picker state
   const [showBgSourcePicker, setShowBgSourcePicker] = useState(false)
@@ -340,8 +356,8 @@ export default function BookEditorPage() {
 
   // Contextual action bar: track which image is selected in PageEditor
   const [selectedEditorImageId, setSelectedEditorImageId] = useState<string | null>(null)
-  const [selectedEditorImageType, setSelectedEditorImageType] = useState<'sticker' | 'background' | null>(null)
-  const handleSelectedImageChange = useCallback((imageId: string | null, imageType: 'sticker' | 'background' | null) => {
+  const [selectedEditorImageType, setSelectedEditorImageType] = useState<'sticker' | 'element' | 'background' | null>(null)
+  const handleSelectedImageChange = useCallback((imageId: string | null, imageType: 'sticker' | 'element' | 'background' | null) => {
     setSelectedEditorImageId(imageId)
     setSelectedEditorImageType(imageType)
   }, [])
@@ -398,28 +414,22 @@ export default function BookEditorPage() {
     setActivePageIndex((prev) => Math.max(0, prev - 1))
   }, [activePage, book, deletePage])
 
-  const handleRemoveImage = useCallback(
-    (imageId: string) => {
-      if (!activePage) return
-      removeImageFromPage(activePage.id, imageId)
-    },
-    [activePage, removeImageFromPage],
-  )
-
   const handleImagePositionChange = useCallback(
     (imageId: string, position: ImagePosition) => {
       if (!activePage) return
-      updateImagePosition(activePage.id, imageId, position)
+      const receipt = updateImagePosition(activePage.id, imageId, position)
+      if (receipt) editorHistory.push({ pageId: activePage.id, action: 'image_transform', imageTransformId: imageId, ...receipt })
     },
-    [activePage, updateImagePosition],
+    [activePage, updateImagePosition, editorHistory],
   )
 
   const handleReorderImage = useCallback(
     (imageId: string, direction: 'up' | 'down') => {
       if (!activePage) return
-      reorderImage(activePage.id, imageId, direction)
+      const receipt = reorderImage(activePage.id, imageId, direction)
+      if (receipt) editorHistory.push({ pageId: activePage.id, action: 'image_order', imageChanges: true, ...receipt })
     },
-    [activePage, reorderImage],
+    [activePage, reorderImage, editorHistory],
   )
 
   const handleAddImageFile = useCallback(
@@ -431,34 +441,29 @@ export default function BookEditorPage() {
   )
 
   // ── History-tracked page mutations ──────────────────────────────
-  /** Snapshot the active page before a mutation, push history after. */
+  /** Both endpoints are known before writing; never await a React render to
+   * guess the after state. Image operations restore only fields they own. */
   const trackPageChange = useCallback(
-    (action: string, mutate: () => void) => {
-      if (!activePage || !book) return
-      const before = structuredClone(activePage)
-      mutate()
-      // Re-read updated page from book state (next render will have it;
-      // we schedule the push via microtask so the state has settled)
-      queueMicrotask(() => {
-        // book may have updated by now — read latest from ref
-        const updatedPage = bookRef.current?.pages.find((p) => p.id === before.id)
-        if (updatedPage) {
-          editorHistory.push({ pageId: before.id, action, before, after: structuredClone(updatedPage) })
-        }
-      })
+    (action: string, changes: Partial<BookPage>) => {
+      if (!activePage) return
+      const receipt = changePage(activePage.id, (current) => ({
+        ...current,
+        ...changes,
+        ...('images' in changes ? restoreImageChanges(current, activePage, { ...activePage, ...changes }) : {}),
+      }))
+      if (receipt) editorHistory.push({ pageId: activePage.id, action, ...receipt, imageChanges: 'images' in changes })
     },
-    [activePage, book, editorHistory],
+    [activePage, editorHistory, changePage],
   )
-
-  // Keep a mutable ref to book for async history reads
-  const bookRef = useRef(book)
-  bookRef.current = book
 
   const handleTrackedRemoveImage = useCallback(
     (imageId: string) => {
-      trackPageChange('remove_image', () => handleRemoveImage(imageId))
+      if (!activePage) return
+      const receipt = changePage(activePage.id, (current) => current.images.some((image) => image.id === imageId)
+        ? { ...current, images: current.images.filter((image) => image.id !== imageId) } : undefined)
+      if (receipt) editorHistory.push({ pageId: activePage.id, action: 'remove_image', imageChanges: true, ...receipt })
     },
-    [trackPageChange, handleRemoveImage],
+    [changePage, editorHistory, activePage],
   )
 
   const handleTrackedPageUpdate = useCallback(
@@ -468,7 +473,7 @@ export default function BookEditorPage() {
         handlePageUpdate(changes)
         return
       }
-      trackPageChange('page_update', () => handlePageUpdate(changes))
+      trackPageChange('page_update', changes)
     },
     [trackPageChange, handlePageUpdate],
   )
@@ -476,14 +481,14 @@ export default function BookEditorPage() {
   const handleUndo = useCallback(() => {
     const result = editorHistory.undo()
     if (!result) return
-    updatePage(result.pageId, result.state)
-  }, [editorHistory, updatePage])
+    changePage(result.pageId, (current) => ({ ...current, ...(result.imageTransformId ? restoreImageTransform(current, result.state, result.imageTransformId) : result.imageChangesFrom ? restoreImageChanges(current, result.imageChangesFrom, result.state) : result.state) }))
+  }, [editorHistory, changePage])
 
   const handleRedo = useCallback(() => {
     const result = editorHistory.redo()
     if (!result) return
-    updatePage(result.pageId, result.state)
-  }, [editorHistory, updatePage])
+    changePage(result.pageId, (current) => ({ ...current, ...(result.imageTransformId ? restoreImageTransform(current, result.state, result.imageTransformId) : result.imageChangesFrom ? restoreImageChanges(current, result.imageChangesFrom, result.state) : result.state) }))
+  }, [editorHistory, changePage])
 
   useUndoRedoKeys(handleUndo, handleRedo)
 
@@ -780,46 +785,66 @@ export default function BookEditorPage() {
   }, [])
 
   // ── Change background ───────────────────────────────────────────
-  const handleChangeBackground = useCallback(() => {
-    if (!activePage) return
-    const bgIds = activePage.images
-      .filter((img) => img.type !== 'sticker')
-      .map((img) => img.id)
-    setReplacingBackgroundIds(bgIds)
+  const handleChangeBackground = useCallback((imageId?: string) => {
+    if (!activePage || !bookId || backgroundUploading) return
+    const target = backgroundTarget(activePage.images, imageId ?? selectedEditorImageId)
+    if (!target) return
+    setReplacingBackground({ familyId, bookId, pageId: activePage.id, imageId: target.id, url: target.url, storagePath: target.storagePath, type: target.type, scope: backgroundScope.current })
+    setBackgroundNotice(null)
     setShowBgSourcePicker(true)
-  }, [activePage])
+  }, [activePage, familyId, bookId, backgroundUploading, selectedEditorImageId])
+
+  const commitBackground = useCallback((target: BackgroundReplacementTarget & { scope: number }, candidate: PageImage, usedAiGeneration = false) => {
+    if (target.scope !== backgroundScope.current || target.familyId !== familyId || target.bookId !== bookId) {
+      setBackgroundNotice('This picture belongs to the book you were editing before. Your current book has not changed.')
+      return false
+    }
+    const receipt = changePage(target.pageId, (current) => replacePageBackground(current, target, candidate), { usedAiGeneration })
+    if (!receipt) {
+      setBackgroundNotice('That picture changed while you were choosing. Please choose it again.')
+      return false
+    }
+    editorHistory.push({ pageId: target.pageId, action: 'replace_background', imageChanges: true, ...receipt })
+    setBackgroundNotice(`Picture updated on page ${receipt.after.pageNumber}.`)
+    setReplacingBackground(null)
+    return true
+  }, [familyId, bookId, changePage, editorHistory])
 
   const handleBgSourceMakeScene = useCallback(() => {
     setShowBgSourcePicker(false)
-    const prefill = activePage?.text
-      ? `Illustrate: ${activePage.text.slice(0, 100)}`
+    const originPage = book?.pages.find((page) => page.id === replacingBackground?.pageId)
+    const prefill = originPage?.text
+      ? `Illustrate: ${originPage.text.slice(0, 100)}`
       : ''
     setAiPrompt(prefill)
     setAiResult(null)
     setAiFailure(null)
     setAiAlternatives([])
     setShowAiDialog(true)
-  }, [activePage])
+  }, [book, replacingBackground])
 
   const handleBgSourceUpload = useCallback(() => {
     setShowBgSourcePicker(false)
+    const target = replacingBackground
+    if (!target || target.scope !== backgroundScope.current) return
     const input = document.createElement('input')
     input.type = 'file'
     input.accept = 'image/*'
     input.capture = 'environment'
-    input.onchange = (e) => {
+    input.onchange = async (e) => {
       const file = (e.target as HTMLInputElement).files?.[0]
-      if (file && activePage) {
-        // Remove old backgrounds, then add photo as full-page background
-        if (replacingBackgroundIds.length > 0) {
-          replacingBackgroundIds.forEach((id) => removeImageFromPage(activePage.id, id))
-          setReplacingBackgroundIds([])
-        }
-        void addImageToPage(activePage.id, file, { cleanBackground: false })
+      if (!file || target.scope !== backgroundScope.current) return
+      setBackgroundUploading(true)
+      const candidate = await prepareBackgroundPhoto(file)
+      if (target.scope !== backgroundScope.current) return
+      setBackgroundUploading(false)
+      if (candidate) commitBackground(target, candidate)
+      else {
+        setBackgroundNotice('Your picture is still here. The new photo could not upload. Please try again.')
       }
     }
     input.click()
-  }, [activePage, replacingBackgroundIds, removeImageFromPage, addImageToPage])
+  }, [replacingBackground, prepareBackgroundPhoto, commitBackground])
 
   const handleBgSourceGallery = useCallback(() => {
     setShowBgSourcePicker(false)
@@ -828,20 +853,16 @@ export default function BookEditorPage() {
 
   const handleSelectGalleryBackground = useCallback(
     (url: string) => {
-      if (!activePage) return
-      // Remove old backgrounds
-      if (replacingBackgroundIds.length > 0) {
-        replacingBackgroundIds.forEach((id) => removeImageFromPage(activePage.id, id))
-        setReplacingBackgroundIds([])
-      }
-      addAiImageToPage(activePage.id, url, '', 'From gallery')
+      if (!replacingBackground) return
+      commitBackground(replacingBackground, prepareAiPageImage(url, '', 'From gallery'), true)
       setShowGalleryPicker(false)
     },
-    [activePage, replacingBackgroundIds, removeImageFromPage, addAiImageToPage],
+    [replacingBackground, prepareAiPageImage, commitBackground],
   )
 
   // ── AI Scene generation ─────────────────────────────────────────
   const openAiDialog = useCallback(() => {
+    setReplacingBackground(null)
     const prefill = activePage?.text
       ? `Illustrate: ${activePage.text.slice(0, 100)}`
       : ''
@@ -893,16 +914,13 @@ export default function BookEditorPage() {
 
   const handleUseAiImage = useCallback(() => {
     if (!activePage || !aiResult) return
-    // If replacing an existing background, remove old background images first
-    if (replacingBackgroundIds.length > 0) {
-      replacingBackgroundIds.forEach((id) => removeImageFromPage(activePage.id, id))
-      setReplacingBackgroundIds([])
-    }
-    addAiImageToPage(activePage.id, aiResult.url, aiResult.storagePath, aiPrompt)
+    if (replacingBackground) {
+      if (!commitBackground(replacingBackground, prepareAiPageImage(aiResult.url, aiResult.storagePath, aiResult.askedFor), true)) return
+    } else addAiImageToPage(activePage.id, aiResult.url, aiResult.storagePath, aiPrompt)
     setShowAiDialog(false)
     setAiResult(null)
     setShowOverlayGuide(true)
-  }, [activePage, aiResult, aiPrompt, addAiImageToPage, replacingBackgroundIds, removeImageFromPage])
+  }, [activePage, aiResult, aiPrompt, addAiImageToPage, replacingBackground, prepareAiPageImage, commitBackground])
 
   // ── Sticker ─────────────────────────────────────────────────────
   const autoSuggestTheme = useCallback((updatedBook: Book): BookTheme | null => {
@@ -1258,10 +1276,10 @@ export default function BookEditorPage() {
           size="small"
         />
         {/* Contextual chips based on image selection */}
-        {selectedEditorImageType === 'sticker' && selectedEditorImageId && (
+        {(selectedEditorImageType === 'sticker' || selectedEditorImageType === 'element') && selectedEditorImageId && (
           <Chip
             icon={<DeleteOutlineIcon />}
-            label="Delete sticker"
+            label={selectedEditorImageType === 'sticker' ? 'Delete sticker' : 'Remove picture'}
             onClick={() => { handleTrackedRemoveImage(selectedEditorImageId); deselect() }}
             color="error"
             size="small"
@@ -1364,6 +1382,9 @@ export default function BookEditorPage() {
         )}
       </Stack>
 
+      {backgroundUploading && <Alert severity="info">Uploading your new picture. Your current picture stays until it is ready.</Alert>}
+      {backgroundNotice && <Alert severity="info" onClose={() => setBackgroundNotice(null)}>{backgroundNotice}</Alert>}
+
       {/* Page editor area */}
       {activePage && (
         <Box
@@ -1376,6 +1397,7 @@ export default function BookEditorPage() {
           }}
         >
           <PageEditor
+            key={`${familyId}/${bookId}/${activePage.id}`}
             page={activePage}
             onUpdate={handleTrackedPageUpdate}
             onAddImage={handleAddImageFile}
@@ -1737,7 +1759,7 @@ export default function BookEditorPage() {
       {/* Background source picker */}
       <Dialog
         open={showBgSourcePicker}
-        onClose={() => { setShowBgSourcePicker(false); setReplacingBackgroundIds([]) }}
+        onClose={() => { setShowBgSourcePicker(false); setReplacingBackground(null) }}
         maxWidth="xs"
         fullWidth
       >
@@ -1802,7 +1824,7 @@ export default function BookEditorPage() {
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => { setShowBgSourcePicker(false); setReplacingBackgroundIds([]) }}>
+          <Button onClick={() => { setShowBgSourcePicker(false); setReplacingBackground(null) }}>
             Cancel
           </Button>
         </DialogActions>
@@ -1811,7 +1833,7 @@ export default function BookEditorPage() {
       {/* Gallery background picker */}
       <Dialog
         open={showGalleryPicker}
-        onClose={() => { setShowGalleryPicker(false); setReplacingBackgroundIds([]) }}
+        onClose={() => { setShowGalleryPicker(false); setReplacingBackground(null) }}
         fullScreen={isMobile}
         maxWidth="sm"
         fullWidth
@@ -1883,14 +1905,14 @@ export default function BookEditorPage() {
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => { setShowGalleryPicker(false); setReplacingBackgroundIds([]) }}>
+          <Button onClick={() => { setShowGalleryPicker(false); setReplacingBackground(null) }}>
             Cancel
           </Button>
         </DialogActions>
       </Dialog>
 
       {/* AI Scene generation dialog */}
-      <Dialog open={showAiDialog} onClose={() => { setShowAiDialog(false); setReplacingBackgroundIds([]) }} maxWidth="sm" fullWidth>
+      <Dialog open={showAiDialog} onClose={() => { setShowAiDialog(false); setReplacingBackground(null) }} maxWidth="sm" fullWidth>
         <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
           <Box component="span" sx={{ flex: 1 }}>Make a picture</Box>
           {/* One "?" for every paid picture in the editor (FEAT-178) — the
@@ -1900,6 +1922,7 @@ export default function BookEditorPage() {
         </DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ pt: 1 }}>
+            {replacingBackground && backgroundNotice && <Alert severity="info">{backgroundNotice}</Alert>}
             {/* World type quick-pick chips */}
             <Box>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
@@ -2048,7 +2071,7 @@ export default function BookEditorPage() {
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => { setShowAiDialog(false); setReplacingBackgroundIds([]) }} disabled={aiLoading}>
+          <Button onClick={() => { setShowAiDialog(false); setReplacingBackground(null) }} disabled={aiLoading}>
             Cancel
           </Button>
           {aiResult ? (

@@ -106,6 +106,18 @@ describe('BookReaderPage background fit (FEAT-177)', () => {
     state.image = { id: 'i1', url: 'https://img/p1.png', type: 'ai-generated' }
   })
 
+  it.each([
+    ['photo', undefined, '0%', '0%', '100%', '100%'],
+    ['photo', 'element', '10%', '10%', '40%', '40%'],
+    ['sticker', undefined, '25%', '15%', '30%', '30%'],
+  ] as const)('keeps default %s/%s geometry aligned with the editor', (type, layerType, left, top, width, height) => {
+    state.image = { ...state.image, type, layerType }
+    render(<BookReaderPage />)
+    goToContentPage()
+    const style = getComputedStyle(sharpPageImage())
+    expect([style.left, style.top, style.width, style.height]).toEqual([left, top, width, height])
+  })
+
   it('shows a fitted background whole, over a blurred copy of itself', () => {
     state.image = { ...state.image, fit: 'fit' }
     render(<BookReaderPage />)

@@ -32,7 +32,7 @@ import { PAGE_LAYOUTS, TEXT_SIZES, TEXT_FONTS, TEXT_SIZE_STYLES, TEXT_FONT_FAMIL
 import DraggableImage from './DraggableImage'
 import type { ImagePosition } from './DraggableImage'
 import LayersPanel from './LayersPanel'
-import { stackOrder } from './draggableImageUtils'
+import { stackOrder, layerTypeOf, backgroundTarget, imageGeometry } from './draggableImageUtils'
 import {
   applyBackgroundFit,
   backgroundFitOf,
@@ -60,7 +60,7 @@ interface PageEditorProps {
   onUpdate: (changes: Partial<BookPage>) => void
   onAddImage: (file: File) => void
   onRemoveImage?: (imageId: string) => void
-  onChangeBackground?: () => void
+  onChangeBackground?: (imageId?: string) => void
   onReRecord?: () => void
   onImagePositionChange?: (imageId: string, position: ImagePosition) => void
   /** Move an image one step in the layer stack ('up' = toward the top). */
@@ -69,7 +69,7 @@ interface PageEditorProps {
   /** Increment to deselect all images from parent (e.g. when action buttons are clicked) */
   deselectSignal?: number
   /** Notifies parent when the selected image changes (for contextual action bar). */
-  onSelectedImageChange?: (imageId: string | null, imageType: 'sticker' | 'background' | null) => void
+  onSelectedImageChange?: (imageId: string | null, imageType: 'sticker' | 'element' | 'background' | null) => void
   /** Called when user restores a previous version of an image. */
   onRestoreVersion?: (imageId: string, versionIndex: number) => void
 }
@@ -111,7 +111,7 @@ export default function PageEditor({
       onSelectedImageChange(null, null)
       return
     }
-    onSelectedImageChange(selectedImageId, img.type === 'sticker' ? 'sticker' : 'background')
+    onSelectedImageChange(selectedImageId, layerTypeOf(img) === 'background' ? 'background' : img.type === 'sticker' ? 'sticker' : 'element')
   }, [selectedImageId, page.images, onSelectedImageChange])
 
   const handleTextChange = useCallback(
@@ -161,7 +161,8 @@ export default function PageEditor({
   // Background images (scenes, photos, sketches, AI-generated) drive the
   // "Change background" menu. Stacking/render order over *all* images comes
   // from stackOrder — no fixed background-vs-sticker container split.
-  const backgroundImages = page.images.filter((img) => img.type !== 'sticker')
+  const backgroundImages = page.images.filter((img) => layerTypeOf(img) === 'background')
+  const targetBackground = backgroundTarget(page.images, selectedImageId)
   const orderedImages = stackOrder(page.images)
 
   // FEAT-177 — "show the whole picture" vs "fill the page", per background,
@@ -184,9 +185,7 @@ export default function PageEditor({
    */
   const removeOneBackground = () => {
     if (!onRemoveImage) return
-    const target =
-      backgroundImages.find((img) => img.id === selectedImageId) ??
-      backgroundImages[backgroundImages.length - 1]
+    const target = targetBackground
     if (!target) return
     onRemoveImage(target.id)
     setSelectedImageId(null)
@@ -216,7 +215,7 @@ export default function PageEditor({
             onClose={() => setBgMenuAnchor(null)}
           >
             {onChangeBackground && (
-              <MenuItem onClick={() => { setBgMenuAnchor(null); onChangeBackground() }}>
+              <MenuItem onClick={() => { setBgMenuAnchor(null); onChangeBackground(targetBackground?.id) }}>
                 <ListItemIcon><AutoFixHighIcon fontSize="small" /></ListItemIcon>
                 <ListItemText>Change picture</ListItemText>
               </MenuItem>
@@ -240,10 +239,10 @@ export default function PageEditor({
                 <ListItemText>Remove picture</ListItemText>
               </MenuItem>
             )}
-            {onRestoreVersion && backgroundImages.some((img) => (img.previousVersions?.length ?? 0) > 0) && (
+            {onRestoreVersion && (targetBackground?.previousVersions?.length ?? 0) > 0 && (
               <MenuItem onClick={() => {
                 setBgMenuAnchor(null)
-                const imgWithVersions = backgroundImages.find((img) => (img.previousVersions?.length ?? 0) > 0)
+                const imgWithVersions = targetBackground
                 if (imgWithVersions) setVersionHistoryImageId(imgWithVersions.id)
               }}>
                 <ListItemIcon><HistoryIcon fontSize="small" /></ListItemIcon>
@@ -279,10 +278,10 @@ export default function PageEditor({
               // element strictly ordered (no ties) while giving a fitted
               // background somewhere to put its backdrop.
               const renderZ = (stackIdx + 1) * 2
-              if (img.type === 'sticker') {
+              if (layerTypeOf(img) === 'element') {
                 return (
                   <DraggableImage
-                    key={img.id}
+                    key={`${page.id}/${img.id}`}
                     image={img}
                     selected={selectedImageId === img.id}
                     onSelect={() => setSelectedImageId(img.id)}
@@ -293,7 +292,7 @@ export default function PageEditor({
                   />
                 )
               }
-              const pos = img.position ?? { x: 0, y: 0, width: 100, height: 100 }
+              const pos = imageGeometry(img)
               const transforms: string[] = []
               if (pos.rotation) transforms.push(`rotate(${pos.rotation}deg)`)
               if (pos.flipH) transforms.push('scaleX(-1)')
