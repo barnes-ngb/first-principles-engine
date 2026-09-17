@@ -8,6 +8,7 @@
 
 | Document | Status | Notes |
 |---|---|---|
+| `review/STICKER_RESULT_IDENTITY_2026-09.md` | **CURRENT** (2026-09-17) | FIX-252 — completed sticker identity, failed redo preservation and save/generation exclusion; validation boundaries. |
 | `review/STICKER_CLEANUP_LAYOUT_2026-09.md` | **CURRENT** (2026-09-17) | FIX-251 — explicit large-image preview/consent and responsive cleanup layout; candidate validation boundaries. |
 | `review/BOOK_CONTROLS_2026-09.md` | **CURRENT** (2026-09-17) | FIX-250 — reachable picture actions, explicit off-page recovery, separate background controls and validation limits. |
 | `review/BOOK_EDITOR_RELIABILITY_2026-09.md` | **CURRENT** (2026-09-16) | FIX-248/249 — book transforms, scoped Undo/Redo, background/layer preservation, validation limits and family trial |
