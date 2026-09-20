@@ -8,8 +8,13 @@
 > corrections applied directly.
 > **Prior audit:** `ARCHITECTURE_AUDIT_2026-09-13.md` (window start, merge of PR #1847: commit `3478029`).
 > **Window covered:** 2026-09-13 → 2026-09-20 — **97 commits, 215 files changed, +18,629 / −3,950 lines**
-> (`git diff --shortstat 3478029..HEAD`). Roughly a quarter the size of the 08-29→09-13 window's diff on
-> a file-count basis (215 vs 752), consistent with a one-week window against that report's two-week one.
+> (`git diff --shortstat 3478029..2a4cf2c` — `2a4cf2c` being `origin/main`'s tip when this audit run
+> started, i.e. the window's END commit; **not** `HEAD`, which by the time this PR is reviewed also
+> includes this PR's own doc-only fix commits and will report different, larger figures for the same
+> command — `git diff --shortstat 3478029..HEAD` on this PR's own head is a different, larger number by
+> design, since it also measures this audit's own output). Roughly a quarter the size of the 08-29→09-13
+> window's diff on a file-count basis (215 vs 752), consistent with a one-week window against that
+> report's two-week one.
 > Headline: **`UX-409`, last cycle's own #1 recommended `PROMPT_FIX` target (the weekly-review
 > data-loss risk), was fixed the same day the last audit's PR merged** (`FIX-236`, PR #1850,
 > 2026-09-13) — the fastest this series has seen its own top recommendation actioned. The rest of the
