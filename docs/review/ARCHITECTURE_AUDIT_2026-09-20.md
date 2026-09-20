@@ -120,12 +120,12 @@ files >= 1500L: 18
 
 **Seven of eighteen files were exactly flat this window** (0L delta against the 09-13 baseline:
 `useQuestSession.ts`, `WorkshopPage.tsx`, `shellyChat.ts`, `chatPlanner.logic.ts`, `VoxelCharacter.tsx`,
-`DevAdminTab.tsx`, `useShellyChatActions.ts`) and four more moved by single digits (`BookEditorPage.tsx`
-+23, `CurriculumTab.tsx` −6, `contextSlices.ts` +11, `RecordsPage.tsx` +2) — eleven of eighteen essentially
-untouched. A different shape from every prior cycle in this series, consistent with the window being
-materially shorter (7 days vs. the usual 1–2 weeks) and the work landing being reliability/consolidation
-passes on a handful of surfaces (Today, the book editor, the child switcher, the weekly-review generator)
-rather than broad feature work touching many large files at once.
+`DevAdminTab.tsx`, `useShellyChatActions.ts`) and two more moved by single digits (`CurriculumTab.tsx` −6,
+`RecordsPage.tsx` +2) — **nine of eighteen** flat or within single digits. A different shape from every
+prior cycle in this series, consistent with the window being materially shorter (7 days vs. the usual
+1–2 weeks) and the work landing being reliability/consolidation passes on a handful of surfaces (Today,
+the book editor, the child switcher, the weekly-review generator) rather than broad feature work touching
+many large files at once.
 
 ### 1.2 ARCH-02 (`PlannerChatPage.tsx`) — unaddressed for a fifth cycle, but this is the first window it didn't get harder to fix
 
@@ -289,7 +289,9 @@ others."* This window's `FEAT-237` deleted `ContextBar`'s inert chip, the drawer
 in-page `ChildSelector` sites (`components/ChildSelector.tsx` itself deleted), and **three** hand-rolled
 pickers a grep for the component couldn't see (`ArmorTab`'s button pair, `MyAvatarPage`'s themed row —
 which also carried the `.name === 'lincoln'` literal §1.8 found gone — and `AvatarAdminTab`'s chip row,
-which keeps its `onClick` since it doubles as the duplicate-mark/delete list). `src/test/oneChildControl.
+which keeps its chips (the duplicate-mark and per-profile delete list) but had its child-switching
+`onClick={() => setActiveChildId(c.id)}` removed, leaving only `onDelete` — confirmed via
+`git diff 3478029..HEAD -- src/features/settings/AvatarAdminTab.tsx`). `src/test/oneChildControl.
 source.test.ts` fails closed on an eleventh caller of `setActiveChildId`, per `CLAUDE.md`'s `src/app/`
 section. **Verified directly this cycle** (not just read off the ledger): `grep -nE "=== *'Lincoln'|===
 *'London'|\.name *===" src/app/childSwitcher.ts src/components/ChildSwitcherChip.tsx` returns zero
@@ -408,9 +410,14 @@ independently this window.
 
 - **`docs/review/DECISION_FUNC-01_source_of_truth.md`** — added the seventh Authority-table row,
   `learnerModels/{childId}` (concept frontier / synthesis), closing `DOC-26` (filed by the 09-13 audit).
-  The row states the store, its ~8 writers, its readers, and its reconciliation path with `skillSnapshots`
-  via `needsReconcile` + the Foundations tab's confirm/override flow — content the 09-13 report's §2.1
-  already fully specified; this is a mechanical transcription into the decision doc, not a new judgment.
+  The row states the store, its writer modules, and its readers. **Corrected on Codex review of this
+  same PR** (round 1): the writer list initially named `strandSessionWrites.ts` (whose own header
+  disclaims any `learnerModels` write) and omitted the confirmed real writers `learnerSynthesis.ts` and
+  `stuckRetestQueue.ts` — fixed by direct verification against the code. The row also initially overstated
+  `needsReconcile` as a general reconciliation seam between `learnerModels` and `skillSnapshots`; verified
+  against `core/foundations/evalModelSync.ts`, it is an **internal `learnerModels` mechanism** (an eval's
+  read vs. an attestation already stored inside `learnerModels`) and never reads `skillSnapshots` —
+  the row now says plainly that no general cross-store reconciliation exists today.
 - **`CLAUDE.md`** Known Technical Debt section: every stale line-count parenthetical corrected against
   this cycle's fresh counts — `PlannerChatPage.tsx` 3,950L → **3,942L**, `chat.ts CF` 3,051L → **3,108L**,
   `BookEditorPage.tsx` 2,414L → **2,437L**, `MyAvatarPage.tsx` 1,934L → **1,897L** (with a note on why it
