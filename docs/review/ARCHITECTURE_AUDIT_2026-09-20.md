@@ -78,9 +78,10 @@ window. The two `raw-refs` warnings are the same two files (`ArmorTab.tsx`, `Dev
 This window's clearest lens-1 result is **`UX-409`'s fix landing** (§2.1) — the loop's one identified,
 unrecoverable data-loss point closed within hours of being flagged. The clearest lens-2 result is
 **`FEAT-237`'s "one child control" sweep** (§2.2) closing out the last of the `UX-329` child-switch census
-rows on two more surfaces the automated heuristic couldn't see (a `.name === 'lincoln'` literal in
-`MyAvatarPage.tsx`, gone by deletion rather than by rewrite). No MO-hardcoding lens hit this window; see
-§4.5.
+rows on the three hand-rolled pickers a grep for `<ChildSelector` couldn't see (`ArmorTab`,
+`MyAvatarPage`, `AvatarAdminTab`) — and, as a side effect of deleting `MyAvatarPage.tsx`'s block, also
+removing one of `ARCH-43`'s tracked name-literal sites (a `.name === 'lincoln'` literal, confirmed gone
+by deletion rather than by rewrite). No MO-hardcoding lens hit this window; see §4.5.
 
 ---
 
@@ -117,11 +118,14 @@ files >= 1500L: 18
 | `src/features/settings/DevAdminTab.tsx` | 1,530L | +0 | Watch-list (new at 09-13), flat. |
 | `src/features/shelly-chat/useShellyChatActions.ts` | 1,506L | +0 | Watch-list (new at 09-13), flat — no decomposition read attempted yet; still recommended. |
 
-**Twelve of eighteen files were exactly flat this window** (0L delta against the 09-13 baseline) — a
-different shape from every prior cycle in this series, consistent with the window being materially
-shorter (7 days vs. the usual 1–2 weeks) and the work landing being reliability/consolidation passes on a
-handful of surfaces (Today, the book editor, the child switcher) rather than broad feature work touching
-many large files at once.
+**Seven of eighteen files were exactly flat this window** (0L delta against the 09-13 baseline:
+`useQuestSession.ts`, `WorkshopPage.tsx`, `shellyChat.ts`, `chatPlanner.logic.ts`, `VoxelCharacter.tsx`,
+`DevAdminTab.tsx`, `useShellyChatActions.ts`) and four more moved by single digits (`BookEditorPage.tsx`
++23, `CurriculumTab.tsx` −6, `contextSlices.ts` +11, `RecordsPage.tsx` +2) — eleven of eighteen essentially
+untouched. A different shape from every prior cycle in this series, consistent with the window being
+materially shorter (7 days vs. the usual 1–2 weeks) and the work landing being reliability/consolidation
+passes on a handful of surfaces (Today, the book editor, the child switcher, the weekly-review generator)
+rather than broad feature work touching many large files at once.
 
 ### 1.2 ARCH-02 (`PlannerChatPage.tsx`) — unaddressed for a fifth cycle, but this is the first window it didn't get harder to fix
 
@@ -291,8 +295,9 @@ section. **Verified directly this cycle** (not just read off the ledger): `grep 
 *'London'|\.name *===" src/app/childSwitcher.ts src/components/ChildSwitcherChip.tsx` returns zero
 matches — the one remaining control gates on `canSwitchChild`/`canOpenChildMenu` (capability: is there
 more than one child, is this a parent profile), never on a name. This is a genuine lens-2 win: the same
-initiative that reduced the child-switch surface count also happened to delete two more of `ARCH-43`'s
-name-literal sites as a side effect of consolidation, not as a dedicated remediation pass.
+initiative that reduced the child-switch surface count also happened to delete one more of `ARCH-43`'s
+name-literal sites (in the deleted `MyAvatarPage.tsx` block, §1.8) as a side effect of consolidation, not
+as a dedicated remediation pass.
 
 ### 2.3 Loop integrity — traced FIX-237/UX-413(a), weekly-review evidence following the activity day
 
@@ -462,7 +467,7 @@ naming as confirmation the propose→fix pipeline this ledger runs on is working
 fixed. (2) **`ARCH-02`** (`PlannerChatPage.tsx`) — unaddressed for a fifth consecutive cycle, though for
 the first time the file didn't grow around the standing seam this window, which is as good a week as any
 to finally cut it. (3) **`FEAT-237`'s "one child control" sweep** (§2.2/1.8) — a UX consolidation that,
-as a side effect, deleted two more of `ARCH-43`'s tracked name-literal sites, a second instance (after
+as a side effect, deleted one more of `ARCH-43`'s tracked name-literal sites, a second instance (after
 `ARCH-47`'s resolution at 09-13) of this series' recommendations getting acted on quickly once scoped.
 **Recommend running `PROMPT_FIX.md` next against:** `ARCH-02`'s live-day-edit handler trio extraction
 (five cycles overdue, ~190L, now a smaller lift than it will be if it waits for a sixth), then the
