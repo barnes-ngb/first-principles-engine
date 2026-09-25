@@ -1,4 +1,4 @@
-import { jsPDF } from 'jspdf'
+import type { jsPDF } from 'jspdf'
 import type { Book, BookPage } from '../../core/types'
 import { startStep } from '../../core/utils/perf'
 import { fetchAsDataUri } from './imageDataUri'
@@ -1182,6 +1182,8 @@ export async function printBook(book: Book, opts: PrintBookOptions): Promise<Pri
   const pdfW = config.widthMM + bleedOffset * 2
   const pdfH = config.heightMM + bleedOffset * 2
 
+  // Loaded here, not at module top, so jsPDF stays out of the main bundle (ARCH-05).
+  const { jsPDF } = await import('jspdf')
   const pdf = new jsPDF({
     orientation: config.orientation,
     unit: 'mm',
