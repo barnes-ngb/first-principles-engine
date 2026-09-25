@@ -88,7 +88,7 @@ import type { DrawingChoice, PostCleanupChoice } from './DrawingChoiceDialog'
 import { cleanSketchBackground } from './cleanSketch'
 import type { ImagePosition } from './DraggableImage'
 import { useBook } from './useBook'
-import { printBook } from './printBook'
+import { makeBookPdf } from './makeBookPdf'
 import PrintSettingsDialog from './PrintSettingsDialog'
 import type { PrintSettings } from './PrintSettingsDialog'
 import { useBackgroundReimagine } from './useBackgroundReimagine'
@@ -981,17 +981,13 @@ export default function BookEditorPage() {
     setShowPrintSettings(false)
     setPrinting(true)
     try {
-      const { skippedImageCount } = await printBook(book, {
+      const notice = await makeBookPdf(book, {
         childName,
         isLincoln,
         sightWords: book.sightWords,
         settings,
       })
-      if (skippedImageCount > 0) {
-        setPrintSkipNotice(
-          `${skippedImageCount} picture${skippedImageCount === 1 ? '' : 's'} couldn't be printed and ${skippedImageCount === 1 ? 'was' : 'were'} left blank.`,
-        )
-      }
+      if (notice) setPrintSkipNotice(notice)
     } finally {
       setPrinting(false)
     }
