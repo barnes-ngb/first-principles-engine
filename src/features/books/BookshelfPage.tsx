@@ -48,7 +48,7 @@ import { useCatalogProducts } from '../business/useCatalogProducts'
 import { bookToCatalogInitial, canPromoteBook, isSourceInCatalog } from '../business/catalogOnramps'
 import { useBookshelf } from './useBook'
 import BookGenerateChat from './BookGenerateChat'
-import { printBook } from './printBook'
+import { makeBookPdf } from './makeBookPdf'
 import { buildGrandparentBriefHtml } from './grandparentBrief'
 import PrintSettingsDialog from './PrintSettingsDialog'
 import type { PrintSettings } from './PrintSettingsDialog'
@@ -129,17 +129,13 @@ export default function BookshelfPage() {
     async (settings: PrintSettings) => {
       if (!printTarget?.id) return
       setShowPrintSettings(false)
-      const { skippedImageCount } = await printBook(printTarget, {
+      const notice = await makeBookPdf(printTarget, {
         childName,
         isLincoln,
         sightWords: printTarget.sightWords,
         settings,
       })
-      if (skippedImageCount > 0) {
-        setPrintSkipNotice(
-          `${skippedImageCount} picture${skippedImageCount === 1 ? '' : 's'} couldn't be printed and ${skippedImageCount === 1 ? 'was' : 'were'} left blank.`,
-        )
-      }
+      if (notice) setPrintSkipNotice(notice)
       setPrintTarget(null)
     },
     [printTarget, childName, isLincoln],
