@@ -1,18 +1,32 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+
 import { describe, expect, it } from 'vitest'
 
-import type { ChecklistItem, DayLog } from '../../core/types'
+import { weekRangeFromDateKey } from '../../core/utils/dateKey'
+
+import type {
+  ChecklistItem,
+  DayLog,
+  HoursAdjustment,
+  HoursEntry,
+} from '../../core/types'
 import { SubjectBucket } from '../../core/types/enums'
+import { computeHoursSummary } from '../records/records.logic'
 import {
+  bucketContributionsByDate,
   buildWeekDates,
-  computeDayState,
+  computeRibbonWeek,
   computeWeekStats,
   DAY_LABELS,
-  formatHoursChip,
-  getPlannedAndLogged,
+  formatCountedHours,
+  getPlanProgress,
   isWeekEmpty,
   itemMinutes,
   parseMinutesFromLabel,
+  ribbonWeekStart,
 } from './weekRibbon.logic'
+import * as ribbonLogic from './weekRibbon.logic'
 
 // ── parseMinutesFromLabel ──────────────────────────────────────
 
@@ -77,10 +91,10 @@ describe('itemMinutes', () => {
   })
 })
 
-// ── getPlannedAndLogged ────────────────────────────────────────
+// ── getPlanProgress — the plan half ────────────────────────────
 
-describe('getPlannedAndLogged', () => {
-  it('sums planned and logged minutes from checklist', () => {
+describe('getPlanProgress', () => {
+  it('sums planned and checked minutes and counts rows', () => {
     const log: DayLog = {
       childId: 'c1',
       date: '2026-07-21',
@@ -91,15 +105,15 @@ describe('getPlannedAndLogged', () => {
         { label: 'Speech (10m)', completed: true, subjectBucket: SubjectBucket.LanguageArts },
       ],
     }
-    const result = getPlannedAndLogged(log)
-    expect(result.planned).toBe(60)
-    expect(result.logged).toBe(40) // 30 + 10 completed
-    expect(result.subjects).toContain(SubjectBucket.Reading)
-    expect(result.subjects).toContain(SubjectBucket.LanguageArts)
-    expect(result.subjects).not.toContain(SubjectBucket.Math)
+    expect(getPlanProgress(log)).toEqual({
+      planned: 60,
+      checked: 40,
+      rowsPlanned: 3,
+      rowsDone: 2,
+    })
   })
 
-  it('excludes manual-source items', () => {
+  it('does not treat a manual row as part of the plan', () => {
     const log: DayLog = {
       childId: 'c1',
       date: '2026-07-21',
@@ -109,19 +123,19 @@ describe('getPlannedAndLogged', () => {
         { label: 'Extra Task (15m)', completed: true, source: 'manual' },
       ],
     }
-    const result = getPlannedAndLogged(log)
-    expect(result.planned).toBe(30)
-    expect(result.logged).toBe(30)
+    expect(getPlanProgress(log)).toEqual({
+      planned: 30,
+      checked: 30,
+      rowsPlanned: 1,
+      rowsDone: 1,
+    })
   })
 
-  it('returns zeros for null/undefined log', () => {
-    expect(getPlannedAndLogged(null)).toEqual({ planned: 0, logged: 0, subjects: [] })
-    expect(getPlannedAndLogged(undefined)).toEqual({ planned: 0, logged: 0, subjects: [] })
-  })
-
-  it('returns zeros for log without checklist', () => {
-    const log: DayLog = { childId: 'c1', date: '2026-07-21', blocks: [] }
-    expect(getPlannedAndLogged(log)).toEqual({ planned: 0, logged: 0, subjects: [] })
+  it('returns zeros for a missing log or checklist', () => {
+    const zero = { planned: 0, checked: 0, rowsPlanned: 0, rowsDone: 0 }
+    expect(getPlanProgress(null)).toEqual(zero)
+    expect(getPlanProgress(undefined)).toEqual(zero)
+    expect(getPlanProgress({ childId: 'c1', date: '2026-07-21', blocks: [] })).toEqual(zero)
   })
 })
 
@@ -166,145 +180,249 @@ describe('buildWeekDates', () => {
   })
 })
 
-// ── computeDayState ────────────────────────────────────────────
+// ── The counted week (UX-443) ──────────────────────────────────
+//
+// Every test in this block fails against the retired chip, whose numerator was
+// the planned minutes of ticked NON-manual rows and nothing else.
 
-describe('computeDayState', () => {
-  const today = '2026-07-23'
+const CHILD = 'lincoln'
+const WEEK = buildWeekDates('2026-09-21') // Mon 21 – Fri 25 Sep
+const TODAY = '2026-09-25'
 
-  const makeLog = (checklist: ChecklistItem[]): DayLog => ({
-    childId: 'c1',
-    date: today,
-    blocks: [],
-    checklist,
+function day(date: string, checklist: ChecklistItem[], childId = CHILD): DayLog {
+  return { childId, date, blocks: [], checklist }
+}
+
+function ribbon(input: {
+  dayLogs?: DayLog[]
+  hoursEntries?: HoursEntry[]
+  adjustments?: HoursAdjustment[]
+}) {
+  return computeRibbonWeek({
+    dayLogs: input.dayLogs ?? [],
+    hoursEntries: input.hoursEntries ?? [],
+    adjustments: input.adjustments ?? [],
+    childId: CHILD,
+    weekDates: WEEK,
+    today: TODAY,
+  })
+}
+
+const PLANNED_MONDAY = day('2026-09-21', [
+  { label: 'Fast Phonics (20m)', completed: true, estimatedMinutes: 20, source: 'planner' },
+  { label: 'Math (30m)', completed: false, estimatedMinutes: 30, source: 'planner' },
+])
+
+describe('computeRibbonWeek — the chip counts what happened', () => {
+  it('a kid’s manual “I Did More” row moves the chip', () => {
+    const before = ribbon({ dayLogs: [PLANNED_MONDAY] }).totalMinutes
+    const withExtra = ribbon({
+      dayLogs: [
+        day('2026-09-21', [
+          ...PLANNED_MONDAY.checklist!,
+          // KidExtraLogger's shape: a completed manual row carrying its minutes.
+          {
+            label: 'Lego build (25m)',
+            completed: true,
+            estimatedMinutes: 25,
+            source: 'manual',
+            subjectBucket: SubjectBucket.Other,
+          },
+        ]),
+      ],
+    }).totalMinutes
+    expect(withExtra - before).toBe(25)
   })
 
-  it('returns "in-progress" for today with a plan', () => {
-    const log = makeLog([{ label: 'Task (20m)', completed: false }])
-    expect(computeDayState(today, log, today)).toBe('in-progress')
+  it('an `hours` document from the Capture card moves the chip', () => {
+    const r = ribbon({
+      dayLogs: [PLANNED_MONDAY],
+      hoursEntries: [
+        {
+          id: 'h1',
+          childId: CHILD,
+          date: '2026-09-23',
+          minutes: 45,
+          subjectBucket: SubjectBucket.PracticalArts,
+          source: 'unified-capture',
+        } as HoursEntry,
+      ],
+    })
+    expect(r.totalMinutes).toBe(20 + 45)
   })
 
-  it('returns "empty" for today with no plan', () => {
-    expect(computeDayState(today, null, today)).toBe('empty')
+  it('a negative `hoursAdjustments` row moves the chip DOWN', () => {
+    const before = ribbon({ dayLogs: [PLANNED_MONDAY] }).totalMinutes
+    const after = ribbon({
+      dayLogs: [PLANNED_MONDAY],
+      adjustments: [
+        {
+          id: 'a1',
+          childId: CHILD,
+          date: '2026-09-22',
+          minutes: -10,
+          reason: 'Correction',
+          subjectBucket: SubjectBucket.Reading,
+        } as HoursAdjustment,
+      ],
+    }).totalMinutes
+    expect(after).toBe(before - 10)
   })
 
-  it('returns "done" for past day with >= 80% logged', () => {
-    const log = makeLog([
-      { label: 'Task A (25m)', completed: true },
-      { label: 'Task B (25m)', completed: true },
-      { label: 'Task C (25m)', completed: true },
-      { label: 'Task D (25m)', completed: true },
-      { label: 'Task E (25m)', completed: false },
-    ])
-    // 100 logged out of 125 planned = 80%
-    expect(computeDayState('2026-07-21', log, today)).toBe('done')
+  it('an artifact with no `hours` row does not move it — artifacts carry no minutes', () => {
+    // There is no artifact input at all: evidence and time are separate records
+    // (AUDIT-234 / FEAT-238), and the ribbon reads only the three time sources.
+    const r = ribbon({ dayLogs: [PLANNED_MONDAY] })
+    expect(r.totalMinutes).toBe(20)
+    expect(Object.keys(ribbonLogic)).not.toContain('artifactMinutes')
   })
 
-  it('returns "partial" for past day with < 80% logged', () => {
-    const log = makeLog([
-      { label: 'Task A (50m)', completed: true },
-      { label: 'Task B (50m)', completed: false },
-      { label: 'Task C (50m)', completed: false },
-    ])
-    // 50 logged out of 150 planned = 33%
-    expect(computeDayState('2026-07-21', log, today)).toBe('partial')
+  it('is the shared fold’s total, exactly — no second arithmetic', () => {
+    const dayLogs = [PLANNED_MONDAY]
+    const hoursEntries = [
+      { id: 'h', childId: CHILD, date: '2026-09-26', minutes: 60, subjectBucket: SubjectBucket.Science },
+    ] as HoursEntry[]
+    const r = ribbon({ dayLogs, hoursEntries })
+    expect(r.totalMinutes).toBe(
+      computeHoursSummary(dayLogs, hoursEntries, [], CHILD).totalMinutes,
+    )
+    // Saturday's Dad Lab counts in the chip even though it has no dot.
+    expect(r.totalMinutes).toBe(80)
+    expect(r.stats.reduce((s, d) => s + d.countedMinutes, 0)).toBe(20)
   })
 
-  it('returns "skipped" for past day with plan but 0 logged', () => {
-    const log = makeLog([
-      { label: 'Task A (20m)', completed: false },
-      { label: 'Task B (20m)', completed: false },
-    ])
-    expect(computeDayState('2026-07-21', log, today)).toBe('skipped')
-  })
-
-  it('returns "empty" for past day with no plan', () => {
-    expect(computeDayState('2026-07-21', null, today)).toBe('empty')
-  })
-
-  it('returns "pending" for future day with a plan', () => {
-    const log = makeLog([{ label: 'Task (20m)', completed: false }])
-    expect(computeDayState('2026-07-25', log, today)).toBe('pending')
-  })
-
-  it('returns "empty" for future day with no plan', () => {
-    expect(computeDayState('2026-07-25', null, today)).toBe('empty')
+  it('counts his own week and never his brother’s', () => {
+    const r = ribbon({
+      dayLogs: [
+        PLANNED_MONDAY,
+        day('2026-09-21', [{ label: 'His (45m)', completed: true, estimatedMinutes: 45 }], 'london'),
+      ],
+    })
+    expect(r.totalMinutes).toBe(20)
+    expect(r.stats[0].plannedMinutes).toBe(50)
   })
 })
 
-// ── computeWeekStats ───────────────────────────────────────────
+describe('bucketContributionsByDate', () => {
+  it('sums by date, subtracts negatives, and names only subjects that added time', () => {
+    const buckets = bucketContributionsByDate([
+      { date: '2026-09-21', minutes: 20, subjectBucket: 'Reading' },
+      { date: '2026-09-21', minutes: 30, subjectBucket: 'Math' },
+      { date: '2026-09-22', minutes: -10, subjectBucket: 'Science' },
+    ])
+    expect(buckets['2026-09-21']).toEqual({ minutes: 50, subjects: ['Reading', 'Math'] })
+    expect(buckets['2026-09-22']).toEqual({ minutes: -10, subjects: [] })
+  })
+})
 
 describe('computeWeekStats', () => {
-  it('produces a DayStats entry per weekday', () => {
-    const dates = buildWeekDates('2026-07-20')
-    const stats = computeWeekStats(dates, {}, '2026-07-23')
+  it('produces one entry per weekday, labelled Mon..Fri', () => {
+    const stats = computeWeekStats(WEEK, {}, {}, TODAY)
     expect(stats).toHaveLength(5)
     expect(stats.map((s) => s.label)).toEqual([...DAY_LABELS])
-    expect(stats.every((s) => s.state === 'empty')).toBe(true)
   })
+})
 
-  it('reflects logged data from logsByDate', () => {
-    const dates = buildWeekDates('2026-07-20')
-    const log: DayLog = {
-      childId: 'c1',
-      date: '2026-07-20',
-      blocks: [],
-      checklist: [
-        { label: 'Reading (30m)', completed: true, subjectBucket: SubjectBucket.Reading },
-      ],
+// ── The chip label (UX-443) ────────────────────────────────────
+
+describe('formatCountedHours', () => {
+  it('has no slash, no target, no percentage — for any value', () => {
+    for (const minutes of [0, 5, 45, 59, 60, 90, 138, 228, 600, 1500]) {
+      const label = formatCountedHours(minutes)
+      expect(label).not.toContain('/')
+      expect(label).not.toContain('%')
     }
-    const stats = computeWeekStats(dates, { '2026-07-20': log }, '2026-07-23')
-    const mon = stats[0]
-    expect(mon.plannedMinutes).toBe(30)
-    expect(mon.loggedMinutes).toBe(30)
-    expect(mon.state).toBe('done')
-    expect(mon.subjects).toContain(SubjectBucket.Reading)
+  })
+
+  it('reads minutes under an hour and hours at or above one', () => {
+    expect(formatCountedHours(45)).toBe('45 min')
+    expect(formatCountedHours(60)).toBe('1 hr')
+    expect(formatCountedHours(120)).toBe('2 hrs')
+    expect(formatCountedHours(228)).toBe('3.8 hrs')
+  })
+
+  it('reads a zero or negative total as none, never as a negative duration', () => {
+    expect(formatCountedHours(0)).toBe('0 min')
+    expect(formatCountedHours(-20)).toBe('0 min')
+    expect(formatCountedHours(Number.NaN)).toBe('0 min')
+  })
+
+  it('the retired ratio formatter is gone', () => {
+    expect(Object.keys(ribbonLogic)).not.toContain('formatHoursChip')
+    expect(Object.keys(ribbonLogic)).not.toContain('getPlannedAndLogged')
   })
 })
 
-// ── formatHoursChip ────────────────────────────────────────────
-
-describe('formatHoursChip', () => {
-  it('shows hours when planned >= 60', () => {
-    expect(formatHoursChip(90, 120)).toBe('1.5/2 hrs')
-  })
-
-  it('shows whole hours without decimal', () => {
-    expect(formatHoursChip(60, 120)).toBe('1/2 hrs')
-  })
-
-  it('shows minutes when planned < 60', () => {
-    expect(formatHoursChip(15, 30)).toBe('15/30 min')
-  })
-
-  it('shows 0/0 min for zero values', () => {
-    expect(formatHoursChip(0, 0)).toBe('0/0 min')
-  })
-})
-
-// ── isWeekEmpty ────────────────────────────────────────────────
+// ── isWeekEmpty (UX-444) ───────────────────────────────────────
 
 describe('isWeekEmpty', () => {
-  it('returns true when all days have zero planned minutes', () => {
-    const stats = buildWeekDates('2026-07-20').map((date, i) => ({
-      date,
-      label: DAY_LABELS[i] ?? '',
-      state: 'empty' as const,
-      plannedMinutes: 0,
-      loggedMinutes: 0,
-      subjects: [],
-    }))
-    expect(isWeekEmpty(stats)).toBe(true)
+  it('is true only when nothing was planned AND nothing was counted', () => {
+    const r = ribbon({})
+    expect(isWeekEmpty(r.stats, r.totalMinutes)).toBe(true)
   })
 
-  it('returns false when any day has planned minutes', () => {
-    const stats = buildWeekDates('2026-07-20').map((date, i) => ({
-      date,
-      label: DAY_LABELS[i] ?? '',
-      state: 'empty' as const,
-      plannedMinutes: i === 2 ? 30 : 0,
-      loggedMinutes: 0,
-      subjects: [],
-    }))
-    expect(isWeekEmpty(stats)).toBe(false)
+  it('is false for a week with counted time and no plan', () => {
+    const r = ribbon({
+      hoursEntries: [
+        { id: 'h', childId: CHILD, date: '2026-09-22', minutes: 30, subjectBucket: SubjectBucket.Art },
+      ] as HoursEntry[],
+    })
+    expect(r.stats.every((s) => s.plannedMinutes === 0)).toBe(true)
+    expect(isWeekEmpty(r.stats, r.totalMinutes)).toBe(false)
+  })
+
+  it('is false for a week whose only time is a weekend, which has no dot', () => {
+    const r = ribbon({
+      adjustments: [
+        { id: 'a', childId: 'both', date: '2026-09-26', minutes: 60, reason: 'Dad Lab' },
+      ] as HoursAdjustment[],
+    })
+    expect(isWeekEmpty(r.stats, r.totalMinutes)).toBe(false)
+  })
+
+  it('is false when any day has a plan', () => {
+    const r = ribbon({ dayLogs: [PLANNED_MONDAY] })
+    expect(isWeekEmpty(r.stats, r.totalMinutes)).toBe(false)
+  })
+})
+
+// ── ribbonWeekStart (Codex round 1, P2) ────────────────────────
+
+describe('ribbonWeekStart', () => {
+  it('is the Monday of the Sun–Sat week containing the day, every day of it', () => {
+    for (const d of ['2026-09-20', '2026-09-21', '2026-09-23', '2026-09-25', '2026-09-26']) {
+      expect(ribbonWeekStart(d)).toBe('2026-09-21')
+    }
+  })
+
+  it('on a Sunday, counts that Sunday — not the Sun–Sat that just ended', () => {
+    // Sunday 27 Sep. A Monday-start week would hand back Mon 21, whose Sun–Sat
+    // (20–26) leaves the Sunday on screen out of the chip.
+    const monday = ribbonWeekStart('2026-09-27')
+    expect(monday).toBe('2026-09-28')
+    // …and the range the ribbon queries for that Monday holds the Sunday.
+    const range = weekRangeFromDateKey(monday)
+    expect(range.start <= '2026-09-27' && '2026-09-27' <= range.end).toBe(true)
+    const sundayEntry = [
+      { id: 'h', childId: CHILD, date: '2026-09-27', minutes: 40, subjectBucket: SubjectBucket.Reading },
+    ] as HoursEntry[]
+    // The ribbon reads the week `useWeekHoursInputs` queries for this Monday;
+    // the fold is asserted over exactly the documents that range admits.
+    const r = computeRibbonWeek({
+      dayLogs: [],
+      hoursEntries: sundayEntry,
+      adjustments: [],
+      childId: CHILD,
+      weekDates: buildWeekDates(monday),
+      today: '2026-09-27',
+    })
+    expect(r.totalMinutes).toBe(40)
+    expect(r.stats.map((s) => s.date)).toEqual(buildWeekDates('2026-09-28'))
+  })
+
+  it('is what Today hands the ribbon — not its Monday-start day list', () => {
+    const src = readFileSync(resolve(__dirname, 'TodayPage.tsx'), 'utf8')
+    expect(src).toContain('weekStart={ribbonWeekStart(selectedDate)}')
+    expect(src).not.toMatch(/<WeekRibbon[\s\S]{0,200}weekStart=\{weekDayDates/)
   })
 })

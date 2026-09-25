@@ -10,22 +10,26 @@
  *
  * ── Which hours figure this is, and why ─────────────────────────────────────
  *
- * The Today ribbon's `4.8/11.8 hrs` chip (`today/weekRibbon.logic.ts`
- * `formatHoursChip`) answers a DIFFERENT question: how far through the week's
- * *planned checklist* the family is. It sums non-manual checklist items at their
- * planned minutes and reports them against a planned denominator — so it cannot
- * be the source here (the denominator is exactly the target this section may not
- * have), and it excludes manual hours entries, Dad Lab sessions, block actuals
- * and adjustments.
- *
  * This line reports the COUNTED hours: the same `collectHoursContributions`
  * (`functions/src/shared/hoursContributions.ts`, ARCH-47 slice 4) the Records
  * page, the MO compliance dashboard, the compliance pack and the monthly review
- * book all fold. Reading the ribbon's rule instead would have created a THIRD
- * definition of "hours this week" in a records-keeping app, which is precisely
- * the drift the shared module exists to prevent. The two numbers will differ,
- * and the caption says which one this is so the difference is explainable rather
- * than mysterious.
+ * book all fold.
+ *
+ * Until `FIX-254` the Today ribbon's `4.8/11.8 hrs` chip answered a DIFFERENT
+ * question — how far through the week's *planned checklist* the family was: it
+ * summed non-manual checklist items at their planned minutes against a planned
+ * denominator, and excluded manual rows, `hours` documents, Dad Lab sessions,
+ * block actuals and adjustments. It could not be the source here (its
+ * denominator was exactly the target this section may not have), so this
+ * paragraph used to explain why the two numbers differed.
+ *
+ * **They no longer differ** (UX-443, owner decision 2026-09-25: counted hours
+ * only, no denominator). The ribbon now reads the same three arrays through
+ * `useWeekHoursInputs`, folds them through the same rule over the same week
+ * range, and states the result with no `/` — so for one child and one week the
+ * Today chip and this line show the same number, asserted in
+ * `src/test/hoursReaderAgreement.test.ts`. {@link HOURS_SOURCE_CAPTION} is the
+ * one sentence both surfaces use to say so.
  *
  * Nothing here writes, and no hours or compliance math was touched — the figure
  * is folded live at read time from the canonical path, so a backfill logged
