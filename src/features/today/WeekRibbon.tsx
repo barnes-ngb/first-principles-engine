@@ -1,4 +1,22 @@
-import { useEffect, useMemo, useState } from 'react'
+/**
+ * Today's week ribbon (parent only): a chip stating the week's COUNTED time and
+ * five Mon–Fri dots that double as the day switcher.
+ *
+ * Since `FIX-254` it reads the Review's three sources through
+ * `useWeekHoursInputs` (live) and computes nothing itself — the rules are in
+ * `weekRibbon.logic.ts`, whose header says what the old `2.3/25` chip counted
+ * and why it changed (UX-443 / UX-444).
+ *
+ * **Child switch: SAFE, and it has no census row.** It holds no editable state
+ * and writes nothing; its reads are `useWeekHoursInputs`, whose `requestKey`
+ * (`familyId|childId|weekKey`) resets the arrays during render and re-keys the
+ * listeners, so a switch can only replace one child's week with the other's.
+ * The census heuristic now derives the same answer — it requires editable state
+ * — and checks in both directions, so the row it used to carry (for the old
+ * inline `subscriptionKey`) would fail as `not-a-candidate`; the verdict lives
+ * here instead, the `WeekBySubject` precedent.
+ */
+import { useMemo } from 'react'
 import type { KeyboardEvent } from 'react'
 import { Link as RouterLink } from 'react-router-dom'
 import Box from '@mui/material/Box'
@@ -7,16 +25,25 @@ import Skeleton from '@mui/material/Skeleton'
 import Stack from '@mui/material/Stack'
 import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
-import { onSnapshot, query, where } from 'firebase/firestore'
 
-import { daysCollection } from '../../core/firebase/firestore'
-import type { DayLog } from '../../core/types'
+import { useWeekHoursInputs } from '../weekly-review/useWeekHoursInputs'
+import {
+  HOURS_SOURCE_CAPTION,
+  HOURS_UNAVAILABLE_LINE,
+} from '../weekly-review/weekHours'
 import {
   buildWeekDates,
-  computeWeekStats,
+  computeRibbonWeek,
+  countedDayLine,
   DAY_LABELS,
-  formatHoursChip,
+  DAY_NO_PLAN_LINE,
+  formatCountedHours,
   isWeekEmpty,
+  PLAN_WEEK_LINK,
+  RIBBON_HEADING,
+  rowsDoneLine,
+  WEEK_EMPTY_LINE,
+  WEEK_RANGE_NOTE,
   type DayStats,
   type DotState,
 } from './weekRibbon.logic'
@@ -52,6 +79,10 @@ function getDotPaletteColor(
       return { borderToken: 'warning.main', halfFillToken: 'warning.main' }
     case 'in-progress':
       return { borderToken: 'primary.main', fillToken: 'primary.light' }
+    case 'logged':
+      // UX-444: time was counted on a day with no plan — filled, never the
+      // empty ring, and not the plan's green either.
+      return { borderToken: 'info.main', fillToken: 'info.light' }
     case 'skipped':
     case 'empty':
     case 'pending':
@@ -70,27 +101,25 @@ interface DayDotProps {
 function DayDot({ stats, isToday, isSelected, onSelect }: DayDotProps) {
   const palette = getDotPaletteColor(stats.state)
   const interactive = Boolean(onSelect)
-  const tooltipBody =
-    stats.plannedMinutes > 0 ? (
-      <Box>
-        <Typography variant="caption" sx={{ fontWeight: 600, display: 'block' }}>
-          {formatLongDate(stats.date)}
-        </Typography>
-        <Typography variant="caption" sx={{ display: 'block' }}>
-          {stats.loggedMinutes}/{stats.plannedMinutes} min
-          {stats.subjects.length > 0 ? ` · ${stats.subjects.join(', ')}` : ''}
-        </Typography>
-      </Box>
-    ) : (
-      <Box>
-        <Typography variant="caption" sx={{ fontWeight: 600, display: 'block' }}>
-          {formatLongDate(stats.date)}
-        </Typography>
-        <Typography variant="caption" sx={{ display: 'block' }}>
-          No plan for this day
-        </Typography>
-      </Box>
-    )
+  // The day's counted minutes, and — on a planned day — how many ROWS are
+  // ticked. Never minutes against planned minutes: that is the denominator the
+  // owner removed (UX-443).
+  const tooltipBody = (
+    <Box>
+      <Typography variant="caption" sx={{ fontWeight: 600, display: 'block' }}>
+        {formatLongDate(stats.date)}
+      </Typography>
+      <Typography variant="caption" sx={{ display: 'block' }}>
+        {countedDayLine(stats.countedMinutes)}
+        {stats.subjects.length > 0 ? ` · ${stats.subjects.join(', ')}` : ''}
+      </Typography>
+      <Typography variant="caption" sx={{ display: 'block' }}>
+        {stats.rowsPlanned > 0
+          ? rowsDoneLine(stats.rowsDone, stats.rowsPlanned)
+          : DAY_NO_PLAN_LINE}
+      </Typography>
+    </Box>
+  )
 
   return (
     <Tooltip title={tooltipBody} placement="top" arrow>
@@ -167,9 +196,7 @@ function DayDot({ stats, isToday, isSelected, onSelect }: DayDotProps) {
             display: { xs: 'none', sm: 'block' },
           }}
         >
-          {stats.plannedMinutes > 0
-            ? `${stats.loggedMinutes}/${stats.plannedMinutes}m`
-            : '–'}
+          {stats.countedMinutes > 0 ? `${Math.round(stats.countedMinutes)}m` : '–'}
         </Typography>
       </Stack>
     </Tooltip>
@@ -185,53 +212,47 @@ export default function WeekRibbon({
   onSelectDate,
 }: WeekRibbonProps) {
   const weekDates = useMemo(() => buildWeekDates(weekStart), [weekStart])
-  const subscriptionKey = `${familyId}|${childId}|${weekStart}`
-  const [data, setData] = useState<{
-    key: string
-    logs: Record<string, DayLog | null>
-  } | null>(null)
-  const [erroredKey, setErroredKey] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!familyId || !childId || weekDates.length === 0) return
-
-    const q = query(
-      daysCollection(familyId),
-      where('childId', '==', childId),
-      where('date', '>=', weekDates[0]),
-      where('date', '<=', weekDates[weekDates.length - 1]),
-    )
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        const map: Record<string, DayLog | null> = {}
-        for (const d of weekDates) map[d] = null
-        for (const docSnap of snap.docs) {
-          const docData = docSnap.data() as DayLog
-          if (!docData?.date || !(docData.date in map)) continue
-          const existing = map[docData.date]
-          if (
-            !existing ||
-            (docData.checklist?.length ?? 0) > (existing.checklist?.length ?? 0)
-          ) {
-            map[docData.date] = docData
-          }
-        }
-        setData({ key: subscriptionKey, logs: map })
-      },
-      (err) => {
-        console.error('[WeekRibbon] Firestore error:', err)
-        setErroredKey(subscriptionKey)
-      },
-    )
-    return unsub
-  }, [familyId, childId, weekDates, subscriptionKey])
+  // UX-443: the Review's three reads, live — one loader, not a `days`-only
+  // subscription beside it. It re-keys on (family, child, week) itself.
+  const { dayLogs, hoursEntries, adjustments, loading, error } = useWeekHoursInputs(
+    familyId,
+    childId,
+    weekStart,
+    { live: true },
+  )
+  const week = useMemo(
+    () =>
+      computeRibbonWeek({ dayLogs, hoursEntries, adjustments, childId, weekDates, today }),
+    [dayLogs, hoursEntries, adjustments, childId, weekDates, today],
+  )
 
   if (!childId) return null
-  if (erroredKey === subscriptionKey) return null
 
-  const logsByDate = data?.key === subscriptionKey ? data.logs : null
-  if (logsByDate === null) {
+  // A failed read is not an empty week (UX-211's rule): the sentence, never
+  // `0 min`, and no dots that would read as five empty days.
+  if (error) {
+    return (
+      <Box
+        sx={{
+          px: 1.5,
+          py: 1,
+          mb: 1,
+          borderRadius: 1,
+          border: '1px solid',
+          borderColor: 'divider',
+        }}
+      >
+        <Typography variant="overline" color="text.secondary" sx={{ fontWeight: 600 }}>
+          {RIBBON_HEADING}
+        </Typography>
+        <Typography variant="body2" color="text.secondary">
+          {HOURS_UNAVAILABLE_LINE}
+        </Typography>
+      </Box>
+    )
+  }
+
+  if (loading) {
     return (
       <Box
         sx={{
@@ -250,7 +271,7 @@ export default function WeekRibbon({
           sx={{ mb: 0.75 }}
         >
           <Typography variant="overline" color="text.secondary" sx={{ fontWeight: 600 }}>
-            This Week
+            {RIBBON_HEADING}
           </Typography>
           <Skeleton variant="rounded" width={72} height={22} />
         </Stack>
@@ -284,9 +305,9 @@ export default function WeekRibbon({
     )
   }
 
-  const stats = computeWeekStats(weekDates, logsByDate, today)
+  const { stats, totalMinutes } = week
 
-  if (isWeekEmpty(stats)) {
+  if (isWeekEmpty(stats, totalMinutes)) {
     return (
       <Box
         sx={{
@@ -305,7 +326,7 @@ export default function WeekRibbon({
       >
         {/* UX-24: the shared EmptyState convention — warm, no negation. */}
         <Typography variant="body2" color="text.secondary">
-          Nothing planned for this week yet.
+          {WEEK_EMPTY_LINE}
         </Typography>
         <Typography
           component={RouterLink}
@@ -318,14 +339,11 @@ export default function WeekRibbon({
             '&:hover': { textDecoration: 'underline' },
           }}
         >
-          → Plan My Week
+          {PLAN_WEEK_LINK}
         </Typography>
       </Box>
     )
   }
-
-  const totalLogged = stats.reduce((s, d) => s + d.loggedMinutes, 0)
-  const totalPlanned = stats.reduce((s, d) => s + d.plannedMinutes, 0)
 
   return (
     <Box
@@ -350,14 +368,16 @@ export default function WeekRibbon({
           color="text.secondary"
           sx={{ fontWeight: 600, letterSpacing: 0.5 }}
         >
-          This Week
+          {RIBBON_HEADING}
         </Typography>
-        <Chip
-          label={formatHoursChip(totalLogged, totalPlanned)}
-          size="small"
-          variant="outlined"
-          sx={{ fontWeight: 600 }}
-        />
+        <Tooltip title={`${HOURS_SOURCE_CAPTION} ${WEEK_RANGE_NOTE}`} arrow>
+          <Chip
+            label={formatCountedHours(totalMinutes)}
+            size="small"
+            variant="outlined"
+            sx={{ fontWeight: 600 }}
+          />
+        </Tooltip>
       </Stack>
       <Stack
         direction="row"

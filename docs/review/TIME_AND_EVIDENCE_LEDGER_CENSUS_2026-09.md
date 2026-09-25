@@ -63,11 +63,11 @@ logs. No number, fold, rounding or stored row was changed by this run.
 ## 3. The derived numbers
 
 ```
-source files scanned (non-test, src/ + functions/src/): 883
-surfaces naming a time or evidence collection: 62
-by role: {"WRITE":15,"READ":22,"BOTH":25}
-by collection: {"hours":16,"hoursAdjustments":9,"days":30,"artifacts":32}
-census rows: 62
+source files scanned (non-test, src/ + functions/src/): 896
+surfaces naming a time or evidence collection: 61
+by role: {"WRITE":15,"READ":21,"BOTH":25}
+by collection: {"hours":16,"hoursAdjustments":9,"days":29,"artifacts":32}
+census rows: 61
 census problems: 0
 date-rule call sites (9 distinct rules): 34
    13  getWeekRange
@@ -79,17 +79,24 @@ date-rule call sites (9 distinct rules): 34
     2  schoolYearStart
     1  getPlanningWeekRange
     1  lastCompletedSchoolWeekKey
-consumers of the shared counting path: 7
+consumers of the shared counting path: 8
        functions/src/ai/promptHours.ts
        functions/src/ai/tasks/monthlyReviewData.ts
        src/features/records/MonthlyTrend.tsx
        src/features/records/RecordsPage.tsx
        src/features/records/dataReviewExport.logic.ts
+       src/features/today/weekRibbon.logic.ts
        src/features/weekly-review/useWeekHours.ts
        src/features/weekly-review/weekBySubject.ts
 ```
 
-Re-derived by `npm run census:time-ledger` on 2026-09-15 (`FIX-239` / `UX-415`).
+Re-derived by `npm run census:time-ledger` on 2026-09-25 (`FIX-254` / `UX-443`). Today's
+`WeekRibbon.tsx` no longer names `days` — its reads moved to the Review's
+`useWeekHoursInputs`, which §5 already lists — so its §5 row is gone (`days` 30 → 29,
+`READ` 22 → 21, surfaces 62 → 61), and `weekRibbon.logic.ts` is the eighth consumer of the
+shared counting path. No writer moved and no arithmetic changed.
+
+The 2026-09-15 re-derivation (`FIX-239` / `UX-415`):
 Parent-requested identity preparation makes `TodayPage.tsx` a direct `days`
 surface again; its new §5 row is classified from the same source derivation.
 In `FIX-238` / `UX-367`, the artifact reader moved from `TodayPage.tsx` to `useTodayArtifacts.ts`, so §5
@@ -232,12 +239,11 @@ no document.
 | `src/features/today/useTodayMiningMinutes.ts` | hours | READ | one day, `hours` only | A cap, not a record: Knowledge Mine minutes for today, for the daily mining limit |
 | `src/features/today/useUnifiedCapture.ts` | artifacts | BOTH | the selected day — local | **WRITER.** The capture pipeline behind the card: the artifact, the scan, and FEAT-184's kid/parent lane split. Its day write goes through `dayChecklistRowWrite.ts` (`UX-404`), and only a row resolving to a **workbook** may reach the curriculum route at all (`UX-403`) |
 | `src/features/today/WeekFocusCard.tsx` | artifacts | WRITE | the week's key | **WRITER.** The conundrum's artifact |
-| `src/features/today/WeekRibbon.tsx` | days | READ | `getWeekRange(…, 1)` — Monday-start | `formatHoursChip`: progress through the week's **planned** checklist against a planned denominator. A different question, excluded from the agreement test **by name** (`UX-211`) |
 | `src/features/watch/useWatchHistory.ts` | days | READ | a rolling window back from today | Reads day logs for watch history |
 | `src/features/watch/useWatchItemCompletion.ts` | artifacts | WRITE | — (no range rule) | **WRITER.** The watched-video artifact; mirrors the DATA-14 correspondence when it completes the item |
 | `src/features/watch/writeWatchItemToDay.ts` | days | BOTH | the chosen day's key — local | **WRITER.** Adds a watch row to a live day, through `setDayLogGuarded`. Its whole job is the write, and it names no raw verb |
 | `src/features/weekly-review/useWeekBySubject.ts` | artifacts | READ | `weekRangeFromDateKey` on separate `dayLogId` and `createdAt` ranges | `FIX-237` addresses `UX-413(a)`: valid bare activity-day keys decide evidence membership; unlinked book/sketch evidence and unsupported links retain the existing upload-date range. Deduplicated by document ID; hours still use the unchanged `date` reader and shared fold |
-| `src/features/weekly-review/useWeekHoursInputs.ts` | hours · hoursAdjustments · days | READ | `weekRangeFromDateKey` → the shared fold | The ONE read behind both weekly sections (`UX-388`). Deliberately does **not** run the DATA-09 migration: a read-only review surface has no business writing to the hours record |
+| `src/features/weekly-review/useWeekHoursInputs.ts` | hours · hoursAdjustments · days | READ | `weekRangeFromDateKey` → the shared fold | The ONE read behind both weekly sections (`UX-388`) and, since `FIX-254` / `UX-443`, Today's week ribbon — which passes `{ live: true }` for the same queries and mapping over `onSnapshot`. Deliberately does **not** run the DATA-09 migration: a read-only review surface has no business writing to the hours record |
 | `src/features/workshop/MyGamesGallery.tsx` | artifacts | BOTH | — (no range rule) | Reads game artifacts |
 | `src/features/workshop/workshopUtils.ts` | hours · days · artifacts | BOTH | `toISOString().slice(0,10)` — **UTC** | **WRITER.** Play minutes split proportionally by challenge bucket, plus a day-log mark. **Every date here is UTC**, so an evening session is stamped tomorrow — `UX-412` |
 ---
@@ -300,10 +306,16 @@ exclusion list that is a heuristic is an exclusion list that grows silently.
 
 | Surface | What it actually answers | Why it may not be compared |
 |---|---|---|
-| Today's `WeekRibbon` chip (`formatHoursChip`) | progress through the week's **planned** checklist | different numerator, and a **planned denominator** — the target `UX-211` forbids the hours surfaces |
 | Planner's `hoursPerDay` header | the routine's own unweighted minute total, re-parsed from the prose the app wrote | not a reading of the hours record at all; its own tautology is `UX-206` / `UX-208` / `UX-209` |
 | `useTodayMiningMinutes` | today's Knowledge Mine minutes | a **cap**, not a record: one day, one source |
 | `weekEvidenceCounts` / `WeekInEvidence` | books, reading sessions, teach-backs | counts of evidence, never minutes |
+
+**Today's `WeekRibbon` chip was the first row of this table until `FIX-254`** (`UX-443` → `UX-445`).
+It read the planned minutes of ticked non-manual checklist rows against the week's planned minutes
+(`formatHoursChip`, `2.3/25`) — a different numerator and a planned denominator. The owner read it on
+2026-09-25 and saw that only the check-marks moved it, then decided Today asks the question Records
+asks: counted hours, no denominator. It is now folded through the shared rule and sits in §6a; the
+agreement test keeps its old arithmetic as a second positive control.
 
 ### 6c. The date rules
 
