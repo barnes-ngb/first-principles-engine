@@ -53,6 +53,7 @@
  */
 
 import type { ChecklistItem, DayLog, HoursAdjustment, HoursEntry } from '../../core/types'
+import { weekRangeFromDateKey } from '../../core/utils/dateKey'
 import {
   collectHoursContributions,
   computeHoursSummary,
@@ -149,6 +150,26 @@ export function getPlanProgress(log: DayLog | null | undefined): PlanProgress {
     }
   }
   return out
+}
+
+/**
+ * The Monday the ribbon draws from, for the day being viewed (Codex round 1 on
+ * `FIX-254`, P2): the Monday of the **Sun–Sat week that contains** `dateKey`.
+ *
+ * The chip counts that Sun–Sat week (`weekRangeFromDateKey`, the Review's week),
+ * so the dots must be its Monday–Friday. `TodayPage`'s own Mon–Fri list is a
+ * Monday-start week, which on a Sunday is the week that just ENDED — handing
+ * that Monday to the ribbon made the chip count the previous Sun–Sat and leave
+ * out the Sunday on screen. Monday–Saturday give the same answer either way;
+ * only a Sunday differs, and there the ribbon now shows the week it is part of.
+ */
+export function ribbonWeekStart(dateKey: string): string {
+  const sunday = new Date(weekRangeFromDateKey(dateKey).start + 'T00:00:00')
+  sunday.setDate(sunday.getDate() + 1)
+  const yyyy = sunday.getFullYear()
+  const mm = String(sunday.getMonth() + 1).padStart(2, '0')
+  const dd = String(sunday.getDate()).padStart(2, '0')
+  return `${yyyy}-${mm}-${dd}`
 }
 
 /** Build Mon-Fri YYYY-MM-DD strings from a Monday weekStart. */

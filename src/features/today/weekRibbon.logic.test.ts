@@ -1,4 +1,9 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+
 import { describe, expect, it } from 'vitest'
+
+import { weekRangeFromDateKey } from '../../core/utils/dateKey'
 
 import type {
   ChecklistItem,
@@ -19,6 +24,7 @@ import {
   isWeekEmpty,
   itemMinutes,
   parseMinutesFromLabel,
+  ribbonWeekStart,
 } from './weekRibbon.logic'
 import * as ribbonLogic from './weekRibbon.logic'
 
@@ -377,5 +383,46 @@ describe('isWeekEmpty', () => {
   it('is false when any day has a plan', () => {
     const r = ribbon({ dayLogs: [PLANNED_MONDAY] })
     expect(isWeekEmpty(r.stats, r.totalMinutes)).toBe(false)
+  })
+})
+
+// ── ribbonWeekStart (Codex round 1, P2) ────────────────────────
+
+describe('ribbonWeekStart', () => {
+  it('is the Monday of the Sun–Sat week containing the day, every day of it', () => {
+    for (const d of ['2026-09-20', '2026-09-21', '2026-09-23', '2026-09-25', '2026-09-26']) {
+      expect(ribbonWeekStart(d)).toBe('2026-09-21')
+    }
+  })
+
+  it('on a Sunday, counts that Sunday — not the Sun–Sat that just ended', () => {
+    // Sunday 27 Sep. A Monday-start week would hand back Mon 21, whose Sun–Sat
+    // (20–26) leaves the Sunday on screen out of the chip.
+    const monday = ribbonWeekStart('2026-09-27')
+    expect(monday).toBe('2026-09-28')
+    // …and the range the ribbon queries for that Monday holds the Sunday.
+    const range = weekRangeFromDateKey(monday)
+    expect(range.start <= '2026-09-27' && '2026-09-27' <= range.end).toBe(true)
+    const sundayEntry = [
+      { id: 'h', childId: CHILD, date: '2026-09-27', minutes: 40, subjectBucket: SubjectBucket.Reading },
+    ] as HoursEntry[]
+    // The ribbon reads the week `useWeekHoursInputs` queries for this Monday;
+    // the fold is asserted over exactly the documents that range admits.
+    const r = computeRibbonWeek({
+      dayLogs: [],
+      hoursEntries: sundayEntry,
+      adjustments: [],
+      childId: CHILD,
+      weekDates: buildWeekDates(monday),
+      today: '2026-09-27',
+    })
+    expect(r.totalMinutes).toBe(40)
+    expect(r.stats.map((s) => s.date)).toEqual(buildWeekDates('2026-09-28'))
+  })
+
+  it('is what Today hands the ribbon — not its Monday-start day list', () => {
+    const src = readFileSync(resolve(__dirname, 'TodayPage.tsx'), 'utf8')
+    expect(src).toContain('weekStart={ribbonWeekStart(selectedDate)}')
+    expect(src).not.toMatch(/<WeekRibbon[\s\S]{0,200}weekStart=\{weekDayDates/)
   })
 })
