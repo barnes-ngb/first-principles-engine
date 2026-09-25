@@ -347,6 +347,28 @@ by severity: {"P1":0,"P2":0,"P3":0,"—":95}
 census problems: 0
 ```
 
+### Re-derived 2026-09-25 (FIX-254 / UX-443 — Today's week ribbon)
+
+Pasted from `npm run census:child-switch`. `WeekRibbon.tsx` is **no longer a candidate**: its own
+`days` subscription (and the `subscriptionKey` its SAFE row named) is gone, and its reads are
+`useWeekHoursInputs`, which re-keys on `familyId|childId|weekKey` during render. It holds no
+editable state and writes nothing, so the heuristic — which requires editable state — derives the
+same SAFE answer and asks for no row; the row was removed (a volunteered row fails as
+`not-a-candidate`) and the verdict is stated in the file's header, the `WeekBySubject` precedent.
+Candidates 95 → 94 (prop arm 52 → 51), SAFE 56 → 55; nothing else moved.
+
+```
+source files scanned (non-test, under src/, excluding src/test/): 807
+files reading useActiveChild: 73
+candidates: 94 (hook arm 43, prop arm 51)
+files rendering an in-page <ChildSelector>: 0
+feature files referencing setActiveChildId (any in-page child control): 3
+census rows: 94
+by verdict: {"BIND":9,"HIDE":3,"RESET":17,"GATE":10,"SAFE":55}
+by severity: {"P1":0,"P2":0,"P3":0,"—":94}
+census problems: 0
+```
+
 ## 5. The registry
 
 | Surface (file) | Child-scoped state it holds | What it writes, and to which collection | Reachable by a switch today? | Verdict | Severity |
@@ -433,7 +455,6 @@ census problems: 0
 | `src/features/today/KidTodayView.tsx` | choices, captures, celebration state | `days`, `artifacts`, `dailyArmorSessions` | No — kid profiles only | **SAFE** — `TodayPage` returns this view for a kid profile, and a kid profile's `setActiveChildId` is a no-op; every prop below it is `child.id` | — |
 | `src/features/today/LessonVideoDialog.tsx` | a picked video, an exclusion list | `hours` — the logged watch entry | Selector (Today) | **RESET** — an identity effect keyed on `childId\|date` clears the pick, the exclusions and the logged confirmation and calls `onClose`, so a video found for one boy can never be logged against the other; the caller's scope notice names it. **No hours arithmetic changed** (`DOC-25`'s four terms; the fold is asserted with a positive control in `LessonVideoDialog.childSwitch.test.tsx`). Fixed by AUDIT-228 | — |
 | `src/features/today/TodayPage.tsx` | a strand-session draft, edit-mode move/swap targets, energy and plan type | `days`, `dailyPlans`, `artifacts`, `scans`, `activityConfigs` | Shell only — its own `ChildSelector` went with `UX-425` | **RESET** — a scope guard keyed on `childId\|date` closes the strand dialog, the move and swap targets and the watch picker, and `todayScope.todayScopeResetNotice` names in words what it closed and who it was for (RESET's second half: make the loss visible); `TodayChecklist` is keyed on the same scope and reports its own four open decisions up so the remount is not silent. Energy and plan type are `GATE`d separately by `useDailyPlan` (`UX-345`). Fixed by AUDIT-228 | — |
-| `src/features/today/WeekRibbon.tsx` | one week's day summaries | nothing — a read-only subscription | Selector (Today) | **SAFE** — writes nothing; `subscriptionKey` (`familyId\|childId\|weekStart`) already re-keys the subscription | — |
 | `src/features/today/useBookProgress.ts` | the loaded `BookProgress` | `bookProgress/{childId}_{bookId}` | Selector (Today, Planner) | **SAFE** — the document id is rebuilt from the current `childId` at the write, and the subscription resets on a prop change | — |
 | `src/features/today/useDailyPlan.ts` | the loaded `DailyPlan` | `dailyPlans/{date}_{childId}` — merge-only | Selector (Today) | **GATE** — this row named the hazard and then **dismissed it wrongly** (Codex round 4). The id is rebuilt from the live `childId`, but `saveDailyPlan` spreads `dailyPlan?.sessions`, and the child-change effect did not clear `dailyPlan` before its `getDoc` — so a toggle in that window wrote the previous child's `sessions` onto the new child's plan under `merge: true`. Now: the plan is dropped **during render** on a target change, and a failed read sets `loadFailed` rather than passing as an empty day (which would have written `sessions: []` over a day that has some — the half of the report that did not hold turned out to be its own defect). `saveDailyPlan` refuses unless `dailyPlanIsEditable`, and `DayStatusRow`'s two controls are dead while it does. Fixed by FIX-223 (UX-345) | — |
 | `src/features/today/useUnifiedCapture.ts` | a staged capture — photo, note, which checklist item | `artifacts`, `scans`, `days`, and (parent only) `activityConfigs` / `childSkillMaps` / `skillSnapshots` | Selector (Today) | **SAFE** — and the line that makes it true: `handleUnifiedCapture` is a `useCallback` over `childId`, so an invocation already running when the parent switches keeps the child it was tapped for, and every collection above is written from that closure. Its one shared write is the day-log lane, which since `UX-357` refuses a document composed for another day rather than re-stamping it, and says so. The dialog that opens it is closed by the page's scope guard | — |

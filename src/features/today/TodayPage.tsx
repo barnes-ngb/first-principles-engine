@@ -124,6 +124,7 @@ import {
 } from './todayRowKind'
 import WeekFocusCard from './WeekFocusCard'
 import WeekRibbon from './WeekRibbon'
+import { ribbonWeekStart } from './weekRibbon.logic'
 import WorkshopGameCards from './WorkshopGameCards'
 
 /** Stable empty list, so gating on it does not churn every consumer's deps. */
@@ -1527,7 +1528,7 @@ export default function TodayPage() {
           <WeekRibbon
             childId={selectedChildId}
             familyId={familyId}
-            weekStart={weekDayDates[0].dateKey}
+            weekStart={ribbonWeekStart(selectedDate)}
             today={realToday}
             selectedDate={selectedDate}
             onSelectDate={setSelectedDate}

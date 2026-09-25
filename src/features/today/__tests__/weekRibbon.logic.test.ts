@@ -2,14 +2,12 @@ import { describe, expect, it } from 'vitest'
 
 import type { ChecklistItem, DayLog } from '../../../core/types'
 import {
-  buildWeekDates,
   computeDayState,
-  computeWeekStats,
-  formatHoursChip,
-  getPlannedAndLogged,
-  isWeekEmpty,
+  getPlanProgress,
   itemMinutes,
   parseMinutesFromLabel,
+  pickDayLogsByDate,
+  type PlanProgress,
 } from '../weekRibbon.logic'
 
 function makeLog(date: string, items: Array<Partial<ChecklistItem>>): DayLog {
@@ -25,6 +23,8 @@ function makeLog(date: string, items: Array<Partial<ChecklistItem>>): DayLog {
     })),
   }
 }
+
+const NO_PLAN: PlanProgress = { planned: 0, checked: 0, rowsPlanned: 0, rowsDone: 0 }
 
 describe('parseMinutesFromLabel', () => {
   it('parses minute hint from a label', () => {
@@ -47,128 +47,93 @@ describe('itemMinutes', () => {
   })
 })
 
-describe('getPlannedAndLogged', () => {
-  it('returns zero for null log', () => {
-    expect(getPlannedAndLogged(null)).toEqual({ planned: 0, logged: 0, subjects: [] })
-  })
+// ── The dot table (UX-444) — one test per row ───────────────────
+//
+// `done` / `partial` on a planned day stay PLAN-based; counted time decides
+// whether a day that was not the plan still happened. The rows marked NEW fail
+// against the retired rule, which read only the plan.
 
-  it('sums minutes across mixed source items', () => {
-    const log = makeLog('2026-05-11', [
-      { label: 'Math', completed: true, plannedMinutes: 30, subjectBucket: 'Math' },
-      { label: 'Reading (15m)', completed: false },
-      { label: 'LA', completed: true, estimatedMinutes: 20, subjectBucket: 'LanguageArts' },
-    ])
-    const { planned, logged, subjects } = getPlannedAndLogged(log)
-    expect(planned).toBe(65)
-    expect(logged).toBe(50)
-    expect(subjects.sort()).toEqual(['LanguageArts', 'Math'])
-  })
-
-  it('ignores items with source = manual', () => {
-    const log = makeLog('2026-05-11', [
-      { label: 'Math', completed: true, plannedMinutes: 30 },
-      { label: 'Manual entry', completed: true, plannedMinutes: 60, source: 'manual' },
-    ])
-    expect(getPlannedAndLogged(log)).toEqual({ planned: 30, logged: 30, subjects: [] })
-  })
-})
-
-describe('computeDayState', () => {
+describe('computeDayState — the UX-444 table', () => {
   const today = '2026-05-14'
+  const past = '2026-05-12'
+  const future = '2026-05-15'
+  const planned = (items: Array<Partial<ChecklistItem>>) =>
+    getPlanProgress(makeLog(past, items))
 
-  it('returns in-progress for today with a plan', () => {
-    const log = makeLog(today, [{ label: 'x', completed: false, plannedMinutes: 30 }])
-    expect(computeDayState(today, log, today)).toBe('in-progress')
+  it('today, with a plan → in-progress', () => {
+    const plan = planned([{ label: 'x', plannedMinutes: 30 }])
+    expect(computeDayState(today, plan, 0, today)).toBe('in-progress')
   })
 
-  it('returns empty for today with no plan', () => {
-    expect(computeDayState(today, null, today)).toBe('empty')
+  it('NEW: today, no plan but counted minutes → in-progress', () => {
+    expect(computeDayState(today, NO_PLAN, 25, today)).toBe('in-progress')
   })
 
-  it('returns pending for future date with a plan', () => {
-    const log = makeLog('2026-05-15', [{ label: 'x', completed: false, plannedMinutes: 30 }])
-    expect(computeDayState('2026-05-15', log, today)).toBe('pending')
+  it('today, nothing at all → empty', () => {
+    expect(computeDayState(today, NO_PLAN, 0, today)).toBe('empty')
   })
 
-  it('returns empty for future date with no log', () => {
-    expect(computeDayState('2026-05-15', null, today)).toBe('empty')
+  it('NEW: past, no plan, counted > 0 → logged (not the empty ring)', () => {
+    expect(computeDayState(past, NO_PLAN, 45, today)).toBe('logged')
   })
 
-  it('returns skipped for past date with plan and 0 logged', () => {
-    const log = makeLog('2026-05-12', [{ label: 'x', completed: false, plannedMinutes: 30 }])
-    expect(computeDayState('2026-05-12', log, today)).toBe('skipped')
+  it('past, plan, nothing checked, counted == 0 → skipped', () => {
+    const plan = planned([{ label: 'x', plannedMinutes: 30 }])
+    expect(computeDayState(past, plan, 0, today)).toBe('skipped')
   })
 
-  it('returns done for past date with >= 80% logged', () => {
-    const log = makeLog('2026-05-12', [
+  it('NEW: past, plan, nothing checked, counted > 0 → partial', () => {
+    const plan = planned([{ label: 'x', plannedMinutes: 30 }])
+    expect(computeDayState(past, plan, 40, today)).toBe('partial')
+  })
+
+  it('past, plan, checked ≥ 80% of planned minutes → done', () => {
+    const plan = planned([
       { label: 'a', completed: true, plannedMinutes: 30 },
       { label: 'b', completed: true, plannedMinutes: 30 },
       { label: 'c', completed: true, plannedMinutes: 20 },
       { label: 'd', completed: false, plannedMinutes: 20 },
     ])
-    expect(computeDayState('2026-05-12', log, today)).toBe('done')
+    expect(computeDayState(past, plan, 80, today)).toBe('done')
   })
 
-  it('returns partial for past date with some but < 80% logged', () => {
-    const log = makeLog('2026-05-12', [
+  it('past, plan, checked < 80% → partial', () => {
+    const plan = planned([
       { label: 'a', completed: true, plannedMinutes: 20 },
       { label: 'b', completed: false, plannedMinutes: 80 },
     ])
-    expect(computeDayState('2026-05-12', log, today)).toBe('partial')
+    expect(computeDayState(past, plan, 20, today)).toBe('partial')
+  })
+
+  it('done stays plan-based: lots of counted time does not make an unticked plan done', () => {
+    const plan = planned([{ label: 'x', plannedMinutes: 30 }])
+    expect(computeDayState(past, plan, 600, today)).toBe('partial')
+  })
+
+  it('future, plan → pending', () => {
+    const plan = planned([{ label: 'x', plannedMinutes: 30 }])
+    expect(computeDayState(future, plan, 0, today)).toBe('pending')
+  })
+
+  it('nothing at all → empty, past or future', () => {
+    expect(computeDayState(past, NO_PLAN, 0, today)).toBe('empty')
+    expect(computeDayState(future, NO_PLAN, 0, today)).toBe('empty')
+  })
+
+  it('a net-negative day (a correction outweighing the time) is not counted time', () => {
+    expect(computeDayState(past, NO_PLAN, -10, today)).toBe('empty')
   })
 })
 
-describe('buildWeekDates', () => {
-  it('produces Mon-Fri YYYY-MM-DD strings', () => {
-    expect(buildWeekDates('2026-05-11')).toEqual([
-      '2026-05-11',
-      '2026-05-12',
-      '2026-05-13',
-      '2026-05-14',
-      '2026-05-15',
-    ])
-  })
-})
-
-describe('computeWeekStats', () => {
-  it('labels each day Mon..Fri in order', () => {
-    const dates = buildWeekDates('2026-05-11')
-    const stats = computeWeekStats(dates, {}, '2026-05-14')
-    expect(stats.map((s) => s.label)).toEqual(['Mon', 'Tue', 'Wed', 'Thu', 'Fri'])
-  })
-})
-
-describe('isWeekEmpty', () => {
-  it('returns true when no day has a plan', () => {
-    const stats = computeWeekStats(buildWeekDates('2026-05-11'), {}, '2026-05-14')
-    expect(isWeekEmpty(stats)).toBe(true)
-  })
-
-  it('returns false when any day has a plan', () => {
-    const dates = buildWeekDates('2026-05-11')
-    const stats = computeWeekStats(
-      dates,
-      {
-        '2026-05-12': makeLog('2026-05-12', [
-          { label: 'x', completed: false, plannedMinutes: 30 },
-        ]),
-      },
-      '2026-05-14',
-    )
-    expect(isWeekEmpty(stats)).toBe(false)
-  })
-})
-
-describe('formatHoursChip', () => {
-  it('reports minutes when planned < 60', () => {
-    expect(formatHoursChip(20, 45)).toBe('20/45 min')
-  })
-
-  it('reports whole hours cleanly', () => {
-    expect(formatHoursChip(120, 240)).toBe('2/4 hrs')
-  })
-
-  it('reports fractional hours with one decimal', () => {
-    expect(formatHoursChip(90, 150)).toBe('1.5/2.5 hrs')
+describe('pickDayLogsByDate', () => {
+  it('takes this child’s longest checklist per date and ignores other dates', () => {
+    const short = makeLog('2026-05-11', [{ label: 'a' }])
+    const long = makeLog('2026-05-11', [{ label: 'a' }, { label: 'b' }])
+    const brother = { ...makeLog('2026-05-11', [{ label: 'x' }, { label: 'y' }, { label: 'z' }]), childId: 'kid-2' }
+    const outside = makeLog('2026-05-18', [{ label: 'q' }])
+    const map = pickDayLogsByDate([short, long, brother, outside], 'kid-1', ['2026-05-11', '2026-05-12'])
+    expect(map['2026-05-11']).toBe(long)
+    expect(map['2026-05-12']).toBeNull()
+    expect('2026-05-18' in map).toBe(false)
   })
 })

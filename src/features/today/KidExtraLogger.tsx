@@ -112,7 +112,10 @@ export default function KidExtraLogger({
   // data shape, not copy (filed, FEAT-186). FEAT-199 did not reword them
   // either — it made the row EXTENSIBLE, moving the same six verbatim into
   // `quickLogChips.ts` as the defaults behind the family's own flagged
-  // activity configs.
+  // activity configs. FIX-254 (UX-443): the row this writes — a completed
+  // `source: 'manual'` item carrying `estimatedMinutes` — is counted by the
+  // shared hours fold on Records AND, since then, on Today's week chip, which
+  // used to skip manual rows; so a kid who logs more work moves the parent's week.
   return (
     <SectionCard title="⭐ I Did More!">
       <Stack spacing={2} sx={{ py: 1 }}>

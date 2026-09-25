@@ -34,7 +34,7 @@ import { practiceWordsUsedIn } from './storyPracticeWords'
 import { stackOrder, imageGeometry } from './draggableImageUtils'
 import { hasFitBackdrop, resolveImageFit } from './imageFit'
 import ImageFitBackdrop from './ImageFitBackdrop'
-import { printBook } from './printBook'
+import { makeBookPdf } from './makeBookPdf'
 import PrintSettingsDialog from './PrintSettingsDialog'
 import type { PrintSettings } from './PrintSettingsDialog'
 import { TEXT_SIZE_STYLES, TEXT_FONT_FAMILIES } from './bookTypes'
@@ -391,17 +391,13 @@ export default function BookReaderPage() {
     setShowPrintSettings(false)
     setPrinting(true)
     try {
-      const { skippedImageCount } = await printBook(book, {
+      const notice = await makeBookPdf(book, {
         childName,
         isLincoln,
         sightWords: book.sightWords,
         settings,
       })
-      if (skippedImageCount > 0) {
-        setPrintSkipNotice(
-          `${skippedImageCount} picture${skippedImageCount === 1 ? '' : 's'} couldn't be printed and ${skippedImageCount === 1 ? 'was' : 'were'} left blank.`,
-        )
-      }
+      if (notice) setPrintSkipNotice(notice)
     } finally {
       setPrinting(false)
     }

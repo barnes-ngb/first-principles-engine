@@ -1,4 +1,3 @@
-import { jsPDF } from 'jspdf'
 import type { Sticker } from '../../core/types'
 import { fetchAsDataUri } from './imageDataUri'
 import {
@@ -60,6 +59,8 @@ export async function printStickerSheet(
   const dataUris = await Promise.all(items.map((s) => fetchAsDataUri(s.url, s.storagePath)))
   const skippedImageCount = dataUris.filter((u) => !u.startsWith('data:')).length
 
+  // Loaded here, not at module top, so jsPDF stays out of the main bundle (ARCH-05).
+  const { jsPDF } = await import('jspdf')
   const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: [page.widthMM, page.heightMM] })
 
   const fillWhite = () => {

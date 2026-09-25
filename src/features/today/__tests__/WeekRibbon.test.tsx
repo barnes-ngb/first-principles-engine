@@ -3,39 +3,59 @@ import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import WeekRibbon from '../WeekRibbon'
-import type { ChecklistItem, DayLog } from '../../../core/types'
+import type {
+  ChecklistItem,
+  DayLog,
+  HoursAdjustment,
+  HoursEntry,
+} from '../../../core/types'
 
-type SnapshotHandler = (snap: { docs: Array<{ data: () => DayLog }> }) => void
+type Doc = { id: string; data: () => unknown }
+type SnapshotHandler = (snap: { docs: Doc[] }) => void
 type ErrorHandler = (err: Error) => void
+type Source = 'days' | 'hours' | 'adjustments'
 
+// UX-443: the ribbon reads the Review's three sources, live. The mock routes
+// each `onSnapshot` by the collection its query was built on.
 const snapshotState: {
-  next: { docs: Array<{ data: () => DayLog }> } | null
+  days: DayLog[]
+  hours: HoursEntry[]
+  adjustments: HoursAdjustment[]
   error: Error | null
-} = { next: null, error: null }
+} = { days: [], hours: [], adjustments: [], error: null }
 
 vi.mock('firebase/firestore', () => ({
   onSnapshot: (
-    _q: unknown,
+    q: unknown,
     onNext: SnapshotHandler,
     onError?: ErrorHandler,
   ): (() => void) => {
+    const source = (q as [{ source: Source }])[0].source
     if (snapshotState.error && onError) {
       onError(snapshotState.error)
     } else {
-      onNext(snapshotState.next ?? { docs: [] })
+      const rows = snapshotState[source] as Array<{ id?: string }>
+      onNext({
+        docs: rows.map((row, i) => ({ id: row.id ?? `${source}-${i}`, data: () => row })),
+      })
     }
     return () => {}
   },
+  getDocs: vi.fn(),
   query: vi.fn((...args: unknown[]) => args),
   where: vi.fn((...args: unknown[]) => args),
 }))
 
 vi.mock('../../../core/firebase/firestore', () => ({
-  daysCollection: vi.fn(() => ({})),
+  daysCollection: vi.fn(() => ({ source: 'days' })),
+  hoursCollection: vi.fn(() => ({ source: 'hours' })),
+  hoursAdjustmentsCollection: vi.fn(() => ({ source: 'adjustments' })),
 }))
 
 afterEach(() => {
-  snapshotState.next = null
+  snapshotState.days = []
+  snapshotState.hours = []
+  snapshotState.adjustments = []
   snapshotState.error = null
 })
 
@@ -53,10 +73,14 @@ function dayLog(date: string, items: Array<Partial<ChecklistItem>>): DayLog {
   }
 }
 
-function setSnapshot(logs: DayLog[]): void {
-  snapshotState.next = {
-    docs: logs.map((log) => ({ data: () => log })),
-  }
+function setSnapshot(
+  logs: DayLog[],
+  hours: HoursEntry[] = [],
+  adjustments: HoursAdjustment[] = [],
+): void {
+  snapshotState.days = logs
+  snapshotState.hours = hours
+  snapshotState.adjustments = adjustments
 }
 
 function renderRibbon(props: {
@@ -125,7 +149,7 @@ describe('WeekRibbon', () => {
     expect(link.getAttribute('href')).toBe('/planner/chat')
   })
 
-  it('totals the hours chip across mixed-source items (plannedMinutes vs estimatedMinutes vs label-parsed)', () => {
+  it('the chip states the counted week with no denominator (UX-443)', () => {
     setSnapshot([
       dayLog('2026-05-11', [
         { label: 'a (10m)', completed: true },
@@ -139,8 +163,54 @@ describe('WeekRibbon', () => {
 
     renderRibbon()
 
-    // Logged: 10 + 20 + 60 = 90. Planned: 10 + 20 + 30 + 60 = 120. Both >= 60 → hrs.
-    expect(screen.getByText('1.5/2 hrs')).toBeInTheDocument()
+    // Counted by the shared fold: 10 + 20 + 60 = 90 → "1.5 hrs". The old chip
+    // read "1.5/2 hrs"; the planned 120 is nowhere on the page now.
+    expect(screen.getByText('1.5 hrs')).toBeInTheDocument()
+    expect(screen.queryByText(/\//)).not.toBeInTheDocument()
+  })
+
+  it('a kid’s manual row, a Capture `hours` doc and a correction all move the chip', () => {
+    setSnapshot(
+      [
+        dayLog('2026-05-11', [
+          { label: 'Plan (30m)', completed: true, estimatedMinutes: 30 },
+          { label: 'Lego (25m)', completed: true, estimatedMinutes: 25, source: 'manual' },
+        ]),
+      ],
+      [
+        { id: 'h', childId: 'kid-1', date: '2026-05-12', minutes: 45, source: 'unified-capture' } as HoursEntry,
+      ],
+      [
+        { id: 'a', childId: 'kid-1', date: '2026-05-13', minutes: -10, reason: 'Fix' } as HoursAdjustment,
+      ],
+    )
+    renderRibbon()
+    // 30 + 25 + 45 − 10 = 90.
+    expect(screen.getByText('1.5 hrs')).toBeInTheDocument()
+  })
+
+  it('a failed read says so and never renders 0 (UX-211’s rule)', () => {
+    snapshotState.error = new Error('permission-denied')
+    renderRibbon()
+    expect(screen.getByText(/Couldn’t read this week’s hours/)).toBeInTheDocument()
+    expect(screen.queryByText(/^0 (min|hrs?)$/)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/Mon /)).not.toBeInTheDocument()
+  })
+
+  it('a past day with counted time and no plan is filled, not empty (UX-444)', () => {
+    setSnapshot(
+      [dayLog('2026-05-12', [{ label: 'x', completed: false, plannedMinutes: 30 }])],
+      [{ id: 'h', childId: 'kid-1', date: '2026-05-11', minutes: 45 } as HoursEntry],
+    )
+    renderRibbon({ today: '2026-05-14' })
+    expect(screen.getByLabelText(/Mon logged/i)).toBeInTheDocument()
+  })
+
+  it('a week with counted time and no plan is not "Nothing planned"', () => {
+    setSnapshot([], [{ id: 'h', childId: 'kid-1', date: '2026-05-11', minutes: 45 } as HoursEntry])
+    renderRibbon({ today: '2026-05-14' })
+    expect(screen.queryByText(/Nothing planned/)).not.toBeInTheDocument()
+    expect(screen.getByText('45 min')).toBeInTheDocument()
   })
 
   it('marks past dates with no logged minutes as skipped', () => {

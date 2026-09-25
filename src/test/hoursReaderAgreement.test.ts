@@ -36,14 +36,23 @@
  * question and are excluded BY NAME with the reason, because an exclusion list
  * that is a heuristic is an exclusion list that grows silently:
  *
- *   • `today/weekRibbon.logic.ts formatHoursChip` — progress through the week's
- *     PLANNED checklist, against a planned denominator. A different numerator
- *     and a denominator this codebase's hours surfaces may not have (UX-211).
  *   • `planner-chat` `hoursPerDay` — the routine's own unweighted minute total,
  *     re-parsed from the prose the app wrote. Not a reading of the hours record
  *     at all, and its own tautology is filed as UX-206 / UX-208 / UX-209.
  *   • `today/useTodayMiningMinutes` — one day, one source (`hours` documents
  *     from Knowledge Mine), for a cap and not for a record.
+ *
+ * **Today's week ribbon USED to be on this list, and is not any more** (`FIX-254`
+ * / `UX-445`). Its chip — `formatHoursChip` over `getPlannedAndLogged` — read
+ * the planned minutes of ticked non-manual checklist rows against the week's
+ * planned minutes, and it was excluded here as *"progress through the week's
+ * PLANNED checklist … a denominator this codebase's hours surfaces may not
+ * have"*. That was true, and it was the problem: the owner read `2.3/25` on a
+ * Friday and saw that only the check-marks moved it (2026-09-25). The owner then
+ * decided the question Today asks is the question Records asks — counted hours,
+ * no denominator — so the ribbon is folded through the shared rule and asserted
+ * below beside the others. `RETIRED_RIBBON_READER` keeps its old arithmetic as a
+ * second positive control, for the same reason the first one is kept.
  *
  * ── The positive control ────────────────────────────────────────────────────
  *
@@ -72,6 +81,11 @@ import {
   computeMonthlyTrend,
   computeSubjectDistribution,
 } from '../features/records/records.logic'
+import {
+  buildWeekDates,
+  computeRibbonWeek,
+  itemMinutes,
+} from '../features/today/weekRibbon.logic'
 import { groupWeekBySubject } from '../features/weekly-review/weekBySubject'
 
 // ── One child, one week ─────────────────────────────────────────────────────
@@ -327,6 +341,37 @@ const READERS: Reader[] = [
       }).reduce((sum, subject) => sum + subject.totalMinutes, 0),
   },
   {
+    surface: 'Today → This Week chip (computeRibbonWeek)',
+    fold: 'collectHoursContributions → computeHoursSummary',
+    // FIX-254 / UX-443: moved from the exclusion list into the agreement. The
+    // ribbon's week is the Review's (Sunday to Saturday); its dots draw the
+    // school days, and its chip is the whole week.
+    read: () =>
+      computeRibbonWeek({
+        dayLogs: DAY_LOGS,
+        hoursEntries: HOURS_ENTRIES,
+        adjustments: ADJUSTMENTS,
+        childId: CHILD,
+        weekDates: buildWeekDates('2026-09-07'),
+        today: '2026-09-25',
+      }).totalMinutes,
+  },
+  {
+    surface: 'Today → This Week dots, summed (computeRibbonWeek)',
+    fold: 'collectHoursContributions → bucket by date',
+    // Every dated minute in the fixture falls Mon–Fri, so the dots sum to the
+    // week — the per-day minutes are the same fold, bucketed, not re-derived.
+    read: () =>
+      computeRibbonWeek({
+        dayLogs: DAY_LOGS,
+        hoursEntries: HOURS_ENTRIES,
+        adjustments: ADJUSTMENTS,
+        childId: CHILD,
+        weekDates: buildWeekDates('2026-09-07'),
+        today: '2026-09-25',
+      }).stats.reduce((sum, day) => sum + day.countedMinutes, 0),
+  },
+  {
     surface: 'Monthly review book (functions: computeMonthHours)',
     fold: 'collectHoursContributions → summarizeHoursContributions',
     read: () =>
@@ -396,6 +441,25 @@ function DRIFTED_READER(): number {
   return totalMinutes
 }
 
+/**
+ * The arithmetic Today's ribbon chip USED to perform (`getPlannedAndLogged`,
+ * retired by `FIX-254`), written out — the numerator of `2.3/25`: planned
+ * minutes of ticked checklist rows, manual rows skipped, and nothing from
+ * `hours`, `hoursAdjustments` or block actuals. Kept as a control for the same
+ * reason `DRIFTED_READER` is.
+ */
+function RETIRED_RIBBON_READER(): number {
+  let logged = 0
+  for (const log of DAY_LOGS) {
+    if (log.childId !== CHILD) continue
+    for (const item of log.checklist ?? []) {
+      if (item.source === 'manual') continue
+      if (item.completed) logged += itemMinutes(item)
+    }
+  }
+  return logged
+}
+
 /** Do all of these readers report the same number? The property under test. */
 function readersAgree(readers: readonly Reader[]): boolean {
   const totals = readers.map((r) => r.read())
@@ -454,6 +518,18 @@ describe('every reader of a child’s week reports the same counted minutes', ()
     expect(readersAgree([...READERS, drifted])).toBe(false)
     // And it is not a rounding difference: it is a different question.
     expect(DRIFTED_READER()).not.toBe(READERS[0].read())
+  })
+
+  it('FAILS CLOSED on the ribbon’s retired arithmetic (FIX-254)', () => {
+    const retired: Reader = {
+      surface: 'Today → This Week chip — the `2.3/25` numerator FIX-254 removed',
+      fold: 'its own',
+      read: RETIRED_RIBBON_READER,
+    }
+    expect(readersAgree([...READERS, retired])).toBe(false)
+    // 20 + 30 + 20 + 10 + 0 = 80 against the fold's 405: no hours document, no
+    // adjustment and no block actual ever reached it.
+    expect(RETIRED_RIBBON_READER()).toBe(80)
   })
 
   it('names exactly the four ways that reader differs', () => {

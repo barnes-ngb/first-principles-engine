@@ -31,10 +31,22 @@
  * Collapsing it means lifting the read to `WeeklyReviewPage` and passing it to
  * both sections, which changes `WeekPaceSection`'s props; filed as `UX-389`
  * rather than bundled into a feature run.
+ *
+ * ── A third reader, and a live one (UX-443) ─────────────────────────────────
+ *
+ * Today's week ribbon folds the same three arrays now — the owner decided the
+ * question Today asks is the one Records asks — so it reads them HERE rather
+ * than keeping its own `days` subscription beside a fourth loader. Today is a
+ * page where a box is ticked and the week should move under the parent's thumb,
+ * so it passes `{ live: true }`: the SAME three range queries and the SAME
+ * doc→record mapping, delivered through `onSnapshot` instead of `getDocs`. The
+ * mapping is three named functions both modes call, so the two modes cannot
+ * count differently. The review page keeps the one-shot read it always had.
  */
 
 import { useEffect, useState } from 'react'
-import { getDocs, query, where } from 'firebase/firestore'
+import { getDocs, onSnapshot, query, where } from 'firebase/firestore'
+import type { QueryDocumentSnapshot } from 'firebase/firestore'
 
 import {
   daysCollection,
@@ -53,9 +65,52 @@ export interface WeekHoursInputs {
   error: Error | null
 }
 
+export interface WeekHoursInputsOptions {
+  /**
+   * Subscribe instead of reading once (UX-443). Same queries, same mapping;
+   * only the delivery differs.
+   */
+  live?: boolean
+}
+
 const EMPTY_DAYS: DayLog[] = []
 const EMPTY_ENTRIES: HoursEntry[] = []
 const EMPTY_ADJUSTMENTS: HoursAdjustment[] = []
+
+// Same doc→record mapping the Records page uses, including the composite
+// day-log key fallbacks — a different mapping here would be a different count.
+
+function mapHoursDocs(docs: QueryDocumentSnapshot[]): HoursEntry[] {
+  return docs.map((d) => {
+    const data = d.data() as HoursEntry
+    return {
+      ...data,
+      id: data.id ?? d.id,
+      date: data.date ?? d.id,
+      childId:
+        data.childId ??
+        (data.dayLogId ? deriveChildIdFromDocId(data.dayLogId) : undefined),
+    }
+  })
+}
+
+function mapDayDocs(docs: QueryDocumentSnapshot[]): DayLog[] {
+  return docs.map((d) => {
+    const data = d.data() as DayLog
+    return {
+      ...data,
+      date: data.date ?? parseDateFromDocId(d.id),
+      childId: data.childId ?? deriveChildIdFromDocId(d.id) ?? '',
+    }
+  })
+}
+
+function mapAdjustmentDocs(docs: QueryDocumentSnapshot[]): HoursAdjustment[] {
+  return docs.map((d) => ({
+    ...(d.data() as HoursAdjustment),
+    id: d.id,
+  }))
+}
 
 /**
  * The week's `hours`, `days` and `hoursAdjustments` documents for one child's
@@ -70,7 +125,9 @@ export function useWeekHoursInputs(
   familyId: string,
   childId: string,
   weekKey: string,
+  options: WeekHoursInputsOptions = {},
 ): WeekHoursInputs {
+  const live = options.live === true
   const [dayLogs, setDayLogs] = useState<DayLog[]>(EMPTY_DAYS)
   const [hoursEntries, setHoursEntries] = useState<HoursEntry[]>(EMPTY_ENTRIES)
   const [adjustments, setAdjustments] = useState<HoursAdjustment[]>(EMPTY_ADJUSTMENTS)
@@ -95,79 +152,88 @@ export function useWeekHoursInputs(
     let cancelled = false
 
     const { start, end } = weekRangeFromDateKey(weekKey)
+    const hoursQuery = query(
+      hoursCollection(familyId),
+      where('date', '>=', start),
+      where('date', '<=', end),
+    )
+    const daysQuery = query(
+      daysCollection(familyId),
+      where('date', '>=', start),
+      where('date', '<=', end),
+    )
+    const adjustmentsQuery = query(
+      hoursAdjustmentsCollection(familyId),
+      where('date', '>=', start),
+      where('date', '<=', end),
+    )
 
-    Promise.all([
-      getDocs(
-        query(
-          hoursCollection(familyId),
-          where('date', '>=', start),
-          where('date', '<=', end),
+    const fail = (err: unknown) => {
+      if (cancelled) return
+      console.error('[UX-211] Failed to load week hours', err)
+      setError(err instanceof Error ? err : new Error(String(err)))
+      setLoading(false)
+    }
+
+    if (live) {
+      // Loading ends only once all three have delivered: a total folded from
+      // two of three sources is a wrong number, not a partial one.
+      const arrived = { hours: false, days: false, adjustments: false }
+      const settle = () => {
+        if (arrived.hours && arrived.days && arrived.adjustments) setLoading(false)
+      }
+      const unsubs = [
+        onSnapshot(
+          hoursQuery,
+          (snap) => {
+            if (cancelled) return
+            setHoursEntries(mapHoursDocs(snap.docs))
+            arrived.hours = true
+            settle()
+          },
+          fail,
         ),
-      ),
-      getDocs(
-        query(
-          daysCollection(familyId),
-          where('date', '>=', start),
-          where('date', '<=', end),
+        onSnapshot(
+          daysQuery,
+          (snap) => {
+            if (cancelled) return
+            setDayLogs(mapDayDocs(snap.docs))
+            arrived.days = true
+            settle()
+          },
+          fail,
         ),
-      ),
-      getDocs(
-        query(
-          hoursAdjustmentsCollection(familyId),
-          where('date', '>=', start),
-          where('date', '<=', end),
+        onSnapshot(
+          adjustmentsQuery,
+          (snap) => {
+            if (cancelled) return
+            setAdjustments(mapAdjustmentDocs(snap.docs))
+            arrived.adjustments = true
+            settle()
+          },
+          fail,
         ),
-      ),
-    ])
+      ]
+      return () => {
+        cancelled = true
+        for (const unsub of unsubs) unsub()
+      }
+    }
+
+    Promise.all([getDocs(hoursQuery), getDocs(daysQuery), getDocs(adjustmentsQuery)])
       .then(([hoursSnap, daysSnap, adjSnap]) => {
         if (cancelled) return
-        // Same doc→record mapping the Records page uses, including the
-        // composite day-log key fallbacks — a different mapping here would be a
-        // different count.
-        setHoursEntries(
-          hoursSnap.docs.map((d) => {
-            const data = d.data() as HoursEntry
-            return {
-              ...data,
-              id: data.id ?? d.id,
-              date: data.date ?? d.id,
-              childId:
-                data.childId ??
-                (data.dayLogId
-                  ? deriveChildIdFromDocId(data.dayLogId)
-                  : undefined),
-            }
-          }),
-        )
-        setDayLogs(
-          daysSnap.docs.map((d) => {
-            const data = d.data() as DayLog
-            return {
-              ...data,
-              date: data.date ?? parseDateFromDocId(d.id),
-              childId: data.childId ?? deriveChildIdFromDocId(d.id) ?? '',
-            }
-          }),
-        )
-        setAdjustments(
-          adjSnap.docs.map((d) => ({
-            ...(d.data() as HoursAdjustment),
-            id: d.id,
-          })),
-        )
+        setHoursEntries(mapHoursDocs(hoursSnap.docs))
+        setDayLogs(mapDayDocs(daysSnap.docs))
+        setAdjustments(mapAdjustmentDocs(adjSnap.docs))
         setLoading(false)
       })
-      .catch((err: unknown) => {
-        if (cancelled) return
-        console.error('[UX-211] Failed to load week hours', err)
-        setError(err instanceof Error ? err : new Error(String(err)))
-        setLoading(false)
-      })
+      .catch(fail)
 
     return () => {
       cancelled = true
     }
-  }, [familyId, childId, weekKey])
+  }, [familyId, childId, weekKey, live])
 
   return { dayLogs, hoursEntries, adjustments, loading, error }
 }
