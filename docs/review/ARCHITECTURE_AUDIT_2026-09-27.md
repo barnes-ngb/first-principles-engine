@@ -187,9 +187,29 @@ tsx` → zero hits (`SkillSnapshotPage.tsx`'s general merge/`persist` path still
 `grep -rl "TeachHelperDialog\|LoginPage" src --include=*.test.tsx --include=*.test.ts` → zero hits for
 either; `DispositionProfile.tsx` still has only `DispositionProfile.childSwitch.test.tsx`, no general
 test file. `workshop` directory ratio unchanged at **45 source / 8 test files (5.6:1)** per this cycle's
-census run (byte-identical to 09-20); `avatar` unchanged at **80/20 (4.0:1)**. **TEST-01 status:
-unchanged — IMPROVING, no new progress this cycle on either named gap or the `workshop` ratio** — expected,
-given the window touched none of the files these gaps are about.
+census run (byte-identical to 09-20); `avatar` unchanged at **80/20 (4.0:1)**.
+
+**The prompt's own Step 1 instruction is to re-list every zero-test feature each cycle, not only the two
+previously-named gaps — done here in full.** `npm run census:arch-audit`'s directory sweep names five
+feature directories with source but no test files: `auth`, `login`, `not-found`, `planner`, `ui-preview`.
+Two of the five are the `TeachHelperDialog.tsx` (`planner/`) and `LoginPage.tsx` (`auth/`) gaps already
+re-checked above — both are genuinely missing coverage on real logic, unchanged. The other three,
+read directly this cycle for the first time in this series' recorded text:
+- **`login/ProfileSelectPage.tsx`** (251L) — almost entirely presentational styling (per-profile color/
+  font/border branching for three static profile cards); its one piece of real behavior is a one-line
+  `onClick={() => selectProfile(p.id)}`. Judged a genuine UI shell — low-value to test, not a logic gap.
+- **`not-found/NotFoundPage.tsx`** (29L) — static copy plus one `navigate('/today')` call on a button.
+  Judged a genuine UI shell.
+- **`ui-preview/UiPreviewPage.tsx`** (82L) — a dev-only component gallery, explicitly documented in its
+  own file header and in `CLAUDE.md`'s Project Structure section as *"unlinked from nav... does not touch
+  any real surface"*; it exists to eyeball shared state components on a phone, not to be used by a family.
+  Judged genuinely untestable-and-pointless-to-test — no real user ever reaches it.
+
+So of the five, **two remain the named, real gaps** (`TeachHelperDialog.tsx`, `LoginPage.tsx`) and
+**three are correctly classified as UI shells** not worth a test file — the census-derived count was
+already fully explained by the two rows this ledger has carried since TEST-04/TEST-01's prior cycles;
+nothing new to file. **TEST-01 status: unchanged — IMPROVING, no new progress this cycle on the two named
+gaps or the `workshop` ratio** — expected, given the window touched none of the relevant files.
 
 **New this cycle: `TEST-06`**, filed for the flake found in Step 0 (`SketchScanner.resultIdentity.test.
 tsx`'s 5000ms timeout under full-suite load, confirmed environmental by an isolated pass at 1.6s). This
@@ -216,12 +236,34 @@ touched this window (§0.5). **ARCH-43 stays OPEN, unchanged.**
 `grep -rn "TODO.*[Ll]adder\|ladder.*TODO" src` → zero hits, unchanged. Node 22 migration (`ARCH-17`) and
 the `functions/`↔`src/` duplication consolidation (`ARCH-47`) remain untouched by this window's diff.
 
-### 1.8 CHAT_TASKS registry / FUNC-01 decision doc — unchanged
+### 1.8 CHAT_TASKS registry / FUNC-01 decision doc — unchanged, spot-verified against current code
 
-`CHAT_TASKS registry size`: **21**, unchanged (census script). `docs/review/DECISION_FUNC-01_source_of_
-truth.md` — confirmed absent from this window's diff (`git diff 2ee63ce..efab358 --stat -- docs/review/
-DECISION_FUNC-01_source_of_truth.md` is empty); its Authority table (last updated by `DOC-26`, 09-20)
-needed no re-verification since no store or writer it names was touched this window.
+`CHAT_TASKS registry size`: **21**, unchanged (census script).
+
+`docs/review/DECISION_FUNC-01_source_of_truth.md` is confirmed absent from this window's diff, but that
+alone doesn't prove its Authority table (last corrected by `DOC-26`, 09-20) still matches the code — a
+claim about who *reads* a store can go stale from a change to the reader, not only from a change to the
+named writer, so "the doc file itself wasn't touched" is too weak a check on its own.
+
+Re-verified instead by extracting every distinct writer/reader module the table names across its seven
+authority dimensions plus its three execution-record rows — 25 named files in total, spanning
+`EvaluateChatPage.tsx`, `useQuestSession.ts`, `SkillSnapshotPage.tsx`, `useCertificateProgress.ts`,
+`CertificateScanSection.tsx`, `skillSnapshotWrites.ts`, `updateSkillMapFromFindings.ts`, `useSkillMap.ts`,
+the seven `learnerModels` writers (`evalModelWriteback.ts`, `questModelSync.ts`, `writeReviewAction.ts`,
+`workbookPositionSync.ts`, `bootstrapLearnerModel.ts`, `stuckRetestQueue.ts`, `learnerSynthesis.ts`),
+`activityConfigWrites.ts`, `useActivityConfigs.ts`, `DispositionProfile.tsx`, `useDayLog.ts`,
+`applyWeekPlan.ts`, `liveDayEdit.ts`, `writeWatchItemToDay.ts`, `dayWriteGuard.ts`,
+`writeNextWeekDraft.ts`, and `useWatchLibrary.ts` — and confirming each still exists and still references
+the collection/behavior the table claims for it (a keyword check per file: `learnerModels` inside each of
+the seven `learnerModels` writers, `days` inside `useDayLog.ts`, `dispositionCache` inside
+`DispositionProfile.tsx`, and so on for the rest). **All 25 found, all 25 match.**
+
+This is a real spot-check, not a full re-derivation census — it confirms presence of the claimed
+behavior, not its exclusivity, so it wouldn't catch a *new*, undocumented eighth `learnerModels` writer
+appearing somewhere the table doesn't mention. But it is real evidence rather than an inference from an
+empty diff, and it agrees with the independently-confirmed fact that this window's diff touches none of
+these 25 files at all (§0.5) — the doc's own claims and the code they describe moved together, which is
+what "unchanged" should mean here.
 
 ### 1.9 Drift catalog — one file crossed the 150L threshold, and it is this window's own named fix
 
@@ -316,11 +358,14 @@ comment, no UI or interaction change.
 ### 4.1 DATA-01 — holds, now 5 guarded call sites (one more than 09-20)
 
 `grep -rn "computeHoursSummary(" src functions/src --include=*.ts --include=*.tsx | grep -v '\.test\.'`
-returns **5** non-test call sites, one more than 09-20's 4: `RecordsPage.tsx:481`, `dataReviewExport.
-logic.ts:1273`, `weekly-review/useWeekHours.ts:40`, `weekly-review/weekBySubject.ts:418` (all four
-present, unchanged), plus the new `today/weekRibbon.logic.ts:320` from `FIX-254` (§2.1). **DATA-01 holds
-FIXED** — the new consumer routes through the shared rule rather than adding a sixth independent
-accumulator, which is the positive case this row exists to keep true.
+returns **6** lines, not 5 — the sixth is `MonthlyTrend.tsx:27`, a comment referencing the function name
+(`// computeHoursSummary(). The cumulative core/total below therefore match the...`), not a call.
+Excluding declaration-free comment lines (`| grep -vE '^\S+:\s*//'`) reproduces exactly **5** actual call
+sites, one more than 09-20's 4: `RecordsPage.tsx:481`, `dataReviewExport.logic.ts:1273`, `weekly-review/
+useWeekHours.ts:40`, `weekly-review/weekBySubject.ts:418` (all four present, unchanged), plus the new
+`today/weekRibbon.logic.ts:320` from `FIX-254` (§2.1). **DATA-01 holds FIXED** — the new consumer routes
+through the shared rule rather than adding a sixth independent accumulator, which is the positive case
+this row exists to keep true.
 
 ### 4.2 DATA-02 — still NEEDS-DATA, now 88 days past the freeze window
 
@@ -377,8 +422,8 @@ correct direction of travel. No new view computes hours independently this windo
   other row this audit re-verified (`ARCH-01`→`04`, `06`→`08`, `43`, `44`, `47`, `50`, `DATA-01`, `DATA-13`,
   `DATA-17`, `TEST-01`) was already correctly reflected in the ledger — this audit's contribution on each
   is independent re-confirmation against current code, not a ledger write.
-  **Ledger gets +2 rows this cycle** (`TEST-06`, and the `ARCH-05` status-cell update counts as a status
-  change, not a new row) — narrower than most cycles, matching the window's small diff.
+  **Ledger gets +1 row this cycle** (`TEST-06`) **plus one status-cell edit** (`ARCH-05` — an update to an
+  existing row, not a new one) — narrower than most cycles, matching the window's small diff.
 - No changes needed to `CLAUDE.md`'s Known Technical Debt section this cycle — every line-count
   parenthetical in that section was already current as of the 09-20 audit's fixes, and this window's
   diff didn't move any of the tracked files except `BookEditorPage.tsx` (−4L, below the section's
