@@ -369,6 +369,26 @@ by severity: {"P1":0,"P2":0,"P3":0,"—":94}
 census problems: 0
 ```
 
+### Re-derived 2026-09-27 (FIX-255 / UX-420 — the weekly review's *Try again*)
+
+Pasted from `npm run census:child-switch`. One new candidate, `WeekRetryControl.tsx` (hook arm
+43 → 44): it reads `useActiveChild` for the capability gate and holds a pending/failed phase for
+the paid call it makes. **SAFE**, with the lines that make it true in its row — the call carries its
+own child and week, and the phase is keyed by them. Candidates 94 → 95, SAFE 55 → 56; nothing else
+moved.
+
+```
+source files scanned (non-test, under src/, excluding src/test/): 809
+files reading useActiveChild: 74
+candidates: 95 (hook arm 44, prop arm 51)
+files rendering an in-page <ChildSelector>: 0
+feature files referencing setActiveChildId (any in-page child control): 3
+census rows: 95
+by verdict: {"BIND":9,"HIDE":3,"RESET":17,"GATE":10,"SAFE":56}
+by severity: {"P1":0,"P2":0,"P3":0,"—":95}
+census problems: 0
+```
+
 ## 5. The registry
 
 | Surface (file) | Child-scoped state it holds | What it writes, and to which collection | Reachable by a switch today? | Verdict | Severity |
@@ -462,6 +482,7 @@ census problems: 0
 | `src/features/watch/useWatchLibrary.ts` | the family's vetted videos, a `trackedChild` marker | `watchLibrary` — `addDoc` / `updateDoc` by id | Selector (Planner, Today) | **SAFE** — the library is family-scoped with a `childId \| 'both'` filter; vetting writes the caller's body and edits address a video by its own id | — |
 | `src/features/weekly-review/WeekPaceSection.tsx` | a clock — the instant the positions sentence is read against (`UX-407`) | nothing; it writes no document of any kind | Shell only — Review's and its own `ChildSelector` both went with `UX-425` | **SAFE** — the only state in the file is `clock`, a `Date` re-seeded during render whenever the page's own `now` changes, and it is not a person's work: nothing is typed, nothing is dirty and nothing can be lost. The section's every number comes from `useWeekHours`, which is keyed on `(familyId, childId, weekKey)` and re-reads on a switch, and the file names no Firestore writer at all — asserted by its own suite's source scan. It joined this census when `UX-407` gave the sentence a clock that advances; the heuristic over-matches on purpose and this is the row that costs | — |
 | `src/features/weekly-review/WeekReflectionCard.tsx` | the parent's answer and note, before Save | `weeklyReviews/{weekKey}_{childId}.reflection` — single-key merge | Selector (Weekly Review) | **GATE** — `seeded` is compared during render against `(docKey, storedKey)` and re-seeds unless the answer is `dirty`, so the card cannot carry one child's answer into another's document | — |
+| `src/features/weekly-review/WeekRetryControl.tsx` | one *Try again* attempt's phase (`pending` / `failed`) and an in-flight ref (`UX-420`) | nothing itself — it calls `generateWeeklyReviewNow`, whose writes go to `weeklyReviews/{weekKey}_{childId}` for the child and week **in the request** | Shell only — Review has no in-page selector since `UX-425` | **SAFE** — the request carries the `childId` and `weekKey` it was tapped for (`retryWeeklyReview({ familyId, childId, weekKey })`, captured when the tap's closure was made), so a switch mid-call cannot retarget it; and the phase is stored under `stateKey` (the child and the week, joined) and read only when that key matches, so a pending or failed outcome is never shown on the other boy's week. Nothing typed, nothing dirty, nothing to lose | — |
 | `src/features/weekly-review/WeeklyReviewPage.tsx` | accept/reject ticks for pace adjustments | `weeklyReviews` — a transaction over `adjustments` | Shell only — Review's and its own `ChildSelector` both went with `UX-425` | **RESET** — `loadedChildId` is compared during render and the decision draft is cleared on a change; Apply then resolves the draft against the document's current adjustments inside a transaction | — |
 | `src/features/workshop/MyGamesGallery.tsx` | a type filter, a child filter, a delete target | `storyGames` — deletes by document id | Shell only | **SAFE** — every delete addresses a game by its own id and permission is checked against `game.childId`, the document's own field | — |
 | `src/features/workshop/PlaytestReviewView.tsx` | per-card review states, an edit draft | `storyGames/{gameId}` | Shell only | **HIDE** — reached only through `WorkshopPage`, whose derived `renderPhase` closes every phase gate while the header is on another child | — |

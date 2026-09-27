@@ -22,6 +22,7 @@ import {
 } from './weekHours'
 import { weekEvidenceCountsLine } from './weekEvidenceCounts'
 import { useWeekHours } from './useWeekHours'
+import WeekRetryControl from './WeekRetryControl'
 
 export interface WeekPaceSectionProps {
   familyId: string
@@ -251,6 +252,21 @@ function WeekPaceBody({
         <Typography variant="body2" color="text.secondary">
           {narrativeLine}
         </Typography>
+      )}
+
+      {/*
+        UX-420 — the door for the sentence above, and only where it applies:
+        `weekRetryOffer` renders nothing unless a failure is recorded and no
+        narrative stands, so a STALE-narrative week gets the sentence and no
+        button. Capability-gated again inside, because it spends a paid call.
+      */}
+      {!reviewFailed && (
+        <WeekRetryControl
+          familyId={familyId}
+          childId={childId}
+          weekKey={weekKey}
+          review={review}
+        />
       )}
 
       {historyFailed && (

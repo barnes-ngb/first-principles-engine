@@ -134,8 +134,10 @@ export const POSITIONS_PENDING_LINE =
  * It says what is observable and nothing about why. *"The cron didn't run"* is a
  * claim about a server this page has no information from — the run may have
  * thrown, the Claude call may have failed (in which case `generateReviewForChild`
- * writes nothing at all, positions included — filed as `UX-409`), or the family
- * may simply not have existed that week. What a parent needs to know is
+ * wrote nothing at all, positions included — `UX-409`, closed by FIX-236, and
+ * its assembly-side twin `UX-447`, closed by FIX-255, both on the Cloud Function
+ * side and live only once `functions` is deployed), or the family may simply not
+ * have existed that week. What a parent needs to know is
  * narrower and is all true: there is no rate, and **the numbers above are not
  * affected**, because the hours and the evidence are folded live from the
  * records and never came from this document.
@@ -315,11 +317,12 @@ export const REVIEW_UNAVAILABLE_LINE =
  *
  * So the sentence says the one thing that is both true and consequential — the
  * numbers on this page are unaffected, and the month's book will be thinner for
- * this week — and it **does not instruct**. There is no *Regenerate* control on
- * this page (UX-219 removed it, deliberately, and restoring one is the owner's
- * decision, not a side effect of a fix); pointing a parent at an action with no
- * button is UX-269's own failure, so the absent door is filed as `UX-420`
- * instead of promised here.
+ * this week — and it **does not instruct**. It did not when it was written
+ * because there was no control to point at (UX-219 removed *Regenerate*, and
+ * restoring one was the owner's decision). The owner made it on 2026-09-27
+ * (`UX-420`, *"Both — the hole and the re-run door"*), and the door is the
+ * separate *Try again* beside this sentence — see {@link weekRetryOffer} — so
+ * the sentence still states a fact and the control carries the verb.
  *
  * It claims nothing about WHY. The stored `narrativeError` message is the app's
  * own text and is not rendered: a rate limit or a missing secret is an operator's
@@ -378,20 +381,122 @@ export function reviewHasNarrative(
 }
 
 /**
+ * What is said when this week's records could not be gathered for a summary,
+ * and its workbook positions ARE on file (UX-447).
+ *
+ * The weekly run now writes the positions before it assembles the week, so a
+ * throw in the assembly — a permission change, a missing index, one malformed
+ * day — no longer loses the positions with it. The positions sentence above
+ * therefore correctly stops (they were saved), and this one takes its place.
+ *
+ * It must not overclaim: a document in this state has positions and no summary
+ * of the week's hours or evidence, which is weaker than an ordinary record. So
+ * it names exactly what was kept and what was not, and ends on the one thing a
+ * parent needs — the numbers on this page never came from this document.
+ */
+export const CONTEXT_FAILED_LINE =
+  'This week’s summary couldn’t be put together, so it won’t be part of the monthly book. Its workbook positions were saved, and everything above is read live and isn’t affected.'
+
+/**
+ * The same failure, where no positions are on file (UX-447).
+ *
+ * A review can carry none for two ordinary reasons — the child has no
+ * positioned workbook, or the `activityConfigs` read failed — so this sentence
+ * claims nothing about positions either way.
+ */
+export const CONTEXT_FAILED_NO_POSITIONS_LINE =
+  'This week’s summary couldn’t be put together, so it won’t be part of the monthly book. Everything above is read live and isn’t affected.'
+
+/**
+ * Could this week's records not be gathered? (UX-447). Structural, and narrow for
+ * `narrativeFailed`'s reason: a run that gets through writes the field as `null`.
+ */
+export function contextFailed(review: { contextError?: unknown } | null): boolean {
+  const err = review?.contextError
+  return (
+    !!err &&
+    typeof err === 'object' &&
+    typeof (err as { message?: unknown }).message === 'string'
+  )
+}
+
+/** Does the document hold a positions snapshot with at least one position? */
+export function reviewHasPositions(review: { curriculumPositions?: unknown } | null): boolean {
+  const snap = review?.curriculumPositions
+  if (!snap || typeof snap !== 'object') return false
+  const positions = (snap as { positions?: unknown }).positions
+  return Array.isArray(positions) && positions.length > 0
+}
+
+type FailureReview = NonNullable<Parameters<typeof reviewHasNarrative>[0]> & {
+  narrativeError?: unknown
+  contextError?: unknown
+  curriculumPositions?: unknown
+}
+
+/**
  * Which failure sentence this week gets, or `null` when there is nothing to say.
  *
  * One entry point, so a caller cannot render the missing-summary claim about a
- * week that has one.
+ * week that has one — and, since UX-447, one decision over BOTH halves that can
+ * fail, rather than a second conditional beside it on the page:
+ *
+ *   • a standing narrative wins over either failure — the monthly book goes on
+ *     reading it, so the only true sentence is that it could not be refreshed;
+ *   • a context failure comes next, because it means the model was never asked:
+ *     a `narrativeError` beside it is an older run's, and the newer fact is that
+ *     the week could not be gathered at all;
+ *   • then a narrative failure, as before.
  */
-export function narrativeFailureLine(
-  review:
-    | (NonNullable<Parameters<typeof reviewHasNarrative>[0]> & {
-        narrativeError?: unknown
-      })
-    | null,
-): string | null {
-  if (!narrativeFailed(review)) return null
-  return reviewHasNarrative(review) ? NARRATIVE_STALE_LINE : NARRATIVE_FAILED_LINE
+export function narrativeFailureLine(review: FailureReview | null): string | null {
+  const context = contextFailed(review)
+  if (!context && !narrativeFailed(review)) return null
+  if (reviewHasNarrative(review)) return NARRATIVE_STALE_LINE
+  if (context) {
+    return reviewHasPositions(review) ? CONTEXT_FAILED_LINE : CONTEXT_FAILED_NO_POSITIONS_LINE
+  }
+  return NARRATIVE_FAILED_LINE
+}
+
+/**
+ * The *Try again* control's label and its before-the-tap note (UX-420).
+ *
+ * `null` means no control, and that is most weeks. It is offered ONLY where the
+ * document records a failure and no narrative stands — not a general
+ * *Regenerate*, which UX-219 removed correctly: the narrative is the monthly
+ * book's raw material and is not shown on this page, so there is nothing to
+ * refresh a week that already has one for, and a paid call spent doing it is a
+ * call spent on nothing. "Stands" is {@link reviewHasNarrative} — the monthly
+ * book's own question — never a second guess at it.
+ *
+ * The note says what the tap will do before it is made (`UX-313`'s rule). It
+ * cannot recover a past week's positions: the snapshot is taken only when the
+ * week closes, and `currentPosition` has no history (UX-212). So where none are
+ * on file the note says so, rather than letting a parent believe the tap fills
+ * the gap.
+ */
+export interface WeekRetryOffer {
+  label: string
+  note: string
+}
+
+export const WEEK_RETRY_LABEL = 'Try again'
+export const WEEK_RETRY_NOTE =
+  'Asks for this week’s summary again. This uses one AI call.'
+export const WEEK_RETRY_NOTE_NO_POSITIONS =
+  'Asks for this week’s summary again. This uses one AI call. It can’t save workbook positions for a week that has already ended.'
+/** Said when the call itself failed — the tap's own outcome, not the week's. */
+export const WEEK_RETRY_FAILED_LINE =
+  'That didn’t work either. The week’s records above are unchanged — you can try again later.'
+
+export function weekRetryOffer(review: FailureReview | null): WeekRetryOffer | null {
+  if (!review) return null
+  if (!contextFailed(review) && !narrativeFailed(review)) return null
+  if (reviewHasNarrative(review)) return null
+  return {
+    label: WEEK_RETRY_LABEL,
+    note: reviewHasPositions(review) ? WEEK_RETRY_NOTE : WEEK_RETRY_NOTE_NO_POSITIONS,
+  }
 }
 
 /**
