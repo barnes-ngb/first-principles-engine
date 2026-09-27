@@ -569,3 +569,50 @@ describe("a killed run is observable: runStartedAt (UX-450)", () => {
     expect(doc.contextError).toBeUndefined();
   });
 });
+
+describe("round 1 P2 — every child is stamped with the INVOCATION's start (UX-450)", () => {
+  it("pass 1 and pass 2 stamp one instant, however late a child's turn comes", async () => {
+    state.configs = positionedConfigs;
+    const invocation = new Date("2026-09-27T05:15:00.000Z");
+    const stamps: Array<string | undefined> = [];
+    await evaluate.runWeeklyReviewCron(db, WEEK, "key", {
+      startedAt: invocation,
+      listFamilies: async () => ["fam-1"],
+      listChildren: async () => [
+        { childId: "lincoln", childName: "Lincoln" },
+        { childId: "london", childName: "London" },
+      ],
+      recordWeekBeforeAssembly: async (_d, _f, _c, _w, opts) => {
+        stamps.push(opts.startedAt);
+      },
+      runCycle: (d, f, c, n, w, k, _deps, opts) =>
+        runWeeklyReviewCycleForChild(
+          d, f, c, n, w, k,
+          {
+            synthesizeIfStale: (async () => undefined) as never,
+            assembleWeekContext: evaluate.assembleWeekContext,
+            generateReviewForChild: (async () => undefined) as never,
+            recordWeekBeforeAssembly: async (_d2, _f2, _c2, _w2, o) => {
+              stamps.push(o.startedAt);
+            },
+          },
+          opts,
+        ),
+    });
+    expect(stamps).toHaveLength(4);
+    expect(new Set(stamps)).toEqual(new Set([invocation.toISOString()]));
+  });
+
+  it("POSITIVE CONTROL — a cycle called without the invocation's start stamps its own", async () => {
+    state.configs = positionedConfigs;
+    state.docs.set(PATH, { status: "snapshot-only" });
+    await runWeeklyReviewCycleForChild(db, "fam-1", "lincoln", "Lincoln", WEEK, "key", {
+      synthesizeIfStale: (async () => undefined) as never,
+      assembleWeekContext: evaluate.assembleWeekContext,
+      generateReviewForChild: (async () => undefined) as never,
+    });
+    const stamped = state.docs.get(PATH)!.runStartedAt as string;
+    expect(stamped).not.toBe("2026-09-27T05:15:00.000Z");
+    expect(Date.now() - Date.parse(stamped)).toBeLessThan(60_000);
+  });
+});

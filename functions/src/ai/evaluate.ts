@@ -1168,8 +1168,10 @@ export function contextErrorDoc(reason: ContextFailureReason): ContextErrorDoc {
  * narrative failure means it was and the model did not answer.
  *
  * ── `runStartedAt` (UX-450) ─────────────────────────────────────────────────
- * Every call stamps when the run reached this week, overwriting the last run's
- * stamp. It is the one way a KILLED run is observable: the platform ending the
+ * Every call stamps when the run began, overwriting the last run's stamp. On
+ * the scheduled path that is the INVOCATION's start, shared by every child and
+ * by both passes (Codex round 1, P2) — the platform's deadline runs from there;
+ * a manual run establishes its own. It is the one way a KILLED run is observable: the platform ending the
  * function at its deadline runs no `catch`, so such a run leaves `status:
  * 'snapshot-only'` and no error field at all. The page reads the stamp against
  * {@link WEEKLY_REVIEW_TIMEOUT_SECONDS} (the longer of the two deadlines) to
@@ -1867,6 +1869,15 @@ export async function runWeeklyReviewCycleForChild(
     /** UX-447 — injectable for the same reason. */
     writeContextFailure?: typeof writeContextFailure;
   } = { synthesizeIfStale, assembleWeekContext, generateReviewForChild },
+  options: {
+    /**
+     * UX-450 (Codex round 1, P2) — the INVOCATION's start, for the
+     * `runStartedAt` stamp. The scheduler's deadline began before pass 1, so
+     * a fresh stamp per child would give a later child a window the function
+     * no longer has. Absent (a direct call), the stamp is taken now.
+     */
+    startedAt?: string;
+  } = {},
 ): Promise<void> {
   const recordFirst = deps.recordWeekBeforeAssembly ?? recordWeekBeforeAssembly;
   const recordContextFailure = deps.writeContextFailure ?? writeContextFailure;
@@ -1877,7 +1888,10 @@ export async function runWeeklyReviewCycleForChild(
   //    the learner-model synthesis, which is a MODEL CALL and can hang until the
   //    scheduled function's deadline (Codex round 1, P1). A stale model is
   //    regenerable; a week's positions are not.
-  await recordFirst(db, familyId, childId, weekKey, { createPositions: true });
+  await recordFirst(db, familyId, childId, weekKey, {
+    createPositions: true,
+    startedAt: options.startedAt,
+  });
 
   // 1) Refresh the learner model (FEAT-57 beat, reordered for FEAT-74) — still
   //    before the review, so the review reads a fresh frontier.
@@ -1959,8 +1973,16 @@ export async function runWeeklyReviewCron(
     listChildren?: typeof listWeeklyReviewChildren;
     recordWeekBeforeAssembly?: typeof recordWeekBeforeAssembly;
     runCycle?: typeof runWeeklyReviewCycleForChild;
+    /**
+     * When this invocation began (UX-450). Every child's `runStartedAt` is
+     * stamped with this ONE instant — pass 1 and pass 2 alike — because the
+     * platform's deadline runs from the invocation, not from a child's turn
+     * (Codex round 1, P2). The handler passes the moment it was entered.
+     */
+    startedAt?: Date;
   } = {},
 ): Promise<void> {
+  const invocationStartedAt = (deps.startedAt ?? new Date()).toISOString();
   const listFamilies = deps.listFamilies ?? listWeeklyReviewFamilies;
   const listChildren = deps.listChildren ?? listWeeklyReviewChildren;
   const record = deps.recordWeekBeforeAssembly ?? recordWeekBeforeAssembly;
@@ -1978,7 +2000,10 @@ export async function runWeeklyReviewCron(
       continue;
     }
     for (const c of children) {
-      await record(db, familyId, c.childId, weekKey, { createPositions: true });
+      await record(db, familyId, c.childId, weekKey, {
+        createPositions: true,
+        startedAt: invocationStartedAt,
+      });
       targets.push({ familyId, ...c });
     }
   }
@@ -1986,7 +2011,9 @@ export async function runWeeklyReviewCron(
   // Pass 2 — FEAT-57 / FEAT-74: synthesize-if-stale, then the review on the
   // fresh frontier. Failure isolation lives inside the helper.
   for (const t of targets) {
-    await runCycle(db, t.familyId, t.childId, t.childName, weekKey, apiKey);
+    await runCycle(db, t.familyId, t.childId, t.childName, weekKey, apiKey, undefined, {
+      startedAt: invocationStartedAt,
+    });
   }
 }
 
@@ -2054,6 +2081,8 @@ export const weeklyReview = onSchedule(
     secrets: [claudeApiKey],
   },
   async () => {
+    // UX-450: the deadline runs from here, so the stamp does too.
+    const startedAt = new Date();
     const db = getFirestore();
     // The family's civil date, not the runtime's (UX-266).
     //
@@ -2072,6 +2101,6 @@ export const weeklyReview = onSchedule(
     const weekKey = lastWeekKey(civilDateObjectInZone(new Date(), WEEKLY_REVIEW_SCHEDULE.timeZone));
     const apiKey = claudeApiKey.value();
 
-    await runWeeklyReviewCron(db, weekKey, apiKey);
+    await runWeeklyReviewCron(db, weekKey, apiKey, { startedAt });
   },
 );

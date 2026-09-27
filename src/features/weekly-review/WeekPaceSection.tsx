@@ -157,11 +157,18 @@ function WeekPaceBody({
     // UX-450 adds a second moment of the same kind: the instant a run on this
     // week can no longer be in flight, after which the unfinished-run sentence
     // and its *Try again* become true. The earlier of the two wakes the tab.
+    //
+    // Measured from the REAL current instant, not from `clock` (Codex round 1,
+    // P2): the deadline moves when a run re-stamps `runStartedAt`, and `clock`
+    // may still be the mount time, so subtracting it added the tab's age to the
+    // wait. A deadline already past while `clock` is behind it fires at once.
     const dueMs = msUntilPositionsDue(weekKey, clock)
     const unfinishedMs =
-      runUnfinishedDeadline === null ? null : runUnfinishedDeadline - clock.getTime()
+      runUnfinishedDeadline === null || clock.getTime() >= runUnfinishedDeadline
+        ? null
+        : Math.max(0, runUnfinishedDeadline - Date.now())
     const candidates = [dueMs, unfinishedMs].filter(
-      (v): v is number => v !== null && v > 0,
+      (v): v is number => v !== null && v >= 0,
     )
     const ms = candidates.length > 0 ? Math.min(...candidates) : null
     const timer =
