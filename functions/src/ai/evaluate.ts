@@ -1889,6 +1889,76 @@ export async function runWeeklyReviewCycleForChild(
   }
 }
 
+/** One child the weekly run covers. */
+export interface WeeklyReviewTarget {
+  familyId: string;
+  childId: string;
+  childName: string;
+}
+
+/** Every child of every family, in the order the run visits them. */
+export async function listWeeklyReviewTargets(db: Firestore): Promise<WeeklyReviewTarget[]> {
+  const targets: WeeklyReviewTarget[] = [];
+  const familiesSnap = await db.collection("families").get();
+  for (const familyDoc of familiesSnap.docs) {
+    const childrenSnap = await familyDoc.ref.collection("children").get();
+    for (const childDoc of childrenSnap.docs) {
+      targets.push({
+        familyId: familyDoc.id,
+        childId: childDoc.id,
+        childName: (childDoc.data()?.name as string) || "",
+      });
+    }
+  }
+  return targets;
+}
+
+/**
+ * The scheduled run's body, in TWO passes (UX-447, Codex round 2, P1).
+ *
+ * **Pass 1 records every child's positions before any model call starts.**
+ * Round 1 moved the record ahead of each child's learner-model synthesis, but
+ * the loop awaits one child's whole cycle before reaching the next, so a
+ * synthesis or narrative call that hangs until the function's deadline on the
+ * FIRST child still left every later child's week-end positions unwritten —
+ * and those cannot be recovered afterwards (UX-212). Pass 1 is plain Firestore
+ * reads and one transaction per child, with no model call in it.
+ *
+ * **Pass 2 is the cycle exactly as before** — synthesis, assembly, narrative,
+ * one child at a time. Its own `recordWeekBeforeAssembly` is kept: it is
+ * create-only, so on a normal run it writes nothing new, and it is the second
+ * chance for a child whose pass-1 transaction could not complete.
+ *
+ * Deps are injectable so the pass order is assertable without a live Firestore.
+ */
+export async function runWeeklyReviewCron(
+  db: Firestore,
+  weekKey: string,
+  apiKey: string,
+  deps: {
+    listTargets?: typeof listWeeklyReviewTargets;
+    recordWeekBeforeAssembly?: typeof recordWeekBeforeAssembly;
+    runCycle?: typeof runWeeklyReviewCycleForChild;
+  } = {},
+): Promise<void> {
+  const listTargets = deps.listTargets ?? listWeeklyReviewTargets;
+  const record = deps.recordWeekBeforeAssembly ?? recordWeekBeforeAssembly;
+  const runCycle = deps.runCycle ?? runWeeklyReviewCycleForChild;
+
+  const targets = await listTargets(db);
+
+  // Pass 1 — every child's positions on file; `record` never throws.
+  for (const t of targets) {
+    await record(db, t.familyId, t.childId, weekKey, { createPositions: true });
+  }
+
+  // Pass 2 — FEAT-57 / FEAT-74: synthesize-if-stale, then the review on the
+  // fresh frontier. Failure isolation lives inside the helper.
+  for (const t of targets) {
+    await runCycle(db, t.familyId, t.childId, t.childName, weekKey, apiKey);
+  }
+}
+
 // ── Scheduled Cloud Function ────────────────────────────────────
 
 /**
@@ -1947,25 +2017,6 @@ export const weeklyReview = onSchedule(
     const weekKey = lastWeekKey(civilDateObjectInZone(new Date(), WEEKLY_REVIEW_SCHEDULE.timeZone));
     const apiKey = claudeApiKey.value();
 
-    // Get all families
-    const familiesSnap = await db.collection("families").get();
-
-    for (const familyDoc of familiesSnap.docs) {
-      const familyId = familyDoc.id;
-
-      // Get all children in this family
-      const childrenSnap = await familyDoc.ref.collection("children").get();
-
-      for (const childDoc of childrenSnap.docs) {
-        const childId = childDoc.id;
-        const childName = (childDoc.data()?.name as string) || "";
-
-        // FEAT-57 / FEAT-74: synthesize-if-stale FIRST, then generate the review
-        // on the fresh frontier. Failure isolation lives inside the helper.
-        await runWeeklyReviewCycleForChild(
-          db, familyId, childId, childName, weekKey, apiKey,
-        );
-      }
-    }
+    await runWeeklyReviewCron(db, weekKey, apiKey);
   },
 );

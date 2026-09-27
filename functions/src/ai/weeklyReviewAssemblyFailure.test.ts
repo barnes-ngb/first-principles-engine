@@ -403,3 +403,53 @@ describe("the manual path (Try again) never creates a snapshot (UX-420)", () => 
     expect(doc.narrativeError).toBeNull();
   });
 });
+
+describe("round 2 P1 — every child's positions land before any model call", () => {
+  const targets = [
+    { familyId: "fam-1", childId: "lincoln", childName: "Lincoln" },
+    { familyId: "fam-1", childId: "london", childName: "London" },
+  ];
+  const LONDON = `families/fam-1/weeklyReviews/${WEEK}_london`;
+  const flush = async () => {
+    for (let i = 0; i < 30; i++) await new Promise((r) => setTimeout(r, 0));
+  };
+
+  it("records every child in a first pass, before the first cycle starts", async () => {
+    const order: string[] = [];
+    await evaluate.runWeeklyReviewCron(db, WEEK, "key", {
+      listTargets: async () => targets,
+      recordWeekBeforeAssembly: async (_db, _f, childId) => {
+        order.push(`record:${childId}`);
+      },
+      runCycle: async (_db, _f, childId) => {
+        order.push(`cycle:${childId}`);
+      },
+    });
+    expect(order).toEqual(["record:lincoln", "record:london", "cycle:lincoln", "cycle:london"]);
+  });
+
+  it("the second child's positions are on file though the first child's cycle hangs", async () => {
+    state.configs = positionedConfigs;
+    void evaluate.runWeeklyReviewCron(db, WEEK, "key", {
+      listTargets: async () => targets,
+      runCycle: () => new Promise(() => undefined),
+    });
+    await flush();
+    expect(state.docs.get(PATH)?.curriculumPositions).toBeDefined();
+    expect(state.docs.get(LONDON)?.curriculumPositions).toBeDefined();
+  });
+
+  it("POSITIVE CONTROL — with no first pass, a hang on the first child loses the second", async () => {
+    state.configs = positionedConfigs;
+    void evaluate.runWeeklyReviewCron(db, WEEK, "key", {
+      listTargets: async () => targets,
+      recordWeekBeforeAssembly: async () => undefined,
+      runCycle: (d, f, c, n, w, k) =>
+        c === "lincoln"
+          ? new Promise(() => undefined)
+          : runWeeklyReviewCycleForChild(d, f, c, n, w, k),
+    });
+    await flush();
+    expect(state.docs.get(LONDON)?.curriculumPositions).toBeUndefined();
+  });
+});
