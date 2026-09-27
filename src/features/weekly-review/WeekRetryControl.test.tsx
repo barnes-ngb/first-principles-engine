@@ -298,3 +298,70 @@ describe('Try again (UX-420)', () => {
     expect(source).not.toMatch(/isLincoln|'Lincoln'|"Lincoln"|'London'|"London"/)
   })
 })
+
+describe('Try again on a run that never finished (UX-450)', () => {
+  /** A killed run: stamped at the cron's 00:15, positions on file, no error. */
+  const killed = (runStartedAt = '2026-09-27T05:15:02.000Z'): WeeklyReview =>
+    ({
+      childId: 'c1',
+      weekKey: WEEK,
+      status: 'snapshot-only',
+      curriculumPositions: positions,
+      runStartedAt,
+    }) as unknown as WeeklyReview
+
+  function renderKilled(doc: WeeklyReview) {
+    return render(
+      <WeekPaceSection
+        familyId="fam-1"
+        childId="c1"
+        weekKey={WEEK}
+        review={doc}
+        reviewFailed={false}
+        history={[]}
+        historyLoading={false}
+        historyFailed={false}
+        now={OWNER_LOOKED}
+      />,
+    )
+  }
+
+  it('is offered for a killed run, eleven hours on', () => {
+    renderKilled(killed())
+    expect(screen.getByText(WEEK_RETRY_NOTE)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
+  })
+
+  it('keeps the tap’s failure visible after the tap’s own run re-stamps the week', async () => {
+    // The manual run re-stamps `runStartedAt`, which puts the week back inside
+    // its window and withdraws the offer while the call is still out — so the
+    // outcome of THIS tap must not vanish with the button.
+    let reject: (err: unknown) => void = () => undefined
+    mockRetry.mockImplementation(() => new Promise((_, r) => { reject = r }))
+    const { rerender } = renderKilled(killed())
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    })
+    const restamped = killed(OWNER_LOOKED.toISOString())
+    rerender(
+      <WeekPaceSection
+        familyId="fam-1"
+        childId="c1"
+        weekKey={WEEK}
+        review={restamped}
+        reviewFailed={false}
+        history={[]}
+        historyLoading={false}
+        historyFailed={false}
+        now={OWNER_LOOKED}
+      />,
+    )
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument()
+    expect(screen.getByText('Asking…')).toBeInTheDocument()
+
+    await act(async () => {
+      reject(new Error('deadline-exceeded'))
+    })
+    expect(screen.getByText(WEEK_RETRY_FAILED_LINE)).toBeInTheDocument()
+  })
+})

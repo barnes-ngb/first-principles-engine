@@ -1167,6 +1167,15 @@ export function contextErrorDoc(reason: ContextFailureReason): ContextErrorDoc {
  * a context failure means the week was never summarised from its records, a
  * narrative failure means it was and the model did not answer.
  *
+ * ── `runStartedAt` (UX-450) ─────────────────────────────────────────────────
+ * Every call stamps when the run reached this week, overwriting the last run's
+ * stamp. It is the one way a KILLED run is observable: the platform ending the
+ * function at its deadline runs no `catch`, so such a run leaves `status:
+ * 'snapshot-only'` and no error field at all. The page reads the stamp against
+ * {@link WEEKLY_REVIEW_TIMEOUT_SECONDS} (the longer of the two deadlines) to
+ * tell a run still in flight from one that can no longer finish. The stamp
+ * never writes `status` and never touches the snapshot.
+ *
  * Never throws: it is a best-effort head start, and the record write in
  * `generateReviewForChild` still runs afterwards. If the transaction cannot
  * complete, nothing is written here — a plain merge could not honour
@@ -1177,8 +1186,9 @@ export async function recordWeekBeforeAssembly(
   familyId: string,
   childId: string,
   weekKey: string,
-  options: { createPositions: boolean },
+  options: { createPositions: boolean; startedAt?: string },
 ): Promise<void> {
+  const runStartedAt = options.startedAt ?? new Date().toISOString();
   try {
     const curriculumPositions = options.createPositions
       ? await loadCurriculumSnapshot(db, familyId, childId, weekKey)
@@ -1194,7 +1204,11 @@ export async function recordWeekBeforeAssembly(
       // would otherwise leave a stray `weeklyReviews` row behind before the
       // assembly refused it.
       if (!options.createPositions && existing === undefined) return;
-      const payload: Record<string, unknown> = { childId, weekKey };
+      // UX-450: when this run began, overwritten every run. A run the platform
+      // kills at its deadline runs no catch, so it leaves no `narrativeError` and
+      // no `contextError` — this stamp is the only trace that it started, and the
+      // page measures "should have finished by now" from it. Never a `status`.
+      const payload: Record<string, unknown> = { childId, weekKey, runStartedAt };
       if (curriculumPositions && existing?.curriculumPositions === undefined) {
         payload.curriculumPositions = curriculumPositions;
       }
@@ -1737,6 +1751,11 @@ export const WEEKLY_REVIEW_NOW_FAILED_MESSAGE =
  * assembles the week, may run a learner-model synthesis (a model call) and then
  * asks for the narrative — so the page's *Try again* would report a failure the
  * server simply had not finished. The client's timeout is set just above this.
+ *
+ * Still sized right under UX-450: a manual run reaches ONE child, so at most two
+ * model calls (synthesis, then narrative) against five minutes. It stays below
+ * the scheduled run's {@link WEEKLY_REVIEW_TIMEOUT_SECONDS}, which is the one
+ * the page measures an unfinished run against, so that measure holds for both.
  */
 export const WEEKLY_REVIEW_NOW_TIMEOUT_SECONDS = 300;
 
@@ -2005,9 +2024,33 @@ export const WEEKLY_REVIEW_SCHEDULE = {
   timeZone: "America/Chicago",
 } as const;
 
+/**
+ * **The scheduled run's own deadline (UX-450).**
+ *
+ * It had none. `weeklyReview` set no `timeoutSeconds` and nothing in
+ * `functions/src` calls `setGlobalOptions`, so it ran on the platform default of
+ * **60 seconds** — while pass 2 runs every child in sequence and each real child
+ * can make two model calls (`synthesizeIfStale` when the model is stale, then the
+ * narrative). Two boys, up to four Claude calls, one minute. When the platform
+ * kills an instance no `catch` runs, so the week was left `snapshot-only` with no
+ * error recorded and the page said nothing and offered no door.
+ *
+ * **540, and not more**, because 540 seconds (9 minutes) is the SDK's stated
+ * ceiling for event-handling functions, which a scheduled function is; it is
+ * safe on every function type, where a larger value would be refused on some.
+ * It is also at least the manual callable's
+ * {@link WEEKLY_REVIEW_NOW_TIMEOUT_SECONDS} (300, sized for ONE child's two
+ * calls), so the page can measure "this run can no longer finish" from the
+ * longer of the two and be right for both. Mirrored on the client as
+ * `REVIEW_RUN_TIMEOUT_SECONDS` in `weekHours.ts`, pinned by a source scan, and
+ * pinned here by `evaluate.test.ts`.
+ */
+export const WEEKLY_REVIEW_TIMEOUT_SECONDS = 540;
+
 export const weeklyReview = onSchedule(
   {
     ...WEEKLY_REVIEW_SCHEDULE,
+    timeoutSeconds: WEEKLY_REVIEW_TIMEOUT_SECONDS,
     secrets: [claudeApiKey],
   },
   async () => {

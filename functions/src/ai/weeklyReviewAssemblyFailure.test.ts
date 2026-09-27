@@ -102,7 +102,10 @@ vi.mock("firebase-admin/firestore", () => ({ getFirestore: () => fakeDb }));
 vi.mock("./aiConfig.js", () => ({ claudeApiKey: { value: () => "key" } }));
 vi.mock("./authGuard.js", () => ({ requireEmailAuth: () => ({ uid: "fam-1" }) }));
 vi.mock("firebase-functions/v2/https", () => ({
-  onCall: (_opts: unknown, handler: unknown) => handler,
+  onCall: (opts: Record<string, unknown>, handler: unknown) => {
+    deployedOptions.now = opts;
+    return handler;
+  },
   HttpsError: class extends Error {
     code: string;
     constructor(code: string, message: string) {
@@ -111,8 +114,12 @@ vi.mock("firebase-functions/v2/https", () => ({
     }
   },
 }));
+const deployedOptions: { schedule?: Record<string, unknown>; now?: Record<string, unknown> } = {};
 vi.mock("firebase-functions/v2/scheduler", () => ({
-  onSchedule: (_opts: unknown, handler: unknown) => handler,
+  onSchedule: (opts: Record<string, unknown>, handler: unknown) => {
+    deployedOptions.schedule = opts;
+    return handler;
+  },
 }));
 vi.mock("./chatTypes.js", () => ({
   callClaude: async () => {
@@ -484,5 +491,81 @@ describe("round 2 P1 — every child's positions land before any model call", ()
     });
     await flush();
     expect(state.docs.get(PATH)?.curriculumPositions).toBeDefined();
+  });
+});
+
+describe("a killed run is observable: runStartedAt (UX-450)", () => {
+  it("the scheduled function is DEPLOYED with its own deadline, not the 60s default", () => {
+    // Read off the options object handed to `onSchedule`, so this is the value
+    // the function ships with — the gap was an absent key, not a wrong one.
+    expect(deployedOptions.schedule?.timeoutSeconds).toBe(evaluate.WEEKLY_REVIEW_TIMEOUT_SECONDS);
+    expect(evaluate.WEEKLY_REVIEW_TIMEOUT_SECONDS).toBe(540);
+  });
+
+  it("the callable's deadline stays inside the scheduled one the page measures against", () => {
+    expect(deployedOptions.now?.timeoutSeconds).toBe(evaluate.WEEKLY_REVIEW_NOW_TIMEOUT_SECONDS);
+    expect(evaluate.WEEKLY_REVIEW_NOW_TIMEOUT_SECONDS).toBeLessThanOrEqual(
+      evaluate.WEEKLY_REVIEW_TIMEOUT_SECONDS,
+    );
+  });
+
+  it("the cron stamps when it started, on the record it creates", async () => {
+    state.configs = positionedConfigs;
+    await recordWeekBeforeAssembly(db, "fam-1", "lincoln", WEEK, {
+      createPositions: true,
+      startedAt: "2026-09-27T05:15:02.000Z",
+    });
+    const doc = state.docs.get(PATH)!;
+    expect(doc.runStartedAt).toBe("2026-09-27T05:15:02.000Z");
+    expect(doc.status).toBe("snapshot-only");
+  });
+
+  it("a later run overwrites the stamp and changes nothing else — no status, no snapshot", async () => {
+    const recorded = { recordedAt: "x", weekKey: WEEK, positions: [{ configId: "w1", name: "Math", currentPosition: 14 }] };
+    state.docs.set(PATH, {
+      status: "draft",
+      celebration: "He read a chapter.",
+      curriculumPositions: recorded,
+      runStartedAt: "2026-09-27T05:15:02.000Z",
+    });
+    state.configs = [{ id: "w1", data: { name: "Math", currentPosition: 31 } }];
+    await recordWeekBeforeAssembly(db, "fam-1", "lincoln", WEEK, {
+      createPositions: true,
+      startedAt: "2026-09-28T14:00:00.000Z",
+    });
+    const doc = state.docs.get(PATH)!;
+    expect(doc.runStartedAt).toBe("2026-09-28T14:00:00.000Z");
+    expect(doc.status).toBe("draft");
+    expect(doc.curriculumPositions).toEqual(recorded);
+    expect(doc.celebration).toBe("He read a chapter.");
+  });
+
+  it("the manual path stamps a week that exists, and still creates none", async () => {
+    await recordWeekBeforeAssembly(db, "fam-1", "lincoln", WEEK, {
+      createPositions: false,
+      startedAt: "2026-09-28T14:00:00.000Z",
+    });
+    expect(state.docs.has(PATH)).toBe(false);
+
+    state.docs.set(PATH, { status: "snapshot-only" });
+    await recordWeekBeforeAssembly(db, "fam-1", "lincoln", WEEK, {
+      createPositions: false,
+      startedAt: "2026-09-28T14:00:00.000Z",
+    });
+    expect(state.docs.get(PATH)!.runStartedAt).toBe("2026-09-28T14:00:00.000Z");
+    expect(state.docs.get(PATH)!.status).toBe("snapshot-only");
+  });
+
+  it("a run killed after pass 1 leaves the stamp and NO error — the shape the page must name", async () => {
+    // Pass 1 ran; the platform then ended the function before pass 2 reached
+    // this child, so no catch ran. This is the document the page is handed.
+    state.configs = positionedConfigs;
+    await recordWeekBeforeAssembly(db, "fam-1", "lincoln", WEEK, { createPositions: true });
+    const doc = state.docs.get(PATH)!;
+    expect(doc.status).toBe("snapshot-only");
+    expect(typeof doc.runStartedAt).toBe("string");
+    expect(Number.isFinite(Date.parse(doc.runStartedAt as string))).toBe(true);
+    expect(doc.narrativeError).toBeUndefined();
+    expect(doc.contextError).toBeUndefined();
   });
 });
