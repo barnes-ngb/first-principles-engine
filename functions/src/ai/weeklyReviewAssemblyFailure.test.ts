@@ -405,10 +405,13 @@ describe("the manual path (Try again) never creates a snapshot (UX-420)", () => 
 });
 
 describe("round 2 P1 — every child's positions land before any model call", () => {
-  const targets = [
-    { familyId: "fam-1", childId: "lincoln", childName: "Lincoln" },
-    { familyId: "fam-1", childId: "london", childName: "London" },
-  ];
+  const oneFamily = {
+    listFamilies: async () => ["fam-1"],
+    listChildren: async () => [
+      { childId: "lincoln", childName: "Lincoln" },
+      { childId: "london", childName: "London" },
+    ],
+  };
   const LONDON = `families/fam-1/weeklyReviews/${WEEK}_london`;
   const flush = async () => {
     for (let i = 0; i < 30; i++) await new Promise((r) => setTimeout(r, 0));
@@ -417,7 +420,7 @@ describe("round 2 P1 — every child's positions land before any model call", ()
   it("records every child in a first pass, before the first cycle starts", async () => {
     const order: string[] = [];
     await evaluate.runWeeklyReviewCron(db, WEEK, "key", {
-      listTargets: async () => targets,
+      ...oneFamily,
       recordWeekBeforeAssembly: async (_db, _f, childId) => {
         order.push(`record:${childId}`);
       },
@@ -431,7 +434,7 @@ describe("round 2 P1 — every child's positions land before any model call", ()
   it("the second child's positions are on file though the first child's cycle hangs", async () => {
     state.configs = positionedConfigs;
     void evaluate.runWeeklyReviewCron(db, WEEK, "key", {
-      listTargets: async () => targets,
+      ...oneFamily,
       runCycle: () => new Promise(() => undefined),
     });
     await flush();
@@ -442,7 +445,7 @@ describe("round 2 P1 — every child's positions land before any model call", ()
   it("POSITIVE CONTROL — with no first pass, a hang on the first child loses the second", async () => {
     state.configs = positionedConfigs;
     void evaluate.runWeeklyReviewCron(db, WEEK, "key", {
-      listTargets: async () => targets,
+      ...oneFamily,
       recordWeekBeforeAssembly: async () => undefined,
       runCycle: (d, f, c, n, w, k) =>
         c === "lincoln"
@@ -451,5 +454,35 @@ describe("round 2 P1 — every child's positions land before any model call", ()
     });
     await flush();
     expect(state.docs.get(LONDON)?.curriculumPositions).toBeUndefined();
+  });
+
+  it("round 3 P1 — a family whose children cannot be read costs only itself", async () => {
+    state.configs = positionedConfigs;
+    const cycled: string[] = [];
+    await evaluate.runWeeklyReviewCron(db, WEEK, "key", {
+      listFamilies: async () => ["fam-1", "fam-broken"],
+      listChildren: async (_db, familyId) => {
+        if (familyId === "fam-broken") throw new Error("unavailable");
+        return [{ childId: "lincoln", childName: "Lincoln" }];
+      },
+      runCycle: async (_d, familyId, childId) => {
+        cycled.push(`${familyId}/${childId}`);
+      },
+    });
+    expect(state.docs.get(PATH)?.curriculumPositions).toBeDefined();
+    expect(cycled).toEqual(["fam-1/lincoln"]);
+  });
+
+  it("round 3 P1 — a family discovered is recorded before the next is even listed", async () => {
+    state.configs = positionedConfigs;
+    void evaluate.runWeeklyReviewCron(db, WEEK, "key", {
+      listFamilies: async () => ["fam-1", "fam-stalled"],
+      listChildren: (_db, familyId) =>
+        familyId === "fam-stalled"
+          ? new Promise(() => undefined)
+          : Promise.resolve([{ childId: "lincoln", childName: "Lincoln" }]),
+    });
+    await flush();
+    expect(state.docs.get(PATH)?.curriculumPositions).toBeDefined();
   });
 });

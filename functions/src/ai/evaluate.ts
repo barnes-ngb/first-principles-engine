@@ -1889,40 +1889,40 @@ export async function runWeeklyReviewCycleForChild(
   }
 }
 
-/** One child the weekly run covers. */
-export interface WeeklyReviewTarget {
-  familyId: string;
-  childId: string;
-  childName: string;
+/** Every family id, in the order the run visits them. */
+export async function listWeeklyReviewFamilies(db: Firestore): Promise<string[]> {
+  const familiesSnap = await db.collection("families").get();
+  return familiesSnap.docs.map((d) => d.id);
 }
 
-/** Every child of every family, in the order the run visits them. */
-export async function listWeeklyReviewTargets(db: Firestore): Promise<WeeklyReviewTarget[]> {
-  const targets: WeeklyReviewTarget[] = [];
-  const familiesSnap = await db.collection("families").get();
-  for (const familyDoc of familiesSnap.docs) {
-    const childrenSnap = await familyDoc.ref.collection("children").get();
-    for (const childDoc of childrenSnap.docs) {
-      targets.push({
-        familyId: familyDoc.id,
-        childId: childDoc.id,
-        childName: (childDoc.data()?.name as string) || "",
-      });
-    }
-  }
-  return targets;
+/** One family's children. */
+export async function listWeeklyReviewChildren(
+  db: Firestore,
+  familyId: string,
+): Promise<Array<{ childId: string; childName: string }>> {
+  const childrenSnap = await db.collection(`families/${familyId}/children`).get();
+  return childrenSnap.docs.map((d) => ({
+    childId: d.id,
+    childName: (d.data()?.name as string) || "",
+  }));
 }
 
 /**
- * The scheduled run's body, in TWO passes (UX-447, Codex round 2, P1).
+ * The scheduled run's body, in TWO passes (UX-447, Codex rounds 2 and 3, P1).
  *
  * **Pass 1 records every child's positions before any model call starts.**
  * Round 1 moved the record ahead of each child's learner-model synthesis, but
- * the loop awaits one child's whole cycle before reaching the next, so a
- * synthesis or narrative call that hangs until the function's deadline on the
+ * the loop awaited one child's whole cycle before reaching the next, so a
+ * synthesis or narrative call that hung until the function's deadline on the
  * FIRST child still left every later child's week-end positions unwritten —
  * and those cannot be recovered afterwards (UX-212). Pass 1 is plain Firestore
  * reads and one transaction per child, with no model call in it.
+ *
+ * **Pass 1 records each family as it is discovered** (round 3): a census taken
+ * in full first made every snapshot depend on every family's `children` read
+ * succeeding, so one failed or stalled lookup cost the positions of families
+ * already found. A family whose children cannot be read is logged and skipped;
+ * the others are recorded and reviewed as normal.
  *
  * **Pass 2 is the cycle exactly as before** — synthesis, assembly, narrative,
  * one child at a time. Its own `recordWeekBeforeAssembly` is kept: it is
@@ -1936,20 +1936,32 @@ export async function runWeeklyReviewCron(
   weekKey: string,
   apiKey: string,
   deps: {
-    listTargets?: typeof listWeeklyReviewTargets;
+    listFamilies?: typeof listWeeklyReviewFamilies;
+    listChildren?: typeof listWeeklyReviewChildren;
     recordWeekBeforeAssembly?: typeof recordWeekBeforeAssembly;
     runCycle?: typeof runWeeklyReviewCycleForChild;
   } = {},
 ): Promise<void> {
-  const listTargets = deps.listTargets ?? listWeeklyReviewTargets;
+  const listFamilies = deps.listFamilies ?? listWeeklyReviewFamilies;
+  const listChildren = deps.listChildren ?? listWeeklyReviewChildren;
   const record = deps.recordWeekBeforeAssembly ?? recordWeekBeforeAssembly;
   const runCycle = deps.runCycle ?? runWeeklyReviewCycleForChild;
 
-  const targets = await listTargets(db);
-
-  // Pass 1 — every child's positions on file; `record` never throws.
-  for (const t of targets) {
-    await record(db, t.familyId, t.childId, weekKey, { createPositions: true });
+  // Pass 1 — discover a family, record its children at once; `record` never
+  // throws, and a failed lookup costs only its own family.
+  const targets: Array<{ familyId: string; childId: string; childName: string }> = [];
+  for (const familyId of await listFamilies(db)) {
+    let children: Array<{ childId: string; childName: string }>;
+    try {
+      children = await listChildren(db, familyId);
+    } catch (err) {
+      console.error(`Failed to list children for family=${familyId}:`, err);
+      continue;
+    }
+    for (const c of children) {
+      await record(db, familyId, c.childId, weekKey, { createPositions: true });
+      targets.push({ familyId, ...c });
+    }
   }
 
   // Pass 2 — FEAT-57 / FEAT-74: synthesize-if-stale, then the review on the
