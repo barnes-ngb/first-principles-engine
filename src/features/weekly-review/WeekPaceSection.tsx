@@ -19,6 +19,7 @@ import {
   msUntilPositionsDue,
   positionsPendingLine,
   reviewWasGenerated,
+  runUnfinishedAt,
 } from './weekHours'
 import { weekEvidenceCountsLine } from './weekEvidenceCounts'
 import { useWeekHours } from './useWeekHours'
@@ -132,6 +133,10 @@ function WeekPaceBody({
     setClock(now ?? new Date())
   }
 
+  // A number, so the effect below re-arms only when the deadline itself moves
+  // (a new run re-stamps `runStartedAt`), not on every render.
+  const runUnfinishedDeadline = runUnfinishedAt(review, weekKey)
+
   useEffect(() => {
     const refresh = () => setClock(new Date())
     // A phone leaves by switching apps and never unmounts (`useDebounce`'s own
@@ -148,7 +153,24 @@ function WeekPaceBody({
     // further timer is set — so an early wake schedules one more and a correct
     // wake schedules none. `setTimeout` is capped at a 32-bit delay, so a
     // deadline further out than that simply waits for the tab to come back.
-    const ms = msUntilPositionsDue(weekKey, clock)
+    //
+    // UX-450 adds a second moment of the same kind: the instant a run on this
+    // week can no longer be in flight, after which the unfinished-run sentence
+    // and its *Try again* become true. The earlier of the two wakes the tab.
+    //
+    // Measured from the REAL current instant, not from `clock` (Codex round 1,
+    // P2): the deadline moves when a run re-stamps `runStartedAt`, and `clock`
+    // may still be the mount time, so subtracting it added the tab's age to the
+    // wait. A deadline already past while `clock` is behind it fires at once.
+    const dueMs = msUntilPositionsDue(weekKey, clock)
+    const unfinishedMs =
+      runUnfinishedDeadline === null || clock.getTime() >= runUnfinishedDeadline
+        ? null
+        : Math.max(0, runUnfinishedDeadline - Date.now())
+    const candidates = [dueMs, unfinishedMs].filter(
+      (v): v is number => v !== null && v >= 0,
+    )
+    const ms = candidates.length > 0 ? Math.min(...candidates) : null
     const timer =
       ms !== null && ms <= 2_147_483_647 ? setTimeout(refresh, ms) : undefined
 
@@ -157,7 +179,7 @@ function WeekPaceBody({
       window.removeEventListener('focus', refresh)
       if (timer !== undefined) clearTimeout(timer)
     }
-  }, [weekKey, clock])
+  }, [weekKey, clock, runUnfinishedDeadline])
 
   const current = useMemo(
     () => normalizeCurriculumSnapshot(review?.curriculumPositions),
@@ -178,7 +200,9 @@ function WeekPaceBody({
 
   // `null` unless this week's narrative failed; which of the two sentences it
   // is depends on whether an earlier one is still on the document.
-  const narrativeLine = narrativeFailureLine(review)
+  // UX-450: and, against the page's clock, whether a run started and never
+  // finished — the one failure that records no error by construction.
+  const narrativeLine = narrativeFailureLine(review, { weekKey, now: clock })
 
   // A failed read is not an empty result, and a read still in flight is not a
   // first week. Both would otherwise print as an affirmative claim.
@@ -266,6 +290,7 @@ function WeekPaceBody({
           childId={childId}
           weekKey={weekKey}
           review={review}
+          now={clock}
         />
       )}
 

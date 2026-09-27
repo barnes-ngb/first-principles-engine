@@ -14,6 +14,12 @@ export interface WeekRetryControlProps {
   childId: string
   weekKey: string
   review: WeeklyReview | null
+  /**
+   * The section's clock (UX-450). A killed run records no error, so whether the
+   * door is offered for it depends on the time; absent, it is never offered for
+   * that case — the answer that claims less.
+   */
+  now?: Date
 }
 
 /**
@@ -47,16 +53,20 @@ export default function WeekRetryControl(props: WeekRetryControlProps) {
 
 type Phase = 'pending' | 'failed'
 
-function WeekRetryBody({ familyId, childId, weekKey, review }: WeekRetryControlProps) {
+function WeekRetryBody({ familyId, childId, weekKey, review, now }: WeekRetryControlProps) {
   const stateKey = `${childId}|${weekKey}`
   const [attempt, setAttempt] = useState<{ key: string; phase: Phase } | null>(null)
   // Keyed, like the phase (Codex round 1, P2): a boolean held for week A left
   // week B's button enabled and dead after a switch until A finished.
   const inFlight = useRef<Set<string>>(new Set())
 
-  const offer = weekRetryOffer(review)
+  const offer = weekRetryOffer(review, now ? { weekKey, now } : undefined)
   const phase = attempt?.key === stateKey ? attempt.phase : null
-  if (!offer) return null
+  // A tap on an unfinished week re-stamps `runStartedAt` (UX-450), which puts
+  // the week back inside its run window and withdraws the offer while the call
+  // is still out. The tap's own outcome is not the week's, so it stays visible:
+  // the control renders its pending or failed line without the button.
+  if (!offer && phase === null) return null
 
   const onTap = async () => {
     const key = stateKey
@@ -92,17 +102,27 @@ function WeekRetryBody({ familyId, childId, weekKey, review }: WeekRetryControlP
 
   return (
     <Stack spacing={0.5} alignItems="flex-start">
-      <Typography variant="caption" color="text.secondary">
-        {offer.note}
-      </Typography>
-      <Button
-        size="small"
-        variant="outlined"
-        onClick={onTap}
-        disabled={phase === 'pending'}
-      >
-        {phase === 'pending' ? 'Asking…' : offer.label}
-      </Button>
+      {offer && (
+        <Typography variant="caption" color="text.secondary">
+          {offer.note}
+        </Typography>
+      )}
+      {offer ? (
+        <Button
+          size="small"
+          variant="outlined"
+          onClick={onTap}
+          disabled={phase === 'pending'}
+        >
+          {phase === 'pending' ? 'Asking…' : offer.label}
+        </Button>
+      ) : (
+        phase === 'pending' && (
+          <Typography variant="body2" color="text.secondary" role="status">
+            Asking…
+          </Typography>
+        )
+      )}
       {phase === 'failed' && (
         <Typography variant="body2" color="text.secondary" role="status">
           {WEEK_RETRY_FAILED_LINE}

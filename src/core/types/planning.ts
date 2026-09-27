@@ -1220,6 +1220,13 @@ export interface WeeklyReview {
    * written before the week is assembled precisely so that it can.
    */
   contextError?: WeekContextError | null
+  /**
+   * When the last weekly run reached this week, as an ISO instant (UX-450) —
+   * overwritten by every run, scheduled or manual. A run the platform kills at
+   * its deadline records no error, so this is how the page tells a run still in
+   * flight from one that can no longer finish. Never implies a `status`.
+   */
+  runStartedAt?: string
   reviewedAt?: string
   createdAt?: string
   updatedAt?: string
