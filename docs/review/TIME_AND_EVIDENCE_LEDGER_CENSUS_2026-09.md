@@ -53,6 +53,7 @@ take them — marked, not guessed:
 |---|---|---|
 | Which door wrote his Practical Arts hours | Only `UnifiedCaptureCard` writes an `hours` row **and** an artifact in one tap, with the activity name in `notes`. That is the shape he described | The `hours` docs for `2026-09-07`–`2026-09-11`, `source` field |
 | Whether the weekly cron ran for Aug 31 – Sep 4 | **Still not derivable, and never will be for that week.** `generateReviewForChild` wrote **nothing at all** when the Claude call threw, so an absent document is consistent with both "the cron never fired" and "it fired and failed" (`UX-409`). `FIX-236` makes it derivable from the week it ships onward — the record lands before the model call — but nothing back-fills a week whose positions were never read | `weeklyReviews/2026-08-30_<lincoln>` existing, and the `weeklyReview` function's logs |
+| Whether the weekly cron ran for Sep 20 – Sep 26 (added 2026-09-27, `UX-447`) | **Not derivable, and never will be for that week.** The owner read *"No workbook positions were saved for this week"* on Sunday 2026-09-27; the document carries no `status`. Production was still running the pre-`FIX-236` code, and `FIX-236` itself would not have saved the week had `assembleWeekContext` thrown, because it wrote the record one call too deep. `FIX-255` writes the positions **before** the week is assembled and records an app-owned `contextError` if the assembly throws — from the deploy onward. **Nothing back-fills Sep 20 – Sep 26**: `currentPosition` has no history, and since `UX-448` a manual *Try again* never stamps today's positions onto a past week | `weeklyReviews/2026-09-20_<lincoln>` and the `weeklyReview` function's logs for 2026-09-27 |
 | Whether Practical Arts' 4 hours are entries, adjustments or blocks | All three are possible and all three now get named (`UX-408`) | The same week's `hours` / `hoursAdjustments` / `days` documents |
 
 **Not checked:** no browser, no pixels measured, no live Firestore, no Cloud Function
@@ -340,12 +341,14 @@ agreement test keeps its old arithmetic as a second positive control.
 | `UX-406` | 2 | **FIXED** in this run | Review → Week had no week control, so on any day but Saturday it showed the previous school week with no way to move |
 | `UX-407` | 3 | **FIXED** in this run | The positions sentence promised *"saved overnight, once Saturday is over"* about Saturdays already past |
 | `UX-408` | 2 | **FIXED** in this run | Counted minutes that no completed checklist item accounts for were named nowhere |
-| `UX-409` | 1 | **FIXED** by `FIX-236` | A failed weekly review writes **nothing**, so that week's position snapshot — the repo's only record of where a workbook stood on a date — is lost permanently, and no client route regenerates it. The record is now written **before** the model call (owner decision, 2026-09-13); the missing regenerate door is filed on as `UX-420` |
+| `UX-409` | 1 | **FIXED** by `FIX-236` | A failed weekly review writes **nothing**, so that week's position snapshot — the repo's only record of where a workbook stood on a date — is lost permanently, and no client route regenerates it. The record is now written **before** the model call (owner decision, 2026-09-13); the missing regenerate door is filed on as `UX-420`, built by `FIX-255` (owner decision, 2026-09-27) |
 | `UX-410` | 2 | **FIXED** by `FIX-236` | `loadHoursSummary` is a fourth definition of hours, read into two AI prompts, with a 1000-hour target and a percentage. All three AI-side readers now fold through the shared rule and the target line is gone |
 | `UX-411` | 2 | FILED | Two school years: July 1 in the app, August 1 in the Cloud Function |
 | `UX-412` | 2 | FILED | The Workshop and Knowledge Mine date their `hours` / `days` writes in **UTC**, so an evening session is stamped tomorrow |
 | `UX-413` | 3 | PARTIAL — `FIX-237` | (a) Weekly by-subject evidence now uses valid explicit activity days, preserving upload-date fallback for unlinked evidence. (b) Day documents missing `date` remain an open investigation |
 | `UX-414` | 3 | FILED | With a week selector, *"Was that enough this week?"* can now be answered about a week still ahead |
+| `UX-447` | 1 | **FIXED** by `FIX-255` | `FIX-236`'s record-first write sat inside `generateReviewForChild`, behind `assembleWeekContext`; a throw there still lost the week, positions included. The positions are now written before the assembly, and the failure is named on the document |
+| `UX-448` | 2 | **FIXED** by `FIX-255` | The manual regenerate created a positions snapshot from today's `activityConfigs` for a past week that had none. Only the scheduled run may create one now |
 
 Full bodies are in `docs/review/REVIEW_HOME_BASE.md` §6.
 
