@@ -1731,8 +1731,17 @@ function noDataNarrative(ctx: WeekContext): WeeklyReviewNarrative {
 export const WEEKLY_REVIEW_NOW_FAILED_MESSAGE =
   "Weekly review failed. The function's logs have the cause.";
 
+/**
+ * The callable's own deadline (Codex round 1, P2, on UX-420). A callable
+ * defaults to 60 seconds server-side whatever the client waits, and this one
+ * assembles the week, may run a learner-model synthesis (a model call) and then
+ * asks for the narrative — so the page's *Try again* would report a failure the
+ * server simply had not finished. The client's timeout is set just above this.
+ */
+export const WEEKLY_REVIEW_NOW_TIMEOUT_SECONDS = 300;
+
 export const generateWeeklyReviewNow = onCall(
-  { secrets: [claudeApiKey] },
+  { secrets: [claudeApiKey], timeoutSeconds: WEEKLY_REVIEW_NOW_TIMEOUT_SECONDS },
   async (request) => {
     const { uid } = requireEmailAuth(request);
 
@@ -1843,7 +1852,16 @@ export async function runWeeklyReviewCycleForChild(
   const recordFirst = deps.recordWeekBeforeAssembly ?? recordWeekBeforeAssembly;
   const recordContextFailure = deps.writeContextFailure ?? writeContextFailure;
 
-  // 1) Refresh the learner model FIRST (FEAT-57 beat, reordered for FEAT-74).
+  // 0) Put the week's positions on file BEFORE anything else (UX-447). Never
+  //    throws, and it is outside every try below on purpose: the one field that
+  //    cannot be rebuilt no longer waits on six reads it owes nothing — nor on
+  //    the learner-model synthesis, which is a MODEL CALL and can hang until the
+  //    scheduled function's deadline (Codex round 1, P1). A stale model is
+  //    regenerable; a week's positions are not.
+  await recordFirst(db, familyId, childId, weekKey, { createPositions: true });
+
+  // 1) Refresh the learner model (FEAT-57 beat, reordered for FEAT-74) — still
+  //    before the review, so the review reads a fresh frontier.
   try {
     await deps.synthesizeIfStale(db, familyId, childId, childName, apiKey);
   } catch (err) {
@@ -1853,12 +1871,7 @@ export async function runWeeklyReviewCycleForChild(
     );
   }
 
-  // 2) Put the week's positions on file BEFORE assembling it (UX-447). Never
-  //    throws, and it is outside the try below on purpose: the one field that
-  //    cannot be rebuilt no longer waits on six reads it owes nothing.
-  await recordFirst(db, familyId, childId, weekKey, { createPositions: true });
-
-  // 3) Generate the review — now grounded on the fresh frontier.
+  // 2) Generate the review — now grounded on the fresh frontier.
   try {
     let ctx: WeekContext;
     try {

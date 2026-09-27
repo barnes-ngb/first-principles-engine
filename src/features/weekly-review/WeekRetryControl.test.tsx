@@ -261,6 +261,37 @@ describe('Try again (UX-420)', () => {
     expect(screen.queryByText(WEEK_RETRY_FAILED_LINE)).not.toBeInTheDocument()
   })
 
+  it('round 1 P2 — a call pending on one boy’s week does not deaden the other’s button', async () => {
+    let releaseFirst: () => void = () => undefined
+    mockRetry
+      .mockReturnValueOnce(new Promise<void>((r) => (releaseFirst = r)))
+      .mockResolvedValue(undefined)
+    const { rerender } = renderWith(assemblyFailed())
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(mockRetry).toHaveBeenCalledTimes(1)
+
+    const other = (
+      <WeekPaceSection
+        familyId="fam-1"
+        childId="c2"
+        weekKey={WEEK}
+        review={assemblyFailed()}
+        reviewFailed={false}
+        history={[]}
+        historyLoading={false}
+        historyFailed={false}
+        now={OWNER_LOOKED}
+      />
+    )
+    rerender(other)
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    })
+    expect(mockRetry).toHaveBeenCalledTimes(2)
+    expect(mockRetry).toHaveBeenLastCalledWith({ familyId: 'fam-1', childId: 'c2', weekKey: WEEK })
+    await act(async () => releaseFirst())
+  })
+
   it('gates on capability, never on a name', () => {
     const source = readFileSync(join(import.meta.dirname, 'WeekRetryControl.tsx'), 'utf8')
     expect(source).toMatch(/isChildProfile/)

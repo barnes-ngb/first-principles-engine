@@ -227,9 +227,24 @@ describe("the cron: assembly throws, and the week is still on file (UX-447)", ()
     expect(JSON.stringify(state.docs.get(PATH))).not.toContain("PLANTED-MARKER");
   });
 
-  it("records the positions BEFORE the assembly is attempted", async () => {
+  it("round 1 P1 — records the positions even while learner synthesis hangs", async () => {
+    // `synthesizeIfStale` is a model call; a hang until the function's deadline
+    // used to happen BEFORE the positions write, which then never ran.
+    state.configs = positionedConfigs;
+    void runCron({ synthesizeIfStale: () => new Promise(() => undefined) });
+    for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 0));
+
+    expect(state.docs.get(PATH)?.curriculumPositions).toMatchObject({
+      positions: evaluate.toCurriculumPositions(positionedConfigs),
+    });
+  });
+
+  it("records the positions BEFORE synthesis and BEFORE the assembly", async () => {
     const order: string[] = [];
     await runCron({
+      synthesizeIfStale: async () => {
+        order.push("synthesize");
+      },
       recordWeekBeforeAssembly: async () => {
         order.push("record");
       },
@@ -241,7 +256,7 @@ describe("the cron: assembly throws, and the week is still on file (UX-447)", ()
         order.push("context-failure");
       },
     });
-    expect(order).toEqual(["record", "assemble", "context-failure"]);
+    expect(order).toEqual(["record", "synthesize", "assemble", "context-failure"]);
   });
 
   it("a later successful run completes the record and clears the explanation", async () => {

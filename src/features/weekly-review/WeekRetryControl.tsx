@@ -50,16 +50,18 @@ type Phase = 'pending' | 'failed'
 function WeekRetryBody({ familyId, childId, weekKey, review }: WeekRetryControlProps) {
   const stateKey = `${childId}|${weekKey}`
   const [attempt, setAttempt] = useState<{ key: string; phase: Phase } | null>(null)
-  const inFlight = useRef(false)
+  // Keyed, like the phase (Codex round 1, P2): a boolean held for week A left
+  // week B's button enabled and dead after a switch until A finished.
+  const inFlight = useRef<Set<string>>(new Set())
 
   const offer = weekRetryOffer(review)
   const phase = attempt?.key === stateKey ? attempt.phase : null
   if (!offer) return null
 
   const onTap = async () => {
-    if (inFlight.current) return
-    inFlight.current = true
     const key = stateKey
+    if (inFlight.current.has(key)) return
+    inFlight.current.add(key)
     setAttempt({ key, phase: 'pending' })
     try {
       await retryWeeklyReview({ familyId, childId, weekKey })
@@ -84,7 +86,7 @@ function WeekRetryBody({ familyId, childId, weekKey, review }: WeekRetryControlP
       })
       setAttempt((current) => (current?.key === key ? { key, phase: 'failed' } : current))
     } finally {
-      inFlight.current = false
+      inFlight.current.delete(key)
     }
   }
 

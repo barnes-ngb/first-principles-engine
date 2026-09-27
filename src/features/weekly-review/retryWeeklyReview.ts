@@ -28,6 +28,9 @@ export interface RetryWeeklyReviewRequest {
  */
 const inFlight = new Set<string>()
 
+/** 300s server deadline + 10s of network slack. */
+export const RETRY_CLIENT_TIMEOUT_MS = 310_000
+
 export async function retryWeeklyReview(request: RetryWeeklyReviewRequest): Promise<void> {
   const key = `${request.familyId}|${request.childId}|${request.weekKey}`
   if (inFlight.has(key)) {
@@ -38,9 +41,13 @@ export async function retryWeeklyReview(request: RetryWeeklyReviewRequest): Prom
     const callable = httpsCallable<RetryWeeklyReviewRequest, { success: boolean }>(
       getFunctions(),
       'generateWeeklyReviewNow',
-      // Assembly, an optional learner-model synthesis and one model call. The
-      // default 70s is too tight for the synthesis beat on a busy day.
-      { timeout: 300_000 },
+      // Assembly, an optional learner-model synthesis and one model call. Just
+      // above the callable's own `timeoutSeconds` (300, `evaluate.ts`
+      // `WEEKLY_REVIEW_NOW_TIMEOUT_SECONDS`, pinned by test) so the server's
+      // answer, not the client's patience, decides the outcome.
+      // Written as a literal because DOC-09's resilience check reads for one;
+      // `RETRY_CLIENT_TIMEOUT_MS` is the same number, asserted by test.
+      { timeout: 310_000 },
     )
     await callable({
       familyId: request.familyId,

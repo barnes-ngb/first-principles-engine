@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const calls: unknown[] = []
@@ -11,7 +13,7 @@ vi.mock('firebase/functions', () => ({
   },
 }))
 
-import { retryWeeklyReview } from './retryWeeklyReview'
+import { RETRY_CLIENT_TIMEOUT_MS, retryWeeklyReview } from './retryWeeklyReview'
 
 const req = { familyId: 'fam-1', childId: 'c1', weekKey: '2026-09-20' }
 
@@ -26,7 +28,7 @@ describe('retryWeeklyReview (UX-420)', () => {
     release()
     await done
     expect(calls).toEqual([
-      { name: 'generateWeeklyReviewNow', opts: { timeout: 300_000 }, data: req },
+      { name: 'generateWeeklyReviewNow', opts: { timeout: 310_000 }, data: req },
     ])
   })
 
@@ -43,5 +45,22 @@ describe('retryWeeklyReview (UX-420)', () => {
     release()
     await again
     expect(calls).toHaveLength(2)
+  })
+})
+
+describe('the client waits a little longer than the server works (round 1, P2)', () => {
+  it('the callable declares its own timeoutSeconds, and the client timeout sits just above it', () => {
+    const source = readFileSync(
+      join(import.meta.dirname, '../../../functions/src/ai/evaluate.ts'),
+      'utf8',
+    )
+    const declared = /WEEKLY_REVIEW_NOW_TIMEOUT_SECONDS = (\d+);/.exec(source)
+    expect(declared).not.toBeNull()
+    expect(source).toMatch(/timeoutSeconds: WEEKLY_REVIEW_NOW_TIMEOUT_SECONDS/)
+    const serverMs = Number(declared![1]) * 1000
+    expect(RETRY_CLIENT_TIMEOUT_MS).toBeGreaterThan(serverMs)
+    expect(RETRY_CLIENT_TIMEOUT_MS - serverMs).toBeLessThanOrEqual(30_000)
+    // …and the literal the call passes (asserted above as 310_000) is that constant.
+    expect(RETRY_CLIENT_TIMEOUT_MS).toBe(310_000)
   })
 })
