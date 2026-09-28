@@ -5,7 +5,7 @@
 | Metric | Value | Change from last report (2026-09-21) |
 |--------|-------|--------------------------------------|
 | **Total lines** | **382,731** | +3,651 |
-| **Commits** | **3,783** | +26 |
+| **Commits** | **3,783** (pre-audit baseline*) | +26 |
 | **Test files** | **725** | +8 |
 | **Tests passing** | **10,391** (root combined suite, 725 files, 1 skipped by design, 0 failing) + **1,538** (functions/ own suite, 69 files, real deps) | +180 root, +29 functions (+1 file) |
 | **Firestore collections** | **47** | +0 |
@@ -14,6 +14,12 @@
 | **Routes** | **39** | +0 |
 | **Main chunk size** | **4,231.15 kB / 1,265.19 kB gzip** | **−388.05 kB / −127.04 kB gzip** |
 | **Total JS output** (all emitted chunks) | **~5,006.0 kB / ~1,502.8 kB gzip** | not tracked last cycle |
+
+*\*The commit count is measured against the branch point this audit read (`git rev-list --count HEAD` before this run's own commits existed) and is therefore always stale by the time this report is committed and read — each commit this run makes, and anything merged to `main` afterward, puts the true count one or more ahead. Naming a fixed "current" number inside a commit that itself becomes one of the commits being counted is a moving target that cannot be made exactly correct by construction; it is labeled a baseline rather than chased.*
+
+**Codex round 2 finding (acknowledged, labeled rather than chased — see above):** the commit count named a stale total, off by one at round 1's reviewed commit and by two at round 2's (`git rev-list --count HEAD` reads 3,785 as of this line). Fixed by labeling the number as a pre-audit baseline in both this file and `MASTER_OUTLINE.md`, per the finding's own suggested resolution, rather than attempting to name an exact number that a subsequent commit (including this one) would immediately invalidate again.
+
+**Codex round 2 finding (real, left open — this PR is at its 2-round cap for a sub-500-line diff):** this report's repository-wide survey numbers (TS line count, commit count, test-file count, route count, stale-doc count, etc.) are produced by ad-hoc commands run in-session rather than a **committed** script, which `CLAUDE.md`'s "Numbers in prose are derived, never counted by hand" rule requires for exactly this class of number — a survey across a body of code larger than the change itself. This has been the routine's practice every prior cycle (the 2026-09-21 report shows the same pattern), so it is a pre-existing gap this run inherited rather than introduced, and the round-2 commit-count miss is a direct symptom of it. Building and wiring a committed health-census script (mirroring the `census:child-switch` / `census:finding-tags` precedent) is a real fix but is a scoped engineering task — new tooling, cross-platform correctness per `docs/SCRIPT_CONVENTIONS.md`, and re-deriving every number in this report from it — not a mechanical doc correction, so it is named here for a dedicated follow-up run rather than attempted under this round's cap.
 
 **Codex round 1 finding (fixed in this PR):** last cycle's "Bundle size" row named only the main `index` chunk, not the app's total JS payload — a fresh `npm run build` also emits the split `jspdf` (385.99 kB), `html2canvas` (201.04 kB), and `purify.es` (28.98 kB) chunks, bringing total JS output to ~5,006.0 kB / ~1,502.8 kB gzip. Under the old single-number label, moving jsPDF out of the initial chunk read as a flat 388 kB reduction even though those bytes still ship (on demand, at first "Make a PDF" tap) rather than disappearing. The row is now split into **main chunk** (what loads on first paint — the number that matters for initial load, and the one FIX-253 actually reduced) and **total JS output** (all emitted chunks summed, for payload-growth tracking) so the two questions can't be conflated again. Main chunk dropped for the reason stated below; total JS output is reported for the first time this cycle so there is nothing yet to diff it against.
 
@@ -200,6 +206,7 @@ Every doc that appears in both this cycle's and last cycle's oldest-15 lists age
 
 ### Needs Human Attention
 
+- **(Codex round 2, PR #1878) This report's repository-wide survey numbers are not derived from a committed script**, contrary to `CLAUDE.md`'s derived-numbers rule for exactly this class of count. Left open at this PR's 2-round review cap — see the Metrics section's round-2 note for the full finding and why it wasn't attempted as a mechanical fix. Recommend a dedicated follow-up run to build a committed `scripts/health-census.mjs` (or similar) mirroring the `census:child-switch` precedent, that both this report and `MASTER_OUTLINE.md`'s Scale block read from.
 - **`today/captureRowWrite.ts` is referenced in `CLAUDE.md`'s Today section but the file is actually named `src/features/today/dayChecklistRowWrite.ts`.** Unchanged from last cycle. See Missing File References above. Worth a one-line CLAUDE.md correction, but it's prose (out of this audit's auto-fix scope).
 - **`functions/src/ai/evaluate.ts` grew +370 lines this cycle (1,736→2,106L)**, crossing 2,000L, from the documented FIX-255/FIX-256 weekly-review reliability work. Not yet in `CLAUDE.md`'s Known Technical Debt list — worth a decision on whether to add it now that it has crossed the threshold this repo otherwise treats as a decomposition trigger.
 - **`TodayPage.tsx` (1,952L), `CurriculumTab.tsx` (1,857L), and `DevAdminTab.tsx` (1,530L)** — all previously flagged as growing fast, all flat or near-flat this cycle, all still absent from `CLAUDE.md`'s Known Technical Debt section. Worth a decision on whether to add them now that growth has paused, or wait and see if it resumes.

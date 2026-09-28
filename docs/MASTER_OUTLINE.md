@@ -14,7 +14,7 @@ Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), 
 
 **Scale (current):**
 - TypeScript lines: **382,731** total
-- Commits: **3,783**
+- Commits: **3,783** (pre-audit baseline — the count as of the branch point this audit read; this audit's own commits, and any merged after, are not included and will always put the true count one or more ahead by the time this line is read)
 - Tests: **725 test files**
 - Firestore collections/doc helpers: **47** in `firestore.ts`
 - Cloud Functions: **29**
