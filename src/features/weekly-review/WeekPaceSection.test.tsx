@@ -593,3 +593,89 @@ describe('the positions sentence corrects itself at the deadline', () => {
     expect(vi.getTimerCount()).toBe(0)
   })
 })
+
+describe('a run that started and never finished (UX-450)', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  const STARTED = '2026-09-06T05:15:02.000Z' // the cron's 00:15 CT on this fixture week
+  /** What a killed run leaves: status, positions, a stamp — and no error field at all. */
+  const killed = (extra: Record<string, unknown> = {}): WeeklyReview =>
+    ({
+      childId: 'c1',
+      weekKey: '2026-08-30',
+      status: 'snapshot-only',
+      curriculumPositions: snapshot(SEP_07, 14),
+      runStartedAt: STARTED,
+      ...extra,
+    }) as unknown as WeeklyReview
+  const UNFINISHED = /This week’s summary didn’t finish, so it won’t be part of the monthly book/
+
+  it('says nothing while the run may still be working — a minute in', () => {
+    renderWithReview(killed(), [], { now: new Date('2026-09-06T05:16:00Z') })
+    expect(screen.queryByText(UNFINISHED)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument()
+  })
+
+  it('names the week and offers Try again once the deadline passes, with no reload', () => {
+    vi.useFakeTimers()
+    const mountedAt = new Date('2026-09-06T05:16:00Z') // a minute into the run
+    vi.setSystemTime(mountedAt)
+    renderWithReview(killed(), [], { now: mountedAt })
+    expect(screen.queryByText(UNFINISHED)).not.toBeInTheDocument()
+
+    act(() => {
+      vi.advanceTimersByTime(20 * 60 * 1000)
+    })
+
+    expect(screen.getByText(UNFINISHED)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
+    // The positions sentences stay out of it: the positions WERE saved.
+    expect(screen.queryByText(/No workbook positions were saved for this week/)).not.toBeInTheDocument()
+  })
+
+  it('round 1 P2 — a stamp arriving hours after mount is timed from now, not from the mount', () => {
+    vi.useFakeTimers()
+    const mountedAt = new Date('2026-09-07T08:00:00Z')
+    vi.setSystemTime(mountedAt)
+    // Mounted on a finished week: no deadline, so no timer and no clock refresh.
+    const { rerender } = renderWithReview(
+      killed({ status: 'draft', celebration: 'He read a chapter.' }),
+      [],
+      { now: mountedAt },
+    )
+    act(() => {
+      vi.advanceTimersByTime(2 * 60 * 60 * 1000)
+    })
+    // Two hours on, a retry re-stamps the week and its narrative is not there.
+    const restamped = killed({ runStartedAt: '2026-09-07T10:00:00.000Z' })
+    rerender(
+      <WeekPaceSection
+        familyId="fam-1"
+        childId="c1"
+        weekKey="2026-08-30"
+        review={restamped}
+        reviewFailed={false}
+        history={[]}
+        historyLoading={false}
+        historyFailed={false}
+        now={mountedAt}
+      />,
+    )
+    expect(screen.queryByText(UNFINISHED)).not.toBeInTheDocument()
+
+    act(() => {
+      vi.advanceTimersByTime(15 * 60 * 1000)
+    })
+    expect(screen.getByText(UNFINISHED)).toBeInTheDocument()
+  })
+
+  it('never names a week whose narrative stands', () => {
+    renderWithReview(killed({ celebration: 'He read a chapter.' }), [], {
+      now: new Date('2026-09-20T12:00:00Z'),
+    })
+    expect(screen.queryByText(UNFINISHED)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument()
+  })
+})

@@ -1145,6 +1145,22 @@ export interface WeekNarrativeError {
   at: string
 }
 
+/**
+ * Why this week's records could not be gathered for a summary (UX-447).
+ *
+ * The Cloud Function writes it when `assembleWeekContext` throws — the step
+ * BEFORE the record and the model call — and clears it to `null` once a later
+ * run gets through. Same contract as {@link WeekNarrativeError}: the app's own
+ * words from a one-entry table, never an exception's message, and rendered by
+ * nothing (the page says the parent's version of it).
+ */
+export interface WeekContextError {
+  message: string
+  /** `'assembly-failed'`. */
+  reason?: string
+  at: string
+}
+
 export interface WeeklyReview {
   id?: string
   childId: string
@@ -1197,6 +1213,20 @@ export interface WeeklyReview {
    * lands. Absent on every review written before UX-409.
    */
   narrativeError?: WeekNarrativeError | null
+  /**
+   * Why this week's records could not be gathered for a summary (UX-447).
+   * `null` once a later run assembles them. A document carrying one may hold
+   * `curriculumPositions` and a `status` and nothing else — the positions are
+   * written before the week is assembled precisely so that it can.
+   */
+  contextError?: WeekContextError | null
+  /**
+   * When the last weekly run reached this week, as an ISO instant (UX-450) —
+   * overwritten by every run, scheduled or manual. A run the platform kills at
+   * its deadline records no error, so this is how the page tells a run still in
+   * flight from one that can no longer finish. Never implies a `status`.
+   */
+  runStartedAt?: string
   reviewedAt?: string
   createdAt?: string
   updatedAt?: string

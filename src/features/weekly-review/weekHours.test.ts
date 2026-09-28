@@ -18,6 +18,16 @@ import {
   NARRATIVE_FAILED_LINE,
   NARRATIVE_STALE_LINE,
   reviewWasGenerated,
+  CONTEXT_FAILED_LINE,
+  REVIEW_RUN_MARGIN_MS,
+  REVIEW_RUN_TIMEOUT_SECONDS,
+  RUN_UNFINISHED_LINE,
+  RUN_UNFINISHED_NO_POSITIONS_LINE,
+  WEEK_RETRY_LABEL,
+  WEEK_RETRY_NOTE,
+  WEEK_RETRY_NOTE_NO_POSITIONS,
+  runUnfinishedAt,
+  weekRetryOffer,
 } from './weekHours'
 
 describe('hoursLoggedLine (UX-211)', () => {
@@ -284,5 +294,112 @@ describe('narrativeFailureLine — a failed regenerate is not a missing week', (
   it('narrows structurally, like everything else reading this document', () => {
     expect(reviewHasNarrative({ wins: 'Phonics' } as never)).toBe(false)
     expect(narrativeFailureLine({ narrativeError: 'boom' } as never)).toBeNull()
+  })
+})
+
+// ── A run that started and never finished (UX-450) ──────────────────────────
+
+describe('a killed weekly run is named, and only once it can no longer finish', () => {
+  const WEEK = '2026-09-20' // Sun Sep 20 – Sat Sep 26; cron due 00:15 CT Sun Sep 27
+  const STARTED = '2026-09-27T05:15:02.000Z'
+  const LIMIT_MS = REVIEW_RUN_TIMEOUT_SECONDS * 1000 + REVIEW_RUN_MARGIN_MS
+  const positions = { recordedAt: STARTED, weekKey: WEEK, positions: [{ configId: 'w1', name: 'Math', currentPosition: 14 }] }
+  /** Exactly what a run killed after pass 1 leaves: a status, positions, a stamp — and no error. */
+  const killed = (extra: Record<string, unknown> = {}) => ({
+    status: 'snapshot-only',
+    curriculumPositions: positions,
+    runStartedAt: STARTED,
+    ...extra,
+  })
+  const at = (ms: number) => ({ weekKey: WEEK, now: new Date(Date.parse(STARTED) + ms) })
+
+  it('POSITIVE CONTROL — with no clock, the killed-run document gets no sentence and no door (the gap)', () => {
+    expect(narrativeFailureLine(killed())).toBeNull()
+    expect(weekRetryOffer(killed())).toBeNull()
+  })
+
+  it('names it, with the door, once the deadline and margin have passed', () => {
+    expect(narrativeFailureLine(killed(), at(LIMIT_MS))).toBe(RUN_UNFINISHED_LINE)
+    expect(weekRetryOffer(killed(), at(LIMIT_MS))).toEqual({
+      label: WEEK_RETRY_LABEL,
+      note: WEEK_RETRY_NOTE,
+    })
+  })
+
+  it('stays silent inside the legitimate window between pass 1 and pass 2', () => {
+    // A clock just inside the margin: the run may still be working.
+    expect(narrativeFailureLine(killed(), at(LIMIT_MS - 1))).toBeNull()
+    expect(weekRetryOffer(killed(), at(LIMIT_MS - 1))).toBeNull()
+    // And a minute after it started, which is where pass 2 normally is.
+    expect(narrativeFailureLine(killed(), at(60_000))).toBeNull()
+  })
+
+  it('says so when no positions are on file, and the note says the tap cannot save any', () => {
+    const doc = killed({ curriculumPositions: undefined })
+    expect(narrativeFailureLine(doc, at(LIMIT_MS))).toBe(RUN_UNFINISHED_NO_POSITIONS_LINE)
+    expect(weekRetryOffer(doc, at(LIMIT_MS))?.note).toBe(WEEK_RETRY_NOTE_NO_POSITIONS)
+  })
+
+  it('measures from the stamp, not the schedule — a manual run at 2pm Monday gets its own window', () => {
+    const monday = '2026-09-28T19:00:00.000Z'
+    const doc = killed({ runStartedAt: monday })
+    const mondayAt = (ms: number) => ({ weekKey: WEEK, now: new Date(Date.parse(monday) + ms) })
+    expect(narrativeFailureLine(doc, mondayAt(LIMIT_MS - 1))).toBeNull()
+    expect(narrativeFailureLine(doc, mondayAt(LIMIT_MS))).toBe(RUN_UNFINISHED_LINE)
+  })
+
+  it('a document with no stamp (written before it shipped) falls back to the week’s scheduled due instant', () => {
+    const doc = killed({ runStartedAt: undefined })
+    const due = Date.parse('2026-09-27T05:15:00Z') // 00:15 CDT
+    expect(narrativeFailureLine(doc, { weekKey: WEEK, now: new Date(due + LIMIT_MS - 1) })).toBeNull()
+    expect(narrativeFailureLine(doc, { weekKey: WEEK, now: new Date(due + LIMIT_MS) })).toBe(
+      RUN_UNFINISHED_LINE,
+    )
+    expect(runUnfinishedAt(doc, WEEK)).toBe(due + LIMIT_MS)
+    // An unparseable stamp is treated as none, never as the epoch.
+    expect(runUnfinishedAt(killed({ runStartedAt: 'not a date' }), WEEK)).toBe(due + LIMIT_MS)
+  })
+
+  it('never fires on a week whose narrative stands', () => {
+    const doc = killed({ celebration: 'He read a chapter.' })
+    expect(narrativeFailureLine(doc, at(LIMIT_MS * 10))).toBeNull()
+    expect(weekRetryOffer(doc, at(LIMIT_MS * 10))).toBeNull()
+  })
+
+  it('never fires on a week the run finished (draft / no-data)', () => {
+    expect(narrativeFailureLine(killed({ status: 'draft' }), at(LIMIT_MS * 10))).toBeNull()
+    expect(narrativeFailureLine(killed({ status: 'no-data' }), at(LIMIT_MS * 10))).toBeNull()
+  })
+
+  it('a recorded error still takes precedence, with its wording unchanged', () => {
+    const narrative = killed({ narrativeError: { message: 'x', at: STARTED } })
+    expect(narrativeFailureLine(narrative, at(LIMIT_MS * 10))).toBe(NARRATIVE_FAILED_LINE)
+    const context = killed({ contextError: { message: 'x', at: STARTED } })
+    expect(narrativeFailureLine(context, at(LIMIT_MS * 10))).toBe(CONTEXT_FAILED_LINE)
+    expect(runUnfinishedAt(narrative, WEEK)).toBeNull()
+    expect(runUnfinishedAt(context, WEEK)).toBeNull()
+  })
+})
+
+describe('REVIEW_RUN_TIMEOUT_SECONDS mirrors the Cloud Function’s deadline (UX-450)', () => {
+  // Read as SOURCE, for `REVIEW_SAVE_DUE_TIME`'s reason above.
+  const source = readFileSync(
+    join(import.meta.dirname, '..', '..', '..', 'functions', 'src', 'ai', 'evaluate.ts'),
+    'utf8',
+  )
+
+  it('matches WEEKLY_REVIEW_TIMEOUT_SECONDS exactly', () => {
+    const declared = /export const WEEKLY_REVIEW_TIMEOUT_SECONDS = (\d+);/.exec(source)?.[1]
+    expect(declared).toBeDefined()
+    expect(Number(declared)).toBe(REVIEW_RUN_TIMEOUT_SECONDS)
+  })
+
+  it('is the scheduled function’s deployed deadline', () => {
+    expect(source).toMatch(/timeoutSeconds: WEEKLY_REVIEW_TIMEOUT_SECONDS/)
+  })
+
+  it('is at least the manual callable’s, so one measure is right for both paths', () => {
+    const callable = /export const WEEKLY_REVIEW_NOW_TIMEOUT_SECONDS = (\d+);/.exec(source)?.[1]
+    expect(Number(callable)).toBeLessThanOrEqual(REVIEW_RUN_TIMEOUT_SECONDS)
   })
 })
