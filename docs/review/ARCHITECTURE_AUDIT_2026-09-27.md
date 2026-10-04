@@ -62,7 +62,7 @@ passed cleanly in isolation (`npx vitest run` on the file alone: 20/20 tests, th
 1,604ms — nowhere near the limit). This is the same failure shape as the standing `TEST-02` row
 (`BookEditorPage.cover.test.tsx` — "passes in isolation, blips under full-suite load") on a second file;
 filed as `TEST-06` rather than silently re-running until green, per this audit's own "the baseline is
-the first finding" rule — a timeout that only reproduces under load is real evidence, not noise, even
+the first finding" rule — a timeout that only reproduces under load is real evidence, not noise,
 and its cause has not been established. A second full-suite run was started to check reproducibility; its
 result is folded into this report before the PR opens (see the note at the end of this section).
 

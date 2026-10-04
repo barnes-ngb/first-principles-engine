@@ -6,8 +6,7 @@
 > **Where fixing happens:** Claude Code web, driven by the prompts in `prompts/`, reviewed before merge.
 > **Repo:** github.com/barnes-ngb/first-principles-engine · **Live:** first-principles-engine.web.app
 > **Created:** 2026-05-29 · **Last audit:** 2026-09-27 (`ARCHITECTURE_AUDIT_2026-09-27.md` — the monthly
-> deep architecture audit, window 2026-09-20→09-27: baseline green throughout (one confirmed environmental
-> flake, `TEST-06`); headline is `FIX-253` finally claiming the standing `ARCH-05` `jspdf` code-split
+> deep architecture audit, window 2026-09-20→09-27: baseline green throughout (one observed timeout with unestablished cause, `TEST-06`); headline is `FIX-253` finally claiming the standing `ARCH-05` `jspdf` code-split
 > recommendation this series carried unbuilt for five cycles (main bundle −391.76 kB / −128.10 kB gzip,
 > the first cycle-over-cycle bundle shrink this series has recorded), `ARCH-02` unaddressed for a sixth
 > consecutive cycle (file completely untouched this window), and `FIX-254` closing `UX-443`→`445` (Today's
