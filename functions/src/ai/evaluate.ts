@@ -96,6 +96,12 @@ export interface WeeklyReviewDoc {
    * module needs no `FieldValue` (which its tests would then have to mock).
    */
   narrativeError?: NarrativeErrorDoc | null;
+  /**
+   * Why the week's CONTEXT could not be assembled, when `assembleWeekContext`
+   * threw (UX-447). `null` once a later run assembles it. Same contract as
+   * `narrativeError`: the app's own words, from a table, never an exception's.
+   */
+  contextError?: ContextErrorDoc | null;
   model: string;
   usage: { inputTokens: number; outputTokens: number };
   createdAt: string;
@@ -959,7 +965,10 @@ async function writeWeekRecord(
     const standingNarrative =
       existingStatus !== undefined && !REPLACEABLE_REVIEW_STATUSES.has(existingStatus);
 
-    const payload: Record<string, unknown> = { ...record };
+    // Reaching this write means the week's context WAS assembled, so an earlier
+    // run's explanation of why it could not be must go (UX-447) — the same
+    // reason `narrativeError` is cleared when a narrative lands.
+    const payload: Record<string, unknown> = { ...record, contextError: null };
     if (narrative && !standingNarrative) {
       Object.assign(payload, narrative);
       // A narrative accepted here is a narrative that landed, so the previous
@@ -1075,6 +1084,194 @@ export function narrativeErrorDoc(reason: NarrativeFailureReason): NarrativeErro
     reason,
     at: new Date().toISOString(),
   };
+}
+
+// ── UX-447: the positions go on file BEFORE the week is assembled ─────────────
+
+/**
+ * Why this week's context could not be assembled (UX-447) — the app's own
+ * words, from this table, for the same reason as
+ * {@link NARRATIVE_FAILURE_MESSAGES}: an exception's message is not ours to
+ * store. A Firestore error can quote a document path, and the next thing to
+ * throw in `assembleWeekContext` could quote anything. The thrown error still
+ * reaches the function's logs unchanged; only the stored sentence is fixed.
+ */
+export const CONTEXT_FAILURE_MESSAGES = {
+  "assembly-failed":
+    "The week's records could not be gathered for a summary. The function's logs have the cause.",
+} as const;
+export type ContextFailureReason = keyof typeof CONTEXT_FAILURE_MESSAGES;
+
+/** The stored shape of a context failure. Never exception text, by construction. */
+export interface ContextErrorDoc {
+  message: string;
+  reason: ContextFailureReason;
+  at: string;
+}
+
+export function contextErrorDoc(reason: ContextFailureReason): ContextErrorDoc {
+  return {
+    message: CONTEXT_FAILURE_MESSAGES[reason],
+    reason,
+    at: new Date().toISOString(),
+  };
+}
+
+/**
+ * Put the week's workbook positions on file BEFORE the week is assembled
+ * (UX-447) — FIX-236's argument applied one step earlier.
+ *
+ * ── What went wrong ─────────────────────────────────────────────────────────
+ * UX-409 moved the record ahead of the model call, but it moved it INSIDE
+ * `generateReviewForChild`, and both callers reach that function through
+ * `assembleWeekContext` — which reads `days`, `hours`, `hoursAdjustments`,
+ * books, teach-backs and the child document, and can throw on any of them (a
+ * permission change, a missing index, one malformed day, a transient error). A
+ * throw there lost the whole week with nothing on file, positions included, and
+ * the page said *"No workbook positions were saved for this week"* — which is
+ * what the owner read on Sunday 2026-09-27 about the week of 2026-09-20.
+ *
+ * The positions owe the assembly nothing: `loadCurriculumSnapshot` is a plain
+ * read of `activityConfigs` keyed on family, child and week. So they are written
+ * here, first, and the one irreplaceable field no longer depends on six reads it
+ * has nothing to do with.
+ *
+ * ── The rules it keeps (FIX-236's three, unchanged) ─────────────────────────
+ * **Merged and field-scoped** — `{childId, weekKey}`, the positions, and a
+ * `status` only where there is none; nothing else is in the payload, so a
+ * narrative, an hours summary or a parent's answer already on the document
+ * cannot be touched. **Create-only** — a `curriculumPositions` already on file
+ * stands, checked and written in one transaction. **Never downgrades `status`**
+ * — `snapshot-only` is stamped only on a document that carries no status.
+ *
+ * ── Only the scheduled run may create a snapshot ────────────────────────────
+ * `createPositions` is `false` on the manual path (`generateWeeklyReviewNow`,
+ * the page's *Try again*). A snapshot is a reading of where the workbooks stood
+ * WHEN THE WEEK CLOSED; a reading taken days later is not that, and stamping it
+ * onto the week's document would put today's positions under last week's name.
+ * `ActivityConfig.currentPosition` is one mutable field with no history
+ * (UX-212), so a week the cron could not record has no recoverable positions
+ * and nothing here invents them. On the manual path this function records only
+ * that a run reached the week, and only on a document that already exists.
+ *
+ * ── Why a separate field and not a fourth `status` ──────────────────────────
+ * A record written here has positions and no `hoursSummary` and no `evidence`,
+ * which is weaker than a `snapshot-only` record, and the document must not imply
+ * otherwise. The weakness is carried by `contextError` rather than a new status
+ * because `status` answers a different question and has rules this one would
+ * break: the page reads it as *"the run wrote this week"* (true here), and it is
+ * never downgraded — so on a regenerate of a `draft` week whose assembly then
+ * throws, a status could not say so without violating rule 3, while a field
+ * beside it can, exactly as `narrativeError` already does for the model half.
+ * The two errors are kept apart because they mean different things to a parent:
+ * a context failure means the week was never summarised from its records, a
+ * narrative failure means it was and the model did not answer.
+ *
+ * ── `runStartedAt` (UX-450) ─────────────────────────────────────────────────
+ * Every call stamps when the run began, overwriting the last run's stamp. On
+ * the scheduled path that is the INVOCATION's start, shared by every child and
+ * by both passes (Codex round 1, P2) — the platform's deadline runs from there;
+ * a manual run establishes its own. It is the one way a KILLED run is observable: the platform ending the
+ * function at its deadline runs no `catch`, so such a run leaves `status:
+ * 'snapshot-only'` and no error field at all. The page reads the stamp against
+ * {@link WEEKLY_REVIEW_TIMEOUT_SECONDS} (the longer of the two deadlines) to
+ * tell a run still in flight from one that can no longer finish. The stamp
+ * never writes `status` and never touches the snapshot.
+ *
+ * Never throws: it is a best-effort head start, and the record write in
+ * `generateReviewForChild` still runs afterwards. If the transaction cannot
+ * complete, nothing is written here — a plain merge could not honour
+ * create-only, and `writeWeekRecord` has its own documented fallback.
+ */
+export async function recordWeekBeforeAssembly(
+  db: Firestore,
+  familyId: string,
+  childId: string,
+  weekKey: string,
+  options: { createPositions: boolean; startedAt?: string },
+): Promise<void> {
+  const runStartedAt = options.startedAt ?? new Date().toISOString();
+  try {
+    const curriculumPositions = options.createPositions
+      ? await loadCurriculumSnapshot(db, familyId, childId, weekKey)
+      : undefined;
+    const ref = db
+      .collection(`families/${familyId}/weeklyReviews`)
+      .doc(`${weekKey}_${childId}`);
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      const existing = snap.exists ? (snap.data() ?? {}) : undefined;
+      // The manual path has nothing irreplaceable to protect, so it never
+      // CREATES a document: a request naming a child this family does not have
+      // would otherwise leave a stray `weeklyReviews` row behind before the
+      // assembly refused it.
+      if (!options.createPositions && existing === undefined) return;
+      // UX-450: when this run began, overwritten every run. A run the platform
+      // kills at its deadline runs no catch, so it leaves no `narrativeError` and
+      // no `contextError` — this stamp is the only trace that it started, and the
+      // page measures "should have finished by now" from it. Never a `status`.
+      const payload: Record<string, unknown> = { childId, weekKey, runStartedAt };
+      if (curriculumPositions && existing?.curriculumPositions === undefined) {
+        payload.curriculumPositions = curriculumPositions;
+      }
+      const existingStatus = existing?.status;
+      if (typeof existingStatus !== "string" || existingStatus === "") {
+        payload.status = REVIEW_STATUS_SNAPSHOT_ONLY;
+      }
+      tx.set(ref, payload, { merge: true });
+    });
+  } catch (err) {
+    console.warn("[UX-447] Could not record the week before assembling it", err);
+  }
+}
+
+/**
+ * Record that the week's context could not be assembled (UX-447). Never throws,
+ * for `writeNarrativeFailure`'s reason: the run is already failing, and a failure
+ * to write the explanation must not replace the failure being explained.
+ *
+ * It lands only on a document that already EXISTS — the one
+ * {@link recordWeekBeforeAssembly} just wrote. A `contextError` on a document
+ * with no `status` would be an explanation of a run the page cannot see, and
+ * where the pre-assembly write itself failed there is nothing to explain onto.
+ */
+export async function writeContextFailure(
+  db: Firestore,
+  familyId: string,
+  childId: string,
+  weekKey: string,
+): Promise<void> {
+  try {
+    const ref = db
+      .collection(`families/${familyId}/weeklyReviews`)
+      .doc(`${weekKey}_${childId}`);
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists) return;
+      tx.set(ref, { contextError: contextErrorDoc("assembly-failed") }, { merge: true });
+    });
+  } catch (writeErr) {
+    console.warn("[UX-447] Could not record the context failure", writeErr);
+  }
+}
+
+/**
+ * Assemble the week, and if that throws, say so on the document before
+ * re-throwing (UX-447). The thrown error is the caller's to log, unchanged.
+ */
+export async function assembleWeekContextOrRecordFailure(
+  db: Firestore,
+  familyId: string,
+  childId: string,
+  weekKey: string,
+  assemble: typeof assembleWeekContext = assembleWeekContext,
+): Promise<WeekContext> {
+  try {
+    return await assemble(familyId, childId, weekKey);
+  } catch (err) {
+    await writeContextFailure(db, familyId, childId, weekKey);
+    throw err;
+  }
 }
 
 export function buildEvaluationPrompt(ctx: WeekContext): string {
@@ -1413,6 +1610,7 @@ export async function generateReviewForChild(
   familyId: string,
   ctx: WeekContext,
   apiKey: string,
+  options: { createPositions?: boolean } = {},
 ): Promise<WeeklyReviewDoc> {
   const db = getFirestore();
   const reviewDocId = `${ctx.weekKey}_${ctx.child.id}`;
@@ -1424,9 +1622,14 @@ export async function generateReviewForChild(
   // half has no failure mode of its own. A week with nothing logged is recorded
   // exactly like any other — it is precisely the week UX-213's rate exists to
   // make visible.
-  const curriculumPositions = await loadCurriculumSnapshot(
-    db, familyId, ctx.child.id, ctx.weekKey,
-  );
+  //
+  // `createPositions: false` is the manual path (UX-447): a reading taken after
+  // the week closed is not that week's, so it is not taken at all — see
+  // `recordWeekBeforeAssembly`. The scheduled run keeps the default, which also
+  // makes this a second chance if the pre-assembly write could not complete.
+  const curriculumPositions = options.createPositions === false
+    ? undefined
+    : await loadCurriculumSnapshot(db, familyId, ctx.child.id, ctx.weekKey);
   const record: WeeklyReviewRecord = {
     childId: ctx.child.id,
     weekKey: ctx.weekKey,
@@ -1540,8 +1743,26 @@ function noDataNarrative(ctx: WeekContext): WeeklyReviewNarrative {
 
 // ── On-demand callable (Generate Now) ───────────────────────────
 
+/** What a failed manual run tells its caller — the app's words only (UX-449). */
+export const WEEKLY_REVIEW_NOW_FAILED_MESSAGE =
+  "Weekly review failed. The function's logs have the cause.";
+
+/**
+ * The callable's own deadline (Codex round 1, P2, on UX-420). A callable
+ * defaults to 60 seconds server-side whatever the client waits, and this one
+ * assembles the week, may run a learner-model synthesis (a model call) and then
+ * asks for the narrative — so the page's *Try again* would report a failure the
+ * server simply had not finished. The client's timeout is set just above this.
+ *
+ * Still sized right under UX-450: a manual run reaches ONE child, so at most two
+ * model calls (synthesis, then narrative) against five minutes. It stays below
+ * the scheduled run's {@link WEEKLY_REVIEW_TIMEOUT_SECONDS}, which is the one
+ * the page measures an unfinished run against, so that measure holds for both.
+ */
+export const WEEKLY_REVIEW_NOW_TIMEOUT_SECONDS = 300;
+
 export const generateWeeklyReviewNow = onCall(
-  { secrets: [claudeApiKey] },
+  { secrets: [claudeApiKey], timeoutSeconds: WEEKLY_REVIEW_NOW_TIMEOUT_SECONDS },
   async (request) => {
     const { uid } = requireEmailAuth(request);
 
@@ -1574,14 +1795,21 @@ export const generateWeeklyReviewNow = onCall(
     }
 
     try {
-      const ctx = await assembleWeekContext(familyId, childId, weekKey);
+      const db = getFirestore();
+      // UX-447: note that a run reached this week before anything can fail, and
+      // say on the document if the assembly does. `createPositions: false` — a
+      // manual run is not the week closing, so it never stamps today's positions
+      // onto a past week (a snapshot already on file stands either way).
+      await recordWeekBeforeAssembly(db, familyId, childId, weekKey, {
+        createPositions: false,
+      });
+      const ctx = await assembleWeekContextOrRecordFailure(db, familyId, childId, weekKey);
 
       // FEAT-74 (G4): synthesize-if-stale BEFORE generating, mirroring the Sunday
       // cron ordering, so the manual review also grounds on a fresh model frontier.
       // Isolated in its own try/catch — a synthesis failure must never block the
       // review (it falls back to whatever synthesis is stored).
       try {
-        const db = getFirestore();
         await synthesizeIfStale(db, familyId, childId, ctx.child.name, apiKey);
       } catch (synthErr) {
         console.error(
@@ -1590,7 +1818,7 @@ export const generateWeeklyReviewNow = onCall(
         );
       }
 
-      await generateReviewForChild(familyId, ctx, apiKey);
+      await generateReviewForChild(familyId, ctx, apiKey, { createPositions: false });
     } catch (err) {
       if (err instanceof HttpsError) throw err;
       const errMsg = err instanceof Error ? err.message : "Unknown error";
@@ -1600,7 +1828,13 @@ export const generateWeeklyReviewNow = onCall(
         weekKey,
         error: errMsg,
       });
-      throw new HttpsError("internal", `Weekly review failed: ${errMsg}`);
+      // The cause stays in the logs above and never crosses to the client
+      // (UX-449). It used to be quoted into this message, and on an unreadable
+      // reply the cause is a `SyntaxError` excerpting the MODEL'S text — the
+      // thing `narrativeErrorDoc` keeps off the document for UX-311's reason. It
+      // had no client caller until UX-420's *Try again*, which is what made it
+      // reachable.
+      throw new HttpsError("internal", WEEKLY_REVIEW_NOW_FAILED_MESSAGE);
     }
 
     return { success: true };
@@ -1630,9 +1864,37 @@ export async function runWeeklyReviewCycleForChild(
     synthesizeIfStale: typeof synthesizeIfStale;
     assembleWeekContext: typeof assembleWeekContext;
     generateReviewForChild: typeof generateReviewForChild;
+    /** UX-447 — injectable so the ORDER is assertable; defaults to the real one. */
+    recordWeekBeforeAssembly?: typeof recordWeekBeforeAssembly;
+    /** UX-447 — injectable for the same reason. */
+    writeContextFailure?: typeof writeContextFailure;
   } = { synthesizeIfStale, assembleWeekContext, generateReviewForChild },
+  options: {
+    /**
+     * UX-450 (Codex round 1, P2) — the INVOCATION's start, for the
+     * `runStartedAt` stamp. The scheduler's deadline began before pass 1, so
+     * a fresh stamp per child would give a later child a window the function
+     * no longer has. Absent (a direct call), the stamp is taken now.
+     */
+    startedAt?: string;
+  } = {},
 ): Promise<void> {
-  // 1) Refresh the learner model FIRST (FEAT-57 beat, reordered for FEAT-74).
+  const recordFirst = deps.recordWeekBeforeAssembly ?? recordWeekBeforeAssembly;
+  const recordContextFailure = deps.writeContextFailure ?? writeContextFailure;
+
+  // 0) Put the week's positions on file BEFORE anything else (UX-447). Never
+  //    throws, and it is outside every try below on purpose: the one field that
+  //    cannot be rebuilt no longer waits on six reads it owes nothing — nor on
+  //    the learner-model synthesis, which is a MODEL CALL and can hang until the
+  //    scheduled function's deadline (Codex round 1, P1). A stale model is
+  //    regenerable; a week's positions are not.
+  await recordFirst(db, familyId, childId, weekKey, {
+    createPositions: true,
+    startedAt: options.startedAt,
+  });
+
+  // 1) Refresh the learner model (FEAT-57 beat, reordered for FEAT-74) — still
+  //    before the review, so the review reads a fresh frontier.
   try {
     await deps.synthesizeIfStale(db, familyId, childId, childName, apiKey);
   } catch (err) {
@@ -1644,13 +1906,114 @@ export async function runWeeklyReviewCycleForChild(
 
   // 2) Generate the review — now grounded on the fresh frontier.
   try {
-    const ctx = await deps.assembleWeekContext(familyId, childId, weekKey);
+    let ctx: WeekContext;
+    try {
+      ctx = await deps.assembleWeekContext(familyId, childId, weekKey);
+    } catch (err) {
+      await recordContextFailure(db, familyId, childId, weekKey);
+      throw err;
+    }
     await deps.generateReviewForChild(familyId, ctx, apiKey);
   } catch (err) {
     console.error(
       `Failed to generate weekly review for family=${familyId} child=${childId}:`,
       err,
     );
+  }
+}
+
+/** Every family id, in the order the run visits them. */
+export async function listWeeklyReviewFamilies(db: Firestore): Promise<string[]> {
+  const familiesSnap = await db.collection("families").get();
+  return familiesSnap.docs.map((d) => d.id);
+}
+
+/** One family's children. */
+export async function listWeeklyReviewChildren(
+  db: Firestore,
+  familyId: string,
+): Promise<Array<{ childId: string; childName: string }>> {
+  const childrenSnap = await db.collection(`families/${familyId}/children`).get();
+  return childrenSnap.docs.map((d) => ({
+    childId: d.id,
+    childName: (d.data()?.name as string) || "",
+  }));
+}
+
+/**
+ * The scheduled run's body, in TWO passes (UX-447, Codex rounds 2 and 3, P1).
+ *
+ * **Pass 1 records every child's positions before any model call starts.**
+ * Round 1 moved the record ahead of each child's learner-model synthesis, but
+ * the loop awaited one child's whole cycle before reaching the next, so a
+ * synthesis or narrative call that hung until the function's deadline on the
+ * FIRST child still left every later child's week-end positions unwritten —
+ * and those cannot be recovered afterwards (UX-212). Pass 1 is plain Firestore
+ * reads and one transaction per child, with no model call in it.
+ *
+ * **Pass 1 records each family as it is discovered** (round 3): a census taken
+ * in full first made every snapshot depend on every family's `children` read
+ * succeeding, so one failed or stalled lookup cost the positions of families
+ * already found. A family whose children cannot be read is logged and skipped;
+ * the others are recorded and reviewed as normal.
+ *
+ * **Pass 2 is the cycle exactly as before** — synthesis, assembly, narrative,
+ * one child at a time. Its own `recordWeekBeforeAssembly` is kept: it is
+ * create-only, so on a normal run it writes nothing new, and it is the second
+ * chance for a child whose pass-1 transaction could not complete.
+ *
+ * Deps are injectable so the pass order is assertable without a live Firestore.
+ */
+export async function runWeeklyReviewCron(
+  db: Firestore,
+  weekKey: string,
+  apiKey: string,
+  deps: {
+    listFamilies?: typeof listWeeklyReviewFamilies;
+    listChildren?: typeof listWeeklyReviewChildren;
+    recordWeekBeforeAssembly?: typeof recordWeekBeforeAssembly;
+    runCycle?: typeof runWeeklyReviewCycleForChild;
+    /**
+     * When this invocation began (UX-450). Every child's `runStartedAt` is
+     * stamped with this ONE instant — pass 1 and pass 2 alike — because the
+     * platform's deadline runs from the invocation, not from a child's turn
+     * (Codex round 1, P2). The handler passes the moment it was entered.
+     */
+    startedAt?: Date;
+  } = {},
+): Promise<void> {
+  const invocationStartedAt = (deps.startedAt ?? new Date()).toISOString();
+  const listFamilies = deps.listFamilies ?? listWeeklyReviewFamilies;
+  const listChildren = deps.listChildren ?? listWeeklyReviewChildren;
+  const record = deps.recordWeekBeforeAssembly ?? recordWeekBeforeAssembly;
+  const runCycle = deps.runCycle ?? runWeeklyReviewCycleForChild;
+
+  // Pass 1 — discover a family, record its children at once; `record` never
+  // throws, and a failed lookup costs only its own family.
+  const targets: Array<{ familyId: string; childId: string; childName: string }> = [];
+  for (const familyId of await listFamilies(db)) {
+    let children: Array<{ childId: string; childName: string }>;
+    try {
+      children = await listChildren(db, familyId);
+    } catch (err) {
+      console.error(`Failed to list children for family=${familyId}:`, err);
+      continue;
+    }
+    for (const c of children) {
+      await record(db, familyId, c.childId, weekKey, {
+        createPositions: true,
+        startedAt: invocationStartedAt,
+      });
+      targets.push({ familyId, ...c });
+    }
+  }
+
+  // Pass 2 — FEAT-57 / FEAT-74: synthesize-if-stale, then the review on the
+  // fresh frontier. Failure isolation lives inside the helper.
+  for (const t of targets) {
+    await runCycle(db, t.familyId, t.childId, t.childName, weekKey, apiKey, undefined, {
+      startedAt: invocationStartedAt,
+    });
   }
 }
 
@@ -1688,12 +2051,38 @@ export const WEEKLY_REVIEW_SCHEDULE = {
   timeZone: "America/Chicago",
 } as const;
 
+/**
+ * **The scheduled run's own deadline (UX-450).**
+ *
+ * It had none. `weeklyReview` set no `timeoutSeconds` and nothing in
+ * `functions/src` calls `setGlobalOptions`, so it ran on the platform default of
+ * **60 seconds** — while pass 2 runs every child in sequence and each real child
+ * can make two model calls (`synthesizeIfStale` when the model is stale, then the
+ * narrative). Two boys, up to four Claude calls, one minute. When the platform
+ * kills an instance no `catch` runs, so the week was left `snapshot-only` with no
+ * error recorded and the page said nothing and offered no door.
+ *
+ * **540, and not more**, because 540 seconds (9 minutes) is the SDK's stated
+ * ceiling for event-handling functions, which a scheduled function is; it is
+ * safe on every function type, where a larger value would be refused on some.
+ * It is also at least the manual callable's
+ * {@link WEEKLY_REVIEW_NOW_TIMEOUT_SECONDS} (300, sized for ONE child's two
+ * calls), so the page can measure "this run can no longer finish" from the
+ * longer of the two and be right for both. Mirrored on the client as
+ * `REVIEW_RUN_TIMEOUT_SECONDS` in `weekHours.ts`, pinned by a source scan, and
+ * pinned here by `evaluate.test.ts`.
+ */
+export const WEEKLY_REVIEW_TIMEOUT_SECONDS = 540;
+
 export const weeklyReview = onSchedule(
   {
     ...WEEKLY_REVIEW_SCHEDULE,
+    timeoutSeconds: WEEKLY_REVIEW_TIMEOUT_SECONDS,
     secrets: [claudeApiKey],
   },
   async () => {
+    // UX-450: the deadline runs from here, so the stamp does too.
+    const startedAt = new Date();
     const db = getFirestore();
     // The family's civil date, not the runtime's (UX-266).
     //
@@ -1712,25 +2101,6 @@ export const weeklyReview = onSchedule(
     const weekKey = lastWeekKey(civilDateObjectInZone(new Date(), WEEKLY_REVIEW_SCHEDULE.timeZone));
     const apiKey = claudeApiKey.value();
 
-    // Get all families
-    const familiesSnap = await db.collection("families").get();
-
-    for (const familyDoc of familiesSnap.docs) {
-      const familyId = familyDoc.id;
-
-      // Get all children in this family
-      const childrenSnap = await familyDoc.ref.collection("children").get();
-
-      for (const childDoc of childrenSnap.docs) {
-        const childId = childDoc.id;
-        const childName = (childDoc.data()?.name as string) || "";
-
-        // FEAT-57 / FEAT-74: synthesize-if-stale FIRST, then generate the review
-        // on the fresh frontier. Failure isolation lives inside the helper.
-        await runWeeklyReviewCycleForChild(
-          db, familyId, childId, childName, weekKey, apiKey,
-        );
-      }
-    }
+    await runWeeklyReviewCron(db, weekKey, apiKey, { startedAt });
   },
 );

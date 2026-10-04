@@ -22,13 +22,15 @@
 > what was checked off) plus one Codex-round follow-up fix — both fix rows already correctly reflected
 > in the ledger with merged PR numbers before this audit started, so this cycle's ledger contribution is
 > re-verification plus two genuinely-new status-cell updates (`ARCH-05`, a new flaky-test row), not a
-> backlog of unflipped cells. One flaky test found and confirmed environmental (passes in isolation,
+> backlog of unflipped cells. One flaky test found and observed load-sensitive (passes in isolation,
 > times out only under full-suite load) — the same class as the standing `TEST-02` row, now a second
 > instance.
 
 ---
 
 ## Step 0 — Baseline
+
+October 4 reconciliation: results below are the original audit's historical observations at efab358. Passing reruns do not establish the timeout's cause. TEST-06 remains open; no production fix or global timeout change is made by this report.
 
 ```
 npm ci (root)                         → fresh container, clean install
@@ -39,7 +41,7 @@ npx vitest run                        → run 1: 10,217 passing + 1 skipped (718
                                          full-suite load); isolated re-run of that file: 20/20 passing,
                                          1.6s (well under the timeout); full-suite run 2: 718/718 files,
                                          10,218 passing + 1 skipped, 0 failing, clean — confirmed
-                                         environmental flake, not a regression (see below)
+                                         timeout with cause not established (see below)
 cd functions && npm ci                → fresh container, clean install
 cd functions && npm run lint          → CLEAN
 cd functions && npx tsc --noEmit      → CLEAN
@@ -61,7 +63,7 @@ passed cleanly in isolation (`npx vitest run` on the file alone: 20/20 tests, th
 (`BookEditorPage.cover.test.tsx` — "passes in isolation, blips under full-suite load") on a second file;
 filed as `TEST-06` rather than silently re-running until green, per this audit's own "the baseline is
 the first finding" rule — a timeout that only reproduces under load is real evidence, not noise, even
-though it isn't a logic regression. A second full-suite run was started to check reproducibility; its
+and its cause has not been established. A second full-suite run was started to check reproducibility; its
 result is folded into this report before the PR opens (see the note at the end of this section).
 
 Root tests: **717 → 718 files (+1), 10,211 → 10,217 passing + 1 skipped (+6)** since the 09-20 baseline —
@@ -86,7 +88,7 @@ those 14 flagged locations.
 **Full-suite re-run confirms the flake, does not reproduce it:** a second `npx vitest run`, started
 immediately after the first, completed **718/718 files passing, 10,218 passing + 1 skipped, 0 failing**
 (440.58s) — clean, including `SketchScanner.resultIdentity.test.tsx`. Two data points now agree: the test
-is correct and the failure is timing-margin-under-load, not a logic defect — consistent with `TEST-02`'s
+passed on rerun; timing pressure is a hypothesis, not proof against a logic defect — consistent with `TEST-02`'s
 own documented behavior on a different file. Baseline stands as **GREEN**.
 
 ---
@@ -212,9 +214,9 @@ nothing new to file. **TEST-01 status: unchanged — IMPROVING, no new progress 
 gaps or the `workshop` ratio** — expected, given the window touched none of the relevant files.
 
 **New this cycle: `TEST-06`**, filed for the flake found in Step 0 (`SketchScanner.resultIdentity.test.
-tsx`'s 5000ms timeout under full-suite load, confirmed environmental by an isolated pass at 1.6s). This
+tsx`'s 5000ms timeout under full-suite load, observed load-sensitive by an isolated pass at 1.6s). This
 is the same failure shape `TEST-02` already names on a different file (`BookEditorPage.cover.test.tsx`),
-so the underlying cause is now demonstrated on two independent test files rather than one — worth
+so a similar timeout pattern is observed on two independent test files; its cause remains unconfirmed — worth
 tracking as its own row (not merged into `TEST-02`, whose own text is scoped to one named file) but
 flagged as the same class, since a `PROMPT_FIX` addressing one might reasonably raise the suite's default
 per-test timeout, or examine what's making the full 718-file run tight on wall-clock margin around these
@@ -413,7 +415,7 @@ correct direction of travel. No new view computes hours independently this windo
   now two cycles' worth of unrelated growth plus one cycle of real shrink out of date), route-level
   `React.lazy`/`ARCH-08` still unbuilt — row **stays OPEN**, now correctly described as partially
   addressed rather than silently identical to five cycles ago.
-- **`docs/review/REVIEW_HOME_BASE.md` §6** — new row **`TEST-06`** filed for the confirmed environmental
+- **`docs/review/REVIEW_HOME_BASE.md` §6** — new row **`TEST-06`** filed for the observed load-sensitive
   flake found in Step 0 (§1.4).
 - `docs/review/REVIEW_HOME_BASE.md` header: bumped "Last audit" to 2026-09-27, this report added to the
   audit chain.
@@ -455,7 +457,7 @@ protocol below.
 ## 5-line summary
 
 **Baseline: GREEN** (root: 0 lint errors/3 pre-existing warnings, tsc clean, 10,217/10,218 tests passing
-+1 skipped across 718 files on the first run, one confirmed environmental flake — `SketchScanner.
++1 skipped across 718 files on the first run, one observed load-sensitive flake — `SketchScanner.
 resultIdentity.test.tsx` timed out under full-suite load but passed 20/20 in isolation, filed as
 `TEST-06`; functions: clean lint/tsc, 1,509/1,509 tests across 68 files, byte-identical to 09-20 since no
 `functions/src` file changed this window; build clean, bundle **4,227.44 kB/1,264.13 kB gzip, the first
