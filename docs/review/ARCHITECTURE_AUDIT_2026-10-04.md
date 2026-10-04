@@ -113,15 +113,19 @@ removes some): `three` **598,580 B** (152,160 B gzip) · `@mui/material` **560,4
 `firebase/functions` 42,891 B. Firebase and MUI are needed by every route, so only Three.js is a lazy-split
 candidate by size.
 
-**Who pulls Three.js:** `from 'three'` appears in 25 files, all under `src/features/avatar/` (21 in `voxel/`).
-But `VoxelCharacter` is also reached from **`today/KidTodayView.tsx`** and **`progress/ArmorTab.tsx`**, and
-`router.tsx` imports `MyAvatarPage` eagerly (line 26; 34 eager imports, 0 `lazy(`). So a route-level split of
-`/avatar` alone would **not** remove Three.js from the initial load of Today for a kid profile unless the
-`VoxelCharacter` import in those two files is also made lazy (a component-level `React.lazy`, not a route
-one). **Estimated initial-load reduction if all three entry points are lazy: up to ≈ 150 kB gzip** (Three.js's
-standalone gzip above, an upper bound, deferred only until a surface that draws the voxel avatar is opened).
-The other routes' own code was **not** measured per-route (no per-route build analysis was run), so no figure
-is claimed for them. Architectural decision for the owner, not an auto-fix.
+**Who pulls Three.js (corrected after Codex round 2):** `from 'three'` appears in 25 files, all under
+`src/features/avatar/` — but that is the *definition* site, not the reach. `AvatarThumbnail.tsx` imports
+`three` (`import * as THREE`, line 2) and is imported **statically by the app shell** (`app/AppShell.tsx:16`)
+and by `components/ContextBar.tsx`, `components/ProfileMenu.tsx`, `today/KidTodayView.tsx`, `ArmorGateScreen`
+and five Workshop play views (`grep -rn "import AvatarThumbnail" src`). `router.tsx` also imports
+`MyAvatarPage` eagerly (line 26; 34 eager imports, 0 `lazy(`). So **Three.js is in the initial chunk for
+every route via `AppShell`**: a route-level `React.lazy` on `/avatar` removes **nothing**, and
+lazy-loading `VoxelCharacter` alone would not either. A real split needs `AvatarThumbnail` itself behind a
+`Suspense` boundary (or a non-Three fallback thumbnail) at the shell and its eight other consumers. Whether
+that is worth doing is **unmeasured**: the standalone-bundle figures above are upper bounds for a namespace
+import, and no chunk graph of the real build was produced, so **this audit asserts no reduction figure**.
+The next step is a measured chunk graph (e.g. a bundle visualiser run on the real build) before any
+ranking. Architectural decision for the owner, not an auto-fix.
 
 ### 1.4 Test coverage (`TEST-01`)
 
@@ -241,8 +245,8 @@ Holds. The only hours-adjacent changes are `weekRibbon.logic.ts` (folds through 
 header `Last audit` bump only.
 
 **Recommended `PROMPT_FIX` order:**
-1. `ARCH-05`/`ARCH-08` — a design decision first, then lazy-loading Three.js (§1.3: ≈ 150 kB gzip upper
-   bound; needs component-level lazy in `KidTodayView`/`ArmorTab` as well as the `/avatar` route).
+1. `ARCH-05`/`ARCH-08` — a design decision first, then a measured chunk graph (§1.3). Three.js is reached
+   from the app shell via `AvatarThumbnail`, so no split is justified until that is measured.
 2. `DATA-13` — route the four Missouri literals through `stateCompliance.ts` (trivial, unblocks TX).
 3. `TEST-01` — a `workshop` logic test file.
 `ARCH-51` is a design-first read, not yet a fix target.
