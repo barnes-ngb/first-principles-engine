@@ -50,13 +50,37 @@ still unbuilt; the remaining 4.2 MB is Three.js + every route in one chunk.
 
 ## Step 1 — Architecture & tech debt (Band 1)
 
-### 1.1 Files ≥ 1,500L — **18**, same set as 09-20
+### 1.1 Files ≥ 1,500L — **18**, same set as 09-20, each judged
 
 `npm run census:arch-audit -- --base=2a4cf2c` prints 18 production files ≥ 1,500L (915 files scanned).
-Largest: `PlannerChatPage.tsx` 3,942 · `chat.ts` 3,108 · `BookEditorPage.tsx` 2,433 · `useQuestSession.ts`
-2,275 · `evaluate.ts` 2,106. The three standing candidates (`PlannerChatPage`, `chat.ts`, `useQuestSession`)
-are **byte-flat in line count** this window; `BookEditorPage.tsx` shrank 10 lines (a −4 net edit from
-`FIX-253`). **`ARCH-02` is now unaddressed for a sixth consecutive cycle**, again without growing.
+Judgments restate the standing ones in `CLAUDE.md` › Known Technical Debt and the 09-13/09-20 audits; none of
+the 18 moved by more than the figures shown in 1.2 this window, so no judgment changed except `evaluate.ts`.
+
+| Lines | File | Judgment | Seam / action |
+|---|---|---|---|
+| 3,942 | `planner-chat/PlannerChatPage.tsx` | **Tangled** (`ARCH-02`) | `useLiveDayEditHandlers` hook lift (~230L), mirroring `useAppliedWeekDays` |
+| 3,108 | `ai/chat.ts` | **Tangled** (`ARCH-01`) | extract prompt builders (`buildQuestPrompt` alone 400+L) |
+| 2,433 | `books/BookEditorPage.tsx` | Cohesive-but-big (`ARCH-03`) | sketch/voice/sticker panels, later |
+| 2,275 | `quest/useQuestSession.ts` | **Tangled** (`ARCH-04`) | split by quest domain |
+| 2,106 | `ai/evaluate.ts` | **Now tangled** — see 1.2 (`ARCH-51`) | lift record/failure block |
+| 1,952 | `today/TodayPage.tsx` | Cohesive-but-big | leave (09-20 §1.3) |
+| 1,928 | `workshop/WorkshopPage.tsx` | Cohesive-but-big | phase rendering already delegated; not urgent |
+| 1,919 | `ai/tasks/shellyChat.ts` | Cohesive-but-big | one task handler; leave |
+| 1,897 | `avatar/MyAvatarPage.tsx` | Cohesive-but-big | stable |
+| 1,857 | `progress/CurriculumTab.tsx` | Not yet judged tangled (`ARCH-50`) | design-first read of section boundaries |
+| 1,841 | `today/TodayChecklist.tsx` | Cohesive-but-big | leave |
+| 1,776 | `records/dataReviewExport.logic.ts` | Tangled-leaning (`ARCH-44`) | design-first per that row |
+| 1,682 | `planner-chat/chatPlanner.logic.ts` | Cohesive-but-big | pure logic module; leave |
+| 1,638 | `ai/contextSlices.ts` | Cohesive-but-big, growing | domain-group split when next touched |
+| 1,614 | `records/RecordsPage.tsx` | Cohesive-but-big | leave |
+| 1,606 | `avatar/VoxelCharacter.tsx` | Cohesive-but-big | Three.js render loop; splitting is risky |
+| 1,530 | `settings/DevAdminTab.tsx` | Cohesive-but-big | admin-only tool surface; leave |
+| 1,506 | `shelly-chat/useShellyChatActions.ts` | Cohesive-but-big | write layer; watch growth |
+
+`PlannerChatPage`, `chat.ts` and `useQuestSession` are line-flat this window; `BookEditorPage.tsx` shrank by
+a net 4 lines (`git diff --numstat`: +3 / −7). **`ARCH-02` is unaddressed for a sixth consecutive cycle**,
+again without growing. The "cohesive" calls on the lower rows are carried forward, not re-read this window —
+the census proves size, not cohesion.
 
 ### 1.2 `functions/src/ai/evaluate.ts` — +370L in one window, now tangled enough to file (`ARCH-51`)
 
@@ -80,12 +104,24 @@ read, then lift the record/failure block to `functions/src/ai/weeklyReviewRecord
 `weeklyReviewAssemblyFailure.test.ts` / `weeklyReviewSnapshotWrite.test.ts` split the tests already follow.
 Filed as `ARCH-51`; not for `PROMPT_FIX` until the owner wants it — the file is correct and heavily tested.
 
-### 1.3 Bundle (`ARCH-05`/`ARCH-08`)
+### 1.3 Bundle (`ARCH-05`/`ARCH-08`) — measured
 
-See Step 0. `FIX-253` is the first movement in six cycles and it was the cheap half. **Proposal unchanged:**
-route-level `React.lazy` for the heaviest feature routes (Three.js avatar surfaces first, then Books editor
-and Workshop). Not estimated afresh here — the 09-13 estimate predates this and no new measurement was run,
-so no number is asserted. Architectural decision for the owner, not an auto-fix.
+Main chunk **4,231.15 kB** (Step 0). Heaviest third-party imports, measured by bundling each entry alone with
+esbuild `--bundle --minify` (namespace import, so **upper bounds** — tree-shaking in the real build
+removes some): `three` **598,580 B** (152,160 B gzip) · `@mui/material` **560,490 B** (166,619 B gzip) ·
+`firebase/firestore` **409,575 B** (115,996 B gzip) · `firebase/auth` 169,972 B · `firebase/storage` 71,509 B ·
+`firebase/functions` 42,891 B. Firebase and MUI are needed by every route, so only Three.js is a lazy-split
+candidate by size.
+
+**Who pulls Three.js:** `from 'three'` appears in 25 files, all under `src/features/avatar/` (21 in `voxel/`).
+But `VoxelCharacter` is also reached from **`today/KidTodayView.tsx`** and **`progress/ArmorTab.tsx`**, and
+`router.tsx` imports `MyAvatarPage` eagerly (line 26; 34 eager imports, 0 `lazy(`). So a route-level split of
+`/avatar` alone would **not** remove Three.js from the initial load of Today for a kid profile unless the
+`VoxelCharacter` import in those two files is also made lazy (a component-level `React.lazy`, not a route
+one). **Estimated initial-load reduction if all three entry points are lazy: up to ≈ 150 kB gzip** (Three.js's
+standalone gzip above, an upper bound, deferred only until a surface that draws the voxel avatar is opened).
+The other routes' own code was **not** measured per-route (no per-route build analysis was run), so no figure
+is claimed for them. Architectural decision for the owner, not an auto-fix.
 
 ### 1.4 Test coverage (`TEST-01`)
 
@@ -163,6 +199,17 @@ and the Records page can no longer show different hours for one week. **DATA-01 
 retires the ribbon as the last known second definition of "hours this week" on a parent surface.
 (The 09-20 report counted 4 sites; the ribbon is the fifth.)
 
+**Authoritative core-hours figure.** The last recorded figure is **598.73 h core for Lincoln**, i.e.
+**1.27 h under** the MO 600-core line (`ARCHITECTURE_AUDIT_2026-05.md:255`, the DATA-01 fix run). **It is not
+recomputed here and cannot be from a repo-only audit:** the number is a fold over live `days`/`hours`/
+`hoursAdjustments` documents in Firestore, which this environment has no access to (the 2026-06 audit
+recorded the same limit, `ARCHITECTURE_AUDIT_2026-06.md:222`). What this audit *can* verify — and does — is
+that the fold itself did not move: `functions/src/shared/hoursContributions.ts`, `src/features/records/` and
+the 09-20-to-now diff contain no change to `collectHoursContributions` or `computeHoursSummary`
+(`git diff 2a4cf2c origin/main --stat -- functions/src/shared src/features/records` is empty). The figure is
+therefore stale only to the extent hours were logged after it was last read, and the MO core-hours deadline
+(2026-06-30) is past; the owner's live reading is the authority. No gap is restated from this repo.
+
 ### 4.2 `DATA-02` — still NEEDS-DATA
 
 `2026-10-04 − 2026-07-01 = 95` days past the freeze window (was 81 at 09-20). Needs a live Firestore export
@@ -194,8 +241,8 @@ Holds. The only hours-adjacent changes are `weekRibbon.logic.ts` (folds through 
 header `Last audit` bump only.
 
 **Recommended `PROMPT_FIX` order:**
-1. `ARCH-05`/`ARCH-08` — a design decision first, then the route-level `React.lazy` split (largest remaining
-   user-visible win; the `jspdf` slice proved the approach).
+1. `ARCH-05`/`ARCH-08` — a design decision first, then lazy-loading Three.js (§1.3: ≈ 150 kB gzip upper
+   bound; needs component-level lazy in `KidTodayView`/`ArmorTab` as well as the `/avatar` route).
 2. `DATA-13` — route the four Missouri literals through `stateCompliance.ts` (trivial, unblocks TX).
 3. `TEST-01` — a `workshop` logic test file.
 `ARCH-51` is a design-first read, not yet a fix target.
