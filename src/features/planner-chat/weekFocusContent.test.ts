@@ -11,7 +11,8 @@ const base: WeekPlan = {
   heartQuestion: '',
   tracks: [],
   flywheelPlan: '',
-  buildLab: { title: '', description: '' },
+  buildLab: { title: '', materials: [], steps: [] },
+  childGoals: [],
 }
 
 describe('weekFocusPanelHasContent', () => {
@@ -27,7 +28,7 @@ describe('weekFocusPanelHasContent', () => {
     expect(
       weekFocusPanelHasContent({
         ...base,
-        conundrum: { question: 'What would you do?', context: 'A dilemma' },
+        conundrum: { title: 'A dilemma', scenario: 'Choosing to help', question: 'What would you do?', lincolnPrompt: 'Explain your choice', londonPrompt: 'Tell your choice', virtueConnection: 'Kindness' },
       }),
     ).toBe(true)
   })
@@ -37,7 +38,7 @@ describe('weekFocusPanelHasContent', () => {
       weekFocusPanelHasContent({
         ...base,
         theme: 'Perseverance',
-        conundrum: { question: 'Is it fair?', context: 'Sharing' },
+        conundrum: { title: 'Sharing', scenario: 'Sharing supplies', question: 'Is it fair?', lincolnPrompt: 'Explain your choice', londonPrompt: 'Tell your choice', virtueConnection: 'Fairness' },
       }),
     ).toBe(true)
   })

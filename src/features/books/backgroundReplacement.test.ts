@@ -96,14 +96,14 @@ describe('replacePageBackground', () => {
   })
 
   it('preserves previousVersions from the old image', () => {
-    const versions = [{ url: 'https://old.com/v1.jpg', style: 'comic' }]
+    const versions: PageImage['previousVersions'] = [{ url: 'https://old.com/v1.jpg', replacedAt: '2026-09-07T12:00:00Z', replacedBy: 'reimagine' }]
     const page = makePage({
-      images: [makeImage({ previousVersions: versions } as Partial<PageImage>)],
+      images: [makeImage({ previousVersions: versions })],
     })
     const target = makeTarget()
     const result = replacePageBackground(page, target, candidate)
 
-    expect((result!.images[0] as Record<string, unknown>).previousVersions).toEqual(versions)
+    expect(result!.images[0].previousVersions).toEqual(versions)
   })
 
   it('returns undefined if page id does not match', () => {

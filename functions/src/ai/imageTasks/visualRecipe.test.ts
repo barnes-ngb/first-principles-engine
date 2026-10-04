@@ -198,7 +198,7 @@ describe("MEDIUM_TERMS", () => {
   });
 
   it("every medium has at least one search term", () => {
-    for (const [medium, terms] of Object.entries(MEDIUM_TERMS)) {
+    for (const terms of Object.values(MEDIUM_TERMS)) {
       expect(terms.length).toBeGreaterThan(0);
     }
   });
