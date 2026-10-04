@@ -371,6 +371,137 @@ export function alternativesSourceFor(
   return note || caption || "";
 }
 
+// ── Source-image family boundary (FIX-258) ──────────────────────
+
+/** Control characters, by code point, so this file needs no regex lint exemption. */
+function hasControlCharacter(value: string): boolean {
+  for (let i = 0; i < value.length; i += 1) {
+    const code = value.charCodeAt(i);
+    if (code < 0x20 || code === 0x7f) return true;
+  }
+  return false;
+}
+
+/**
+ * A dot segment, with any `%` stripped first so a half-written escape cannot
+ * hide one: `%2e%2e%` decodes to `..%`, which is `..` wearing a hat.
+ */
+function isDotSegment(value: string): boolean {
+  const bare = value.split("%").join("");
+  return bare === "." || bare === "..";
+}
+
+function isHexPair(value: string): boolean {
+  return /^[0-9a-fA-F]{2}$/.test(value);
+}
+
+/**
+ * One `%XX` decoding pass. Byte-wise and total: it never throws, and a
+ * malformed escape (`100%.png`, `%zz`) is copied through exactly as written,
+ * which is what keeps an ordinary percent in a child's filename ordinary.
+ */
+function decodePercentOnce(value: string): string {
+  let out = "";
+  for (let i = 0; i < value.length; i += 1) {
+    if (value[i] === "%" && i + 3 <= value.length && isHexPair(value.slice(i + 1, i + 3))) {
+      out += String.fromCharCode(parseInt(value.slice(i + 1, i + 3), 16));
+      i += 2;
+      continue;
+    }
+    out += value[i];
+  }
+  return out;
+}
+
+/**
+ * How many decoding passes a name may need before it settles. Eight is far
+ * past any real filename and bounds the work on a hostile one; a segment still
+ * changing after that is refused rather than chased.
+ */
+const MAX_DECODE_ROUNDS = 8;
+
+/** A segment as written: present, not a dot segment, no backslash, no control character. */
+function isPlainNameSegment(value: string): boolean {
+  if (!value) return false;
+  if (isDotSegment(value)) return false;
+  if (value.includes("\\")) return false;
+  if (hasControlCharacter(value)) return false;
+  return true;
+}
+
+/**
+ * Is one segment a name rather than path structure, encoded or not?
+ *
+ * The segment is checked as written, and then **on a validation-only copy**
+ * decoded repeatedly — `%252e` hides one more layer than `%2e` — with every
+ * stage checked for a dot segment, a slash, a backslash or a control
+ * character. The path handed to Storage is never decoded or normalized; only
+ * this copy is.
+ *
+ * The compatibility boundary is deliberate: **ambiguous encoded structure is
+ * refused, an ordinary percent is preserved.** `100%.png`, `50%off.png`,
+ * `my%20drawing.png` and `v%2e1.png` are names and pass; `%2e%2e`, `%252e%252e`,
+ * `a%2fb.png` and `%2e%2e%` could each be read as structure by something that
+ * decodes once more, so they do not.
+ */
+function isAcceptableSegment(segment: string): boolean {
+  if (!isPlainNameSegment(segment)) return false;
+  let current = segment;
+  for (let round = 0; round < MAX_DECODE_ROUNDS; round += 1) {
+    const next = decodePercentOnce(current);
+    if (next === current) return true;
+    if (next.includes("/") || !isPlainNameSegment(next)) return false;
+    current = next;
+  }
+  return false;
+}
+
+/**
+ * `"malformed"` and `"outside-family"` are separated only so the callable can
+ * answer `invalid-argument` for a shape and `permission-denied` for a boundary.
+ */
+export type SketchSourceVerdict = "ok" | "outside-family" | "malformed";
+
+/**
+ * Is `sourcePath` an object inside THIS family's Storage subtree (FIX-258)?
+ *
+ * `enhanceSketch` reads its source with the **admin SDK**, which no storage rule
+ * applies to, and the path is a client-supplied string. The identity gate in the
+ * callable only establishes that the caller owns `familyId`; without this check
+ * an approved parent could name `families/<someone else>/sketches/x.png` and get
+ * a redraw of another family's child's drawing back under a URL of their own. So
+ * the boundary is restated here, in the one place that does the privileged read.
+ *
+ * The boundary is the **family subtree and nothing else**: any nested object
+ * under `families/<familyId>/` is allowed, because which folder holds a picture
+ * is not this gate's business — `sketches/`, `stickers/`, `generated-images/`,
+ * `books/{bookId}/` and anything a later feature adds all pass. What it refuses
+ * is a path that leaves the subtree.
+ *
+ * The family match is an **exact segment**, not a string prefix:
+ * `families/fam-1-evil/…` and `families/fam-10/…` both begin with
+ * `families/fam-1` and are both somebody else's.
+ *
+ * Pure and exported so the rule can be read on its own; the callable below is
+ * what the tests actually drive.
+ */
+export function checkSketchSourcePath(
+  familyId: string,
+  sourcePath: string,
+): SketchSourceVerdict {
+  if (!isAcceptableSegment(familyId) || familyId.includes("/")) return "malformed";
+  if (!sourcePath) return "malformed";
+
+  const segments = sourcePath.split("/");
+  // Shape first: traversal or a URL is malformed whichever family it names, and
+  // calling it "another family's" would read meaning into a string without any.
+  if (!segments.every(isAcceptableSegment)) return "malformed";
+  // `families/<familyId>/` plus at least one object segment.
+  if (segments.length < 3) return "malformed";
+  if (segments[0] !== "families" || segments[1] !== familyId) return "outside-family";
+  return "ok";
+}
+
 export function buildEnhancePrompt(
   style?: string,
   caption?: string,
@@ -479,6 +610,24 @@ export const enhanceSketch = onCall(
         "permission-denied",
         "You do not have access to this family.",
       );
+    }
+
+    // ── Source-image family boundary (FIX-258) ─────────────────
+    // After the identity gate above (which is what makes `familyId` mean
+    // "this caller's family"), and before anything is spent or read: the
+    // copyright rewriter is a paid Claude call, and `getStorage()`/`exists()`/
+    // `download()` below run as the admin SDK, which no storage rule constrains.
+    const sourceVerdict = checkSketchSourcePath(familyId, sketchStoragePath);
+    if (sourceVerdict !== "ok") {
+      throw sourceVerdict === "outside-family"
+        ? new HttpsError(
+            "permission-denied",
+            "The source image must be in this family's storage.",
+          )
+        : new HttpsError(
+            "invalid-argument",
+            "sketchStoragePath is not a valid source image path.",
+          );
     }
 
     // ── Caption validation ──────────────────────────────────────
