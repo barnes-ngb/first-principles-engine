@@ -26,7 +26,9 @@ import { StickerCategory } from '../../core/types/enums'
  * already exists.
  */
 
-const addDocMock = vi.hoisted(() => vi.fn(async () => ({ id: 'new-id' })))
+const addDocMock = vi.hoisted(() =>
+  vi.fn(async (..._args: unknown[]) => ({ id: 'new-id' })),
+)
 
 vi.mock('firebase/firestore', () => ({
   addDoc: (...args: unknown[]) => addDocMock(...args),
