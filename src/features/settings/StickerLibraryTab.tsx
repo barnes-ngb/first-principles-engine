@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
@@ -12,6 +12,7 @@ import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
+import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import EditIcon from '@mui/icons-material/Edit'
@@ -40,6 +41,11 @@ import {
   type ImageGenerationFailure,
 } from '../books/imageGenerationFailure'
 import { planStickerEdit } from '../books/stickerLabelEdit'
+import SavedStickerEditDialog from '../books/SavedStickerEditDialog'
+import {
+  savedStickerEditSource,
+  SAVED_STICKER_EDIT_DOOR_LABEL,
+} from '../books/savedStickerEditSession'
 import { FANCY_STYLE_OPTIONS, DEFAULT_FANCY_STYLE_ID } from '../books/drawingStickerStyles'
 import CustomLookCard from '../books/CustomLookCard'
 import { hasCustomPictureNote } from '../books/customPictureNote'
@@ -124,6 +130,24 @@ interface StickerLibraryTabProps {
    * uncapped Settings admin render wants.
    */
   audience?: ArtHelpAudience
+  /**
+   * Show the "Edit this version" door in the big preview
+   * (SAVED-STICKER-EDITOR-003) — one short instruction on a saved themed
+   * version, previewed, then saved as a NEW version.
+   *
+   * Opt-in, and only together with {@link editContextKey}: this tab also renders
+   * in Settings on default props, and a paid door that writes a library row may
+   * not appear on a host that has not said whose session it is. Deliberately not
+   * `canEdit`, which is the catalog's parent-only pricing gate — this is a
+   * child-facing feature.
+   */
+  enableSavedStickerEditing?: boolean
+  /**
+   * The host's actor/context identity for that door — family, profile and the
+   * resolved child, which the library's own "All"/"For" filter does not change.
+   * A change closes the open session rather than re-pointing it.
+   */
+  editContextKey?: string
 }
 
 export default function StickerLibraryTab({
@@ -137,6 +161,8 @@ export default function StickerLibraryTab({
   capReached = false,
   recordGeneration,
   audience = 'parent',
+  enableSavedStickerEditing = false,
+  editContextKey,
 }: StickerLibraryTabProps = {}) {
   const familyId = useFamilyId()
   const { enhanceSketch, imageFailureRef } = useAI()
@@ -157,6 +183,9 @@ export default function StickerLibraryTab({
   const [editProfile, setEditProfile] = useState<'lincoln' | 'london' | 'both'>('both')
   // Big-preview dialog (FEAT-33): tapping a sticker opens it large with quick actions.
   const [previewTarget, setPreviewTarget] = useState<Sticker | null>(null)
+  // The saved version whose edit session is open (SAVED-STICKER-EDITOR-003) —
+  // the version that was actually tapped, never its group's representative.
+  const [savedEditTarget, setSavedEditTarget] = useState<Sticker | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Sticker | null>(null)
   // Print-to-sheet (FEAT-33, enableSelectToPrint): select mode + options dialog.
   const [selectMode, setSelectMode] = useState(false)
@@ -188,16 +217,29 @@ export default function StickerLibraryTab({
    */
   const [makeCustomNote, setMakeCustomNote] = useState('')
 
+  // Which load owns the list. A read started for one family (or before a
+  // refresh) can resolve after another has begun, and the later one is the one
+  // on screen — so a stale answer is dropped instead of overwriting it.
+  const loadTokenRef = useRef(0)
+
   const load = useCallback(async () => {
     if (!familyId) return
+    const token = loadTokenRef.current + 1
+    loadTokenRef.current = token
     setLoading(true)
     const q = query(stickerLibraryCollection(familyId), orderBy('createdAt', 'desc'))
     const snap = await getDocs(q)
+    // A newer load is already running and will clear `loading` itself.
+    if (token !== loadTokenRef.current) return
     setStickers(snap.docs.map((d) => withDefaults({ ...d.data(), id: d.id })))
     setLoading(false)
   }, [familyId])
 
   useEffect(() => { void load() }, [load, refreshSignal])
+
+  // A changed actor/context is a different session: the open editor closes
+  // rather than following the switch onto another child's identity.
+  useEffect(() => { setSavedEditTarget(null) }, [editContextKey, familyId])
 
   const visibleStickers = stickers.filter((s) => {
     if (childProfileFilter) {
@@ -223,6 +265,10 @@ export default function StickerLibraryTab({
     ...grouped.drawings.flatMap((g) => g.versions),
     ...gridStickers,
   ]
+
+  // The saved-version editor needs all three: the host's opt-in, the identity it
+  // acts under, and a family to read and write in.
+  const savedEditingEnabled = enableSavedStickerEditing && !!editContextKey && !!familyId
 
   const handleOpenEdit = useCallback((sticker: Sticker) => {
     setEditTarget(sticker)
@@ -798,6 +844,25 @@ export default function StickerLibraryTab({
               >
                 Make more versions
               </Button>
+              {/* Edit THIS version (SAVED-STICKER-EDITOR-003) — a separate door
+                  from "Make more versions", which makes a new look of the
+                  drawing. Shown only for a version this door can honestly open
+                  on: a saved picture in a known look, never the original. */}
+              {savedEditingEnabled && savedStickerEditSource(previewTarget) && (
+                <Button
+                  startIcon={<AutoFixHighIcon />}
+                  onClick={() => {
+                    const target = previewTarget
+                    setPreviewTarget(null)
+                    setSavedEditTarget(target)
+                  }}
+                  // The theme does not give a text Button a touch target; this
+                  // new door sets its own (44px), existing actions unchanged.
+                  sx={{ minHeight: 44 }}
+                >
+                  {SAVED_STICKER_EDIT_DOOR_LABEL}
+                </Button>
+              )}
               {enableSelectToPrint && (
                 <Button
                   startIcon={<PrintIcon />}
@@ -1065,6 +1130,23 @@ export default function StickerLibraryTab({
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Saved-version editor (SAVED-STICKER-EDITOR-003). Mounted only on a host
+          that supplied both the opt-in and its context identity, so the
+          default/Settings render is unchanged. */}
+      {savedEditingEnabled && editContextKey && (
+        <SavedStickerEditDialog
+          source={savedEditTarget}
+          familyId={familyId}
+          contextKey={editContextKey}
+          capReached={capReached}
+          recordGeneration={recordGeneration}
+          onClose={() => setSavedEditTarget(null)}
+          // A saved session is finished: close it, then reload once so the new
+          // version appears where the others are.
+          onSaved={() => { setSavedEditTarget(null); void load() }}
+        />
+      )}
 
       {/* Promote-to-catalog dialog (FEAT-82) — read-only of the sticker; writes
           only a CatalogProduct via useCatalogProducts.createProduct. Gated by
