@@ -90,6 +90,29 @@ const SYSTEM_PROMPTS: Record<RewriteMode, string> = {
   sketch: SKETCH_REWRITE_SYSTEM,
 };
 
+/** How a caller wants a failed rewrite reported. */
+export interface RewriteOptions {
+  /**
+   * Log a fixed line instead of the caught error.
+   *
+   * Default (and every existing caller) keeps logging the error object, which is
+   * the right trade for a caption: the SDK's message is the only clue to why the
+   * rewriter is down, and a caption is already stored on the sticker it made.
+   *
+   * The saved-picture edit path (SAVED-STICKER-EDIT-CONTRACT-002) is the one
+   * caller that cannot afford it. An SDK error quotes the request it failed on,
+   * the request IS the person's instruction, and that mode's whole contract is
+   * that the instruction is never written down — so handler-side redaction is
+   * too late by the time this `catch` has already logged. Nothing else changes:
+   * the same prompt, the same call, the same regex fallback, the same return.
+   */
+  staticDiagnostics?: boolean;
+}
+
+/** What {@link staticDiagnostics} logs in place of the error. */
+const STATIC_REWRITE_FAILURE =
+  "Copyright rewriter failed, using fallback strip (diagnostics suppressed for this caller).";
+
 /**
  * Use Claude Haiku to rewrite a prompt, stripping copyrighted names and
  * replacing them with visual descriptions. Falls back to regex strip on failure.
@@ -97,12 +120,14 @@ const SYSTEM_PROMPTS: Record<RewriteMode, string> = {
  * @param prompt   - The raw user-provided prompt/caption
  * @param mode     - Which rewrite style to use
  * @param apiKey   - Claude API key (from secret)
+ * @param options  - See {@link RewriteOptions}; omitted keeps the legacy logging
  * @returns The rewritten prompt (always returns something usable)
  */
 export async function rewriteForCopyright(
   prompt: string,
   mode: RewriteMode,
   apiKey: string,
+  options?: RewriteOptions,
 ): Promise<string> {
   try {
     const { default: Anthropic } = await import("@anthropic-ai/sdk");
@@ -123,7 +148,15 @@ export async function rewriteForCopyright(
     // Empty response — fall back to regex
     return fallbackCopyrightStrip(prompt);
   } catch (err) {
-    console.warn("Copyright rewriter failed, using fallback strip:", err);
+    if (options?.staticDiagnostics) {
+      console.warn(STATIC_REWRITE_FAILURE);
+    } else {
+      console.warn("Copyright rewriter failed, using fallback strip:", err);
+    }
+    // Unchanged either way, deliberately: the fallback is what keeps a rewriter
+    // outage from blocking every picture, and which caller it is does not alter
+    // what the filter should do. A caller that needs to know the rewrite was not
+    // the model's checks that for itself.
     return fallbackCopyrightStrip(prompt);
   }
 }
