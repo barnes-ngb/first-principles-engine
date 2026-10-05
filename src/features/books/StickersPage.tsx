@@ -71,6 +71,16 @@ export default function StickersPage() {
     recordGeneration,
   } = useStickerArtQuota()
 
+  // Whose session the saved-version editor runs as (SAVED-STICKER-EDITOR-003).
+  // Family + profile + the resolved child — the library's own "All"/"For Lincoln"
+  // filter is a view, not an identity, so it is deliberately not part of this
+  // key. A change to any of the three replaces the open edit session; without a
+  // family there is no identity to supply and the door stays shut.
+  const editActorChildId = activeChild?.id || activeChildId
+  const savedEditContextKey = familyId
+    ? `${familyId}|${profile ?? 'none'}|${editActorChildId || 'none'}`
+    : undefined
+
   // Help copy is audience-gated on capability (FEAT-178) — a kid profile reads
   // the kid wording, everyone else the fuller parent wording. Never a name.
   const audience = isChildProfile ? 'kid' : 'parent'
@@ -200,6 +210,8 @@ export default function StickersPage() {
         capReached={artCapReached}
         recordGeneration={recordGeneration}
         audience={audience}
+        enableSavedStickerEditing={!!savedEditContextKey}
+        editContextKey={savedEditContextKey}
       />
 
       {familyId && (
