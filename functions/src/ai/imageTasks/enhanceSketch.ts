@@ -12,11 +12,19 @@ import {
   ImageFailureKind,
   PROVIDER_ERROR_KIND,
   ProviderErrorReason,
+  imageFailureDetails,
   imageFailureDetailsFor,
   readProviderError,
 } from "./imageFailure.js";
 import { recipeDetail, type VisualRecipe } from "./visualRecipe.js";
 import { normalizeCustomPictureNote } from "../../shared/customPictureNote.js";
+import {
+  acceptEditInstruction,
+  rewrittenInstructionSurvives,
+  savedStickerLook,
+  type SavedStickerEdit,
+  type SavedStickerLook,
+} from "../../shared/savedStickerEdit.js";
 
 // ── Request / Response types ────────────────────────────────────
 
@@ -46,6 +54,19 @@ export interface EnhanceSketchRequest {
    * rewriter every other prompt goes through.
    */
   customNote?: string;
+  /**
+   * Edit a picture that is already SAVED, rather than redraw a sketch
+   * (SAVED-STICKER-EDIT-CONTRACT-002).
+   *
+   * Absent — the overwhelmingly common case — and every byte of this handler's
+   * behaviour is what it was: same prompt, same recipes, same usage row. Present
+   * and it is a different request: the look is derived from the stored sticker
+   * rather than sent, `transparent` is implied, and the legacy free-text fields
+   * have no meaning beside it, so sending one is refused rather than ignored.
+   * Malformed is refused too — never silently treated as a legacy redraw, which
+   * would hand back a brand-new picture when an edit was asked for.
+   */
+  savedStickerEdit?: SavedStickerEdit;
 }
 
 export interface EnhanceSketchResponse {
@@ -371,6 +392,148 @@ export function alternativesSourceFor(
   return note || caption || "";
 }
 
+// ── Source-image family boundary (FIX-258) ──────────────────────
+
+/** Control characters, by code point, so this file needs no regex lint exemption. */
+function hasControlCharacter(value: string): boolean {
+  for (let i = 0; i < value.length; i += 1) {
+    const code = value.charCodeAt(i);
+    if (code < 0x20 || code === 0x7f) return true;
+  }
+  return false;
+}
+
+/**
+ * A dot segment, with any `%` stripped first so a half-written escape cannot
+ * hide one: `%2e%2e%` decodes to `..%`, which is `..` wearing a hat.
+ */
+function isDotSegment(value: string): boolean {
+  const bare = value.split("%").join("");
+  return bare === "." || bare === "..";
+}
+
+function isHexPair(value: string): boolean {
+  return /^[0-9a-fA-F]{2}$/.test(value);
+}
+
+/**
+ * One `%XX` decoding pass. Byte-wise and total: it never throws, and a
+ * malformed escape (`100%.png`, `%zz`) is copied through exactly as written,
+ * which is what keeps an ordinary percent in a child's filename ordinary.
+ */
+function decodePercentOnce(value: string): string {
+  let out = "";
+  for (let i = 0; i < value.length; i += 1) {
+    if (value[i] === "%" && i + 3 <= value.length && isHexPair(value.slice(i + 1, i + 3))) {
+      out += String.fromCharCode(parseInt(value.slice(i + 1, i + 3), 16));
+      i += 2;
+      continue;
+    }
+    out += value[i];
+  }
+  return out;
+}
+
+/**
+ * How many decoding passes a name may need before it settles. Eight is far
+ * past any real filename and bounds the work on a hostile one; a segment still
+ * changing after that is refused rather than chased.
+ */
+const MAX_DECODE_ROUNDS = 8;
+
+/** A segment as written: present, not a dot segment, no backslash, no control character. */
+function isPlainNameSegment(value: string): boolean {
+  if (!value) return false;
+  if (isDotSegment(value)) return false;
+  if (value.includes("\\")) return false;
+  if (hasControlCharacter(value)) return false;
+  return true;
+}
+
+/**
+ * Is one segment a name rather than path structure, encoded or not?
+ *
+ * The segment is checked as written, and then **on a validation-only copy**
+ * decoded repeatedly — `%252e` hides one more layer than `%2e` — with every
+ * stage checked for a dot segment, a slash, a backslash or a control
+ * character. The path handed to Storage is never decoded or normalized; only
+ * this copy is.
+ *
+ * The compatibility boundary is deliberate: **ambiguous encoded structure is
+ * refused, an ordinary percent is preserved.** `100%.png`, `50%off.png`,
+ * `my%20drawing.png` and `v%2e1.png` are names and pass; `%2e%2e`, `%252e%252e`,
+ * `a%2fb.png` and `%2e%2e%` could each be read as structure by something that
+ * decodes once more, so they do not.
+ */
+function isAcceptableSegment(segment: string): boolean {
+  if (!isPlainNameSegment(segment)) return false;
+  let current = segment;
+  for (let round = 0; round < MAX_DECODE_ROUNDS; round += 1) {
+    const next = decodePercentOnce(current);
+    if (next === current) return true;
+    if (next.includes("/") || !isPlainNameSegment(next)) return false;
+    current = next;
+  }
+  return false;
+}
+
+/**
+ * `"malformed"` and `"outside-family"` are separated only so the callable can
+ * answer `invalid-argument` for a shape and `permission-denied` for a boundary.
+ */
+export type SketchSourceVerdict = "ok" | "outside-family" | "malformed";
+
+/**
+ * Is `sourcePath` an object inside THIS family's Storage subtree (FIX-258)?
+ *
+ * `enhanceSketch` reads its source with the **admin SDK**, which no storage rule
+ * applies to, and the path is a client-supplied string. The identity gate in the
+ * callable only establishes that the caller owns `familyId`; without this check
+ * an approved parent could name `families/<someone else>/sketches/x.png` and get
+ * a redraw of another family's child's drawing back under a URL of their own. So
+ * the boundary is restated here, in the one place that does the privileged read.
+ *
+ * The boundary is the **family subtree and nothing else**: any nested object
+ * under `families/<familyId>/` is allowed, because which folder holds a picture
+ * is not this gate's business — `sketches/`, `stickers/`, `generated-images/`,
+ * `books/{bookId}/` and anything a later feature adds all pass. What it refuses
+ * is a path that leaves the subtree.
+ *
+ * The family match is an **exact segment**, not a string prefix:
+ * `families/fam-1-evil/…` and `families/fam-10/…` both begin with
+ * `families/fam-1` and are both somebody else's.
+ *
+ * Pure and exported so the rule can be read on its own; the callable below is
+ * what the tests actually drive.
+ */
+export function checkSketchSourcePath(
+  familyId: string,
+  sourcePath: string,
+): SketchSourceVerdict {
+  if (!isAcceptableSegment(familyId) || familyId.includes("/")) return "malformed";
+  if (!sourcePath) return "malformed";
+
+  const segments = sourcePath.split("/");
+  // Shape first: traversal or a URL is malformed whichever family it names, and
+  // calling it "another family's" would read meaning into a string without any.
+  if (!segments.every(isAcceptableSegment)) return "malformed";
+  // `families/<familyId>/` plus at least one object segment.
+  if (segments.length < 3) return "malformed";
+  if (segments[0] !== "families" || segments[1] !== familyId) return "outside-family";
+  return "ok";
+}
+
+/**
+ * The cutout rail, in one place because the saved-picture edit prompt needs the
+ * same sentences. Extracted, not rewritten: `buildEnhancePrompt`'s output is
+ * pinned byte-for-byte against the previous committed implementation in
+ * `enhanceSketch.savedStickerEdit.test.ts`.
+ */
+const TRANSPARENT_CLAUSE =
+  "IMPORTANT: Render only the character/object on a fully TRANSPARENT background. " +
+  "No background scene, no ground, no shadows on the ground, no environment, no border. " +
+  "The result must be a clean cutout suitable for use as a sticker. ";
+
 export function buildEnhancePrompt(
   style?: string,
   caption?: string,
@@ -415,11 +578,7 @@ export function buildEnhancePrompt(
     : themeOwnsLook
       ? `Visual theme: ${themeRecipe.summary} ${recipeDetail(themeRecipe, { transparent })}`
       : `Visual theme: ${themeRecipe.summary} `;
-  const transparentClause = transparent
-    ? "IMPORTANT: Render only the character/object on a fully TRANSPARENT background. " +
-      "No background scene, no ground, no shadows on the ground, no environment, no border. " +
-      "The result must be a clean cutout suitable for use as a sticker. "
-    : "";
+  const transparentClause = transparent ? TRANSPARENT_CLAUSE : "";
   const note = normalizeCustomPictureNote(customNote);
   // With a note the drawing is deliberately NOT kept as it is — one thing about
   // it changes. Without one this sentence is byte-identical to what it has
@@ -444,6 +603,198 @@ export function buildEnhancePrompt(
   );
 }
 
+// ── Editing a saved picture (SAVED-STICKER-EDIT-CONTRACT-002) ───
+
+/**
+ * Is this value usable as ONE Firestore document id?
+ *
+ * Reuses the FIX-258 segment rule above rather than inventing a second one: a
+ * document id is concatenated into `families/<familyId>/stickerLibrary/<id>`, so
+ * a slash, a dot segment, a backslash, a control character or an encoded form of
+ * any of them would address a different document — or a different collection.
+ * Checked before the reference is built, not after the read.
+ */
+export function isSafeDocumentId(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  if (value.includes("/")) return false;
+  return isAcceptableSegment(value);
+}
+
+/** What the usage row records instead of the prompt, in saved-edit mode. */
+export const SAVED_STICKER_EDIT_USAGE_PROMPT = "saved-picture edit (instruction not stored)";
+
+/** The correction a refused instruction gets: something to do, and no false claim. */
+const EDIT_INSTRUCTION_REFUSAL =
+  "That change needs different wording. Describe it in one short sentence — what to " +
+  "add or take away, in plain words, without naming a character — and try again.";
+
+/**
+ * What a saved-picture edit says when something OTHER than the wording failed.
+ *
+ * Static, and the only thing this mode ever says about a downstream failure.
+ * Every error body on this path is a hazard the legacy path does not have: a
+ * provider, a rewriter and a Firestore read all quote what they were given, and
+ * on this mode that is a child's own sentence about their own picture. The
+ * legacy redraw's prompt is assembled from fixed recipes, so it keeps passing
+ * the provider's message through — the words are the difference, not the care.
+ *
+ * It does not say the wording was wrong (it was not) and promises nothing about
+ * billing, which this path cannot know.
+ */
+const EDIT_UNAVAILABLE =
+  "That edit could not be made just now. Nothing about your picture was changed — wait a moment and try again.";
+
+/**
+ * The prompt for editing a picture that already exists.
+ *
+ * Three things make it a different prompt rather than `buildEnhancePrompt` with
+ * another clause, which is why the legacy builder is untouched:
+ *
+ * - **The source is a finished illustration, not a sketch.** Every sentence of
+ *   the legacy prompt is written around "inspired by this child's hand-drawn
+ *   sketch", which on a saved sticker would ask the model to redraw a drawing it
+ *   is not looking at.
+ * - **Removal has to be allowed.** The legacy prompt ends on "keep the same
+ *   composition, characters, and scene layout" — a sentence that contradicts
+ *   "take the hat off", and the model is left to pick which instruction wins. So
+ *   the preserve-everything-else sentence here scopes itself to what the
+ *   instruction does not name.
+ * - **The look is already in the pixels.** It is restated so the edit cannot
+ *   drift the style, not to choose one.
+ *
+ * Returns `null` for a look that resolves to no recipe, so there is no silent
+ * fallback to the house watercolor. Unreachable through the callable, which
+ * refuses an unknown look before this is called.
+ */
+export function buildSavedStickerEditPrompt(
+  look: SavedStickerLook,
+  instruction: string,
+): string | null {
+  const baseRecipe = look.style ? STYLE_RECIPES[look.style] : undefined;
+  const themed = getThemeRecipe(look.theme);
+  const lead = baseRecipe ?? themed;
+  if (!lead || !instruction) return null;
+  // The one look that is both a style and a theme (minecraft) keeps the legacy
+  // shape: one full recipe, the theme subordinate by its brevity (FEAT-159).
+  const themeClause = baseRecipe && themed ? `Visual theme: ${themed.summary} ` : "";
+  return (
+    `Edit this existing picture. It is already a finished illustration ` +
+    `${lead.hint} — it is NOT a hand-drawn sketch, so do not redraw it as one and ` +
+    `do not start a new picture. ` +
+    `Make exactly this one change to it: ${instruction}. ` +
+    `If that change asks for something to be taken away, take it away completely and ` +
+    `fill the space it leaves with whatever naturally surrounds it — no hole, no ` +
+    `outline, no faded copy of it left behind. If it asks for something to be added, ` +
+    `add only that. ` +
+    `Everything the change does not mention stays as it already is — the same subject, ` +
+    `the same pose, the same expression, the same colors. ` +
+    `${recipeDetail(lead, { transparent: true })}` +
+    `${themeClause}` +
+    `That is the look this picture is already drawn in: match it, and ignore any part ` +
+    `of the change that names an art style, a medium, or a look. ` +
+    `${TRANSPARENT_CLAUSE}` +
+    `This is a redraw, so it will not be pixel-for-pixel identical; what matters is ` +
+    `that the one requested change is made and nothing else about the picture is. ` +
+    `Safe for children, family-friendly, no text overlays.`
+  );
+}
+
+/** The legacy fields that have no meaning beside a saved-picture edit (contract 1). */
+const EDIT_CONFLICT_FIELDS = [
+  "style",
+  "caption",
+  "theme",
+  "transparent",
+  "customNote",
+] as const;
+
+/**
+ * The request's edit field, shape-checked. Anything else — `null`, a string, an
+ * array, a missing or non-string member — is refused rather than read past.
+ */
+function requireSavedStickerEdit(raw: unknown): SavedStickerEdit {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    throw new HttpsError("invalid-argument", "savedStickerEdit must be an object.");
+  }
+  const edit = raw as Record<string, unknown>;
+  if (
+    typeof edit.sourceStickerId !== "string" ||
+    typeof edit.sourceLookId !== "string" ||
+    typeof edit.instruction !== "string"
+  ) {
+    throw new HttpsError(
+      "invalid-argument",
+      "savedStickerEdit needs sourceStickerId, sourceLookId and instruction.",
+    );
+  }
+  if (!isSafeDocumentId(edit.sourceStickerId)) {
+    throw new HttpsError("invalid-argument", "sourceStickerId is not a valid sticker id.");
+  }
+  return {
+    sourceStickerId: edit.sourceStickerId,
+    sourceLookId: edit.sourceLookId,
+    instruction: edit.instruction,
+  };
+}
+
+/**
+ * Does the stored sticker agree, in every particular, with the request?
+ *
+ * Reads the ONE document named and nothing else — no group query, no
+ * representative, no original to fall back to. The row has to BE the object the
+ * caller said it was: its own `storagePath` is the source being edited, and its
+ * own `theme` is the look being preserved. A row that disagrees is refused
+ * rather than reconciled, because every way of reconciling it ends in editing a
+ * different picture or editing it in a look it was not made in.
+ *
+ * Point-in-time, and claims nothing more: the sticker could be deleted a
+ * millisecond later. What this rules out is editing something that was never the
+ * caller's to edit.
+ */
+async function requireSavedSource(
+  familyId: string,
+  sketchStoragePath: string,
+  edit: SavedStickerEdit,
+): Promise<void> {
+  let row: unknown;
+  try {
+    const snapshot = await getFirestore()
+      .doc(`families/${familyId}/stickerLibrary/${edit.sourceStickerId}`)
+      .get();
+    row = snapshot.exists ? (snapshot.data() as unknown) : undefined;
+  } catch {
+    // A failed read is not an affirmative empty one, so it cannot fall through
+    // to "not found" — and its error names the document it failed on. Caught
+    // without a binding: there is nothing safe to do with it, and the one unsafe
+    // thing, logging it, is what this exists to prevent.
+    throw new HttpsError("unavailable", EDIT_UNAVAILABLE);
+  }
+  if (!row || typeof row !== "object" || Array.isArray(row)) {
+    throw new HttpsError("not-found", "That saved picture was not found.");
+  }
+  const sticker = row as Record<string, unknown>;
+  // The cleaned original is the child's own drawing and anchors its group; it is
+  // not an AI version of a known look, so there is nothing to preserve a look of.
+  if (sticker.isOriginal === true) {
+    throw new HttpsError(
+      "failed-precondition",
+      "The original drawing cannot be edited this way.",
+    );
+  }
+  if (sticker.storagePath !== sketchStoragePath) {
+    throw new HttpsError(
+      "failed-precondition",
+      "That saved picture does not match the image being edited.",
+    );
+  }
+  if (sticker.theme !== edit.sourceLookId) {
+    throw new HttpsError(
+      "failed-precondition",
+      "That saved picture was not made in the look being edited.",
+    );
+  }
+}
+
 // ── Callable Cloud Function ─────────────────────────────────────
 
 export const enhanceSketch = onCall(
@@ -460,6 +811,7 @@ export const enhanceSketch = onCall(
       theme,
       transparent,
       customNote,
+      savedStickerEdit,
     } = request.data as EnhanceSketchRequest;
 
     // ── Input validation ───────────────────────────────────────
@@ -480,6 +832,89 @@ export const enhanceSketch = onCall(
         "You do not have access to this family.",
       );
     }
+
+    // ── Source-image family boundary (FIX-258) ─────────────────
+    // After the identity gate above (which is what makes `familyId` mean
+    // "this caller's family"), and before anything is spent or read: the
+    // copyright rewriter is a paid Claude call, and `getStorage()`/`exists()`/
+    // `download()` below run as the admin SDK, which no storage rule constrains.
+    const sourceVerdict = checkSketchSourcePath(familyId, sketchStoragePath);
+    if (sourceVerdict !== "ok") {
+      throw sourceVerdict === "outside-family"
+        ? new HttpsError(
+            "permission-denied",
+            "The source image must be in this family's storage.",
+          )
+        : new HttpsError(
+            "invalid-argument",
+            "sketchStoragePath is not a valid source image path.",
+          );
+    }
+
+    // ── Saved-picture edit mode (SAVED-STICKER-EDIT-CONTRACT-002) ─
+    // After the identity and source-path gates, which are unchanged and still
+    // own the family boundary — this mode narrows what may be edited, it does
+    // not widen what may be read. Every refusal below lands before the copyright
+    // rewriter (a paid Claude call), before Storage and before any image call.
+    let editLook: SavedStickerLook | null = null;
+    let editPrompt: string | null = null;
+    if (savedStickerEdit !== undefined) {
+      const edit = requireSavedStickerEdit(savedStickerEdit);
+      const conflict = EDIT_CONFLICT_FIELDS.find(
+        (field) => (request.data as Record<string, unknown>)[field] !== undefined,
+      );
+      if (conflict) {
+        throw new HttpsError(
+          "invalid-argument",
+          `${conflict} cannot be sent with savedStickerEdit — the look comes from the saved picture.`,
+        );
+      }
+      editLook = savedStickerLook(edit.sourceLookId);
+      if (!editLook) {
+        throw new HttpsError("invalid-argument", "sourceLookId is not a known look.");
+      }
+      const accepted = acceptEditInstruction(edit.instruction);
+      if (!accepted) {
+        throw new HttpsError("invalid-argument", EDIT_INSTRUCTION_REFUSAL);
+      }
+      await requireSavedSource(familyId, sketchStoragePath, edit);
+      // The same rewriter every other prompt goes through, on the same terms —
+      // what differs is that its answer must still say what the person said. A
+      // changed or empty answer is a refusal with something to do about it, not
+      // a fallback to the unfiltered words and not a generic image failure.
+      //
+      // Two things are asked of it that no other caller asks. `staticDiagnostics`
+      // because the helper's own failure log would otherwise carry the caught
+      // SDK error, which quotes the prompt it was sent — handler-side redaction
+      // cannot reach a line already written. And the `catch`, because the helper
+      // is documented never to throw rather than built not to, and the whole
+      // point here is that this mode does not pass an error body on.
+      let rewritten: string;
+      try {
+        rewritten = await rewriteForCopyright(
+          accepted,
+          "sketch",
+          claudeApiKey.value(),
+          { staticDiagnostics: true },
+        );
+      } catch {
+        throw new HttpsError("unavailable", EDIT_UNAVAILABLE);
+      }
+      if (!rewrittenInstructionSurvives(accepted, rewritten)) {
+        throw new HttpsError("failed-precondition", EDIT_INSTRUCTION_REFUSAL);
+      }
+      // Built here rather than beside the legacy prompt below, so a look that
+      // somehow resolves to no recipe costs no Storage read either.
+      editPrompt = buildSavedStickerEditPrompt(editLook, accepted);
+      if (!editPrompt) {
+        throw new HttpsError("invalid-argument", "sourceLookId is not a known look.");
+      }
+    }
+
+    // What the look resolves to. In legacy mode these ARE the request's own
+    // fields, so everything downstream is byte-identical to what it was.
+    const effectiveStyle = editLook ? editLook.style : style;
+    const effectiveTransparent = editLook ? true : transparent;
 
     // ── Caption validation ──────────────────────────────────────
     if (caption !== undefined && typeof caption !== "string") {
@@ -533,18 +968,17 @@ export const enhanceSketch = onCall(
 
     // ── Enhance via gpt-image-1.5 edit endpoint ────────────────
     const provider = createOpenAiProvider(openaiApiKey.value());
-    const prompt = buildEnhancePrompt(
-      style,
-      safeCaption,
-      theme,
-      transparent,
-      safeNote,
-    );
+    const prompt =
+      editPrompt ??
+      buildEnhancePrompt(style, safeCaption, theme, transparent, safeNote);
 
+    // No instruction, no sticker id: the saved-edit mode logs that it ran and
+    // nothing about what was asked for.
     console.log("enhanceSketch: starting API call", {
       sketchStoragePath,
-      style: style ?? "storybook",
-      transparent: transparent ?? false,
+      style: effectiveStyle ?? "storybook",
+      transparent: effectiveTransparent ?? false,
+      savedEdit: !!editLook,
       hasCustomNote: !!safeNote,
       sketchBufferLength: sketchBuffer.length,
       promptLength: prompt.length,
@@ -560,15 +994,19 @@ export const enhanceSketch = onCall(
           // gpt-image-1.5 edit always returns PNG; only background controls
           // whether the cutout is transparent.
           outputFormat: "png",
-          background: transparent ? "transparent" : "auto",
+          background: effectiveTransparent ? "transparent" : "auto",
         },
       );
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
+      const reason = readProviderError(errMsg);
       console.error("Sketch enhancement failed:", {
         sketchStoragePath,
         style,
-        error: errMsg,
+        // The edit path logs the READING of the error — one of five fixed words
+        // — and never the error. A provider quotes the prompt it refused, and on
+        // this mode the prompt contains the person's own instruction.
+        ...(editLook ? { savedEdit: true, reason } : { error: errMsg }),
       });
 
       // The SAME ladder `generateImage` reads (Codex P2, PR #1768) — this
@@ -586,16 +1024,21 @@ export const enhanceSketch = onCall(
       // "in a sparkly blue ice-princess dress", which the door offers as a tap
       // that replaces the NOTE. The pre-rewrite note, deliberately: the
       // alternatives are alternatives to what they asked for.
-      const reason = readProviderError(errMsg);
-      const details = await imageFailureDetailsFor(
-        PROVIDER_ERROR_KIND[reason],
-        () =>
-          suggestPromptAlternatives(
-            alternativesSourceFor(note, caption),
-            "sketch",
-            claudeApiKey.value(),
-          ),
-      );
+      //
+      // A saved-picture edit buys no suggestions. There is nothing to reword —
+      // the legacy fields it would have reworded are refused on this mode, so
+      // the suggester would be handed the empty string anyway — and an edit
+      // instruction is not a subject to offer three variations of. Declaring the
+      // kind and stopping also keeps the words out of one more call.
+      const details = editLook
+        ? imageFailureDetails(PROVIDER_ERROR_KIND[reason])
+        : await imageFailureDetailsFor(PROVIDER_ERROR_KIND[reason], () =>
+            suggestPromptAlternatives(
+              alternativesSourceFor(note, caption),
+              "sketch",
+              claudeApiKey.value(),
+            ),
+          );
 
       switch (reason) {
         case ProviderErrorReason.Blocked:
@@ -623,9 +1066,15 @@ export const enhanceSketch = onCall(
             details,
           );
         default:
+          // The one branch whose message was the provider's own text. Legacy
+          // keeps it — a book reimagine's prompt holds no private words and the
+          // text is the only clue to an unclassified failure. The edit mode gets
+          // the static sentence instead.
           throw new HttpsError(
             "internal",
-            `Sketch enhancement failed: ${errMsg.slice(0, 200)}`,
+            editLook
+              ? EDIT_UNAVAILABLE
+              : `Sketch enhancement failed: ${errMsg.slice(0, 200)}`,
             details,
           );
       }
@@ -661,7 +1110,7 @@ export const enhanceSketch = onCall(
         metadata: {
           generatedBy: "gpt-image-1.5",
           sourceSketch: sketchStoragePath,
-          style: style ?? "storybook",
+          style: effectiveStyle ?? "storybook",
           firebaseStorageDownloadTokens: downloadToken,
         },
       },
@@ -676,9 +1125,12 @@ export const enhanceSketch = onCall(
       model: "gpt-image-1.5",
       inputTokens: 0,
       outputTokens: 0,
-      prompt: prompt.slice(0, 200),
-      style: style ?? "storybook",
-      transparent: transparent ?? false,
+      // A saved-picture edit's prompt CONTAINS the person's instruction, so the
+      // usage row gets a static descriptor instead of a slice of it. Accounting
+      // is otherwise unchanged: same collection, same fields, same numbers.
+      prompt: editLook ? SAVED_STICKER_EDIT_USAGE_PROMPT : prompt.slice(0, 200),
+      style: effectiveStyle ?? "storybook",
+      transparent: effectiveTransparent ?? false,
       sourceSketch: sketchStoragePath,
       storagePath,
       createdAt: new Date().toISOString(),

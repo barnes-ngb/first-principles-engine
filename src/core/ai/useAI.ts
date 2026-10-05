@@ -1,6 +1,9 @@
 import { useCallback, useRef, useState } from 'react'
 import { getFunctions, httpsCallable } from 'firebase/functions'
 import { app } from '../firebase/firebase'
+import type { SavedStickerEdit } from '../../../functions/src/shared/savedStickerEdit'
+
+export type { SavedStickerEdit }
 
 // ── Types (mirrored from functions/src/ai/chat.ts) ──────────────
 
@@ -172,6 +175,16 @@ export interface EnhanceSketchRequest {
    * the same copyright rewriter every other prompt goes through.
    */
   customNote?: string
+  /**
+   * Edit a picture that is already saved, instead of redrawing a sketch
+   * (SAVED-STICKER-EDIT-CONTRACT-002). The shape is IMPORTED from the shared
+   * rule, not copied, so the two sides cannot drift. Omit it and the request is
+   * exactly what it was before this field existed; send it and `style`, `theme`,
+   * `transparent`, `caption` and `customNote` must all be omitted — the look is
+   * derived from the saved picture and the server refuses a request that tries to
+   * send both.
+   */
+  savedStickerEdit?: SavedStickerEdit
 }
 
 export interface EnhanceSketchResponse {
