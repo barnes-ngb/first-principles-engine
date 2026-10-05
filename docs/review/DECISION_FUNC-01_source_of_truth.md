@@ -42,7 +42,9 @@ write-through at the already-stubbed point in `useSkillMapWrite.ts`.
 
 ---
 
-## Authority table (the seams)
+## Authority table (historical implementation inventory)
+
+**October 5, 2026 correction (DOC-27):** The governing layered-ownership ruling above is retained. This older table and its execution-record extension are historical, not a current exclusive writer/reader inventory. Use [the revision-bound source trace](FUNC01_AUTHORITY_TRACE_2026-10.md) for the current implementation, known callers and disagreement risks. In particular: activity documents use config IDs with child attribution fields; Shelly chat reads the Learning Map; additional snapshot/map writers and narrow snapshot-to-model reprojection exist; disposition uses multiple evidence inputs; Milestones is no longer a current Progress tab; and portfolio ladder tags are distinct from the deprecated ladder store. These factual corrections do not authorize new write permissions, cross-store reconciliation or a replacement master store.
 
 | Dimension | Authoritative store | Written by (only) | Read by | Notes |
 |---|---|---|---|---|

@@ -162,6 +162,10 @@ console.log(
     `WorkbookConfig refs: ${workbookConfig.refs} (${workbookConfig.files} files)`,
 )
 
+for (const abs of allFiles.filter((file) => /\bWorkbookConfig\b/.test(readFileSync(file, 'utf8'))).sort()) {
+  console.log('  WorkbookConfig file: ' + relative(ROOT, abs).replace(/\\/g, '/'))
+}
+
 // ── ARCH-43 — Lincoln/London name-literal census ────────────────────────────
 // Same 3-pattern, non-test sweep this report series has used since it was
 // first raised, so the count stays comparable cycle to cycle.
