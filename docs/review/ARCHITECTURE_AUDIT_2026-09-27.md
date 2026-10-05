@@ -207,11 +207,7 @@ read directly this cycle for the first time in this series' recorded text:
   any real surface"*; it exists to eyeball shared state components on a phone, not to be used by a family.
   Judged genuinely untestable-and-pointless-to-test — no real user ever reaches it.
 
-So of the five, **two remain the named, real gaps** (`TeachHelperDialog.tsx`, `LoginPage.tsx`) and
-**three are correctly classified as UI shells** not worth a test file — the census-derived count was
-already fully explained by the two rows this ledger has carried since TEST-04/TEST-01's prior cycles;
-nothing new to file. **TEST-01 status: unchanged — IMPROVING, no new progress this cycle on the two named
-gaps or the `workshop` ratio** — expected, given the window touched none of the relevant files.
+The real logic gaps are TeachHelperDialog and LoginPage; the other named directories are lower-value presentation shells. October 5 reconciliation found that TEST-01 and TEST-04 did not actually name these targets. They are now recorded explicitly as **TEST-07**, with behavior-focused acceptance criteria. This corrects the earlier claim that no new ledger entry was needed; no tests or production fix are claimed by this audit.
 
 **New this cycle: `TEST-06`**, filed for the flake found in Step 0 (`SketchScanner.resultIdentity.test.
 tsx`'s 5000ms timeout under full-suite load, observed load-sensitive by an isolated pass at 1.6s). This
@@ -256,7 +252,7 @@ touched this window (§0.5). **ARCH-43 stays OPEN, unchanged.**
 `grep -rn "TODO.*[Ll]adder\|ladder.*TODO" src` → zero hits, unchanged. Node 22 migration (`ARCH-17`) and
 the `functions/`↔`src/` duplication consolidation (`ARCH-47`) remain untouched by this window's diff.
 
-### 1.8 CHAT_TASKS registry / FUNC-01 decision doc — unchanged, spot-verified against current code
+### 1.8 CHAT_TASKS registry / FUNC-01 — historical spot-check, superseded inventory
 
 `CHAT_TASKS registry size`: **21**, unchanged (census script).
 
@@ -278,13 +274,7 @@ the collection/behavior the table claims for it (a keyword check per file: `lear
 the seven `learnerModels` writers, `days` inside `useDayLog.ts`, `dispositionCache` inside
 `DispositionProfile.tsx`, and so on for the rest). **All 25 found, all 25 match.**
 
-This is a real spot-check, not a full re-derivation census — it confirms presence of the claimed
-behavior, not its exclusivity, so it wouldn't catch a *new*, undocumented eighth `learnerModels` writer
-appearing somewhere the table doesn't mention. But it is real evidence rather than an inference from an
-empty diff, and it agrees with the independently-confirmed fact that this window's diff touches none of
-these 25 files at all (§0.5) — the doc's own claims and the code they describe moved together, which is
-what "unchanged" should mean here.
-
+The historical presence check above did not establish the authority inventory or justify calling it unchanged. October 5 maintenance reconciliation traced stores, direct writers, callers and readers from source independently of the table. The [current source trace](FUNC01_AUTHORITY_TRACE_2026-10.md) documents the discovered drift and disagreements; DOC-27 records the documentation correction. No new master store or protected writer change is authorized. Static tracing does not establish live cross-store consistency.
 ### 1.9 Drift catalog — one file crossed the 150L threshold, and it is this window's own named fix
 
 `npm run census:arch-audit -- --base=2ee63ce`, full sweep:

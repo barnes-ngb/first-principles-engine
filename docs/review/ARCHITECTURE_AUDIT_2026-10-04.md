@@ -130,7 +130,7 @@ ranking. Architectural decision for the owner, not an auto-fix.
 ### 1.4 Test coverage (`TEST-01`)
 
 `census:arch-audit` → **5** feature directories with 0 test files: `auth`, `login`, `not-found`, `planner`,
-`ui-preview`. LoginPage in `auth` has validation, anonymous-account upgrade/sign-in and asynchronous error state; TeachHelperDialog in `planner` reads child records, generates and saves lesson material, and prints. These remain real coverage gaps. `login`, `not-found` and `ui-preview` are lower-value presentation shells. Ratios worth watching, from the same
+`ui-preview`. LoginPage in `auth` has validation, anonymous-account upgrade/sign-in and asynchronous error state; TeachHelperDialog in `planner` reads child records, generates and saves lesson material, and prints. These remain real coverage gaps, now explicitly tracked as TEST-07. `login`, `not-found` and `ui-preview` are lower-value presentation shells. Ratios worth watching, from the same
 script: `workshop` **45 source / 8 test** files and `monthly-review` **15 / 7** are the thinnest real-logic
 areas. **Proposed highest-value additions:** a `workshop` test over its game-generation reducers/guards and a
 `monthly-review` test over its publish/photo-selection logic. This window shipped four additive test files
@@ -153,7 +153,7 @@ Not re-opened; no window commit touches them. Nothing newly removable found.
 
 ### 2.1 "Where is Lincoln" (`FUNC-01`)
 
-The full source-of-truth writer/reader contract was not reverified in this October pass; do not infer unchanged authority from an empty decision-document diff. The September audit section 1.8 records a named-module presence spot-check at efab358 (not an exclusivity proof). Section 2.2 below traces the changed weekly-review failure path only. `DECISION_FUNC-01_source_of_truth.md` remains the governing decision; no architecture change is proposed by this limitation.
+The original October pass did not reverify the full contract. The October 5 maintenance reconciliation now supplies a [source-derived authority trace](FUNC01_AUTHORITY_TRACE_2026-10.md), independent of the old decision table, covering all seven dimensions plus identity and execution records. It identifies additional snapshot/map writers, Shelly chat as a map reader, narrow model reprojection, the actual activity document key, and historical Milestones/Ladders claims. DOC-27 records the corrected documentation; unresolved implementation seams remain open, including DATA-17. The layered-ownership decision is retained. This is static source evidence, not live consistency validation.
 
 ### 2.2 Loop integrity — the weekly-review path (`FIX-255`, `FIX-256`)
 
