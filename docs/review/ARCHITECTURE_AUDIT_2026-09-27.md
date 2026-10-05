@@ -227,6 +227,24 @@ two specific async-heavy component tests, rather than patching each file's timeo
 `npm run census:arch-audit`: **`ActivityConfig`: 308 refs / 78 files**, **`WorkbookConfig`: 38 refs / 12
 files** — both figures byte-identical to 09-20. **Band 1, ARCH-06, OPEN, unchanged.**
 
+
+The census now also prints each whole-word WorkbookConfig file. The historical efab358 inventory is:
+
+- `src/core/firebase/firestore.ts`
+- `src/core/firebase/migrateActivityConfigs.ts`
+- `src/core/types/planning.ts`
+- `src/features/planner-chat/PhotoLabelForm.tsx`
+- `src/features/planner-chat/PlannerChatPage.tsx`
+- `src/features/planner-chat/PlannerCompactSetup.test.tsx`
+- `src/features/planner-chat/PlannerCompactSetup.tsx`
+- `src/features/planner-chat/PlannerSetupWizard.tsx`
+- `src/features/planner-chat/pace.logic.test.ts`
+- `src/features/planner-chat/pace.logic.ts`
+- `src/features/records/dataReviewExport.logic.ts`
+- `src/features/records/dataReviewExportLoader.ts`
+
+Migration completion is **not safe to declare**: storage helpers, migration/type definitions, planner setup/pace and records consumers still reference the legacy type. Tests are included in this inventory and do not imply that runtime references are gone. No migration or deletion is performed by this audit.
+
 ### 1.6 ARCH-43 (Lincoln/London name-literal census) — flat, same 17 sites / 15 files
 
 `npm run census:arch-audit`: **17 sites / 15 files**, unchanged from 09-20, and the file list itself is
@@ -368,6 +386,8 @@ useWeekHours.ts:40`, `weekly-review/weekBySubject.ts:418` (all four present, unc
 `today/weekRibbon.logic.ts:320` from `FIX-254` (§2.1). **DATA-01 holds FIXED** — the new consumer routes
 through the shared rule rather than adding a sixth independent accumulator, which is the positive case
 this row exists to keep true.
+
+Live compliance total was not refreshed in this repository-only audit. The historical ledger figure is not a current family-hours assessment; DATA-01 above verifies shared calculation routing only. A current authoritative records export is required before stating current core hours or a gap to a jurisdictional threshold.
 
 ### 4.2 DATA-02 — still NEEDS-DATA, now 88 days past the freeze window
 
