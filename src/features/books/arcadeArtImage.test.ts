@@ -58,43 +58,50 @@ let readBlocked = false
 /** Make `toBlob` answer null, as an encoder that failed does. */
 let encodeFails = false
 
+/**
+ * A 2D context over a real buffer, for one canvas.
+ *
+ * The canvas arrives as a PARAMETER rather than through a `this` alias, so the
+ * fixture needs no lint exception to reach `canvas.width` from `putImageData`.
+ */
+function fakeContext(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
+  return {
+    drawImage: () => {},
+    createImageData: (w: number, h: number) => ({
+      data: new Uint8ClampedArray(w * h * 4),
+      width: w,
+      height: h,
+    }),
+    putImageData: (image: { data: Uint8ClampedArray }) => {
+      written = {
+        width: canvas.width,
+        height: canvas.height,
+        data: new Uint8ClampedArray(image.data),
+      }
+    },
+    getImageData: () => {
+      if (readBlocked) {
+        const error = new Error('tainted')
+        error.name = 'SecurityError'
+        throw error
+      }
+      if (!decodedPixels) throw new Error('no fixture installed')
+      return {
+        data: decodedPixels.data,
+        width: decodedPixels.width,
+        height: decodedPixels.height,
+      }
+    },
+  } as unknown as CanvasRenderingContext2D
+}
+
 function installCanvas() {
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(function (
     this: HTMLCanvasElement,
   ) {
-    if (noContext) return null
-    const canvas = this
-    return {
-      drawImage: () => {},
-      createImageData: (w: number, h: number) => ({
-        data: new Uint8ClampedArray(w * h * 4),
-        width: w,
-        height: h,
-      }),
-      putImageData: (image: { data: Uint8ClampedArray }) => {
-        written = {
-          width: canvas.width,
-          height: canvas.height,
-          data: new Uint8ClampedArray(image.data),
-        }
-      },
-      getImageData: () => {
-        if (readBlocked) {
-          const error = new Error('tainted')
-          error.name = 'SecurityError'
-          throw error
-        }
-        if (!decodedPixels) throw new Error('no fixture installed')
-        return {
-          data: decodedPixels.data,
-          width: decodedPixels.width,
-          height: decodedPixels.height,
-        }
-      },
-    } as unknown as CanvasRenderingContext2D
+    return noContext ? null : fakeContext(this)
   })
   vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation(function (
-    this: HTMLCanvasElement,
     callback: BlobCallback,
   ) {
     callback(encodeFails || !written ? null : new Blob(['png'], { type: 'image/png' }))
@@ -153,6 +160,36 @@ function solidFixture(width: number, height: number): Written {
   return { width, height, data }
 }
 
+/**
+ * A response the bounded reader can actually read.
+ *
+ * Every fallback fixture goes through this, because the loader now REFUSES a
+ * response with no readable stream rather than calling `response.blob()` — so
+ * a fixture without a `body` is testing the refusal, not the happy path.
+ */
+function streamedResponse(
+  chunks: Uint8Array[],
+  headers: Record<string, string> = {},
+  onCancel?: () => void,
+) {
+  let index = 0
+  return {
+    ok: true,
+    headers: { get: (name: string) => headers[name.toLowerCase()] ?? null },
+    body: {
+      getReader: () => ({
+        read: async () =>
+          index < chunks.length
+            ? { done: false, value: chunks[index++] }
+            : { done: true, value: undefined },
+        cancel: async () => onCancel?.(),
+      }),
+    },
+  }
+}
+
+const SOME_BYTES = () => [new Uint8Array([1, 2, 3])]
+
 // ── Loading ───────────────────────────────────────────────────────────────
 
 describe('reading a saved picture', () => {
@@ -165,9 +202,8 @@ describe('reading a saved picture', () => {
     expect(result.ok).toBe(true)
     expect(getBlobMock).toHaveBeenCalledTimes(1)
     expect(getBlobMock.mock.calls[0][0]).toEqual({ path: SOURCE.storagePath })
-    // The ceiling goes INTO the request, so an oversized object is refused
-    // during the download rather than measured after it is all allocated.
-    expect(getBlobMock.mock.calls[0][1]).toBe(MAX_ARCADE_SOURCE_BYTES)
+    // ONE BYTE OVER the ceiling, as a sentinel — see the next two tests.
+    expect(getBlobMock.mock.calls[0][1]).toBe(MAX_ARCADE_SOURCE_BYTES + 1)
     // The SDK answered, so the browser fetch is never reached.
     expect(fetch).not.toHaveBeenCalled()
     expectSilence()
@@ -176,10 +212,7 @@ describe('reading a saved picture', () => {
   it('falls through to one plain browser fetch when the SDK throws', async () => {
     decodedPixels = solidFixture(4, 4)
     getBlobMock.mockRejectedValue(new Error('cors'))
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => ({ ok: true, blob: async () => new Blob(['bytes']) })),
-    )
+    vi.stubGlobal('fetch', vi.fn(async () => streamedResponse(SOME_BYTES())))
 
     const result = await loadArcadeArtPixels(SOURCE)
 
@@ -193,19 +226,39 @@ describe('reading a saved picture', () => {
   })
 
   /**
-   * The SDK's own "too large" is an ANSWER, not a reason to try again by
-   * another route: the browser fetch would be the same bytes, and routing it
-   * there is how a bounded first attempt becomes an unbounded second one.
+   * The SDK does not refuse an oversized object — it TRUNCATES it.
+   * `getBlob(ref, n)` sends `Range: bytes=0-n` and then returns
+   * `blob.slice(0, n)`, so asking for the ceiling itself returns a blob of
+   * exactly the ceiling for both a complete file of that size and a fragment of
+   * a huge one. The sentinel is what tells them apart.
    */
-  it('does not fall through to the browser when the SDK says too large', async () => {
-    getBlobMock.mockRejectedValue(new Error('Blob exceeds maximum size.'))
+  it('refuses an object the SDK TRUNCATED, by the sentinel byte', async () => {
+    // What the real SDK hands back for a 50 MB object when asked for MAX + 1:
+    // a blob sliced to exactly the number of bytes requested. Modelled by size
+    // alone, because the size check is the whole subject here.
+    getBlobMock.mockImplementation(
+      async (_ref: unknown, max: number) => ({ size: max }) as Blob,
+    )
 
     expect(await loadArcadeArtPixels(SOURCE)).toEqual({
       ok: false,
       reason: ArcadeArtLoadFailure.TooLarge,
     })
+    // Clipped bytes must never reach the decoder: it would call them
+    // undecodable and blame the picture for our own truncation.
+    expect(createImageBitmap).not.toHaveBeenCalled()
+    // And the answer is known, so the same bytes are not fetched again.
     expect(fetch).not.toHaveBeenCalled()
     expectSilence()
+  })
+
+  it('accepts an object that exactly fills the ceiling', async () => {
+    // The other side of the sentinel: MAX bytes is a complete file, not a
+    // fragment, and refusing it would be the off-by-one in the other direction.
+    decodedPixels = solidFixture(4, 4)
+    getBlobMock.mockResolvedValue({ size: MAX_ARCADE_SOURCE_BYTES } as Blob)
+
+    expect((await loadArcadeArtPixels(SOURCE)).ok).toBe(true)
   })
 
   it('gives the SDK a DEADLINE, so a request that never settles still reports', async () => {
@@ -214,10 +267,7 @@ describe('reading a saved picture', () => {
     // Try again at all.
     decodedPixels = solidFixture(4, 4)
     getBlobMock.mockReturnValue(new Promise(() => {}))
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => ({ ok: true, blob: async () => new Blob(['bytes']) })),
-    )
+    vi.stubGlobal('fetch', vi.fn(async () => streamedResponse(SOME_BYTES())))
 
     const result = await loadArcadeArtPixels(SOURCE, { timeoutMs: 5 })
 
@@ -439,17 +489,20 @@ describe('reading a saved picture', () => {
     expectSilence()
   })
 
-  it('refuses early on an honest over-size Content-Length', async () => {
+  it('refuses early on an honest over-size Content-Length, and STOPS the transfer', async () => {
     getBlobMock.mockRejectedValue(new Error('cors'))
     const getReader = vi.fn()
+    let signal: AbortSignal | undefined
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => ({
-        ok: true,
-        headers: { get: (name: string) => (name === 'content-length' ? '99000000' : null) },
-        body: { getReader },
-        blob: async () => new Blob([]),
-      })),
+      vi.fn(async (_url: string, init: { signal: AbortSignal }) => {
+        signal = init.signal
+        return {
+          ok: true,
+          headers: { get: (name: string) => (name === 'content-length' ? '99000000' : null) },
+          body: { getReader },
+        }
+      }),
     )
 
     expect(await loadArcadeArtPixels(SOURCE)).toEqual({
@@ -457,6 +510,37 @@ describe('reading a saved picture', () => {
       reason: ArcadeArtLoadFailure.TooLarge,
     })
     expect(getReader).not.toHaveBeenCalled()
+    // Refusing is not the same as stopping: without the abort the body keeps
+    // arriving and buffering behind a result nobody is waiting for.
+    expect(signal?.aborted).toBe(true)
+  })
+
+  /**
+   * FAIL CLOSED. `response.blob()` reads the whole body before it can be
+   * measured, which is the unbounded allocation this module exists to avoid —
+   * and `Content-Length` cannot stand in for the measurement, because it is
+   * absent exactly as often as it is wrong.
+   */
+  it('refuses a response with no readable stream rather than reading it whole', async () => {
+    getBlobMock.mockRejectedValue(new Error('cors'))
+    const blob = vi.fn(async () => new Blob([new Uint8Array(50)]))
+    let signal: AbortSignal | undefined
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init: { signal: AbortSignal }) => {
+        signal = init.signal
+        return { ok: true, headers: { get: () => null }, blob }
+      }),
+    )
+
+    expect(await loadArcadeArtPixels(SOURCE)).toEqual({
+      ok: false,
+      reason: ArcadeArtLoadFailure.Unsupported,
+    })
+    expect(blob).not.toHaveBeenCalled()
+    expect(signal?.aborted).toBe(true)
+    expect(createImageBitmap).not.toHaveBeenCalled()
+    expectSilence()
   })
 
   it('accepts a bounded streamed body and converts it', async () => {

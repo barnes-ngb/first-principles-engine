@@ -1,5 +1,5 @@
 import type { ComponentProps } from 'react'
-import { render, screen, waitFor } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -82,6 +82,12 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  // Unmount FIRST. Testing Library's automatic cleanup runs after this hook,
+  // and the session's unmount cleanup revokes its preview object URL — so
+  // restoring the real `URL` here left that call reaching a `revokeObjectURL`
+  // jsdom does not implement. The production cleanup is correct and is left
+  // alone; it is the fixture's teardown order that was wrong.
+  cleanup()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
 })

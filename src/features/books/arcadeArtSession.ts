@@ -32,8 +32,10 @@
  *
  * Pure: no React, no DOM, no Firestore, no I/O.
  */
-import type { ArcadeArtFailure, ArcadeArtSize } from './arcadeArt'
-import { ARCADE_PALETTE } from './arcadeArt'
+import type { ArcadeArtSize } from './arcadeArt'
+// `ArcadeArtFailure` is both a type and the const object of its members, and
+// both are used below — the table's key type, and one member by name.
+import { ARCADE_PALETTE, ArcadeArtFailure } from './arcadeArt'
 import type { Sticker } from '../../core/types'
 
 // ── The source a session is bound to ────────────────────────────────────────
@@ -229,9 +231,10 @@ export const ARCADE_ART_DOWNLOAD_FAILED =
  * How to actually use it, which is the part a bare literal does not tell you.
  *
  * Deliberately a REPLACEMENT instruction rather than "paste this in". An image
- * literal is an expression: pasted at the top level of a program it is a syntax
- * error, and pasted into the Blocks view it is nothing at all. The one place it
- * belongs is over an existing `img` literal in the JavaScript view.
+ * literal is an **expression**: on its own at the top level of a program it is
+ * valid JavaScript that nothing uses, so it compiles and draws no sprite — the
+ * confusing failure, not a loud one. The one place it belongs is over an
+ * existing `img` literal in the JavaScript view.
  */
 export const ARCADE_ART_INSTRUCTIONS: readonly string[] = [
   'Open your game at arcade.makecode.com and switch to JavaScript.',
@@ -249,7 +252,7 @@ export const ARCADE_ART_INSTRUCTIONS: readonly string[] = [
  * that before they go looking for one.
  */
 export const ARCADE_ART_PALETTE_NOTE =
-  `The ${ARCADE_PALETTE.length} colours are Arcade's default palette. In a game that has set its own palette, the same code draws different colours.`
+  `The ${ARCADE_PALETTE.length - 1} colours (plus see-through) are Arcade's default palette. In a game that has set its own palette, the same code draws different colours.`
 
 // ── Failure sentences ───────────────────────────────────────────────────────
 
@@ -263,9 +266,21 @@ const CONVERT_MESSAGES: Record<ArcadeArtFailure, string> = {
     'This picture is too big to convert here. Try a smaller version of it.',
   'empty-source':
     'This picture is completely see-through, so there is nothing to turn into a sprite.',
-  // The one failure that is about the ART rather than about the machinery.
+  // The one failure that is about the ART rather than about the machinery. Its
+  // advice depends on the size, so the size-aware text below replaces it.
   'empty-result':
-    'Everything in this picture is too faint or too thin to show up at this size. Try 32 × 32.',
+    'Everything in this picture is too faint or too thin to show up at this size.',
+}
+
+/**
+ * What to try after an empty result — which is NOT the same sentence at both
+ * sizes. At 16 the next thing to try is 32; at 32 there is no bigger size, so
+ * telling somebody to try the size they are already on is advice that cannot
+ * work, and the honest suggestion is about the picture instead.
+ */
+const EMPTY_RESULT_ADVICE: Record<ArcadeArtSize, string> = {
+  16: 'Try 32 × 32.',
+  32: 'Try a picture with thicker lines or stronger colours.',
 }
 
 const LOAD_MESSAGES: Record<ArcadeArtLoadFailure, string> = {
@@ -283,9 +298,20 @@ const LOAD_MESSAGES: Record<ArcadeArtLoadFailure, string> = {
   cancelled: '',
 } as const
 
-/** What a person reads when a conversion refuses. */
-export function arcadeArtFailureMessage(reason: ArcadeArtFailure): string {
-  return CONVERT_MESSAGES[reason]
+/**
+ * What a person reads when a conversion refuses.
+ *
+ * `size` is the size that refused, and it changes exactly one answer — see
+ * {@link EMPTY_RESULT_ADVICE}. Optional, so a caller that only wants the
+ * reason still gets a whole sentence.
+ */
+export function arcadeArtFailureMessage(
+  reason: ArcadeArtFailure,
+  size?: ArcadeArtSize,
+): string {
+  const message = CONVERT_MESSAGES[reason]
+  if (reason !== ArcadeArtFailure.EmptyResult) return message
+  return `${message} ${EMPTY_RESULT_ADVICE[size ?? 16]}`
 }
 
 /** What a person reads when the picture could not be read. */

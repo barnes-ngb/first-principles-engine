@@ -155,11 +155,13 @@ describe('the session identity', () => {
 })
 
 describe('what a person is told when it fails', () => {
-  it('has a sentence for every conversion refusal', () => {
-    for (const reason of Object.values(ArcadeArtFailure)) {
-      const message = arcadeArtFailureMessage(reason)
-      expect(message.length, reason).toBeGreaterThan(20)
-      expect(message.trim().endsWith('.'), reason).toBe(true)
+  it('has a sentence for every conversion refusal, at both sizes', () => {
+    for (const size of ARCADE_ART_SIZES) {
+      for (const reason of Object.values(ArcadeArtFailure)) {
+        const message = arcadeArtFailureMessage(reason, size)
+        expect(message.length, `${reason} @ ${size}`).toBeGreaterThan(20)
+        expect(message.trim().endsWith('.'), `${reason} @ ${size}`).toBe(true)
+      }
     }
   })
 
@@ -182,9 +184,13 @@ describe('what a person is told when it fails', () => {
    * same. A failure sentence is the one place an address could leak into view.
    */
   it('names no URL, no storage path and no bucket in any message', () => {
+    // Explicit arrows, not bare references: `map` passes the INDEX as the
+    // second argument, which `arcadeArtFailureMessage` reads as the size.
     const everything = [
-      ...Object.values(ArcadeArtFailure).map(arcadeArtFailureMessage),
-      ...Object.values(ArcadeArtLoadFailure).map(arcadeArtLoadFailureMessage),
+      ...ARCADE_ART_SIZES.flatMap((size) =>
+        Object.values(ArcadeArtFailure).map((r) => arcadeArtFailureMessage(r, size)),
+      ),
+      ...Object.values(ArcadeArtLoadFailure).map((r) => arcadeArtLoadFailureMessage(r)),
       ARCADE_ART_INTRO,
       ARCADE_ART_PALETTE_NOTE,
       ...ARCADE_ART_INSTRUCTIONS,
@@ -197,15 +203,30 @@ describe('what a person is told when it fails', () => {
   it('says the empty result is about the picture, and what to try instead', () => {
     // The one refusal that is about the art rather than the machinery, so it is
     // the one that owes a next step.
-    expect(arcadeArtFailureMessage(ArcadeArtFailure.EmptyResult)).toMatch(/32/)
+    expect(arcadeArtFailureMessage(ArcadeArtFailure.EmptyResult, 16)).toMatch(/32 × 32/)
+  })
+
+  it('does NOT tell somebody at 32 to try 32', () => {
+    // Advice that cannot work: there is no bigger size, so the honest next step
+    // is about the picture rather than about the grid.
+    const at32 = arcadeArtFailureMessage(ArcadeArtFailure.EmptyResult, 32)
+    expect(at32).not.toMatch(/Try 32/)
+    expect(at32).toMatch(/thicker lines|stronger colours/)
+  })
+
+  it('still answers a whole sentence when no size is given', () => {
+    const bare = arcadeArtFailureMessage(ArcadeArtFailure.EmptyResult)
+    expect(bare.trim().endsWith('.')).toBe(true)
+    expect(bare.length).toBeGreaterThan(20)
   })
 })
 
 describe('the instructions', () => {
   it('tell a person to REPLACE a literal, in the JavaScript view', () => {
     const steps = ARCADE_ART_INSTRUCTIONS.join(' ')
-    // An image literal is an expression: pasted at the top level of a program
-    // it is a syntax error, and in the Blocks view it is nothing at all.
+    // An image literal is an expression: on its own at the top level it is
+    // valid JavaScript that nothing uses, so it compiles and draws no sprite —
+    // which is why "replace" has to be the verb rather than "paste".
     expect(steps).toMatch(/JavaScript/)
     expect(steps).toMatch(/replace/i)
     expect(steps).toMatch(/paste this over it/i)
@@ -213,7 +234,10 @@ describe('the instructions', () => {
   })
 
   it('say the colours are the DEFAULT palette, and what a custom one does', () => {
-    expect(ARCADE_ART_PALETTE_NOTE).toMatch(/16 colours/)
+    // Fifteen a cell can be drawn in, plus the see-through index — counting
+    // transparent as a sixteenth colour would be one more than exist.
+    expect(ARCADE_ART_PALETTE_NOTE).toMatch(/15 colours/)
+    expect(ARCADE_ART_PALETTE_NOTE).toMatch(/see-through/)
     expect(ARCADE_ART_PALETTE_NOTE).toMatch(/default palette/)
     expect(ARCADE_ART_PALETTE_NOTE).toMatch(/own palette/)
   })

@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -43,7 +44,10 @@ vi.mock('../books/ArcadeArtDialog', () => ({
     familyId: string
     contextKey: string
     nonce: number
+    onClose: () => void
   }) => {
+    // EVERY render is recorded, props and all, so a test can assert what the
+    // host passed in the renders BEFORE an effect ran — not only the last one.
     dialogProps(props)
     if (!props.source) return null
     return (
@@ -52,10 +56,21 @@ vi.mock('../books/ArcadeArtDialog', () => ({
         <span data-testid="arcade-id">{props.source.id}</span>
         <span data-testid="arcade-nonce">{String(props.nonce)}</span>
         <span data-testid="arcade-context">{props.contextKey}</span>
+        {/* The real callback, so a close test closes the way the app does. */}
+        <button type="button" onClick={props.onClose}>
+          Close game art
+        </button>
       </div>
     )
   },
 }))
+
+/** Every (source id, context) the dialog has ever been rendered with. */
+const dialogRenders = (): { id: string | null; context: string }[] =>
+  dialogProps.mock.calls.map(([props]) => ({
+    id: props.source?.id ?? null,
+    context: props.contextKey,
+  }))
 
 const getDocsMock = vi.fn()
 vi.mock('firebase/firestore', () => ({
@@ -190,22 +205,31 @@ describe('the game-art door', () => {
     expect(screen.getByRole('button', { name: doorName })).toBeInTheDocument()
   })
 
-  it('counts each opening as its own session', async () => {
+  it('counts each opening as its own session, through a real close and reopen', async () => {
     const user = userEvent.setup()
     render(<StickerLibraryTab {...ENABLED} />)
 
     await openPreview(user, /Preview Wolf.*Comic/)
     await user.click(screen.getByRole('button', { name: doorName }))
     expect(await screen.findByTestId('arcade-nonce')).toHaveTextContent('1')
-    // MUI keeps the preview's paper mounted through its exit transition.
+    expect(screen.getByTestId('arcade-id')).toHaveTextContent('v-comic')
+    // The preview closed when the door opened; MUI keeps its paper mounted
+    // through the exit transition, so wait for it to go.
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
 
-    // Reopen on the identical picture.
-    await user.click(screen.getByRole('button', { name: 'Preview Wolf Comic-book look' }))
+    // CLOSE the session the way the app does — the dialog's own `onClose`.
+    await user.click(screen.getByRole('button', { name: /close game art/i }))
+    await waitFor(() => expect(screen.queryByTestId('arcade-dialog')).toBeNull())
+
+    // …then reopen on the identical picture, through the live preview button.
+    await user.click(await screen.findByRole('button', { name: 'Preview Wolf Comic-book look' }))
     await user.click(screen.getByRole('button', { name: doorName }))
-    await waitFor(() =>
-      expect(screen.getByTestId('arcade-nonce')).toHaveTextContent('2'),
-    )
+
+    const dialog = await screen.findByTestId('arcade-dialog')
+    // A new session, not the first one resurrected…
+    expect(within(dialog).getByTestId('arcade-nonce')).toHaveTextContent('2')
+    // …on the exact version that was tapped, again.
+    expect(within(dialog).getByTestId('arcade-id')).toHaveTextContent('v-comic')
   })
 
   it('retires an open session when the actor identity changes', async () => {
@@ -316,8 +340,7 @@ describe('provenance of the list a session may start from', () => {
     getDocsMock.mockRejectedValue(new Error('offline'))
     render(<StickerLibraryTab {...ENABLED} />)
 
-    // The legacy behaviour is untouched — a failed read leaves the list as it
-    // was — and nothing vouches for it, so there is no door to tap.
+    // Nothing vouches for a list that was never read, so there is no door.
     await waitFor(() => expect(getDocsMock).toHaveBeenCalledTimes(1))
     expect(screen.queryByRole('button', { name: doorName })).toBeNull()
   })
@@ -330,24 +353,151 @@ describe('provenance of the list a session may start from', () => {
     expect(screen.getByRole('button', { name: doorName })).toBeInTheDocument()
   })
 
-  it('shuts the door on rows that are not in the vouched list at all', async () => {
-    // The family changes and its read fails: the previous family's rows are
-    // still rendered by the legacy list, and no session may start from one.
-    const user = userEvent.setup()
-    const { rerender } = render(<StickerLibraryTab {...ENABLED} />)
-    await screen.findByText(/sticker/)
+})
 
+/**
+ * A failed read for a NEW family must not leave the PREVIOUS family's pictures
+ * on screen with their actions live. The original code stayed on its spinner
+ * for ever, which was wrong in a different way; catching the rejection without
+ * qualifying the rows by family turned that into something worse.
+ */
+describe('a family whose read failed', () => {
+  const switchToFamilyB = async (rerender: (ui: ReactElement) => void) => {
     state.familyId = 'family-2'
     getDocsMock.mockRejectedValue(new Error('offline'))
     rerender(
-      <StickerLibraryTab
-        {...ENABLED}
-        gameArtContextKey="family-2|parents|child-9"
-      />,
+      <StickerLibraryTab {...ENABLED} gameArtContextKey="family-2|parents|child-9" />,
+    )
+    await waitFor(() => expect(getDocsMock).toHaveBeenCalledTimes(2))
+  }
+
+  it('shows NONE of the old family rows or their actions', async () => {
+    const { rerender } = render(<StickerLibraryTab {...ENABLED} />)
+    await screen.findByText(/sticker/)
+    expect(screen.getByRole('button', { name: 'Preview Dino' })).toBeInTheDocument()
+
+    await switchToFamilyB(rerender)
+
+    // No pictures, so no preview, and therefore none of the actions behind one.
+    expect(await screen.findByText(/couldn.t load your stickers/i)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Preview / })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Edit / })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Delete / })).toBeNull()
+    expect(screen.queryByRole('button', { name: doorName })).toBeNull()
+  })
+
+  it('says it FAILED rather than that the family has no stickers', async () => {
+    getDocsMock.mockRejectedValue(new Error('offline'))
+    render(<StickerLibraryTab {...ENABLED} />)
+
+    expect(await screen.findByText(/couldn.t load your stickers/i)).toBeInTheDocument()
+    // The one thing this surface must not claim.
+    expect(screen.queryByText(/no stickers yet/i)).toBeNull()
+  })
+
+  it('offers a retry that re-reads and restores the list', async () => {
+    const user = userEvent.setup()
+    getDocsMock.mockRejectedValueOnce(new Error('offline'))
+    render(<StickerLibraryTab {...ENABLED} />)
+    await screen.findByText(/couldn.t load your stickers/i)
+
+    getDocsMock.mockResolvedValue(snapshotOf(LIBRARY))
+    await user.click(screen.getByRole('button', { name: /try again/i }))
+
+    await screen.findByText(/sticker/)
+    expect(screen.getByRole('button', { name: 'Preview Dino' })).toBeInTheDocument()
+  })
+
+  it('keeps the SAME family rows when a refresh of that family fails, and says so', async () => {
+    // Correctly bound cached behaviour: these really are this family's rows.
+    const { rerender } = render(<StickerLibraryTab {...ENABLED} />)
+    await screen.findByText(/sticker/)
+
+    getDocsMock.mockRejectedValue(new Error('offline'))
+    rerender(<StickerLibraryTab {...ENABLED} refreshSignal={1} />)
+    await waitFor(() => expect(getDocsMock).toHaveBeenCalledTimes(2))
+
+    expect(screen.getByRole('button', { name: 'Preview Dino' })).toBeInTheDocument()
+    expect(screen.getByText(/couldn.t refresh your stickers/i)).toBeInTheDocument()
+  })
+
+  it('still distinguishes a successful EMPTY read', async () => {
+    getDocsMock.mockResolvedValue(snapshotOf([]))
+    render(<StickerLibraryTab {...ENABLED} />)
+
+    expect(await screen.findByText(/no stickers yet/i)).toBeInTheDocument()
+    expect(screen.queryByText(/couldn.t load/i)).toBeNull()
+  })
+})
+
+/**
+ * The source handed to the dialog is gated in RENDER, not by an effect.
+ *
+ * An effect runs after the commit, so a passive clear leaves one render in
+ * which the old picture is passed under the NEW identity — and the dialog's own
+ * child effect can start loading it in exactly that window. Asserting the final
+ * `null` cannot see this; asserting every render can.
+ */
+describe('no render ever pairs an old source with a new identity', () => {
+  const openSession = async (user: ReturnType<typeof userEvent.setup>) => {
+    await openPreview(user, /Preview Wolf.*Comic/)
+    await user.click(screen.getByRole('button', { name: doorName }))
+    await screen.findByTestId('arcade-dialog')
+  }
+
+  it('holds across a same-family CHILD switch', async () => {
+    const user = userEvent.setup()
+    const { rerender } = render(<StickerLibraryTab {...ENABLED} />)
+    await openSession(user)
+    expect(dialogRenders().some((r) => r.id === 'v-comic')).toBe(true)
+
+    dialogProps.mockClear()
+    rerender(
+      <StickerLibraryTab {...ENABLED} gameArtContextKey="family-1|parents|child-2" />,
+    )
+    await waitFor(() => expect(screen.queryByTestId('arcade-dialog')).toBeNull())
+
+    // Not one render under the new context carried the old picture.
+    for (const render_ of dialogRenders()) {
+      if (render_.context === 'family-1|parents|child-2') {
+        expect(render_.id, 'old source under the new identity').toBeNull()
+      }
+    }
+  })
+
+  it('holds across a FAMILY switch', async () => {
+    const user = userEvent.setup()
+    const { rerender } = render(<StickerLibraryTab {...ENABLED} />)
+    await openSession(user)
+
+    dialogProps.mockClear()
+    state.familyId = 'family-2'
+    rerender(
+      <StickerLibraryTab {...ENABLED} gameArtContextKey="family-2|parents|child-9" />,
+    )
+    await waitFor(() => expect(screen.queryByTestId('arcade-dialog')).toBeNull())
+
+    for (const render_ of dialogRenders()) {
+      if (render_.context !== 'family-1|parents|child-1') {
+        expect(render_.id, 'old source under the new identity').toBeNull()
+      }
+    }
+  })
+
+  /** The same gate on the door: an old preview cannot open a fresh session. */
+  it('will not open a NEW session from a preview held over a switch', async () => {
+    const user = userEvent.setup()
+    const { rerender } = render(<StickerLibraryTab {...ENABLED} />)
+    await openPreview(user, /Preview Wolf.*Comic/)
+    expect(screen.getByRole('button', { name: doorName })).toBeInTheDocument()
+
+    rerender(
+      <StickerLibraryTab {...ENABLED} gameArtContextKey="family-1|parents|child-2" />,
     )
 
-    await waitFor(() => expect(getDocsMock).toHaveBeenCalledTimes(2))
-    await user.click(await screen.findByRole('button', { name: /Preview Wolf.*Comic/ }))
+    // Gone in the same commit — the door and the preview both, with no effect
+    // in between for a tap to slip through.
     expect(screen.queryByRole('button', { name: doorName })).toBeNull()
+    expect(screen.queryByTestId('arcade-dialog')).toBeNull()
   })
 })

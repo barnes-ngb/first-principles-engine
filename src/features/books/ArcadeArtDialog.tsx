@@ -364,7 +364,8 @@ function ArcadeArtSession({
       setView((v) => ({
         ...v,
         working: false,
-        convertError: arcadeArtFailureMessage(result.reason),
+        // The size is part of the advice: at 32 there is no bigger size to try.
+        convertError: arcadeArtFailureMessage(result.reason, size),
       }))
       return
     }

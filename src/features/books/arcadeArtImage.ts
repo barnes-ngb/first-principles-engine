@@ -16,20 +16,23 @@
  *
  * ## Bounds
  *
- * - **Bytes, during the download.** The SDK is given its own
- *   `maxDownloadSizeBytes`, and the browser fallback reads the body as a stream
- *   and counts the bytes that actually arrive — `Content-Length` may refuse
- *   early but is never trusted to accept.
+ * - **Bytes.** The SDK is asked for `MAX + 1` as a **sentinel** and anything
+ *   over `MAX` is refused before decoding; the browser fallback counts the
+ *   bytes that actually arrive from the stream. `Content-Length` may refuse
+ *   early but is never trusted to accept, and a response with no readable
+ *   stream is refused rather than read whole.
  * - **Time.** Every network stage has a deadline, so a request that never
  *   settles becomes an error with a *Try again* rather than a permanent spinner.
  * - **The session.** A retired session aborts the browser fetch and drops the
  *   result.
  * - **Pixels, before the RGBA read**, which is four bytes per pixel.
  *
- * The one bound that cannot exist: a browser learns an image's dimensions by
- * decoding its header and allocating the bitmap, so the memory is spent before
- * `naturalWidth` is readable. The byte ceiling is the only lever on that, and a
- * small, highly compressed PNG can still decode large.
+ * Two bounds that do NOT exist, stated rather than implied. A browser learns an
+ * image's dimensions by decoding its header and allocating the bitmap, so that
+ * memory is spent before `naturalWidth` is readable. And `maxDownloadSizeBytes`
+ * is a `Range` header plus a `slice` of what came back — the SDK request is not
+ * abortable, and a server that ignores the range sends the whole object anyway,
+ * so it bounds what we KEEP and not what crosses the wire.
  *
  * Nothing here logs, and nothing here reads or writes Firestore.
  */
@@ -110,21 +113,24 @@ async function withDeadline<T>(
 type FetchOutcome = { ok: true; blob: Blob } | { ok: false; reason: LoadFailure }
 
 /**
- * The SDK's own refusal that the object is over the maximum we asked for.
+ * What we ask the SDK for: one byte MORE than we will accept.
  *
- * Matched on the message the SDK writes for exactly this case. A miss is safe
- * rather than silent: the attempt falls through to the browser fetch, which is
- * itself bounded — so the worst outcome of a reworded SDK message is one extra
- * bounded request, never an unbounded download.
+ * `getBlob(ref, max)` sends `Range: bytes=0-max`, accepts 200 or 206, and then
+ * returns `blob.slice(0, max)`. It does **not** reject an object that is bigger
+ * — it silently TRUNCATES it. So asking for the ceiling itself gives a blob of
+ * exactly the ceiling for both a complete file of that size and a truncated
+ * fragment of a huge one, and a size check against the same number cannot tell
+ * them apart. Truncated bytes then reach the decoder and come back as
+ * *undecodable*, which blames the picture for our own clipping.
+ *
+ * Asking for `MAX + 1` makes the ceiling a sentinel instead: anything over
+ * `MAX` can only be an object that is genuinely too big.
  */
-function isOversizeRejection(error: unknown): boolean {
-  const message = (error as { message?: unknown } | null)?.message
-  return typeof message === 'string' && /exceeds maximum size/i.test(message)
-}
+const SDK_DOWNLOAD_SENTINEL = MAX_ARCADE_SOURCE_BYTES + 1
 
 type SdkOutcome =
   | { kind: 'blob'; blob: Blob }
-  /** The object is over the ceiling. This is an answer, not a reason to retry. */
+  /** Over the ceiling. An answer, not a reason to try the same bytes again. */
   | { kind: 'too-large' }
   /** Unreachable by this route; the browser may still manage it. */
   | { kind: 'failed' }
@@ -133,26 +139,23 @@ async function fetchViaSdk(
   source: ArcadeArtSource,
   timeoutMs: number,
 ): Promise<SdkOutcome> {
-  // The maximum goes INTO the request, so an oversized object is refused during
-  // the download rather than measured after it has all been allocated.
-  //
   // `ref` and `getBlob` can throw SYNCHRONOUSLY on a path the SDK rejects, so
   // the call is inside the try: that is an unreachable source, which the
-  // browser may still manage, not an unexpected browser failure.
+  // browser may still manage, not an unexpected browser failure. A rejection
+  // never means "too large" — see the sentinel above.
   let settled: Settled<Blob> | null
   try {
     settled = await withDeadline(
-      getBlob(ref(storage, source.storagePath), MAX_ARCADE_SOURCE_BYTES),
+      getBlob(ref(storage, source.storagePath), SDK_DOWNLOAD_SENTINEL),
       timeoutMs,
     )
   } catch {
     return { kind: 'failed' }
   }
   if (!settled) return { kind: 'failed' } // the deadline passed
-  if (!settled.ok) {
-    return isOversizeRejection(settled.error) ? { kind: 'too-large' } : { kind: 'failed' }
-  }
-  // GCS does not always honour a Range request, so the size is checked again.
+  if (!settled.ok) return { kind: 'failed' }
+  // The sentinel read: over the ceiling means the object really is too big.
+  // Checked BEFORE decoding, so clipped bytes never reach the decoder.
   if (settled.value.size > MAX_ARCADE_SOURCE_BYTES) return { kind: 'too-large' }
   return { kind: 'blob', blob: settled.value }
 }
@@ -181,13 +184,13 @@ async function readBoundedBody(
 ): Promise<FetchOutcome> {
   const body = response.body
   if (!body || typeof body.getReader !== 'function') {
-    // No stream available. The declared length has already been checked, and
-    // what arrived is checked again — but this path does allocate before it can
-    // measure, which is why it is the fallback's fallback rather than the rule.
-    const blob = await response.blob()
-    return blob.size > limit
-      ? { ok: false, reason: ArcadeArtLoadFailure.TooLarge }
-      : { ok: true, blob }
+    // FAIL CLOSED. `response.blob()` would read the whole body before it could
+    // be measured, which is the unbounded allocation this module exists to
+    // avoid — and `Content-Length` cannot stand in for the measurement,
+    // because it is absent exactly as often as it is wrong. A browser with no
+    // readable stream gets an honest "not available here" instead.
+    controller.abort()
+    return { ok: false, reason: ArcadeArtLoadFailure.Unsupported }
   }
   const reader = body.getReader()
   const chunks: BlobPart[] = []
@@ -220,6 +223,9 @@ async function readFromBrowser(
   // streamed count, which is the measurement that actually decides.
   const declared = Number(headerValue(response, 'content-length'))
   if (Number.isFinite(declared) && declared > MAX_ARCADE_SOURCE_BYTES) {
+    // Refusing is not the same as stopping: without the abort the transfer
+    // keeps running and buffering behind a result nobody is waiting for.
+    controller.abort()
     return { ok: false, reason: ArcadeArtLoadFailure.TooLarge }
   }
   return readBoundedBody(response, MAX_ARCADE_SOURCE_BYTES, controller)

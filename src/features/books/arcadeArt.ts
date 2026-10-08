@@ -252,8 +252,9 @@ export function arcadeArtRow(
  * Shape, pinned by a golden test: `img\`` alone on the first line, one indented
  * row per line, and the closing back-tick alone on the last. This is what gets
  * pasted OVER an existing `img\`…\`` in a game's JavaScript — see
- * `arcadeArtSession.ts` for the instructions that say so, because pasting it at
- * the top level of a program is a syntax error rather than a sprite.
+ * `arcadeArtSession.ts` for the instructions that say so. On its own it is
+ * perfectly valid JavaScript; it is just an expression nothing uses, so it
+ * draws no sprite.
  *
  * Throws on a grid that does not match its own declared size. The converter
  * cannot produce one; a caller that hand-builds indices can, and a silently
