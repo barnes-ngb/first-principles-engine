@@ -222,7 +222,7 @@ describe('the game-art door', () => {
     await waitFor(() => expect(screen.queryByTestId('arcade-dialog')).toBeNull())
 
     // …then reopen on the identical picture, through the live preview button.
-    await user.click(await screen.findByRole('button', { name: 'Preview Wolf Comic-book look' }))
+    await openPreview(user, /Preview Wolf.*Comic/)
     await user.click(screen.getByRole('button', { name: doorName }))
 
     const dialog = await screen.findByTestId('arcade-dialog')
