@@ -687,7 +687,25 @@ export default function StickerLibraryTab({
     }
   }, [printTargets, printing, printPageSize, printStickerSize])
 
-  if (loading) {
+  /**
+   * The full-page spinner is for having NOTHING of this family's to show — not
+   * for "a read is in flight" (PR #1884 round 1).
+   *
+   * It is an early return above the whole tree, and `load()` sets `loading` on
+   * every `refreshSignal` too, so a same-family refresh used to UNMOUNT the open
+   * game-art session: an identical-row or failed refresh rebuilt it with the
+   * same props, which re-downloads the picture and loses the session's sizes,
+   * output and "Copied" receipt, and a refresh that never settled removed it for
+   * good. Retiring a session is `reconcileGameArtTarget`'s decision, and an
+   * in-flight or failed refresh is deliberately **not** one of its reasons — so
+   * the spinner must not make that decision by accident.
+   *
+   * `stickers` is already family-qualified, so both cases the spinner was for
+   * still get it: the first read, and a new family's read (whose rows are never
+   * the previous family's). Neither can have a session open — the door is only
+   * reachable through a rendered sticker's big preview.
+   */
+  if (loading && stickers.length === 0) {
     return <LoadingState fullHeight />
   }
 

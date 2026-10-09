@@ -1,5 +1,6 @@
+import { useEffect, useState } from 'react'
 import type { ReactElement } from 'react'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -31,6 +32,17 @@ vi.mock('../../core/ai/useAI', () => ({
 }))
 
 /**
+ * Mount bookkeeping for the dialog stub.
+ *
+ * `vi.hoisted` because the mock factory below closes over it. A real session's
+ * sizes, rendered output and "Copied" receipt live in the dialog's OWN state,
+ * so being torn down and rebuilt with identical props loses all of it — and
+ * that is invisible to an assertion about props. These counts are how a test
+ * tells the two apart.
+ */
+const session = vi.hoisted(() => ({ ids: 0, mounts: 0, unmounts: 0 }))
+
+/**
  * The dialog as a stub that reports its props.
  *
  * Deliberately not the real one: what is under test here is which source the
@@ -39,16 +51,29 @@ vi.mock('../../core/ai/useAI', () => ({
  */
 const dialogProps = vi.fn()
 vi.mock('../books/ArcadeArtDialog', () => ({
-  default: (props: {
+  // A named, capitalised function expression rather than an arrow: it holds
+  // hooks now, and `rules-of-hooks` reads the component's NAME to decide
+  // whether a hook call is legal.
+  default: function ArcadeArtDialogStub(props: {
     source: Sticker | null
     familyId: string
     contextKey: string
     nonce: number
     onClose: () => void
-  }) => {
+  }) {
     // EVERY render is recorded, props and all, so a test can assert what the
     // host passed in the renders BEFORE an effect ran — not only the last one.
     dialogProps(props)
+    // One id per MOUNT, and a symmetric mount/unmount count beside it. A
+    // retired session (source `null`) keeps its id, because the host handing
+    // over `null` and the host unmounting the dialog are different things.
+    const [instanceId] = useState(() => `mount-${++session.ids}`)
+    useEffect(() => {
+      session.mounts += 1
+      return () => {
+        session.unmounts += 1
+      }
+    }, [])
     if (!props.source) return null
     return (
       <div data-testid="arcade-dialog">
@@ -56,6 +81,7 @@ vi.mock('../books/ArcadeArtDialog', () => ({
         <span data-testid="arcade-id">{props.source.id}</span>
         <span data-testid="arcade-nonce">{String(props.nonce)}</span>
         <span data-testid="arcade-context">{props.contextKey}</span>
+        <span data-testid="arcade-instance">{instanceId}</span>
         {/* The real callback, so a close test closes the way the app does. */}
         <button type="button" onClick={props.onClose}>
           Close game art
@@ -132,6 +158,9 @@ const snapshotOf = (rows: Sticker[]) => ({
 beforeEach(() => {
   state.familyId = 'family-1'
   dialogProps.mockReset()
+  session.ids = 0
+  session.mounts = 0
+  session.unmounts = 0
   getDocsMock.mockReset()
   getDocsMock.mockResolvedValue(snapshotOf(LIBRARY))
 })
@@ -332,6 +361,163 @@ describe('a source the host has already seen change', () => {
 
     await waitFor(() => expect(getDocsMock).toHaveBeenCalledTimes(2))
     expect(screen.getByTestId('arcade-url')).toHaveTextContent(comicVersion.url)
+  })
+})
+
+/**
+ * A refresh is not a reason to REBUILD the session (PR #1884 round 1).
+ *
+ * `load()` raises `loading` on every `refreshSignal`, and the host's full-page
+ * spinner is an early return above the whole tree — so the dialog was unmounted
+ * for the length of every refresh. The two tests above could not see it: by the
+ * time their `waitFor` ran, the dialog had been rebuilt with identical props,
+ * and a props assertion cannot tell that from never having left. A real session
+ * loses its sizes, its rendered output and its "Copied" receipt that way, and
+ * re-downloads the picture — and a refresh that never settled removed it for
+ * good. These tests observe the MOUNT.
+ */
+describe('a same-family refresh never tears the open session down', () => {
+  const openSession = async (user: ReturnType<typeof userEvent.setup>) => {
+    await openPreview(user, /Preview Wolf.*Comic/)
+    await user.click(screen.getByRole('button', { name: doorName }))
+    await screen.findByTestId('arcade-dialog')
+    // One live mount, and nothing torn down to get here.
+    expect(session.mounts).toBe(1)
+    expect(session.unmounts).toBe(0)
+    return screen.getByTestId('arcade-instance').textContent
+  }
+
+  /** The SAME session is still on screen, on the exact version that was tapped. */
+  const expectSameSession = (instance: string | null) => {
+    expect(instance).toMatch(/^mount-/)
+    expect(session.mounts).toBe(1)
+    expect(session.unmounts).toBe(0)
+    expect(screen.getByTestId('arcade-instance')).toHaveTextContent(instance as string)
+    expect(screen.getByTestId('arcade-id')).toHaveTextContent('v-comic')
+    expect(screen.getByTestId('arcade-url')).toHaveTextContent(comicVersion.url)
+    // Still session one: nothing re-opened it behind the parent's back.
+    expect(screen.getByTestId('arcade-nonce')).toHaveTextContent('1')
+  }
+
+  it('holds while a refresh is still in flight', async () => {
+    const user = userEvent.setup()
+    const { rerender } = render(<StickerLibraryTab {...ENABLED} />)
+    const instance = await openSession(user)
+
+    // A read that never comes back — the case that used to remove the session
+    // indefinitely rather than for a frame.
+    let settle: ((snap: unknown) => void) | undefined
+    getDocsMock.mockReturnValueOnce(
+      new Promise((res) => {
+        settle = res
+      }),
+    )
+    rerender(<StickerLibraryTab {...ENABLED} refreshSignal={1} />)
+
+    expect(screen.getByTestId('arcade-dialog')).toBeInTheDocument()
+    expectSameSession(instance)
+
+    // And it is still the same session once the read does land.
+    await act(async () => {
+      settle?.(snapshotOf(LIBRARY))
+    })
+    expectSameSession(instance)
+  })
+
+  it('holds through a refresh that returns the identical row', async () => {
+    const user = userEvent.setup()
+    const { rerender } = render(<StickerLibraryTab {...ENABLED} />)
+    const instance = await openSession(user)
+
+    rerender(<StickerLibraryTab {...ENABLED} refreshSignal={1} />)
+    await waitFor(() => expect(getDocsMock).toHaveBeenCalledTimes(2))
+
+    expectSameSession(instance)
+  })
+
+  it('holds through a same-family refresh that FAILS', async () => {
+    const user = userEvent.setup()
+    const { rerender } = render(<StickerLibraryTab {...ENABLED} />)
+    const instance = await openSession(user)
+
+    getDocsMock.mockRejectedValue(new Error('offline'))
+    rerender(<StickerLibraryTab {...ENABLED} refreshSignal={1} />)
+    await waitFor(() => expect(getDocsMock).toHaveBeenCalledTimes(2))
+
+    // The rows really are this family's, so they stay — and say they are stale.
+    expect(screen.getByText(/couldn.t refresh your stickers/i)).toBeInTheDocument()
+    expectSameSession(instance)
+  })
+
+  /**
+   * Retirement is `reconcileGameArtTarget`'s decision and stays its decision:
+   * the host hands the dialog `null`, which is a different act from taking the
+   * dialog away — and only the first one is a judgement about the source.
+   */
+  it('still retires a re-pointed source, by handing over null rather than unmounting', async () => {
+    const user = userEvent.setup()
+    const { rerender } = render(<StickerLibraryTab {...ENABLED} />)
+    await openSession(user)
+
+    const replaced: Sticker = {
+      ...comicVersion,
+      url: 'https://example.test/comic-v2.png',
+      storagePath: 'families/family-1/stickers/comic-v2.png',
+    }
+    getDocsMock.mockResolvedValue(snapshotOf([replaced, original, legacy]))
+    rerender(<StickerLibraryTab {...ENABLED} refreshSignal={1} />)
+
+    await waitFor(() => expect(screen.queryByTestId('arcade-dialog')).toBeNull())
+    expect(dialogProps.mock.calls.at(-1)?.[0].source).toBeNull()
+    expect(session.unmounts).toBe(0)
+    // Not substituted: the new bytes never reach the retired session.
+    expect(screen.queryByText('https://example.test/comic-v2.png')).toBeNull()
+  })
+
+  it('still retires a deleted row the same way', async () => {
+    const user = userEvent.setup()
+    const { rerender } = render(<StickerLibraryTab {...ENABLED} />)
+    await openSession(user)
+
+    getDocsMock.mockResolvedValue(snapshotOf([original, legacy]))
+    rerender(<StickerLibraryTab {...ENABLED} refreshSignal={1} />)
+
+    await waitFor(() => expect(screen.queryByTestId('arcade-dialog')).toBeNull())
+    expect(dialogProps.mock.calls.at(-1)?.[0].source).toBeNull()
+    expect(session.unmounts).toBe(0)
+  })
+
+  /**
+   * The narrowing is about a refresh of the SAME family. A new family has no
+   * rows of its own yet, and the previous family's may never stand in for them
+   * — so that read still gets the whole-page spinner, session included.
+   */
+  it('a family switch still takes the session, the preview and the pictures away', async () => {
+    const user = userEvent.setup()
+    const { rerender } = render(<StickerLibraryTab {...ENABLED} />)
+    await openSession(user)
+
+    dialogProps.mockClear()
+    state.familyId = 'family-2'
+    getDocsMock.mockReturnValueOnce(new Promise(() => {}))
+    rerender(
+      <StickerLibraryTab {...ENABLED} gameArtContextKey="family-2|parents|child-9" />,
+    )
+
+    // Gone in the same commit, with the new family's read still in flight.
+    expect(session.unmounts).toBe(1)
+    expect(screen.queryByTestId('arcade-dialog')).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Preview / })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Edit / })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Delete / })).toBeNull()
+    expect(screen.queryByRole('button', { name: doorName })).toBeNull()
+    expect(screen.queryByText(comicVersion.url)).toBeNull()
+    // And not one render under the new identity carried the old picture.
+    for (const render_ of dialogRenders()) {
+      if (render_.context !== 'family-1|parents|child-1') {
+        expect(render_.id, 'old source under the new identity').toBeNull()
+      }
+    }
   })
 })
 
