@@ -162,6 +162,7 @@ Derived by `node scripts/health-census.mjs --rev=12ad312b1586437979a6a46cf9d91eb
 ---
 
 ## What's Built but Untested with Real Users
+- **Sticker → MakeCode Arcade game art (FEAT-239)** — a host-opt-in *Make game art* door in the sticker library's big preview converts the **exact saved version tapped** (a drawing group's original included) into a 16×16 or 32×32 Arcade sprite: crop to the non-zero-alpha box, centre-pad to a square without stretching, integrate by fractional cell area, alpha-weighted colour, and nearest of Arcade's 15 default colours plus see-through. It offers the image literal to paste **over** an existing `img` literal in the JavaScript view, and a PNG at the sprite's own size. Writes nothing and spends nothing — no sticker row, sprite record, schema, portfolio, `hours`, XP or snapshot, and no art quota gate. Unreleased and not yet used by the family; actual Arcade import at both sizes, browser copy, native PNG sizes and phone/tablet layout were verified locally by the organizer, and Android Chrome use has not been.
 - Full Hero Hub mission-state cycle end-to-end across multiple weeks.
 - Brothers View sustained usage (especially London-led sessions).
 - Stonebridge continuity quality over 2–3 week narrative runs.

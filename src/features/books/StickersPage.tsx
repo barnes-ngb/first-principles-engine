@@ -81,6 +81,19 @@ export default function StickersPage() {
     ? `${familyId}|${profile ?? 'none'}|${editActorChildId || 'none'}`
     : undefined
 
+  /**
+   * Whose session the game-art door runs as (FEAT-239).
+   *
+   * The same actor identity, deliberately read from the one value rather than
+   * recomposed: two context keys built from the same three parts are two things
+   * that can disagree, and the library retires its big preview when either one
+   * changes. The door is open to parents and children alike — a kid making a
+   * sprite from their own drawing is the point of it — because the conversion
+   * spends nothing, writes nothing, and reads only a picture this page is
+   * already showing them.
+   */
+  const gameArtContextKey = savedEditContextKey
+
   // Help copy is audience-gated on capability (FEAT-178) — a kid profile reads
   // the kid wording, everyone else the fuller parent wording. Never a name.
   const audience = isChildProfile ? 'kid' : 'parent'
@@ -212,6 +225,8 @@ export default function StickersPage() {
         audience={audience}
         enableSavedStickerEditing={!!savedEditContextKey}
         editContextKey={savedEditContextKey}
+        enableGameArt={!!gameArtContextKey}
+        gameArtContextKey={gameArtContextKey}
       />
 
       {familyId && (
