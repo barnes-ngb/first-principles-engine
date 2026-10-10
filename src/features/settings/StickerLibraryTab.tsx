@@ -17,6 +17,7 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import EditIcon from '@mui/icons-material/Edit'
 import PrintIcon from '@mui/icons-material/Print'
+import SportsEsportsIcon from '@mui/icons-material/SportsEsports'
 import { deleteDoc, doc, getDocs, orderBy, query, updateDoc, writeBatch } from 'firebase/firestore'
 
 import { EmptyState, LoadingState } from '../../components/states'
@@ -46,6 +47,8 @@ import {
   savedStickerEditSource,
   SAVED_STICKER_EDIT_DOOR_LABEL,
 } from '../books/savedStickerEditSession'
+import ArcadeArtDialog from '../books/ArcadeArtDialog'
+import { arcadeArtSource, ARCADE_ART_DOOR_LABEL } from '../books/arcadeArtSession'
 import { FANCY_STYLE_OPTIONS, DEFAULT_FANCY_STYLE_ID } from '../books/drawingStickerStyles'
 import CustomLookCard from '../books/CustomLookCard'
 import { hasCustomPictureNote } from '../books/customPictureNote'
@@ -73,6 +76,51 @@ const STICKER_TAG_LABELS: Record<StickerTag, string> = {
 const STICKER_TAGS_ORDERED: StickerTag[] = [
   'animal', 'minecraft', 'fantasy', 'nature', 'character', 'object', 'vehicle', 'food', 'faith', 'other',
 ]
+
+/**
+ * The row in `list` that `sticker` still names, or `null` (FEAT-239).
+ *
+ * Identity is the document id **and the bytes it points at**, so a row that
+ * kept its id and was re-pointed at a different image does not match — which is
+ * exactly the case a lookup by id alone cannot see.
+ */
+function currentListRow(
+  list: readonly Sticker[] | null,
+  sticker: Sticker | null,
+): Sticker | null {
+  if (!list || !sticker?.id) return null
+  const row = list.find((s) => s.id === sticker.id)
+  if (!row) return null
+  return row.url === sticker.url && row.storagePath === sticker.storagePath ? row : null
+}
+
+/**
+ * The game-art session's row after reconciliation against the vouched list
+ * (FEAT-239), or `null` to retire the session.
+ *
+ * Two reasons retire it: the row is **gone**, or it is **re-pointed** at
+ * different bytes under the same id. In both the grid on screen was made from a
+ * picture that is no longer there, and substituting whatever the id now names
+ * would export one picture under another's name. Having **no** vouched list is
+ * not a reason — nothing has been observed to change, so an in-flight or failed
+ * refresh leaves a live session alone.
+ */
+function reconcileGameArtTarget(
+  list: readonly Sticker[] | null,
+  target: Sticker | null,
+): Sticker | null {
+  if (!target) return null
+  if (!list) return target
+  return currentListRow(list, target) ? target : null
+}
+
+/** Library rows and the family they belong to, as one inseparable value. */
+interface LibraryList {
+  familyId: string
+  rows: Sticker[]
+  /** A read for THIS family failed. The rows are whatever last succeeded. */
+  failed: boolean
+}
 
 function withDefaults(sticker: Sticker): Sticker {
   return {
@@ -148,6 +196,27 @@ interface StickerLibraryTabProps {
    * A change closes the open session rather than re-pointing it.
    */
   editContextKey?: string
+  /**
+   * Show the "Make game art" door in the big preview (FEAT-239) — convert THIS
+   * saved picture into a 16 × 16 or 32 × 32 MakeCode Arcade sprite, preview it,
+   * and copy the image literal or download a native-resolution PNG.
+   *
+   * Opt-in, and only together with {@link gameArtContextKey}, for the same
+   * reason as the saved-version editor: this tab also renders in Settings on
+   * default props, and a door that reads a family's stored image may not appear
+   * on a host that has not said whose session it is.
+   *
+   * Deliberately NOT `canEdit` (the catalog's parent-only pricing gate) and
+   * deliberately not gated on the art quota or on saved-edit eligibility — the
+   * conversion is local arithmetic that spends nothing and writes nothing, and
+   * it must reach the EXACT picture tapped, a group's original included.
+   */
+  enableGameArt?: boolean
+  /**
+   * The host's actor/context identity for the game-art door. A change retires
+   * the big preview and any open session rather than re-pointing either.
+   */
+  gameArtContextKey?: string
 }
 
 export default function StickerLibraryTab({
@@ -163,6 +232,8 @@ export default function StickerLibraryTab({
   audience = 'parent',
   enableSavedStickerEditing = false,
   editContextKey,
+  enableGameArt = false,
+  gameArtContextKey,
 }: StickerLibraryTabProps = {}) {
   const familyId = useFamilyId()
   const { enhanceSketch, imageFailureRef } = useAI()
@@ -171,7 +242,16 @@ export default function StickerLibraryTab({
   // child components below, never at this level — so the kid-facing / Settings
   // renders (canEdit=false) never take that dependency.
   const [promoteSticker, setPromoteSticker] = useState<Sticker | null>(null)
-  const [stickers, setStickers] = useState<Sticker[]>([])
+  /**
+   * The library rows **with the family they describe** (FEAT-239).
+   *
+   * One value rather than a bare array, because the two facts have to move
+   * together: an array on its own is rows with no owner, and the previous
+   * family's pictures then keep rendering — with their Edit, Delete and
+   * Make-more actions live — under the new family until an effect catches up.
+   * Qualifying at render makes that unreachable rather than brief.
+   */
+  const [list, setList] = useState<LibraryList | null>(null)
   const [loading, setLoading] = useState(false)
   const [editTarget, setEditTarget] = useState<Sticker | null>(null)
   // FEAT-160: the label is editable here too. One dialog, one more field — and
@@ -181,11 +261,26 @@ export default function StickerLibraryTab({
   const [editError, setEditError] = useState<string | null>(null)
   const [editTags, setEditTags] = useState<StickerTag[]>([])
   const [editProfile, setEditProfile] = useState<'lincoln' | 'london' | 'both'>('both')
-  // Big-preview dialog (FEAT-33): tapping a sticker opens it large with quick actions.
-  const [previewTarget, setPreviewTarget] = useState<Sticker | null>(null)
+  // Big-preview dialog (FEAT-33): tapping a sticker opens it large with quick
+  // actions. Stored WITH the identity it was opened under — see `identityKey`.
+  const [previewSource, setPreviewSource] = useState<Sticker | null>(null)
+  const [previewOrigin, setPreviewOrigin] = useState<string | null>(null)
   // The saved version whose edit session is open (SAVED-STICKER-EDITOR-003) —
   // the version that was actually tapped, never its group's representative.
   const [savedEditTarget, setSavedEditTarget] = useState<Sticker | null>(null)
+  // The saved version a game-art session is open on (FEAT-239) — again the
+  // version that was actually tapped, never its group's representative, and
+  // again stored with the identity it was opened under.
+  const [gameArtSource, setGameArtSource] = useState<Sticker | null>(null)
+  const [gameArtOrigin, setGameArtOrigin] = useState<string | null>(null)
+  /**
+   * How many times the game-art door has been opened.
+   *
+   * Handed to the dialog as its session nonce, so closing and reopening on the
+   * SAME picture starts a new session instead of inheriting the previous one's
+   * grid, error and "Copied" receipt.
+   */
+  const [gameArtNonce, setGameArtNonce] = useState(0)
   const [deleteTarget, setDeleteTarget] = useState<Sticker | null>(null)
   // Print-to-sheet (FEAT-33, enableSelectToPrint): select mode + options dialog.
   const [selectMode, setSelectMode] = useState(false)
@@ -227,19 +322,106 @@ export default function StickerLibraryTab({
     const token = loadTokenRef.current + 1
     loadTokenRef.current = token
     setLoading(true)
-    const q = query(stickerLibraryCollection(familyId), orderBy('createdAt', 'desc'))
-    const snap = await getDocs(q)
-    // A newer load is already running and will clear `loading` itself.
-    if (token !== loadTokenRef.current) return
-    setStickers(snap.docs.map((d) => withDefaults({ ...d.data(), id: d.id })))
-    setLoading(false)
+    try {
+      const q = query(stickerLibraryCollection(familyId), orderBy('createdAt', 'desc'))
+      const snap = await getDocs(q)
+      // A newer load is already running and will clear `loading` itself.
+      if (token !== loadTokenRef.current) return
+      setList({
+        familyId,
+        rows: snap.docs.map((d) => withDefaults({ ...d.data(), id: d.id })),
+        failed: false,
+      })
+      setLoading(false)
+    } catch {
+      if (token !== loadTokenRef.current) return
+      // A failed read is not an affirmative empty result, and it is not a
+      // reason to show ANOTHER family's pictures either. The flag is stamped
+      // against the family that was being read: a refresh of the same family
+      // keeps its own cached rows (they really are this family's), and a read
+      // that failed for a NEW family has no rows to keep.
+      setList((prev) =>
+        prev && prev.familyId === familyId
+          ? { ...prev, failed: true }
+          : { familyId, rows: [], failed: true },
+      )
+      setLoading(false)
+    }
   }, [familyId])
 
   useEffect(() => { void load() }, [load, refreshSignal])
 
-  // A changed actor/context is a different session: the open editor closes
-  // rather than following the switch onto another child's identity.
-  useEffect(() => { setSavedEditTarget(null) }, [editContextKey, familyId])
+  /**
+   * The actor/family identity this tab is rendering under (FEAT-239).
+   *
+   * Both of this tab's keyed doors take their source from the big preview, so
+   * the preview and the game-art target are stored WITH the identity they were
+   * opened under and compared against this on every render. A passive clearing
+   * effect is not enough on its own: it runs after the commit, so for one
+   * render the old picture is passed under the NEW identity — and a child
+   * effect in the dialog can start loading it before the clear ever lands.
+   */
+  const identityKey = `${familyId ?? ''}|${gameArtContextKey ?? ''}|${editContextKey ?? ''}`
+
+  /**
+   * The rows this family's own read returned, qualified at RENDER.
+   *
+   * Everything below reads this rather than the stored array, so a row can
+   * never render — nor carry its Edit / Delete / Make-more actions — under a
+   * family it does not belong to, including in the renders before any effect
+   * has run.
+   */
+  const stickers = list && list.familyId === familyId ? list.rows : []
+
+  /** Patch the rows in place, but only while they still describe this family. */
+  const patchRows = useCallback(
+    (update: (rows: Sticker[]) => Sticker[]) => {
+      setList((prev) =>
+        prev && prev.familyId === familyId ? { ...prev, rows: update(prev.rows) } : prev,
+      )
+    },
+    [familyId],
+  )
+
+  /** This family's read failed, and the person is owed a way to retry it. */
+  const loadFailed = !!list && list.familyId === familyId && list.failed
+
+  // Origin-gated: a stored target whose identity has moved is already gone.
+  const previewTarget = previewOrigin === identityKey ? previewSource : null
+  const gameArtTarget = gameArtOrigin === identityKey ? gameArtSource : null
+
+  const openPreview = useCallback(
+    (sticker: Sticker) => {
+      setPreviewSource(sticker)
+      setPreviewOrigin(identityKey)
+    },
+    [identityKey],
+  )
+  const closePreview = useCallback(() => {
+    setPreviewSource(null)
+    setPreviewOrigin(null)
+  }, [])
+  const closeGameArt = useCallback(() => {
+    setGameArtSource(null)
+    setGameArtOrigin(null)
+  }, [])
+
+  // The saved-version editor has no origin of its own; a changed identity
+  // closes it, exactly as before. Keyed on the identity ALONE — folding the
+  // origins in below would close it every time a preview was opened.
+  useEffect(() => { setSavedEditTarget(null) }, [identityKey])
+
+  /**
+   * Release what the gate has already retired.
+   *
+   * The gate above is what makes a switch safe; this only drops the stored
+   * value afterwards, so a later tap opens a fresh session rather than finding
+   * an old object still in state.
+   */
+  useEffect(() => {
+    if (previewOrigin !== null && previewOrigin !== identityKey) closePreview()
+    if (gameArtOrigin !== null && gameArtOrigin !== identityKey) closeGameArt()
+  }, [identityKey, previewOrigin, gameArtOrigin, closePreview, closeGameArt])
 
   const visibleStickers = stickers.filter((s) => {
     if (childProfileFilter) {
@@ -270,6 +452,31 @@ export default function StickerLibraryTab({
   // acts under, and a family to read and write in.
   const savedEditingEnabled = enableSavedStickerEditing && !!editContextKey && !!familyId
 
+  // Same three conditions for the game-art door: the host's opt-in, the
+  // identity it acts under, and a family whose stored image it may read.
+  const gameArtEnabled = enableGameArt && !!gameArtContextKey && !!familyId
+
+  /**
+   * The rows a game-art session may be opened from, or `null` when there is no
+   * list this family's own SUCCESSFUL read vouches for.
+   *
+   * `null` while a new family's read is in flight and after one fails, which is
+   * what stops a session starting from a row the current family never returned.
+   */
+  const vouchedStickers =
+    gameArtEnabled && list && list.familyId === familyId && !list.failed ? list.rows : null
+
+  // The open session's row, re-resolved against the vouched list on every
+  // render — not in an effect, so a refresh that removes or re-points it
+  // retires the session in the same commit rather than one paint later.
+  const liveGameArtTarget = reconcileGameArtTarget(vouchedStickers, gameArtTarget)
+
+  // …and the retired target is dropped from state too, so a later tap opens a
+  // fresh session rather than resurrecting this one.
+  useEffect(() => {
+    if (gameArtSource && !liveGameArtTarget) closeGameArt()
+  }, [gameArtSource, liveGameArtTarget, closeGameArt])
+
   const handleOpenEdit = useCallback((sticker: Sticker) => {
     setEditTarget(sticker)
     setEditLabel(sticker.label)
@@ -283,18 +490,18 @@ export default function StickerLibraryTab({
 
   // Preview → Edit: hand the sticker to the existing edit dialog.
   const handlePreviewEdit = useCallback((sticker: Sticker) => {
-    setPreviewTarget(null)
+    closePreview()
     handleOpenEdit(sticker)
-  }, [handleOpenEdit])
+  }, [closePreview, handleOpenEdit])
 
   // Preview → Make more versions: open the edit dialog's theme picker directly.
   // handleOpenEdit clears makeVersionsOpen, so re-open it after (last setState wins).
   const handlePreviewMakeVersions = useCallback((sticker: Sticker) => {
-    setPreviewTarget(null)
+    closePreview()
     handleOpenEdit(sticker)
     setMakeError(null)
     setMakeVersionsOpen(true)
-  }, [handleOpenEdit])
+  }, [closePreview, handleOpenEdit])
 
   /**
    * Commit whatever the edit dialog currently holds, without closing it.
@@ -340,8 +547,8 @@ export default function StickerLibraryTab({
       }
       await batch.commit()
       const patchById = new Map(plan.writes.map((w) => [w.id, w.patch]))
-      setStickers((prev) =>
-        prev.map((s) => (s.id && patchById.has(s.id) ? { ...s, ...patchById.get(s.id) } : s)),
+      patchRows((rows) =>
+        rows.map((s) => (s.id && patchById.has(s.id) ? { ...s, ...patchById.get(s.id) } : s)),
       )
       return { ok: true, label: plan.label }
     } catch (err) {
@@ -351,7 +558,7 @@ export default function StickerLibraryTab({
     } finally {
       setSaving(false)
     }
-  }, [editTarget, editLabel, editTags, editProfile, familyId, stickers])
+  }, [editTarget, editLabel, editTags, editProfile, familyId, patchRows, stickers])
 
   const handleSaveEdit = useCallback(async () => {
     if (saving) return
@@ -439,9 +646,9 @@ export default function StickerLibraryTab({
   const handleDelete = useCallback(async () => {
     if (!deleteTarget?.id) return
     await deleteDoc(doc(stickerLibraryCollection(familyId), deleteTarget.id))
-    setStickers((prev) => prev.filter((s) => s.id !== deleteTarget.id))
+    patchRows((rows) => rows.filter((s) => s.id !== deleteTarget.id))
     setDeleteTarget(null)
-  }, [deleteTarget, familyId])
+  }, [deleteTarget, familyId, patchRows])
 
   const toggleSelectMode = useCallback(() => {
     setSelectMode((on) => {
@@ -480,8 +687,53 @@ export default function StickerLibraryTab({
     }
   }, [printTargets, printing, printPageSize, printStickerSize])
 
-  if (loading) {
+  /**
+   * The full-page spinner is for having NOTHING of this family's to show — not
+   * for "a read is in flight" (PR #1884 round 1).
+   *
+   * It is an early return above the whole tree, and `load()` sets `loading` on
+   * every `refreshSignal` too, so a same-family refresh used to UNMOUNT the open
+   * game-art session: an identical-row or failed refresh rebuilt it with the
+   * same props, which re-downloads the picture and loses the session's sizes,
+   * output and "Copied" receipt, and a refresh that never settled removed it for
+   * good. Retiring a session is `reconcileGameArtTarget`'s decision, and an
+   * in-flight or failed refresh is deliberately **not** one of its reasons — so
+   * the spinner must not make that decision by accident.
+   *
+   * `stickers` is already family-qualified, so both cases the spinner was for
+   * still get it: the first read, and a new family's read (whose rows are never
+   * the previous family's). Neither can have a session open — the door is only
+   * reachable through a rendered sticker's big preview.
+   */
+  if (loading && stickers.length === 0) {
     return <LoadingState fullHeight />
+  }
+
+  /**
+   * A failed read, said as a failure (FEAT-239).
+   *
+   * Kept apart from the empty state on purpose: *"No stickers yet"* over a
+   * dropped query is an affirmative claim the app cannot support, and it is the
+   * one thing this surface must not say. Shown when there is nothing cached to
+   * fall back on; a same-family refresh that fails keeps its own rows and gets
+   * the notice above the grid instead.
+   */
+  if (loadFailed && stickers.length === 0) {
+    return (
+      <Stack spacing={1.5} alignItems="center" sx={{ py: 4 }}>
+        <Typography variant="body1">Couldn&rsquo;t load your stickers.</Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center' }}>
+          Check your connection and try again.
+        </Typography>
+        <Button
+          variant="outlined"
+          onClick={() => { void load() }}
+          sx={{ minHeight: 44, textTransform: 'none' }}
+        >
+          Try again
+        </Button>
+      </Stack>
+    )
   }
 
   if (visibleStickers.length === 0) {
@@ -505,6 +757,31 @@ export default function StickerLibraryTab({
 
   return (
     <>
+      {/* A refresh that failed over rows this family's own read DID return:
+          the pictures are real, the list may be out of date, and saying so
+          beats either hiding them or pretending they are current. */}
+      {loadFailed && (
+        <Stack
+          direction="row"
+          alignItems="center"
+          spacing={1}
+          sx={{ mb: 2, flexWrap: 'wrap' }}
+          useFlexGap
+        >
+          <Typography variant="body2" color="error">
+            Couldn&rsquo;t refresh your stickers. This list may be out of date.
+          </Typography>
+          <Button
+            size="small"
+            variant="outlined"
+            onClick={() => { void load() }}
+            sx={{ minHeight: 36, textTransform: 'none' }}
+          >
+            Try again
+          </Button>
+        </Stack>
+      )}
+
       <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
         <Typography variant="body2" color="text.secondary">
           {visibleStickers.length} sticker{visibleStickers.length !== 1 ? 's' : ''} in your library
@@ -535,7 +812,7 @@ export default function StickerLibraryTab({
               allVersions={stickers.filter((s) => s.sourceDrawingId === group.sourceDrawingId)}
               familyId={familyId}
               onChanged={() => { void load() }}
-              onPreview={setPreviewTarget}
+              onPreview={openPreview}
               selectMode={enableSelectToPrint && selectMode}
               selectedIds={selectedIds}
               onToggleSelect={(sticker) => { if (sticker.id) toggleSelected(sticker.id) }}
@@ -585,7 +862,7 @@ export default function StickerLibraryTab({
                 if (selectMode) {
                   if (sticker.id) toggleSelected(sticker.id)
                 } else {
-                  setPreviewTarget(sticker)
+                  openPreview(sticker)
                 }
               }}
               sx={{
@@ -777,7 +1054,7 @@ export default function StickerLibraryTab({
       {/* Big-preview dialog (FEAT-33): tap a sticker → see it large + quick actions */}
       <Dialog
         open={!!previewTarget}
-        onClose={() => setPreviewTarget(null)}
+        onClose={closePreview}
         maxWidth="sm"
         fullWidth
       >
@@ -853,7 +1130,7 @@ export default function StickerLibraryTab({
                   startIcon={<AutoFixHighIcon />}
                   onClick={() => {
                     const target = previewTarget
-                    setPreviewTarget(null)
+                    closePreview()
                     setSavedEditTarget(target)
                   }}
                   // The theme does not give a text Button a touch target; this
@@ -863,12 +1140,42 @@ export default function StickerLibraryTab({
                   {SAVED_STICKER_EDIT_DOOR_LABEL}
                 </Button>
               )}
+              {/* Make game art (FEAT-239) — a local conversion of THIS picture
+                  into an Arcade sprite. Offered on any saved picture that has
+                  stored bytes to read, the group's original included: the
+                  saved-editor's eligibility rule is about redrawing a look and
+                  has nothing to say about converting pixels. Nothing is spent
+                  and nothing is written, so there is no quota gate either.
+
+                  TWO gates, both synchronous. `previewTarget` is origin-gated,
+                  so a preview opened under a previous identity is already gone;
+                  and `vouchedStickers` means a session may only start from a row
+                  the CURRENT family's own successful read returned, so a pending
+                  or failed reload cannot open one either. */}
+              {currentListRow(vouchedStickers, previewTarget) && arcadeArtSource(previewTarget) && (
+                <Button
+                  startIcon={<SportsEsportsIcon />}
+                  onClick={() => {
+                    const target = previewTarget
+                    closePreview()
+                    // A new opening is a new session, even on the same picture.
+                    setGameArtNonce((n) => n + 1)
+                    setGameArtSource(target)
+                    setGameArtOrigin(identityKey)
+                  }}
+                  // The theme gives a text Button no touch target; this door
+                  // sets its own, as the saved-editor's door does.
+                  sx={{ minHeight: 44 }}
+                >
+                  {ARCADE_ART_DOOR_LABEL}
+                </Button>
+              )}
               {enableSelectToPrint && (
                 <Button
                   startIcon={<PrintIcon />}
                   onClick={() => {
                     const target = previewTarget
-                    setPreviewTarget(null)
+                    closePreview()
                     setPrintError(null)
                     setPrintTargets([target])
                   }}
@@ -883,7 +1190,7 @@ export default function StickerLibraryTab({
                 <StickerCatalogButton
                   sticker={previewTarget}
                   onPromote={(s) => {
-                    setPreviewTarget(null)
+                    closePreview()
                     setPromoteSticker(s)
                   }}
                 />
@@ -893,13 +1200,13 @@ export default function StickerLibraryTab({
                 startIcon={<DeleteOutlineIcon />}
                 onClick={() => {
                   const target = previewTarget
-                  setPreviewTarget(null)
+                  closePreview()
                   setDeleteTarget(target)
                 }}
               >
                 Delete
               </Button>
-              <Button variant="contained" onClick={() => setPreviewTarget(null)}>
+              <Button variant="contained" onClick={closePreview}>
                 Close
               </Button>
             </DialogActions>
@@ -1145,6 +1452,20 @@ export default function StickerLibraryTab({
           // A saved session is finished: close it, then reload once so the new
           // version appears where the others are.
           onSaved={() => { setSavedEditTarget(null); void load() }}
+        />
+      )}
+
+      {/* Game art (FEAT-239). Mounted only on a host that supplied both the
+          opt-in and its context identity, so the default/Settings render is
+          unchanged. It reads the stored image and writes nothing — no library
+          row, no sprite record, no reload. */}
+      {gameArtEnabled && gameArtContextKey && (
+        <ArcadeArtDialog
+          source={liveGameArtTarget}
+          familyId={familyId}
+          contextKey={gameArtContextKey}
+          nonce={gameArtNonce}
+          onClose={closeGameArt}
         />
       )}
 
