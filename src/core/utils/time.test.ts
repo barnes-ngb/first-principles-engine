@@ -310,4 +310,61 @@ describe('getSchoolYearRange', () => {
       end: '2024-06-30',
     })
   })
+
+  // ── Boundary and edge cases ───────────────────────────────────
+
+  it('exactly July 1 starts a new school year', () => {
+    const result = getSchoolYearRange(new Date(2026, 6, 1))
+    expect(result).toEqual({ start: '2026-07-01', end: '2027-06-30' })
+  })
+
+  it('June 30 is the last day of the prior school year', () => {
+    const result = getSchoolYearRange(new Date(2026, 5, 30))
+    expect(result).toEqual({ start: '2025-07-01', end: '2026-06-30' })
+  })
+
+  it('January 1 falls in the school year that started the prior July', () => {
+    const result = getSchoolYearRange(new Date(2026, 0, 1))
+    expect(result).toEqual({ start: '2025-07-01', end: '2026-06-30' })
+  })
+
+  it('December 31 falls in the school year that started the same July', () => {
+    const result = getSchoolYearRange(new Date(2025, 11, 31))
+    expect(result).toEqual({ start: '2025-07-01', end: '2026-06-30' })
+  })
+
+  it('February 29 in a leap year resolves correctly', () => {
+    const result = getSchoolYearRange(new Date(2028, 1, 29))
+    expect(result).toEqual({ start: '2027-07-01', end: '2028-06-30' })
+  })
+
+  it('mid-school-year dates (October, March) resolve to the containing year', () => {
+    expect(getSchoolYearRange(new Date(2026, 9, 15))).toEqual({
+      start: '2026-07-01',
+      end: '2027-06-30',
+    })
+    expect(getSchoolYearRange(new Date(2027, 2, 15))).toEqual({
+      start: '2026-07-01',
+      end: '2027-06-30',
+    })
+  })
+
+  it('start is always July 1 and end is always June 30', () => {
+    for (let month = 0; month < 12; month++) {
+      const result = getSchoolYearRange(new Date(2026, month, 15))
+      expect(result.start).toMatch(/-07-01$/)
+      expect(result.end).toMatch(/-06-30$/)
+    }
+  })
+
+  it('end year is always start year + 1', () => {
+    for (const year of [2020, 2024, 2026, 2030]) {
+      for (let month = 0; month < 12; month++) {
+        const result = getSchoolYearRange(new Date(year, month, 15))
+        const startYear = parseInt(result.start.slice(0, 4))
+        const endYear = parseInt(result.end.slice(0, 4))
+        expect(endYear).toBe(startYear + 1)
+      }
+    }
+  })
 })
