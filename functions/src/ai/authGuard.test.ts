@@ -80,6 +80,34 @@ describe("requireEmailAuth", () => {
     const result = requireEmailAuth(request);
     expect(result).toEqual({ uid: "user-1", email: "nathan@example.com" });
   });
+
+  it("throws for non-anonymous provider with no email token", () => {
+    const request = {
+      auth: {
+        uid: "user-1",
+        token: {
+          firebase: { sign_in_provider: "google.com" },
+        },
+      },
+    } as unknown as CallableRequest;
+
+    expect(() => requireEmailAuth(request)).toThrow("email account is required");
+  });
+
+  it("accepts Google provider when email is present", () => {
+    const request = {
+      auth: {
+        uid: "user-1",
+        token: {
+          email: "nathan@gmail.com",
+          firebase: { sign_in_provider: "google.com" },
+        },
+      },
+    } as unknown as CallableRequest;
+
+    const result = requireEmailAuth(request);
+    expect(result).toEqual({ uid: "user-1", email: "nathan@gmail.com" });
+  });
 });
 
 // ── isApprovedUser ──────────────────────────────────────────────
@@ -95,6 +123,20 @@ describe("isApprovedUser", () => {
 
   it("returns false for unapproved email", () => {
     expect(isApprovedUser("stranger@example.com")).toBe(false);
+  });
+
+  it("returns false for email with no @ sign (malformed)", () => {
+    expect(isApprovedUser("not-an-email")).toBe(false);
+  });
+
+  it("returns false for empty string", () => {
+    expect(isApprovedUser("")).toBe(false);
+  });
+
+  it("domain check uses lowercase comparison", () => {
+    // APPROVED_DOMAINS is currently empty, so no domain passes.
+    // This verifies the code path doesn't crash on uppercase domains.
+    expect(isApprovedUser("user@UNKNOWN-DOMAIN.COM")).toBe(false);
   });
 });
 
@@ -178,5 +220,24 @@ describe("checkRateLimit", () => {
 
     expect(mockCollection).toHaveBeenCalledWith("families/user-1/aiUsage");
     expect(mockWhere).toHaveBeenCalledWith("taskType", "==", "chat");
+  });
+
+  it("passes at count exactly one below the limit", async () => {
+    mockGet.mockResolvedValueOnce({ data: () => ({ count: 49 }) });
+    await expect(checkRateLimit("user-1", "plan", 50, 60)).resolves.toBeUndefined();
+  });
+
+  it("uses the provided action name in the query", async () => {
+    mockGet.mockResolvedValueOnce({ data: () => ({ count: 0 }) });
+    await checkRateLimit("user-1", "generateImage");
+    expect(mockWhere).toHaveBeenCalledWith("taskType", "==", "generateImage");
+  });
+
+  it("rate limit error message includes action and limits", async () => {
+    mockGet.mockResolvedValueOnce({ data: () => ({ count: 10 }) });
+
+    await expect(checkRateLimit("user-1", "scan", 10, 30)).rejects.toThrow(
+      /max 10 scan calls per 30 minutes/,
+    );
   });
 });
