@@ -24,7 +24,8 @@ All run in this environment on a fresh `npm ci` of the tree at `3db6028`:
 ```
 npm run lint                      → 0 errors, 4 warnings (3 useQuestSession.ts + 1 new, see 1.2)
 npx tsc -b                        → CLEAN
-npx vitest run                    → 746 files: 745 passed, 1 FAILED (4 tests, all timeouts) — see below
+npx vitest run                    → 1st run (concurrent with the other baseline commands): 745/746 files, 4 timeouts
+                                    re-run, standalone, full suite: 746 files, 10,853 passed + 1 skipped, 0 failing
 cd functions: npm run lint        → CLEAN
 cd functions: npx tsc --noEmit    → CLEAN
 cd functions: npm test            → 74 files, 1,739 passed, 0 failing
@@ -32,16 +33,16 @@ npm run build                     → dist/assets/index-*.js  4,260.96 kB │ gz
 npm run docs:check                → HARD green, 10 SOFT warnings; [ledger-status] PASS
 ```
 
-**Root vitest was red on the first full run — triaged, not waved through.** The one failing file is
+**Root vitest was red on the first full run — triaged, then re-run in full.** The one failing file was
 `src/features/books/__tests__/SketchScanner.resultIdentity.test.tsx` (4 of 20 tests), every failure a
-`Test timed out in 5000ms` with a 5.0–5.4 s duration. The file was run **alone** on the same tree:
-**20/20 pass** (34 s total; individual tests take 0.9–2.8 s). The first run was the whole suite sharing
-the machine with the other three baseline commands. Verdict: a **load-sensitive timeout, not a logic
-regression** — already tracked as `TEST-06` (§1.4). The baseline is therefore **GREEN on the isolated re-run, RED
-under full-suite concurrency**, and a cold CI runner with the same contention can fail the same way.
+`Test timed out in 5000ms` (5.0–5.4 s). That run shared the machine with the lint, `tsc` and functions
+commands. The file alone passed 20/20 (tests 0.9–2.8 s), and **the whole root suite was then re-run
+standalone on the same tree: 746 files, 10,853 passed + 1 skipped, 0 failing.** The failure is therefore
+load-sensitive, not a logic regression — but "passes alone" is a weaker claim than "cannot race", which is
+exactly the open question `TEST-06` carries. **Baseline: GREEN on the standalone full re-run**, red once under
+contention; a cold CI runner can reproduce the contention.
 
-Deltas vs 10-04: root **725 → 746 files**; functions **69 → 74 files, 1,538 → 1,739 tests**. (The failing run's summary:
-10,849 passed + 4 failed + 1 skipped = 10,854 tests.)
+Deltas vs 10-04: root **725 → 746 files**; functions **69 → 74 files, 1,538 → 1,739 tests**. (First run: 10,849 passed + 4 failed + 1 skipped = 10,854 tests; standalone re-run: 10,853 + 1 skipped = 10,854.)
 
 **Bundle: 4,231.15 kB → 4,260.96 kB (+29.81 kB), gzip 1,265.18 → 1,274.84 kB (+9.66 kB).** The first
 upward movement since the `jspdf` split; the sticker lane is statically imported. `grep -c "React.lazy\|lazy("
@@ -70,16 +71,29 @@ not re-read — the census proves size, not cohesion.
 
 ### 1.2 Drift — `StickerLibraryTab.tsx` is 17 lines under the list (`ARCH-52`)
 
-`census:arch-audit --base=12ad312` → **8** files moved >150L, all of them in the sticker lane:
+`census:arch-audit --base=12ad312` → **8** files moved >150L, all in the sticker lane:
 `ArcadeArtDialog.tsx` +762, `SavedStickerEditDialog.tsx` +580, `arcadeArtImage.ts` +489, `arcadeArt.ts` +473,
 `enhanceSketch.ts` (functions) +452, `StickerLibraryTab.tsx` +403, `savedStickerEditSession.ts` +363,
-`arcadeArtSession.ts` +345. Seven of the eight are **new, single-purpose modules** with sibling test files
-(21 test files, +6,515 lines in the window) — the right shape, and the reason this is not a finding.
-The exception is the host: `StickerLibraryTab.tsx` is now **1,483L** (`wc -l`), 17 lines under the census
-threshold, having taken both new doors (saved-sticker edit, Arcade art) and a fourth lint warning
-(`stickers` conditional could change `useCallback` deps on every render, `StickerLibraryTab.tsx:374`).
-**Severity P3, band 1.** **Proposed action:** do not decompose yet; file `ARCH-52` so the next sticker-lane
-run reads the host's section boundaries first and fixes the warning rather than adding a fifth door in place.
+`arcadeArtSession.ts` +345. **Six are new** (`git show 12ad312:<path>` fails for them): the dialogs and the
+session/image/arcade modules, each single-purpose with sibling tests (21 test files, +6,515 lines in the
+window) — the right shape. **Two are existing files that grew** and are judged separately:
+
+- **`StickerLibraryTab.tsx` — 1,483L (`wc -l`), 17 under the census threshold** (`ARCH-52`), having taken both
+  new doors and a fourth lint warning (`StickerLibraryTab.tsx:374`, `stickers` conditional could change
+  `useCallback` deps every render). **P3.** Do not decompose yet; the next sticker-lane run reads the host's
+  section boundaries first and fixes the warning rather than adding a fifth door in place.
+- **`functions/src/ai/imageTasks/enhanceSketch.ts` — 694 → 1,146L (+452)** (`ARCH-53`). Unlike the tab this
+  is a **privileged callable**, and the growth is a second and third responsibility, not more of the first.
+  Top-level declarations by line range (`grep -nE "^export|^(async )?function|^const [A-Z_]+ ="`): prompt
+  recipes and `buildEnhancePrompt` (≈ 31–617, the file's original job); **source-path confinement** —
+  `checkSketchSourcePath` and its percent-decoding/segment helpers (≈ 398–530, from `7d15990`'s family-confinement
+  fix); the **saved-sticker edit** lane — `buildSavedStickerEditPrompt`, `requireSavedStickerEdit`,
+  `requireSavedSource`, the refusal/unavailable copy (≈ 617–800, `FEAT-201`); then the `onCall` handler
+  (800–1,146). The confinement and edit-validation blocks are pure or near-pure, security-relevant, and already
+  have their own test files (`enhanceSketch.sourceOwnership.test.ts`, +532L, plus the shared
+  `savedStickerEdit.ts`/test), which is the seam: **lift path confinement to its own module** so a security
+  rule is read without the prompt recipes beside it. **Severity P3, band 1** — below the 1,500L list and
+  heavily tested, so a design-first read, not a `PROMPT_FIX` target, and not a drive-by inside a feature run.
 
 ### 1.3 Bundle (`ARCH-05`/`ARCH-08`)
 
@@ -194,7 +208,7 @@ Holds. No hours-adjacent file changed; no new minute sum.
 
 ## Step 5 — Ledger and recommended actions
 
-**Filed:** `ARCH-52` (§1.2). **Recurrence recorded on** `TEST-06` (§1.4). **Status re-verifications:** `ARCH-02` OPEN (seventh cycle);
+**Filed:** `ARCH-52`, `ARCH-53` (§1.2). **Recurrence recorded on** `TEST-06` (§1.4). **Status re-verifications:** `ARCH-02` OPEN (seventh cycle);
 `ARCH-05`/`ARCH-08` OPEN; `ARCH-51` OPEN (`evaluate.ts` flat at 2,106); `DATA-01` FIXED; `DATA-02` NEEDS-DATA;
 `DATA-13` OPEN; `ARCH-43` OPEN (17 sites); `TEST-07` OPEN; `TEST-06` OPEN. Mechanical fixes: header `Last audit` bump and the
 `DOCUMENT_INDEX.md` entry (10-04 audit flipped to HISTORICAL, this one CURRENT).
