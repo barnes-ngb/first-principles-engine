@@ -6,8 +6,9 @@
 > **Rule:** inspect / validate / propose only — no structural fixes applied; mechanical doc/ledger
 > corrections only.
 > **Prior audit:** `ARCHITECTURE_AUDIT_2026-10-04.md` (window start `12ad312`, the `origin/main` that run began on).
-> **Window covered:** `12ad312` → `3db6028` (`origin/main` when this run started) — **95 commits, 45 files,
-> +11,728 / −326** (`git diff --shortstat 12ad312..origin/main`; `git log --oneline 12ad312..origin/main | wc -l`);
+> **Window covered:** `12ad312` → `3db6028` (`origin/main` when this run started) — **45 files,
+> +11,728 / −326** (`git diff --shortstat 12ad312..origin/main`; no commit count is stated — this run's
+> checkout is shallow, so `git log | wc -l` there is not the real history length);
 > source only (`src` + `functions/src`): **32 files, +10,596 / −57**. Newest commit is dated 2026-10-09.
 > Headline: it is **one theme** — the sticker lane: saved-sticker editing (`FEAT-201`, PR #1883, with `FIX-258`/`FIX-259`)
 > and MakeCode Arcade game art (`FEAT-239`) — plus four additive test files and the 10-05 maintenance
@@ -36,7 +37,7 @@ npm run docs:check                → HARD green, 10 SOFT warnings; [ledger-stat
 `Test timed out in 5000ms` with a 5.0–5.4 s duration. The file was run **alone** on the same tree:
 **20/20 pass** (34 s total; individual tests take 0.9–2.8 s). The first run was the whole suite sharing
 the machine with the other three baseline commands. Verdict: a **load-sensitive timeout, not a logic
-regression** — filed as `TEST-08` (§1.4). The baseline is therefore **GREEN on the isolated re-run, RED
+regression** — already tracked as `TEST-06` (§1.4). The baseline is therefore **GREEN on the isolated re-run, RED
 under full-suite concurrency**, and a cold CI runner with the same contention can fail the same way.
 
 Deltas vs 10-04: root **725 → 746 files**; functions **69 → 74 files, 1,538 → 1,739 tests**. (The failing run's summary:
@@ -90,18 +91,19 @@ from the settings sticker library on demand and is the cheapest *real* lazy-spli
 (a dialog behind a button, no shell reach). **Proposed action:** when the owner takes `ARCH-05`, start there
 as the measured pilot — one dynamic `import()` of a button-gated dialog — before the Three.js decision.
 
-### 1.4 Test coverage (`TEST-01`, `TEST-07`) and a new flake (`TEST-08`)
+### 1.4 Test coverage (`TEST-01`, `TEST-07`) and a recurring flake (`TEST-06`)
 
 `census:arch-audit` → **5** feature directories with 0 test files: `auth`, `login`, `not-found`, `planner`,
 `ui-preview` — unchanged; `TEST-07` (LoginPage, TeachHelperDialog) still OPEN. Thinnest real-logic areas, same
 script: `workshop` **45 source / 8 test** and `monthly-review` **15 / 7**, unchanged. The window's test
 growth was entirely `books`/`settings`/`planner-chat`/`functions`.
 
-**`TEST-08` (new, P3, band 1): `SketchScanner.resultIdentity.test.tsx` times out under full-suite load.**
-Four tests exceed the default 5 s when the file shares the machine (Step 0) and take 0.9–2.8 s alone; the
-file is the `FIX-252` result-identity suite, which drives `userEvent` through several generate/save cycles per
-test. **Proposed action:** pass an explicit per-test timeout (or `vi.setConfig`) scoped to that file — not
-a global `testTimeout`, and not a skip; the assertions are the point of the file.
+**`TEST-06` (existing, OPEN): this is its second recurrence.** `SketchScanner.resultIdentity.test.tsx` was
+already filed by the 09-27 audit for the same `Test timed out in 5000ms` under full-suite load, passing alone.
+This window the same file failed **four** tests (it was one then), each 5.0–5.4 s against 0.9–2.8 s alone —
+evidence for `TEST-06`'s per-file-versus-suite-wide question: the failures cluster in a file whose tests drive
+`userEvent` through several generate/save cycles, which points at a per-file timeout, not a suite-wide change.
+No new row is filed; `TEST-06` is the one place to fix it.
 
 ### 1.5 `ARCH-06` / `ARCH-43`
 
@@ -192,13 +194,13 @@ Holds. No hours-adjacent file changed; no new minute sum.
 
 ## Step 5 — Ledger and recommended actions
 
-**Filed:** `ARCH-52` (§1.2), `TEST-08` (§1.4). **Status re-verifications:** `ARCH-02` OPEN (seventh cycle);
+**Filed:** `ARCH-52` (§1.2). **Recurrence recorded on** `TEST-06` (§1.4). **Status re-verifications:** `ARCH-02` OPEN (seventh cycle);
 `ARCH-05`/`ARCH-08` OPEN; `ARCH-51` OPEN (`evaluate.ts` flat at 2,106); `DATA-01` FIXED; `DATA-02` NEEDS-DATA;
-`DATA-13` OPEN; `ARCH-43` OPEN (17 sites); `TEST-07` OPEN. Mechanical fixes: header `Last audit` bump and the
+`DATA-13` OPEN; `ARCH-43` OPEN (17 sites); `TEST-07` OPEN; `TEST-06` OPEN. Mechanical fixes: header `Last audit` bump and the
 `DOCUMENT_INDEX.md` entry (10-04 audit flipped to HISTORICAL, this one CURRENT).
 
 **Recommended `PROMPT_FIX` order:**
-1. `TEST-08` — scoped timeout on one test file; removes a red baseline that costs every later run a triage.
+1. `TEST-06` — scoped timeout on one test file; removes a red baseline that costs every later run a triage.
 2. `DATA-13` — route the four Missouri literals through `stateCompliance.ts` (trivial, unblocks TX).
 3. `ARCH-05`/`ARCH-08` — design decision first; the Arcade-art dialog is the measured pilot (§1.3).
 
