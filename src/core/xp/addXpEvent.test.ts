@@ -549,6 +549,63 @@ describe('addXpEvent', () => {
     expect(updateArgs.diamondBalance).toEqual({ __increment: -5 })
   })
 
+  it('default avatar profile includes equippedPieces and unlockedPieces as empty arrays', async () => {
+    let callCount = 0
+    mockGetDoc.mockImplementation(() => {
+      callCount++
+      if (callCount === 1) return Promise.resolve({ exists: () => false })
+      if (callCount === 2) {
+        return Promise.resolve({
+          exists: () => false,
+          data: () => null,
+        })
+      }
+      return Promise.resolve({ exists: () => false, data: () => null })
+    })
+
+    await addXpEvent('fam-1', 'child-1', 'CHECKLIST_DAY_COMPLETE', 10, 'default-profile-fields')
+
+    const avatarData = mockSetDoc.mock.calls[2][1]
+    expect(avatarData.equippedPieces).toEqual([])
+    expect(avatarData.unlockedPieces).toEqual([])
+    expect(avatarData.pieces).toEqual([])
+    expect(avatarData.themeStyle).toBe('minecraft')
+  })
+
+  it('propagates error when setDoc throws on event write', async () => {
+    mockSetDoc.mockRejectedValueOnce(new Error('Firestore write failed'))
+
+    await expect(
+      addXpEvent('fam-1', 'child-1', 'CHECKLIST_DAY_COMPLETE', 10, 'write-fail'),
+    ).rejects.toThrow('Firestore write failed')
+  })
+
+  it('propagates error when checkAndUnlockArmor throws', async () => {
+    let callCount = 0
+    mockGetDoc.mockImplementation(() => {
+      callCount++
+      if (callCount === 1) return Promise.resolve({ exists: () => false })
+      if (callCount === 2) {
+        return Promise.resolve({
+          exists: () => true,
+          data: () => ({ totalXp: 0, sources: { routines: 0, quests: 0, books: 0 } }),
+        })
+      }
+      return Promise.resolve({
+        exists: () => true,
+        data: () => ({
+          childId: 'child-1', themeStyle: 'minecraft', pieces: [],
+          currentTier: 'wood', totalXp: 0, updatedAt: '2026-01-01',
+        }),
+      })
+    })
+    mockCheckAndUnlockArmor.mockRejectedValueOnce(new Error('Armor check failed'))
+
+    await expect(
+      addXpEvent('fam-1', 'child-1', 'CHECKLIST_DAY_COMPLETE', 10, 'armor-fail'),
+    ).rejects.toThrow('Armor check failed')
+  })
+
   it('XP cumulative doc accumulates from a fresh (non-existent) ledger', async () => {
     let callCount = 0
     mockGetDoc.mockImplementation(() => {
