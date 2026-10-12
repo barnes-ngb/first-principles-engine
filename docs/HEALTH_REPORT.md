@@ -1,27 +1,27 @@
-# Code Health Report — 2026-09-28
+# Code Health Report — 2026-10-12
 
-## Reproducible historical snapshot
+## Reproducible snapshot
 
-Corrected October 5 under owner-authorized maintenance. Revision **12ad312b1586437979a6a46cf9d91eb0288aa74b**; as-of **2026-09-28** at UTC midnight. This is a historical survey, not the present app size or a new family assessment.
+Scheduled audit 2026-10-12. Revision **3db6028d56e5af77a1a7bd91de6f2d96b75b8bf1**; as-of **2026-10-12** at UTC midnight. Counts come from the committed census, not hand counts.
 
-Run from the repository using Node 22:
+Run from the repository using Node 22 with full Git history:
 
 ```text
-node scripts/health-census.mjs --rev=12ad312b1586437979a6a46cf9d91eb0288aa74b --as-of=2026-09-28
+node scripts/health-census.mjs --rev=3db6028d56e5af77a1a7bd91de6f2d96b75b8bf1 --as-of=2026-10-12
 npx vitest run scripts/health-census.test.mjs
 ```
 
-Tracked .ts/.tsx under src and functions/src; Git blob LF lines; .test/.spec test filenames. CURRENT Markdown rows deduplicated by path; age from last reachable commit timestamp, UTC midnight; age is not proof of staleness. Full Git history is required; missing indexed documents are reported explicitly. Working-tree edits, generated output and dependencies do not affect the snapshot. Commit count includes only history reachable from the named revision, so later audit commits do not shift it.
+Tracked .ts/.tsx under src and functions/src; Git blob LF lines; .test/.spec test filenames. CURRENT Markdown rows deduplicated by path; age from last reachable commit timestamp, UTC midnight; age is not proof of staleness. Commit count includes only history reachable from the named revision.
 
 | Metric | Value |
 | --- | ---: |
-| TypeScript lines (src and functions/src) | 382731 |
-| Commits reachable from pinned revision | 3783 |
-| Test source files in those roots | 724 |
-| Unique CURRENT Markdown documents | 74 |
-| CURRENT documents last touched more than 30 days earlier | 42 |
+| TypeScript lines (src and functions/src) | 393270 |
+| Commits reachable from pinned revision | 3981 |
+| Test source files in those roots | 744 |
+| Unique CURRENT Markdown documents | 76 |
+| CURRENT documents last touched more than 30 days earlier | 60 |
 
-The previous ad-hoc survey is superseded. Root Vitest's executed file total below includes its own configured scope and is not identical to the source-root filename census. Cross-cycle growth percentages and unpinned route/export counts have been removed instead of implying comparability. Existing architecture census and documentation checks remain the tools for their respective counts.
+Missing indexed documents: none. Previous snapshot (12ad312b, 2026-09-28): 382731 lines, 3783 commits, 724 test files, 74 CURRENT docs, 42 older than 30 days. Route, export and collection counts are not re-derived here; `npm run docs:check` and the existing censuses own those.
 
 ### Largest TypeScript files, including tests
 
@@ -43,46 +43,59 @@ The previous ad-hoc survey is superseded. Root Vitest's executed file total belo
 | `src/features/progress/CurriculumTab.tsx` | 1857 |
 | `src/features/today/TodayChecklist.tsx` | 1841 |
 
+No file newly crossed 2,000 lines since the previous snapshot; the top-15 list is unchanged.
+
 ### Oldest indexed CURRENT documents
 
-Age measures the last reachable commit timestamp, not content accuracy or product relevance. The list is a review aid; stable reference documents may appropriately remain untouched.
+Age is the last reachable commit timestamp, not content accuracy.
 
 | Document | Age in whole days |
 | --- | ---: |
-| `ENGINE_V2.md` | 208 |
-| `KNOWLEDGE_MINE_BRIEF.md` | 189 |
-| `WEEKLY_CONUNDRUM_ARC.md` | 183 |
-| `first-principles-system-review.md` | 173 |
-| `HERO_HUB_ANIMATION_TUNING.md` | 173 |
-| `STONEBRIDGE_BIBLE.md` | 173 |
-| `WORKBOOK_ACTIVITYCONFIG_BACKFILL.md` | 173 |
-| `SCRIPT_CONVENTIONS.md` | 169 |
-| `investigations/backend-reliability-assessment.md` | 168 |
-| `DESIGN_SKIP_SYSTEM_V2_2026-04-09.md` | 159 |
-| `EVALUATION_METHODOLOGY_2026-04.md` | 134 |
-| `EVALUATION_SYSTEM_FULL_SWEEP_2026-05.md` | 133 |
-| `PROFILE_LIMITS_AUDIT.md` | 125 |
-| `DESIGN_MONTHLY_REVIEW_BOOK.md` | 124 |
-| `design-pass-v1/copy-pass-audit.md` | 124 |
+| `ENGINE_V2.md` | 222 |
+| `KNOWLEDGE_MINE_BRIEF.md` | 203 |
+| `WEEKLY_CONUNDRUM_ARC.md` | 197 |
+| `HERO_HUB_ANIMATION_TUNING.md` | 187 |
+| `STONEBRIDGE_BIBLE.md` | 187 |
+| `WORKBOOK_ACTIVITYCONFIG_BACKFILL.md` | 187 |
+| `first-principles-system-review.md` | 187 |
+| `SCRIPT_CONVENTIONS.md` | 183 |
+| `investigations/backend-reliability-assessment.md` | 182 |
+| `DESIGN_SKIP_SYSTEM_V2_2026-04-09.md` | 173 |
+| `EVALUATION_METHODOLOGY_2026-04.md` | 148 |
+| `EVALUATION_SYSTEM_FULL_SWEEP_2026-05.md` | 147 |
+| `PROFILE_LIMITS_AUDIT.md` | 139 |
+| `DESIGN_MONTHLY_REVIEW_BOOK.md` | 138 |
+| `design-pass-v1/copy-pass-audit.md` | 138 |
 
-## Historical build observations
-
-The following results are retained from the original September 28 audit at the pinned revision. They were reported by that audit, not rerun by this documentation correction. Current PR checks are separate.
+## Build status at this revision (run 2026-10-12)
 
 | Check | Status | Notes |
 |-------|--------|-------|
-| **Build** | ✅ PASS | `tsc -b && vite build` clean (~20s). Fresh sandbox — `npm ci` at root and in `functions/` required (not a repo issue). |
-| **Lint** | ⚠️ 3 WARNINGS | 0 errors; same 3 `react-hooks/exhaustive-deps` warnings as every prior cycle (`EvaluateChatPage.tsx:296`, `useQuestSession.ts:850`, `useQuestSession.ts:2129`, all involving `sessionTimer`). `eslint . --fix` made no changes. Not mechanically fixable without reviewing timer semantics. |
-| **Tests (root)** | ✅ PASS | **10,391 passing, 0 failing, 1 skipped** (725 test files, `src/` + `functions/src/` combined via root `vite.config.ts`'s test block). The one skip is the opt-in `docs:ledger-sweep` probe (does not run in `npx vitest run` by design). |
-| **Tests (functions/)** | ✅ PASS | 1,538 passing, 0 failing (69 test files) — functions' own `vitest.config.ts` (real deps, no Anthropic/OpenAI/firebase-admin stubs) |
-| **TypeScript** | ✅ PASS | `npm run build` (`tsc -b`) + a standalone `npx tsc --noEmit -p tsconfig.app.json` both clean; no orphaned imports |
-| **`npm run docs:check`** | ✅ PASS | All HARD checks pass (ledger IDs, index resolution, ledger anchors, collection-count spans, evidence kinds, day-write routing, ledger-status, ledger-status-contradiction). 10 SOFT warnings — see the historical follow-up findings below, identical shape to last cycle. |
-| **npm audit (prod, root)** | ⚠️ 1 moderate | `fflate` (ReDoS-adjacent infinite-loop on malformed ZIP64) — unchanged from last cycle. Fix available via `npm audit fix` (non-breaking); not applied per policy (Rule 8: moderate-only → note, don't fix). |
-| **npm audit (prod, functions)** | ⚠️ 3 moderate | `qs`/`body-parser`/`express` transitive chain — unchanged from last cycle. Fix available via `npm audit fix` (non-breaking); not applied per policy. |
-| **npm audit (full, root)** | ⚠️ 16 vulnerabilities (1 low, 13 moderate, 2 high) | **Flat vs. last cycle.** The 2 high are dev-dependency-only (confirmed by the `--omit=dev` scan above showing only 1 moderate). Fix requires `--force` (breaking) for the dev-only remainder. Low priority per policy. |
-| **npm audit (full, functions)** | ⚠️ 11 vulnerabilities (9 moderate, 2 high) | **Flat vs. last cycle.** Same pattern — highs are dev-only (`firebase-functions-test` chain). Requires `--force` (breaking). Low priority per policy. |
+| **Build** | PASS | `npm run build` (`tsc -b && vite build`) clean, ~20s |
+| **Lint** | 4 WARNINGS, 0 errors | `react-hooks/exhaustive-deps`: `EvaluateChatPage.tsx:296`, `useQuestSession.ts:850`, `useQuestSession.ts:2129` (sessionTimer, as in prior cycles) plus **new** `settings/StickerLibraryTab.tsx:374` (`stickers` conditional changes `useCallback` deps). Not auto-fixed: needs review of the hook semantics. |
+| **Tests (root)** | PASS | 746 files, 10853 passed, 0 failed, 1 skipped (the opt-in `docs:ledger-sweep` probe) |
+| **Tests (functions/)** | NOT RUN | `functions/node_modules` not installed in this run; functions tests are also included in the root run via the root config |
+| **`npm run docs:check`** | PASS | All HARD checks pass; 10 SOFT warnings; resilience census: 7 remote-guard, 1 image-downscale, 120 silent catches |
+| **npm audit (prod, root)** | 6 vulnerabilities (1 low, 1 moderate, 4 high) | **Changed since last cycle (was 1 moderate).** The highs are `@grpc/grpc-js <=1.13.5` via `@firebase/firestore` → `firebase`; the fix is `--force` (breaking), so not applied. `dompurify` and `fflate` are fixable non-breaking but are not high/critical, so left per policy. Human: decide on a firebase upgrade. |
+| **npm audit (full, root)** | 25 vulnerabilities (2 low, 12 moderate, 9 high, 2 critical) | Was 16 (1 low, 13 moderate, 2 high). Dev-dependency share not broken out in this run. |
 
----
+## Doc accuracy
+
+- Stats block in `docs/MASTER_OUTLINE.md` refreshed from the census above (auto-fixed).
+- Every docs/*.md file is indexed in `DOCUMENT_INDEX.md`; no CURRENT document is missing.
+- Nav labels in MASTER_OUTLINE were not compared line by line this run; `docs:check` passes.
+- The earlier `captureRowWrite.ts` reference in CLAUDE.md no longer appears (grep finds none); that finding is resolved.
+
+## Issues found
+
+### Auto-fixed
+- `docs/MASTER_OUTLINE.md` Scale block updated to the pinned census values at 3db6028d.
+
+### Needs human attention
+- **Prod npm audit now shows 4 high** (`@grpc/grpc-js` via firebase); only a `--force` upgrade fixes them.
+- **New lint warning** in `StickerLibraryTab.tsx:374`.
+- 60 of 76 CURRENT docs untouched for more than 30 days; oldest is `ENGINE_V2.md` at 222 days. STALE-CHECK: human to verify content, not just age.
+- Functions package tests were not run separately (dependencies not installed in this environment).
 
 ## Findings retained for follow-up
 
