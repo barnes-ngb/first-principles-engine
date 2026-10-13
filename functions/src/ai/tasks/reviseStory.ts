@@ -9,6 +9,7 @@ import type {
 } from "../chat.js";
 import { buildContextForTask } from "../contextSlices.js";
 import { maxTokensForPageCount } from "../storyPageBudget.js";
+import { resolveEffortForTask } from "../models.js";
 import { loadBookLevelStretch, resolveStoryLevelContext } from "../storyLevelContext.js";
 
 /**
@@ -125,19 +126,26 @@ export const handleReviseStory = async (
 
   const model = modelForTask("reviseStory");
 
+  // A revise rewrites the whole story, so scale the budget with the book's
+  // page count the same way generation does (FEAT-97).
+  const maxTokens = maxTokensForPageCount(normalizedInput.childCalibration.pageCount);
+  // LOW effort, as generation (UX-455) — the same reading-level block, the same
+  // thinking-eats-the-budget exposure.
+  const effort = resolveEffortForTask("reviseStory");
+
   const result = await callClaude({
     apiKey,
     model,
-    // A revise rewrites the whole story, so scale the budget with the book's
-    // page count the same way generation does (FEAT-97).
-    maxTokens: maxTokensForPageCount(normalizedInput.childCalibration.pageCount),
+    maxTokens,
+    effort,
     temperature: 0.7,
     systemPrompt,
     messages: [{ role: "user", content: "Revise the story now." }],
   });
 
   console.log(
-    `[AI] taskType=reviseStory inputTokens≈${result.inputTokens} outputTokens≈${result.outputTokens}`,
+    `[AI] taskType=reviseStory inputTokens≈${result.inputTokens} outputTokens≈${result.outputTokens}` +
+      ` maxTokens=${maxTokens} effort=${effort ?? "default"} stopReason=${result.stopReason}`,
   );
 
   await logAiUsage(db, familyId, {
@@ -152,5 +160,8 @@ export const handleReviseStory = async (
     message: result.text,
     model,
     usage: { inputTokens: result.inputTokens, outputTokens: result.outputTokens },
+    // So the client can name a reply cut short by the budget, as it already can
+    // for generation (FEAT-169 / UX-455) — additive; an older client ignores it.
+    stopReason: result.stopReason,
   };
 };

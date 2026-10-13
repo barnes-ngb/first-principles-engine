@@ -138,11 +138,34 @@ export type ReasoningEffort = (typeof ReasoningEffort)[keyof typeof ReasoningEff
  * Low effort is the appropriate setting for the task and gives the visible text
  * the budget back.
  *
- * The chosen effort is sent as `output_config.effort`; see `callClaude`.
+ * The four story calls join them (UX-455, owner decision 2026-10-13: *"Low"*).
+ * `storyPageBudget.ts` already said why: the visible story is ~100 tokens a
+ * page and nearly all of `max_tokens` is thinking room, and FEAT-176's READING
+ * LEVEL block (allowed patterns, a BANNED list, a SAFE WORDS allowlist) gave a
+ * HIGH-effort writer something to deliberate over for every word — so a long
+ * book for the youngest reader, whose banned list is longest, ran out before the
+ * last page. The quality rail is not effort but measurement: every drafted
+ * story is still checked by `checkStoryReadability` and gets its one focused
+ * fix call when it misses.
+ *   - `generateStory` — the draft.
+ *   - `generateStoryFix` — FEAT-176's one readability fix call. Its own key
+ *     rather than `generateStory`'s, because it is a different task (rewrite a
+ *     handful of named words, not write a story) and a later tuning of one must
+ *     not silently move the other.
+ *   - `reviseStory` / `revisePage` — the two revise doors.
+ *
+ * The chosen effort is sent as `output_config.effort`; see `callClaude`. This
+ * table is NOT applied automatically — each call site passes
+ * `effort: resolveEffortForTask(...)` itself, and the story call sites are held
+ * to that by `storyEffort.source.test.ts`.
  */
 export const EFFORT_BY_TASK: Readonly<Record<string, ReasoningEffort>> = {
   learnerSynthesis: ReasoningEffort.Low,
   monthlyReview: ReasoningEffort.Low,
+  generateStory: ReasoningEffort.Low,
+  generateStoryFix: ReasoningEffort.Low,
+  reviseStory: ReasoningEffort.Low,
+  revisePage: ReasoningEffort.Low,
 };
 
 /** Resolve a task type to its reasoning effort, or `undefined` (API default). */
