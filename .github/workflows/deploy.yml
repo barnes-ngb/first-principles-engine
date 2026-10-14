@@ -9,7 +9,7 @@ on:
   # (e.g., redeploying already-merged Cloud Functions like the monthly review set:
   # generateMonthlyReview, generateMonthlyReviewNow, publishMonthlyReview,
   # unpublishMonthlyReview). Manual runs force a full functions deploy
-  # regardless of whether functions/ changed in the latest commit.
+  # regardless of whether functions/ changed in the push.
   workflow_dispatch:
 
 jobs:
@@ -146,24 +146,14 @@ jobs:
           gcloud storage buckets describe "gs://$BUCKET" --format="json(cors_config)"
 
       # ── Cloud Functions (when functions/ has changes, or on manual run) ──
-      # On manual workflow_dispatch we always deploy functions — the diff-based
-      # check below would miss anything merged in a previous push, which is
-      # exactly the case where Nathan reaches for the "Run workflow" button.
+      # The range is the whole PUSH — `github.event.before` (where `deploy` was)
+      # to `github.sha` — never the last commit alone (FIX-261: the old
+      # `merge-base HEAD HEAD~1` was always HEAD~1, so a push whose last commit
+      # skipped functions/ skipped the deploy). An unreadable range (new branch,
+      # force-push) deploys, and a manual run always deploys.
       - name: Check for functions changes
         id: functions-changed
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          # Compare functions/ against the merge base to catch all changes
-          # even when multiple PRs are merged at once
-          MERGE_BASE=$(git merge-base HEAD HEAD~1 2>/dev/null || echo "HEAD~1")
-          if git diff --quiet "$MERGE_BASE" HEAD -- functions/ firestore.indexes.json; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          fi
+        run: node scripts/deploy-functions-changed.mjs "${{ github.event_name }}" "${{ github.event.before }}" "${{ github.sha }}"
 
       - name: Install functions dependencies
         if: steps.functions-changed.outputs.changed == 'true'
