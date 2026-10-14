@@ -9,6 +9,7 @@ import {
   type StoryFailureSurface,
 } from './storyGenerationFailure'
 import type { StoryReadabilityNote } from './storyPracticeWords'
+import { reportStoryIfCutShort, StoryCallTask } from './storyCutShortReport'
 
 export interface GeneratedStory {
   title: string
@@ -168,6 +169,11 @@ export function useStoryGenerator() {
       }
     }
     if (!isUsableStory(story)) {
+      reportStoryIfCutShort(result, null, {
+        task: StoryCallTask.GenerateStory,
+        pageCount: pageCount ?? 10,
+        wordCount: sightWords.length,
+      })
       // `null`, not `story`: the classifier treats any truthy parsed value as a
       // success and returns `null`, so handing it a `{}` that we have just
       // rejected would throw away the reply's own `stopReason` and call a

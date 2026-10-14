@@ -6,6 +6,8 @@ import type { RevisePageInput, RevisePageOutput } from "../chat.js";
 import { buildContextForTask } from "../contextSlices.js";
 import { sanitizeAndParseJson } from "../../shared/sanitizeJson.js";
 import { loadBookLevelStretch, resolveStoryLevelContext } from "../storyLevelContext.js";
+import { resolveEffortForTask } from "../models.js";
+import { maxTokensForPageCount } from "../storyPageBudget.js";
 
 /**
  * Task: revisePage
@@ -121,10 +123,22 @@ export const handleRevisePage = async (
 
   const model = modelForTask("revisePage");
 
+  // LOW effort (UX-455), and a budget sized from the page rather than a flat
+  // 2,048. At the API default (high) a single-page revise could spend all
+  // 2,048 tokens thinking — thinking counts against `max_tokens` on this model
+  // generation — and come back with no page at all; that is the likeliest
+  // reading of "just about any modification". The one-page shape of the story
+  // budget is 8,192 + 512 × 1 = 8,704: the same thinking headroom a story gets,
+  // for the one page this call returns. A ceiling, not a spend — a page that
+  // finishes early bills what it emitted.
+  const maxTokens = maxTokensForPageCount(1);
+  const effort = resolveEffortForTask("revisePage");
+
   const result = await callClaude({
     apiKey,
     model,
-    maxTokens: 2048,
+    maxTokens,
+    effort,
     temperature: 0.7,
     systemPrompt,
     messages: [{ role: "user", content: "Revise the page now." }],
@@ -149,7 +163,8 @@ export const handleRevisePage = async (
   }
 
   console.log(
-    `[AI] taskType=revisePage inputTokens≈${result.inputTokens} outputTokens≈${result.outputTokens}`,
+    `[AI] taskType=revisePage inputTokens≈${result.inputTokens} outputTokens≈${result.outputTokens}` +
+      ` maxTokens=${maxTokens} effort=${effort ?? "default"} stopReason=${result.stopReason}`,
   );
 
   await logAiUsage(db, familyId, {
@@ -164,5 +179,7 @@ export const handleRevisePage = async (
     message: result.text,
     model,
     usage: { inputTokens: result.inputTokens, outputTokens: result.outputTokens },
+    // So the client can name a reply cut short by the budget (UX-455) — additive.
+    stopReason: result.stopReason,
   };
 };
