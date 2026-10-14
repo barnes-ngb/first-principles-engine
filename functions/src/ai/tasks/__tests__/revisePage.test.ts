@@ -119,14 +119,28 @@ describe("handleRevisePage", () => {
     expect(parsed.regenerateImage).toBe("yes");
   });
 
-  it("uses Sonnet at low maxTokens (2048 — page revisions are small)", async () => {
+  it("uses Sonnet at LOW effort with a one-page story budget (UX-455 — was a flat 2048)", async () => {
     await handleRevisePage(makeCtx(validInput()));
     const callArgs = callClaudeMock.mock.calls[0][0] as {
       model: string;
       maxTokens: number;
+      effort?: string;
     };
     expect(callArgs.model).toBe("claude-sonnet-5");
-    expect(callArgs.maxTokens).toBe(2048);
+    // 8192 base + 512 × 1 page — the story budget's own shape for one page.
+    expect(callArgs.maxTokens).toBe(8704);
+    expect(callArgs.effort).toBe("low");
+  });
+
+  it("returns the reply's stopReason so the client can name a cut-short page (UX-455)", async () => {
+    callClaudeMock.mockResolvedValueOnce({
+      text: '{"newText":"Sam ran',
+      inputTokens: 100,
+      outputTokens: 8704,
+      stopReason: "max_tokens",
+    });
+    const result = await handleRevisePage(makeCtx(validInput()));
+    expect(result.stopReason).toBe("max_tokens");
   });
 
   it("returns regenerateImage='no' correctly when the model sets it", async () => {

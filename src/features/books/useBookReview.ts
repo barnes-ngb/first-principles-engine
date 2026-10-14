@@ -7,6 +7,7 @@ import { booksCollection } from '../../core/firebase/firestore'
 import { useTTS } from '../../core/hooks/useTTS'
 import type { Book, BookPage } from '../../core/types'
 import { useBookIllustrator } from './useBookIllustrator'
+import { reportStoryIfCutShort, StoryCallTask } from './storyCutShortReport'
 import {
   classifyStoryGenerationFailure,
   storyGenerationFailureMessage,
@@ -355,6 +356,11 @@ export function useBookReview(opts: UseBookReviewOptions): UseBookReview {
 
         const parsed = result?.message ? parseRevisePageResult(result.message) : null
         if (!parsed) {
+          reportStoryIfCutShort(result, parsed, {
+            task: StoryCallTask.RevisePage,
+            pageCount: 1,
+            wordCount: 0,
+          })
           // Named, not vague (UX-112): the same three shapes the Generate chat
           // classifies, in this surface's own words and pointing at this
           // surface's own "Try again".

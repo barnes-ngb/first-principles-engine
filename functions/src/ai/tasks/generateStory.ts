@@ -13,6 +13,7 @@ import { checkStoryReadability, normalizeLevelStretch } from "../storyDecodabili
 import type { StoryReadabilityReport } from "../storyDecodability.js";
 import { resolveStoryLevelContext } from "../storyLevelContext.js";
 import { sanitizeAndParseJson } from "../../shared/sanitizeJson.js";
+import { resolveEffortForTask } from "../models.js";
 
 // ── Preset themes (server-side mirror of client PRESET_THEMES) ──
 
@@ -549,10 +550,17 @@ export const handleGenerateStory = async (
   // with a list ran out of room at the page-only budget.
   const maxTokens = maxTokensForPageCount(targetPageCount, storyWords.length);
 
+  // LOW effort (UX-455): at the API default (high) the writer could spend the
+  // whole budget deliberating over the reading-level block and stop before the
+  // last page. Quality is held by the measurement below, not by effort.
+  const effort = resolveEffortForTask("generateStory");
+  const fixEffort = resolveEffortForTask("generateStoryFix");
+
   const result = await callClaude({
     apiKey,
     model,
     maxTokens,
+    effort,
     temperature: 0.7,
     systemPrompt: storySystemPrompt,
     messages: [{ role: "user", content: "Generate the story now." }],
@@ -588,6 +596,7 @@ export const handleGenerateStory = async (
           // The fix rewrites at most a handful of words across the same pages,
           // so it needs no more room than the generation did.
           maxTokens,
+          effort: fixEffort,
           temperature: 0.7,
           systemPrompt: buildStoryReadabilityFixPrompt({
             childName: storyChildName,
@@ -601,6 +610,14 @@ export const handleGenerateStory = async (
           messages: [{ role: "user", content: "Return the fixed story now." }],
         });
         fixTokens = { inputTokens: fix.inputTokens, outputTokens: fix.outputTokens };
+        // The fix's own stop reason never reaches the client (the generation's
+        // does), so a fix cut short by the budget is said here or nowhere.
+        if (fix.stopReason === MAX_TOKENS_STOP_REASON) {
+          console.warn(
+            `[AI] generateStory readability fix incomplete: stopReason=${fix.stopReason}` +
+              ` effort=${fixEffort ?? "default"} outputTokens≈${fix.outputTokens} maxTokens=${maxTokens}`,
+          );
+        }
         const fixedStory = parseStoryForReadability(fix.text);
         const fixedReport = fixedStory
           ? checkStoryReadability(fixedStory.pages, checkOptions)
@@ -637,7 +654,7 @@ export const handleGenerateStory = async (
   const pageMeta = reconcilePagesFromStory(targetPageCount, finalText);
   console.log(
     `[AI] taskType=generateStory inputTokens≈${result.inputTokens} outputTokens≈${result.outputTokens}` +
-      ` maxTokens=${maxTokens} stopReason=${result.stopReason}` +
+      ` maxTokens=${maxTokens} effort=${effort ?? "default"} stopReason=${result.stopReason}` +
       ` words=${storyWords.length} readingLevel=${readingLevel.source}` +
       ` readabilityLevel=${levelContext.effective.level}` +
       ` stretch=${levelContext.effective.stretch}` +
