@@ -29,6 +29,7 @@ import {
   storyDraftSpokenMessage,
 } from './storyPracticeWords'
 import { useBookIllustrator } from './useBookIllustrator'
+import { reportStoryIfCutShort, StoryCallTask } from './storyCutShortReport'
 import { useSightWordProgress } from './useSightWordProgress'
 import type { IllustrationProgress as IllustratorProgress } from './useBookIllustrator'
 
@@ -972,6 +973,11 @@ export function useBookGenerateChat(
           // two happened or what to do next.
           const parsed = result?.message ? parseReviseResult(result.message) : null
           if (!parsed) {
+            reportStoryIfCutShort(result, parsed, {
+              task: StoryCallTask.ReviseStory,
+              pageCount: currentStory?.pages.length ?? pageCount,
+              wordCount: 0,
+            })
             setError(
               storyGenerationFailureMessage(
                 classifyStoryGenerationFailure(result, parsed) ?? 'unreadable',
@@ -1183,6 +1189,11 @@ export function useBookGenerateChat(
       // output budget, or unreadable — each with its own next step.
       const failure = classifyStoryGenerationFailure(result, story)
       if (failure || !story) {
+        reportStoryIfCutShort(result, story, {
+          task: StoryCallTask.GenerateStory,
+          pageCount,
+          wordCount: storyWords.length,
+        })
         setError(storyGenerationFailureMessage(failure ?? 'unreadable'))
         setClarificationPhase(priorPhase)
         return

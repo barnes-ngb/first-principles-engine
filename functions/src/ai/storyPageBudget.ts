@@ -8,8 +8,9 @@
  *     `src/features/books/storyPageTargets.ts`; the two TS build roots can't share
  *     a module — deliberate duplication, kept in sync by test).
  *   - `maxTokensForPageCount` — scales the output budget with the target (and the
- *     word list, FEAT-172) so a long book doesn't truncate. `generateStory` runs
- *     adaptive thinking at HIGH effort (it's not in `EFFORT_BY_TASK`), and on the
+ *     word list, FEAT-172) so a long book doesn't truncate. `generateStory` ran
+ *     adaptive thinking at HIGH effort until UX-455 put the four story calls in
+ *     `EFFORT_BY_TASK` at LOW (the reason below is why), and on the
  *     Sonnet-5 generation thinking tokens count against `max_tokens`, so the model
  *     spends a chunk of the budget on internal reasoning before emitting a single
  *     page — the FEAT-77/78 lesson. FEAT-169's diagnostic then **confirmed** the
