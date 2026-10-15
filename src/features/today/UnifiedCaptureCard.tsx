@@ -208,6 +208,27 @@ export default function UnifiedCaptureCard({
     setDurationInput('')
   }, [childId, selectedPresetId])
 
+  // FIX-262: one tap, one write. The ref is the guard — claimed before the
+  // first `await`, because two taps in one batch would both read a state flag
+  // as `false`; `savePending` only says so on screen. ONE latch for the whole
+  // card: the tabs share the child, category and minutes. In-session only (no
+  // cross-session idempotency, no durable retry), released on every exit.
+  const savePendingRef = useRef(false)
+  const [savePending, setSavePending] = useState(false)
+
+  /** Claims the latch. `false` means a save is already in flight — do nothing. */
+  const beginSave = useCallback(() => {
+    if (savePendingRef.current) return false
+    savePendingRef.current = true
+    setSavePending(true)
+    return true
+  }, [])
+
+  const endSave = useCallback(() => {
+    savePendingRef.current = false
+    setSavePending(false)
+  }, [])
+
   const parsedDuration = useMemo(() => {
     if (durationInput.trim() === '') return 0
     const n = Math.floor(Number(durationInput))
@@ -308,37 +329,46 @@ export default function UnifiedCaptureCard({
   )
 
   const handleNoteSave = useCallback(async () => {
-    const content = noteText.trim()
-    const minutes = parsedDuration
-    const titleSeed = activityName.trim() || content.slice(0, 60) || `Capture ${today}`
-    const hoursNotes = activityName.trim()
-      ? content
-        ? `${activityName.trim()}: ${content}`
-        : activityName.trim()
-      : content
+    if (!beginSave()) return
+    try {
+      const content = noteText.trim()
+      const minutes = parsedDuration
+      const titleSeed = activityName.trim() || content.slice(0, 60) || `Capture ${today}`
+      const hoursNotes = activityName.trim()
+        ? content
+          ? `${activityName.trim()}: ${content}`
+          : activityName.trim()
+        : content
 
-    let artifactSaved = false
-    if (content) {
-      try {
-        const artifact = {
-          ...buildArtifactBase(titleSeed, EvidenceType.Note),
-          content: noteText,
-          activityName: activityName.trim() || undefined,
+      let artifactSaved = false
+      if (content) {
+        try {
+          const artifact = {
+            ...buildArtifactBase(titleSeed, EvidenceType.Note),
+            content: noteText,
+            activityName: activityName.trim() || undefined,
+          }
+          const docRef = await addDoc(artifactsCollection(familyId), artifact)
+          setTodayArtifacts((prev) => [{ ...artifact, id: docRef.id }, ...prev])
+          artifactSaved = true
+        } catch (err) {
+          console.error('Failed to save artifact', err)
+          onSnackMessage({ text: 'Failed to save note.', severity: 'error' })
+          // The early return keeps the form filled for a retry; `finally`
+          // releases the latch so that retry is possible at all.
+          return
         }
-        const docRef = await addDoc(artifactsCollection(familyId), artifact)
-        setTodayArtifacts((prev) => [{ ...artifact, id: docRef.id }, ...prev])
-        artifactSaved = true
-      } catch (err) {
-        console.error('Failed to save artifact', err)
-        onSnackMessage({ text: 'Failed to save note.', severity: 'error' })
-        return
       }
-    }
 
-    const hoursOk = minutes > 0 ? await writeHours(minutes, hoursNotes) : false
-    toastForResult({ artifactSaved, hoursMinutes: minutes, hoursOk })
-    resetForm()
+      const hoursOk = minutes > 0 ? await writeHours(minutes, hoursNotes) : false
+      toastForResult({ artifactSaved, hoursMinutes: minutes, hoursOk })
+      resetForm()
+    } finally {
+      endSave()
+    }
   }, [
+    beginSave,
+    endSave,
     noteText,
     parsedDuration,
     activityName,
@@ -355,6 +385,9 @@ export default function UnifiedCaptureCard({
   const handlePhotoCapture = useCallback(
     async (files: File[]) => {
       if (files.length === 0) return
+      // Nothing was staged above, so no save was attempted and the latch is
+      // not claimed — the check stays ahead of it.
+      if (!beginSave()) return
       setMediaUploading(true)
       try {
         const title = activityName.trim() || `Photo ${today}`
@@ -390,9 +423,12 @@ export default function UnifiedCaptureCard({
         onSnackMessage({ text: 'Photo upload failed.', severity: 'error' })
       } finally {
         setMediaUploading(false)
+        endSave()
       }
     },
     [
+      beginSave,
+      endSave,
       activityName,
       today,
       buildArtifactBase,
@@ -408,6 +444,7 @@ export default function UnifiedCaptureCard({
 
   const handleAudioCapture = useCallback(
     async (fileOrBlob: File | Blob) => {
+      if (!beginSave()) return
       setMediaUploading(true)
       try {
         const title = activityName.trim() || `Audio ${today}`
@@ -438,9 +475,12 @@ export default function UnifiedCaptureCard({
         onSnackMessage({ text: 'Audio upload failed.', severity: 'error' })
       } finally {
         setMediaUploading(false)
+        endSave()
       }
     },
     [
+      beginSave,
+      endSave,
       activityName,
       today,
       buildArtifactBase,
@@ -462,6 +502,7 @@ export default function UnifiedCaptureCard({
 
   const noteSaveTooltip = (() => {
     if (mediaTab !== 'note') return undefined
+    if (savePending) return 'Saving…'
     if (!noteText.trim() && parsedDuration <= 0) {
       return 'Add a photo, audio, note, or duration'
     }
@@ -470,6 +511,11 @@ export default function UnifiedCaptureCard({
     }
     return undefined
   })()
+
+  // The media surfaces disable their own commit buttons while `uploading`, so
+  // a save pending on ANY pathway reads as busy there too (FIX-262) — the one
+  // latch, said once on screen.
+  const mediaBusy = mediaUploading || savePending
 
   // ── Kid save (always visible) disabled state ──
   const kidSaveDisabled = !selectedPresetId || parsedDuration <= 0
@@ -481,11 +527,25 @@ export default function UnifiedCaptureCard({
 
   const handleKidSave = useCallback(async () => {
     if (kidSaveDisabled) return
-    const minutes = parsedDuration
-    const hoursOk = await writeHours(minutes, activityName.trim())
-    toastForResult({ artifactSaved: false, hoursMinutes: minutes, hoursOk })
-    resetForm()
-  }, [kidSaveDisabled, parsedDuration, writeHours, activityName, toastForResult, resetForm])
+    if (!beginSave()) return
+    try {
+      const minutes = parsedDuration
+      const hoursOk = await writeHours(minutes, activityName.trim())
+      toastForResult({ artifactSaved: false, hoursMinutes: minutes, hoursOk })
+      resetForm()
+    } finally {
+      endSave()
+    }
+  }, [
+    kidSaveDisabled,
+    beginSave,
+    endSave,
+    parsedDuration,
+    writeHours,
+    activityName,
+    toastForResult,
+    resetForm,
+  ])
 
   const stepDuration = useCallback((delta: number) => {
     const current = parsedDuration
@@ -775,14 +835,29 @@ export default function UnifiedCaptureCard({
                 value={noteText}
                 onChange={(event) => setNoteText(event.target.value)}
               />
-              <Button
-                variant="contained"
-                onClick={handleNoteSave}
-                disabled={noteSaveDisabled}
-                title={noteSaveTooltip}
-              >
-                Save Capture
-              </Button>
+              <Stack spacing={0.5}>
+                <Button
+                  variant="contained"
+                  onClick={handleNoteSave}
+                  disabled={noteSaveDisabled || savePending}
+                  title={noteSaveTooltip}
+                >
+                  {/* The label stays put while a save is pending — the caption
+                      below carries the status, so it is readable without a
+                      hover and the button keeps one name. */}
+                  Save Capture
+                </Button>
+                {savePending && (
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    role="status"
+                    sx={{ display: 'block', textAlign: 'center' }}
+                  >
+                    Saving…
+                  </Typography>
+                )}
+              </Stack>
             </>
           )}
           {mediaTab === 'photo' &&
@@ -790,20 +865,20 @@ export default function UnifiedCaptureCard({
               // Kid mode stays single-photo (one artifact per photo).
               <PhotoCapture
                 onCapture={(file) => handlePhotoCapture([file])}
-                uploading={mediaUploading}
+                uploading={mediaBusy}
               />
             ) : (
               // Parent mode stages several photos into ONE artifact.
               <PhotoCapture
                 multiple
                 onCaptureBatch={handlePhotoCapture}
-                uploading={mediaUploading}
+                uploading={mediaBusy}
               />
             ))}
           {mediaTab === 'audio' && (
             <AudioRecorder
               onCapture={handleAudioCapture}
-              uploading={mediaUploading}
+              uploading={mediaBusy}
               allowUpload={!isKid}
             />
           )}
@@ -814,7 +889,7 @@ export default function UnifiedCaptureCard({
                 variant="contained"
                 color={kidTheme.saveColor}
                 onClick={handleKidSave}
-                disabled={kidSaveDisabled}
+                disabled={kidSaveDisabled || savePending}
                 size="large"
                 fullWidth
                 sx={{
@@ -826,19 +901,19 @@ export default function UnifiedCaptureCard({
                   '&:hover': { bgcolor: kidTheme.accent, opacity: 0.9 },
                   '&.Mui-disabled': { bgcolor: 'action.disabledBackground' },
                 }}
-                title={kidSaveHelper}
+                title={savePending ? 'Saving…' : kidSaveHelper}
               >
                 {/* UX-74: this button saves no capture — `handleKidSave` writes
                     hours and passes `artifactSaved: false`. Name it what it does. */}
                 Save my time
               </Button>
-              {kidSaveHelper && (
+              {(savePending || kidSaveHelper) && (
                 <Typography
                   variant="caption"
                   color="text.secondary"
                   sx={{ display: 'block', textAlign: 'center' }}
                 >
-                  {kidSaveHelper}
+                  {savePending ? 'Saving…' : kidSaveHelper}
                 </Typography>
               )}
             </Stack>
@@ -908,7 +983,7 @@ export default function UnifiedCaptureCard({
             </Typography>
             <PhotoCapture
               multiple
-              uploading={mediaUploading}
+              uploading={mediaBusy}
               onCaptureBatch={(files) => {
                 setPhotoDialogOpen(false)
                 if (files.length) void handlePhotoCapture(files)
