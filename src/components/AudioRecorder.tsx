@@ -17,9 +17,26 @@ interface AudioRecorderProps {
   uploading?: boolean
   /** If true, show an "Upload audio file" control beside the recorder. */
   allowUpload?: boolean
+  /**
+   * Called when this recorder's OWN pending draft changes — a recording
+   * started, a take finished, a take discarded. Optional: a host that does not
+   * pass it behaves exactly as before.
+   *
+   * The start case fires SYNCHRONOUSLY, before `getUserMedia` is awaited, so a
+   * host hears that a newer draft exists before any of its own in-flight save
+   * can finish and decide the form is clear-able (capture draft protection,
+   * G1/G2). Confirming a take and uploading a file are submissions, not draft
+   * changes, and go through `onCapture` alone.
+   */
+  onDraftChange?: () => void
 }
 
-export default function AudioRecorder({ onCapture, uploading, allowUpload }: AudioRecorderProps) {
+export default function AudioRecorder({
+  onCapture,
+  uploading,
+  allowUpload,
+  onDraftChange,
+}: AudioRecorderProps) {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -41,6 +58,9 @@ export default function AudioRecorder({ onCapture, uploading, allowUpload }: Aud
 
   const startRecording = useCallback(async () => {
     setError(null)
+    // Before the permission prompt is awaited: tapping record is already a new
+    // draft, whatever the microphone then says.
+    onDraftChange?.()
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       const recorder = new MediaRecorder(stream)
@@ -56,6 +76,8 @@ export default function AudioRecorder({ onCapture, uploading, allowUpload }: Aud
       recorder.onstop = () => {
         const blob = new Blob(chunksRef.current, { type: 'audio/webm' })
         const url = URL.createObjectURL(blob)
+        // A take now exists where none did: a draft change, not a submission.
+        onDraftChange?.()
         setAudioBlob(blob)
         setAudioUrl(url)
         setState('recorded')
@@ -76,7 +98,7 @@ export default function AudioRecorder({ onCapture, uploading, allowUpload }: Aud
     } catch {
       setError('Could not access microphone. Check browser permissions.')
     }
-  }, [])
+  }, [onDraftChange])
 
   const stopRecording = useCallback(() => {
     mediaRecorderRef.current?.stop()
@@ -94,12 +116,13 @@ export default function AudioRecorder({ onCapture, uploading, allowUpload }: Aud
   }, [audioBlob, audioUrl, onCapture])
 
   const handleDiscard = useCallback(() => {
+    onDraftChange?.()
     if (audioUrl) URL.revokeObjectURL(audioUrl)
     setAudioBlob(null)
     setAudioUrl(null)
     setState('idle')
     setElapsed(0)
-  }, [audioUrl])
+  }, [audioUrl, onDraftChange])
 
   const handleFileSelected = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     const selected = event.target.files?.[0]

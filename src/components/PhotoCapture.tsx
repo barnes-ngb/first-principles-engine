@@ -24,6 +24,19 @@ interface PhotoCaptureProps {
   uploading?: boolean
   /** If true, allow selecting multiple files at once. */
   multiple?: boolean
+  /**
+   * Called when this component's OWN pending draft changes — a shot or upload
+   * accepted, a staged photo removed, a preview retaken. Optional: a host that
+   * does not pass it behaves exactly as before.
+   *
+   * It fires SYNCHRONOUSLY, before the compression `await`, because the point of
+   * it is to let a host know a newer draft exists before any of its own async
+   * work can finish and decide the form is clear-able (capture draft
+   * protection, G1/G2). Submission is deliberately NOT a draft change — `Use
+   * Photo`, `Save N photos` and the per-file upload path go through `onCapture`
+   * / `onCaptureBatch` alone.
+   */
+  onDraftChange?: () => void
 }
 
 interface StagedPhoto {
@@ -43,6 +56,7 @@ export default function PhotoCapture({
   onCaptureBatch,
   uploading,
   multiple,
+  onDraftChange,
 }: PhotoCaptureProps) {
   const cameraInputRef = useRef<HTMLInputElement>(null)
   const uploadInputRef = useRef<HTMLInputElement>(null)
@@ -72,6 +86,11 @@ export default function PhotoCapture({
   const handleFileChange = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files
     if (!files || files.length === 0) return
+
+    // A staged shot and a preview are both drafts this component holds alone,
+    // so the host hears about them here — ahead of the compression below, which
+    // a host's in-flight save could otherwise outlive.
+    if (staging || !(multiple && files.length > 1)) onDraftChange?.()
 
     if (staging) {
       // Compress and stage every selected file; camera shots and multi-select
@@ -108,7 +127,7 @@ export default function PhotoCapture({
     setFile(selected)
     const objectUrl = URL.createObjectURL(selected)
     setPreview(objectUrl)
-  }, [staging, multiple, onCapture])
+  }, [staging, multiple, onCapture, onDraftChange])
 
   const handleConfirm = useCallback(async () => {
     if (!file) return
@@ -123,21 +142,23 @@ export default function PhotoCapture({
   }, [file, onCapture, preview])
 
   const handleCancel = useCallback(() => {
+    if (preview || file) onDraftChange?.()
     if (preview) URL.revokeObjectURL(preview)
     setPreview(null)
     setFile(null)
     if (cameraInputRef.current) cameraInputRef.current.value = ''
     if (uploadInputRef.current) uploadInputRef.current.value = ''
-  }, [preview])
+  }, [preview, file, onDraftChange])
 
   const removeStaged = useCallback((index: number) => {
+    onDraftChange?.()
     setStaged((prev) => {
       const next = [...prev]
       const [removed] = next.splice(index, 1)
       if (removed) URL.revokeObjectURL(removed.url)
       return next
     })
-  }, [])
+  }, [onDraftChange])
 
   const handleSaveStaged = useCallback(() => {
     // Don't commit while a compression is still landing in `staged` — the late
