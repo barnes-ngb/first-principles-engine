@@ -152,7 +152,19 @@ export function useProspectivePageCheck(): UseProspectivePageCheckResult {
         // `null` rather than throwing. So a `null` response is an honest "no
         // answer, reason not carried here", and the caller shows the generic
         // send-failure sentence.
-        if (!response) return { results: null, sendFailed: true }
+        //
+        // It is REPORTED before returning, through the same sanitized helper the
+        // reply failures use. This is the branch the shipped client actually
+        // takes when a call is refused — the `catch` below is only reachable
+        // against a throwing client — so leaving it silent meant the most common
+        // real failure of this door left no diagnostic row at all. The reason
+        // itself was swallowed by `useAI.chat` and is genuinely not available
+        // here, which is why the detail is a constant: what the row carries is
+        // the picture's shape and the fact that nothing came back.
+        if (!response) {
+          report(shape, NO_RESPONSE_NAME, NO_RESPONSE_DETAIL)
+          return { results: null, sendFailed: true }
+        }
 
         const outcome = readScanAnalysis(response.message, response.stopReason)
         if (outcome.results) return { results: outcome.results }
@@ -200,6 +212,20 @@ function isUnsupportedTask(message: string): boolean {
   if (/taskType must be one of/i.test(message)) return true
   return /invalid-argument/i.test(message) && /taskType|pageCheck/i.test(message)
 }
+
+/**
+ * The label and the sentence for "the call came back with nothing".
+ *
+ * Both are constants written by the app, deliberately: the client swallowed the
+ * reason, so there is nothing truthful to interpolate — and a row for this
+ * branch must not reach for the alternatives (the model's text, the file name,
+ * the parent's capture context) to look more specific than the app can honestly
+ * be. The label is namespaced like the reply failures so the two read as one
+ * family in Diagnostics, and neither string carries a quote, a URL or a
+ * four-digit run, so `redactText` leaves both intact.
+ */
+const NO_RESPONSE_NAME = 'PageCheck:no-response'
+const NO_RESPONSE_DETAIL = 'call returned no reply, reason not carried back'
 
 /** The one path from a page-check failure to the log. The app's own words. */
 function report(shape: ScanFailureShape, name: string, detail: string): void {

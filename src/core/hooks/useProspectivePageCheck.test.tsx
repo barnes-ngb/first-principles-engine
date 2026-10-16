@@ -100,7 +100,9 @@ describe('useProspectivePageCheck', () => {
     // What this case pins is the CLASSIFICATION, against a client that throws.
     // The real `useAI.chat` catches a callable rejection and returns `null`, so
     // the production path for this refusal is the generic send failure asserted
-    // below in "a missing response is a send failure too"; `unsupported` is not
+    // below in "reports a null/undefined response as a send failure, exactly
+    // once, carrying the shape only" — which is also where that path's
+    // diagnostic row is pinned; `unsupported` is not
     // established as reachable through the shipped client.
     chat.mockRejectedValue(new Error(message))
     const outcome = await runner().check(file(), request)
@@ -165,9 +167,46 @@ describe('useProspectivePageCheck', () => {
     expect(outcome).toEqual({ results: null, sendFailed: true })
   })
 
-  it('a missing response is a send failure too', async () => {
-    chat.mockResolvedValue(undefined)
-    const outcome = await runner().check(file(), request)
+  // The branch the SHIPPED client actually takes when a call is refused:
+  // `useAI.chat` catches the callable's rejection and resolves with nothing. It
+  // returned silently before deployment review caught it, so the door's most
+  // common real failure left no diagnostic row at all.
+  it.each([
+    ['a null response', null],
+    ['an undefined response', undefined],
+  ])('reports %s as a send failure, exactly once, carrying the shape only', async (_label, response) => {
+    chat.mockResolvedValue(response)
+    const outcome = await runner().check(file(), {
+      ...request,
+      // Supplied so the row can be checked for it: the parent's own row context
+      // must not travel into the log just because it was available here.
+      captureContext: { itemLabel: 'GATB Math', subjectBucket: 'Math' },
+    })
+
+    // What the caller reads is unchanged — a generic send failure, no kind, no
+    // version-skew claim (the reason was swallowed before it got here).
     expect(outcome).toEqual({ results: null, sendFailed: true })
+
+    // One row: not zero (the bug) and not two (no double-report with the
+    // reply-failure path, which this return skips).
+    expect(reportError).toHaveBeenCalledTimes(1)
+    const logged = reportError.mock.calls[0][0] as {
+      name: string
+      message: string
+      section: string
+      stack: string | null
+    }
+    // The app's own constant words, and the picture's SHAPE.
+    expect(logged.name).toBe('PageCheck:no-response')
+    expect(logged.section).toBe('scan-page-check')
+    expect(logged.stack).toBeNull()
+    expect(logged.message).toContain('door=scan-page-check')
+    expect(logged.message).toContain('in=image/jpeg')
+    expect(logged.message).toContain('call returned no reply')
+    // And nothing else: no bytes, no file name, no row context, no ids.
+    const serialized = JSON.stringify(logged)
+    for (const mustNotLeak of ['page.jpg', 'Ynl0ZXM', 'GATB', 'Math', 'lincoln', 'fam']) {
+      expect(serialized).not.toContain(mustNotLeak)
+    }
   })
 })
