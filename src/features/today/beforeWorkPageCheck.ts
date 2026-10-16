@@ -25,9 +25,12 @@
  *    (`loadRecentScansContext` reads *pending* scans and equates a `skip`
  *    recommendation with mastery), and those reads are capped, so a prospective
  *    row would both leak and starve.
- *  - **does leave the operational rows every AI call leaves** — the rate-limit
- *    entry, the AI usage row, an error row on failure. The copy here says so;
- *    "nothing is recorded" would be a sentence the code contradicts.
+ *  - **does leave the operational rows every AI call leaves** — the AI usage row
+ *    the handler writes, and an error row on failure. The copy here says so;
+ *    "nothing is recorded" would be a sentence the code contradicts. Note what
+ *    is NOT among them: rate limiting writes nothing. `checkRateLimit` counts
+ *    the family's recent `aiUsage` rows for this task and throws when the window
+ *    is full — a read, not a separate rate-limit record.
  *  - **claims nothing about the child from the page.** A page the child has not
  *    touched is evidence about the *page*. It cannot show mastery, and it cannot
  *    show that the lessons before it are done.
@@ -118,11 +121,12 @@ export const SUITABILITY_LABEL: Record<BeforeWorkSuitability, string> = {
  *
  * The claim is deliberately **"no learning or progress records change"** and not
  * *"nothing is recorded"*. The call really does leave operational records
- * behind — the rate-limit entry the callable writes before dispatch, the AI
- * usage row the handler writes after, and an error-log row when something
- * fails — so a flat "nothing was recorded" would be a sentence the code
- * contradicts. What is true, and is the thing a parent is actually asking, is
- * that no record OF THE CHILD'S LEARNING moves.
+ * behind — the AI usage row the handler writes after the model answers, and an
+ * error-log row when something fails — so a flat "nothing was recorded" would be
+ * a sentence the code contradicts. (The rate limit is not one of them: it
+ * *counts* those same `aiUsage` rows and writes none of its own.) What is true,
+ * and is the thing a parent is actually asking, is that no record OF THE CHILD'S
+ * LEARNING moves.
  */
 export const BEFORE_WORK_UNCERTAINTY =
   "This is a guess from one photo of a page he hasn't done yet — not a measure of what he knows. No learning or progress records change."
@@ -135,10 +139,11 @@ export const BEFORE_WORK_UNCERTAINTY =
  *  1. where the photo goes and what is NOT kept — the app writes no `scans`
  *     document and no Storage object for this door, so the photo and the answer
  *     exist only in the request and on the screen;
- *  2. what IS kept — the operational rows every AI call leaves (rate limit, AI
- *     usage, and an error row when one fails). Deliberately not phrased as a
- *     quota being decremented: nothing in this repo meters a family allowance,
- *     so claiming one would be inventing a fact;
+ *  2. what IS kept — the operational rows every AI call leaves: the AI usage row
+ *     and an error row when one fails. Deliberately not phrased as a quota being
+ *     decremented: nothing in this repo meters a family allowance, so claiming
+ *     one would be inventing a fact — and the rate limit is a COUNT over the
+ *     usage rows, so it is not a row of its own to disclose;
  *  3. what closing does and does not do. A request already sent cannot be
  *     recalled and no provider-side deletion is implemented, so neither is
  *     claimed.
@@ -181,10 +186,23 @@ export const BEFORE_WORK_SEND_FAILED =
  *
  * `deploy.yml` publishes hosting before functions, so for a window this app can
  * ask for a check the deployed functions do not know. They refuse it by name in
- * the dispatcher's own validation, which runs before the rate-limit write,
+ * the dispatcher's own validation, which runs before the rate-limit check,
  * before the workbook backfill and before any handler — so in this one case
- * literally nothing is written, not even an operational row. "Try again" would
- * be false advice, so this says what is true and what to do instead.
+ * literally nothing is written, not even an operational row (and not even an
+ * `aiUsage` row, which is the only row the rate limit would have counted).
+ * "Try again" would be false advice, so this says what is true and what to do
+ * instead.
+ *
+ * **Honest limit on when a parent actually reads this sentence.** The refusal
+ * arrives as a callable rejection, and the shared `useAI.chat` catches that and
+ * returns `null` rather than throwing — so the skew window currently lands on
+ * the generic send-failure copy (`BEFORE_WORK_SEND_FAILED`), not here. The
+ * `unsupported` outcome and this sentence are reached only when the rejection
+ * surfaces to `useProspectivePageCheck` as a throw, which its tests arrange with
+ * a throwing mock and which is not established in the production client. The
+ * constant is kept — the fail-closed behaviour it describes is real and
+ * independently asserted, and the client's own API is not this run's to change —
+ * but it must not be read as "this is the message the skew window shows".
  */
 export const BEFORE_WORK_CHECK_UNAVAILABLE =
   'This check isn’t available yet — the app is newer than the service behind it, so the page wasn’t looked at and nothing at all was written. Try again after the next app update; nothing here needs fixing.'

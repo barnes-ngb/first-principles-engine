@@ -20,9 +20,11 @@ A prospective check:
   `days` row — not even a `scanned` flag, and no checklist **identity preparation** (the old door
   prepared identities so it could write a row; with the row write gone, so is the preparation).
 - **persists no record and no image of its own.** No `scans` document, no Storage object. §2.
-- **does leave the operational rows every AI call leaves** — the rate-limit entry the callable writes
-  before dispatch, the AI usage row the handler writes after, and an error-log row on failure. The
-  copy says so; see §5.
+- **does leave the operational rows every AI call leaves** — the AI usage row the handler writes
+  after the model answers, and an error-log row on failure. The copy says so; see §5. **Rate limiting
+  is not one of them:** `authGuard.checkRateLimit` runs a `count()` over the family's recent
+  `aiUsage` documents for the task and throws when the window is full, so it reads that record and
+  writes no row of its own.
 - **claims nothing about the child from the page**, and never that prior lessons are complete.
 - **answers "I can't tell"** when the evidence is incomplete — including when there is no recorded
   evidence about the child to judge fit against.
@@ -94,7 +96,7 @@ have to honour it does not exist yet.
 | registry | `CHAT_TASKS.pageCheck → handlePageCheck` (`functions/src/ai/tasks/pageCheck.ts`) |
 | handler | reads no purpose field: arriving there IS the intent, so a missing or forged flag changes nothing. Always the prospective prompt |
 | legacy | `handleScan` has **no** prospective branch any more — a `scan` carrying the old string gets ordinary retrospective behaviour, backfill included |
-| old service | rejects the unknown task in the dispatcher's own validation — **before** the rate-limit write, the backfill and any handler, so literally nothing is written — and the real client shows the generic send-failure message, without falling back to scan |
+| old service | rejects the unknown task in the dispatcher's own validation — **before** the rate-limit check, the backfill and any handler, so literally nothing is written — and the real client shows the generic send-failure message, without falling back to scan |
 
 There is deliberately **no fallback to `scan`**: a fallback would restore exactly the silent
 retrospective behaviour the skew finding exposed. No deployment workflow change is needed.
@@ -117,8 +119,9 @@ that with the task name, which also closes the skew hole; the payload is no long
 anywhere.
 
 Other pre-dispatch side effects were inspected and left alone: the child profile and skill-snapshot
-reads (reads), `checkRateLimit` (an operational write, kept deliberately), and the context slice
-loaders (reads only).
+reads (reads), `checkRateLimit` (kept deliberately — and it is a **read**: a `count()` over recent
+`aiUsage` rows, not a rate-limit record of its own; an earlier draft of this note and of the feature's
+comments called it a write), and the context slice loaders (reads only).
 
 The proof is executable: `functions/src/ai/chatProspectiveBypass.test.ts` runs the real callable with
 narrow module stubs and asserts scan = 1 backfill call (including a scan carrying a forged intent
@@ -301,7 +304,15 @@ deploy, it works. The reverse order (functions first) is also fine — the new t
 - The unreachable retrospective panel and its five handlers (§7) want a dedicated removal run.
 - No before-work history exists by design (§2). If the owner wants one, it is a new collection and a
   rules change — out of scope here.
-- `withoutAbilityClaims` is heuristic (§6).
+- `withoutAbilityClaims` is heuristic (§6) — stated as a limit, not a guarantee: it catches the
+  phrasings it was written for and no claim is made that every ability claim is removed.
+- **The `unsupported` / "check isn't available yet" copy is not proven reachable through the shipped
+  client** (§5). `useAI.chat` catches a callable rejection and returns `null`, so the release-skew
+  refusal reports as the generic send failure. Making it reachable means changing `useAI`'s error
+  surface, which is deliberately out of scope here; the branch, its classification and its copy are
+  kept and tested against a throwing client, and the comments in
+  `useProspectivePageCheck.ts` / `beforeWorkPageCheck.ts` say exactly this.
+- **The time-and-evidence census moved because of this run.** TodayPage no longer names a time collection directly, so its registry row is removed. Its indirect completed-work writes through existing helpers remain. The organizer ran the committed census generator and refreshed the complete printed block: 915 source files, 60 surfaces/rows and zero classification problems.
 - Windows-only typecheck noise (`ActiveChildLine` / `WeekBySubject` case collisions) is pre-existing
   baseline and unrelated to this run.
 

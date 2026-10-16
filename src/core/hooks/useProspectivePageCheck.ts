@@ -31,8 +31,11 @@
  * and `functions/src/ai/chatProspectiveBypass.test.ts`.
  *
  * What the call does leave behind, deliberately, are the operational rows every
- * AI call leaves: the rate-limit entry, the AI usage row, and an error-log row
- * when something fails. The disclosure the parent reads says exactly that.
+ * AI call leaves: the AI usage row the handler writes, and an error-log row when
+ * something fails. The disclosure the parent reads says exactly that. Rate
+ * limiting is **not** a third row — `authGuard.checkRateLimit` counts the
+ * family's recent `aiUsage` documents for the task and throws when the window is
+ * full, so it reads the usage record rather than writing one of its own.
  *
  * Never throws: every failure comes back as an outcome.
  */
@@ -144,6 +147,11 @@ export function useProspectivePageCheck(): UseProspectivePageCheckResult {
           ],
         })
 
+        // THIS is where a refused call actually lands, including the release-skew
+        // refusal: `useAI.chat` catches the callable's rejection and returns
+        // `null` rather than throwing. So a `null` response is an honest "no
+        // answer, reason not carried here", and the caller shows the generic
+        // send-failure sentence.
         if (!response) return { results: null, sendFailed: true }
 
         const outcome = readScanAnalysis(response.message, response.stopReason)
@@ -157,6 +165,16 @@ export function useProspectivePageCheck(): UseProspectivePageCheckResult {
         // and do not know the task, so the dispatcher refused it by name. It is
         // reported as its own outcome because it wrote nothing and because
         // "try again" is the wrong advice — the service has to catch up.
+        //
+        // Reachability, stated rather than implied: this branch needs the
+        // rejection to arrive HERE as a throw, and the shared `useAI.chat`
+        // catches a callable rejection and returns `null` (handled above). So
+        // the skew window as the production client runs it shows the generic
+        // send-failure sentence, and `unsupported` is proven only against a
+        // throwing client in `useProspectivePageCheck.test.tsx`. The branch is
+        // kept because the classification is right and costs nothing if the
+        // client's error surface improves; changing `useAI`'s API is not this
+        // module's business.
         return isUnsupportedTask(message)
           ? { results: null, sendFailed: true, unsupported: true }
           : { results: null, sendFailed: true }

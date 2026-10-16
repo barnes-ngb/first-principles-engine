@@ -93,8 +93,15 @@ describe('useProspectivePageCheck', () => {
     'invalid-argument: taskType must be one of: plan, scan',
   ])('reports an old service that refuses the task as UNSUPPORTED (%s)', async (message) => {
     // Release skew: hosting deploys before functions, so the previous
-    // dispatcher rejects this task by name — before its rate-limit write, its
-    // workbook backfill and any handler, so nothing at all was written.
+    // dispatcher rejects this task by name — before its rate-limit check, its
+    // workbook backfill and any handler, so nothing at all was written (and the
+    // rate-limit check writes nothing in any case: it counts `aiUsage` rows).
+    //
+    // What this case pins is the CLASSIFICATION, against a client that throws.
+    // The real `useAI.chat` catches a callable rejection and returns `null`, so
+    // the production path for this refusal is the generic send failure asserted
+    // below in "a missing response is a send failure too"; `unsupported` is not
+    // established as reachable through the shipped client.
     chat.mockRejectedValue(new Error(message))
     const outcome = await runner().check(file(), request)
     expect(outcome).toEqual({ results: null, sendFailed: true, unsupported: true })

@@ -16,14 +16,48 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * could not have caught the original bug and cannot catch its return.
  */
 
+// Inline import types, so the mocks below carry the REAL parameter contracts
+// without a value import running ahead of `vi.mock` (type positions only, so
+// nothing is loaded at runtime).
+type TaskCtx = import("./chatTypes.js").ChatTaskContext;
+type TaskResult = import("./chatTypes.js").ChatTaskResult;
+type BackfillArgs = Parameters<
+  typeof import("./workbookActivityConfigBackfill.js").ensureWorkbookActivityConfigsForChild
+>;
+type BackfillStats = import("./workbookActivityConfigBackfill.js").WorkbookBackfillStats;
+type RateLimitArgs = Parameters<typeof import("./authGuard.js").checkRateLimit>;
+
 const { backfillMock, handlerMock, rateLimitMock } = vi.hoisted(() => ({
-  backfillMock: vi.fn(async () => ({ created: 0, updated: 0, skipped: 0 })),
-  handlerMock: vi.fn(async () => ({
-    message: "{}",
-    model: "test",
-    usage: { inputTokens: 0, outputTokens: 0 },
-  })),
-  rateLimitMock: vi.fn(async () => undefined),
+  // The real `WorkbookBackfillStats` shape — "nothing was backfilled", which is
+  // what the dispatcher reads (`created`/`updated`) to decide whether to log.
+  backfillMock: vi.fn(
+    async (
+      _db: BackfillArgs[0],
+      _familyId: BackfillArgs[1],
+      _childId: BackfillArgs[2],
+    ): Promise<BackfillStats> => ({
+      scannedLegacyWorkbooks: 0,
+      created: 0,
+      updated: 0,
+    }),
+  ),
+  // Typed as a real task handler: `ctx` is the dispatcher's own
+  // `ChatTaskContext`, which is what the payload assertion below reads.
+  handlerMock: vi.fn(
+    async (_ctx: TaskCtx): Promise<TaskResult> => ({
+      message: "{}",
+      model: "test",
+      usage: { inputTokens: 0, outputTokens: 0 },
+    }),
+  ),
+  rateLimitMock: vi.fn(
+    async (
+      _uid: RateLimitArgs[0],
+      _action: RateLimitArgs[1],
+      _maxCalls?: RateLimitArgs[2],
+      _windowMinutes?: RateLimitArgs[3],
+    ) => undefined,
+  ),
 }));
 
 vi.mock("./workbookActivityConfigBackfill.js", () => ({
@@ -130,19 +164,18 @@ describe("the dispatcher's pre-handler backfill", () => {
       }),
     );
 
-    const ctx = handlerMock.mock.calls[0][0] as unknown as {
-      familyId: string;
-      childId: string;
-      messages: Array<{ content: string }>;
-    };
+    const ctx = handlerMock.mock.calls[0][0];
     expect(ctx.familyId).toBe("fam-1");
     expect(ctx.childId).toBe("lincoln");
     expect(JSON.parse(ctx.messages[0].content).captureContext).toEqual({ itemLabel: "GATB Math" });
   });
 
-  it("operational records are NOT bypassed — the rate limit still runs", async () => {
+  it("the operational path is NOT bypassed — the rate limit still runs", async () => {
     // The disclosure says the call is logged like any other. That has to be
-    // true: the bypass is for the learning record only.
+    // true: the bypass is for the learning record only. Note what this does and
+    // does not say — `checkRateLimit` COUNTS the family's recent `aiUsage` rows
+    // and writes none of its own, so what is asserted here is that the gate
+    // still runs, not that it leaves a record.
     await callable(
       request({ ...base, taskType: PAGE_CHECK_TASK, messages: [{ role: "user", content: scanPayload() }] }),
     );

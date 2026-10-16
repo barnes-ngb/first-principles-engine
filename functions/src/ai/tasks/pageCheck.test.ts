@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Firestore } from "firebase-admin/firestore";
+import type { ChatTaskContext } from "../chatTypes.js";
 
 /**
  * The `pageCheck` task at the HANDLER boundary: the registry routes it to the
@@ -11,15 +12,31 @@ import type { Firestore } from "firebase-admin/firestore";
  * dispatcher rejects it outright — is executed in `../chatProspectiveBypass.test.ts`.
  */
 
+// The spies carry the REAL signatures of the functions they stand in for, so a
+// changed parameter list fails typecheck here instead of letting an assertion
+// read an argument that no longer exists. Inline import types keep these in
+// type positions only — no value import runs ahead of `vi.mock`.
+type VisionCall = typeof import("../chatTypes.js").callClaudeWithVision;
+type VisionOpts = Parameters<VisionCall>[0];
+type VisionResult = Awaited<ReturnType<VisionCall>>;
+type UsageArgs = Parameters<typeof import("../chatTypes.js").logAiUsage>;
+type ContextArgs = Parameters<typeof import("../contextSlices.js").buildContextForTask>;
+
 const { visionMock, usageMock, contextMock } = vi.hoisted(() => ({
-  visionMock: vi.fn(async () => ({
-    text: '{"pageType":"worksheet"}',
-    inputTokens: 10,
-    outputTokens: 20,
-    stopReason: "end_turn",
-  })),
-  usageMock: vi.fn(async () => undefined),
-  contextMock: vi.fn(async () => ["SKILL SNAPSHOT: addition to 20"]),
+  visionMock: vi.fn(
+    async (_opts: VisionOpts): Promise<VisionResult> => ({
+      text: '{"pageType":"worksheet"}',
+      inputTokens: 10,
+      outputTokens: 20,
+      stopReason: "end_turn",
+    }),
+  ),
+  usageMock: vi.fn(
+    async (_db: UsageArgs[0], _familyId: UsageArgs[1], _data: UsageArgs[2]) => undefined,
+  ),
+  contextMock: vi.fn(async (_taskType: ContextArgs[0], _ctx: ContextArgs[1]) => [
+    "SKILL SNAPSHOT: addition to 20",
+  ]),
 }));
 
 vi.mock("../chatTypes.js", async (importOriginal) => {
@@ -36,23 +53,26 @@ import { PAGE_CHECK_TASK } from "../prospectiveCheck.js";
 
 const db = {} as unknown as Firestore;
 
-function ctx(payload: Record<string, unknown>) {
+function ctx(payload: Record<string, unknown>): ChatTaskContext {
   return {
     db,
     familyId: "fam-1",
     childId: "lincoln",
     childData: { name: "Lincoln", grade: "3" },
     snapshotData: undefined,
-    messages: [{ role: "user" as const, content: JSON.stringify(payload) }],
+    messages: [{ role: "user", content: JSON.stringify(payload) }],
+    // Required by the handler contract, and nothing in these paths sets it:
+    // the page check has no domain, so the real dispatcher sends `undefined`.
+    domain: undefined,
     apiKey: "key",
   };
 }
 
 const image = { imageBase64: "AAAA", mediaType: "image/jpeg" };
 
-/** The system prompt the handler actually sent. */
+/** The system prompt the handler actually sent — read off the real call shape. */
 function sentPrompt(): string {
-  return (visionMock.mock.calls[0][0] as unknown as { systemPrompt: string }).systemPrompt;
+  return visionMock.mock.calls[0][0].systemPrompt;
 }
 
 beforeEach(() => {

@@ -330,7 +330,10 @@ export function useBeforeWorkPageCheck({
           status: BeforeWorkCheckStatus.Answered,
           summary: outcome.unsupported
             ? // Release skew: the service refused the task by name, so nothing
-              // ran and "try again" is not the advice to give.
+              // ran and "try again" is not the advice to give. Reachability is
+              // the runner's to state and is stated there: `useAI.chat` turns a
+              // callable rejection into `null`, so the shipped client reports
+              // that refusal as a plain send failure and takes the branch below.
               inconclusiveBeforeWorkSummary(BEFORE_WORK_CHECK_UNAVAILABLE)
             : outcome.sendFailed
               ? inconclusiveBeforeWorkSummary(BEFORE_WORK_SEND_FAILED)

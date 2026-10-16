@@ -143,8 +143,9 @@ describe('summarizeBeforeWorkCheck — the tentative answer', () => {
     const summary = summarizeBeforeWorkCheck(null, { kind })
     expect(summary.conclusive).toBe(false)
     expect(summary.failureMessage).toMatch(matcher)
-    // The honest claim: operational rows (rate limit, AI usage, error log) DO
-    // exist, so the promise is about learning and progress records only.
+    // The honest claim: operational rows (the AI usage row, the error log) DO
+    // exist, so the promise is about learning and progress records only. Rate
+    // limiting is not one of them — it counts the usage rows, writing none.
     expect(summary.failureMessage).toMatch(/no learning or progress records change/i)
     expect(summary.failureMessage).not.toMatch(/nothing was recorded/i)
   })
