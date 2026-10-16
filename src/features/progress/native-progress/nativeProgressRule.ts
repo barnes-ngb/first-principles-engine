@@ -398,15 +398,77 @@ export function savedNotice(
   )}, seen ${formatDateShort(reviewed.observedOn)}. Nothing else changed.`
 }
 
+/** The receipt for a retry whose first attempt had already landed. */
+export function alreadyRecordedNotice(
+  reviewed: Pick<ReviewedObservation, 'program' | 'nativeNumber' | 'meaning' | 'observedOn'>,
+  childName: string,
+): string {
+  return `Already recorded for ${childName}: ${numberPhrase(
+    reviewed,
+  )}, seen ${formatDateShort(reviewed.observedOn)}. Nothing was saved twice.`
+}
+
 /**
- * What a parent reads when the write did not land.
+ * What a parent reads when the app did not get an answer back.
  *
- * Says the observation is NOT saved, and that her typing is still there — the
- * failure to avoid is her believing a record exists when none does.
+ * It does **not** say the entry was not saved. A generic transport failure is
+ * *indeterminate*: the transaction may have committed and the answer been lost on
+ * the way home, which is the ordinary phone case — so claiming absence is as much
+ * a guess as claiming a save, and the earlier wording made that guess (PR-1897
+ * review, round 2). What is true is that nothing is confirmed, her entry is still
+ * here, and trying again **checks** the same entry rather than adding another:
+ * the document id is built from the entry key and the write is create-or-nothing,
+ * so a retry of a save that did land comes back *already recorded*.
+ *
+ * A refusal the writer can NAME (`NativeProgressRefused`) carries its own
+ * sentence instead, because that one is determinate and says why.
  */
 export function failureNotice(detail?: string): string {
-  const base = 'That was not saved. Your entry is still here — try again.'
+  const base =
+    'This was not confirmed as saved. Your entry is still here — trying again checks the same entry, so it cannot be recorded twice.'
   return detail ? `${base} (${detail})` : base
+}
+
+/**
+ * ...and what she reads when nothing was attempted at all.
+ *
+ * The one failure that may state absence, because it is refused on this device
+ * before anything leaves it. "Not confirmed" here would invent a doubt that does
+ * not exist.
+ */
+export function notSentNotice(reason: string): string {
+  return `This was not sent — ${reason}. Nothing was written, and your entry is still here.`
+}
+
+/**
+ * The heading of the panel for a confirmed save whose answer never came back
+ * after the surface had already moved to another child.
+ *
+ * **Not confirmed**, not "not saved": the panel's own body explains why those are
+ * different things. It names the child it was confirmed for, because the one on
+ * screen is somebody else and a heading without a name would read as a failure of
+ * the entry being typed now.
+ */
+export function strandedSaveTitle(childName: string): string {
+  return `Not confirmed for ${childName}`
+}
+
+/**
+ * ...and the body: what is true, and what the one button does.
+ *
+ * Three facts, in the order they matter: whose entry this was, that the app has
+ * no confirmation it reached that child's record — asserting neither absence nor
+ * presence, because a lost answer leaves both open — and that trying again checks
+ * that same entry rather than adding another. The last clause is the promise the
+ * entry key keeps, and the sentence a landed save comes back with.
+ */
+export function strandedSaveNotice(childName: string): string {
+  return `You confirmed this entry for ${childName}, and the app has no confirmation that it reached ${childName}'s record. Trying again checks that same entry rather than adding another, so it cannot be recorded twice — and if it did land, you will be told it was already recorded.`
+}
+
+/** The extra line when the stranded entry was a correction, not a new one. */
+export function strandedCorrectionNote(childName: string): string {
+  return `Whether it landed already or lands on a retry, it is filed as a correction of ${childName}'s earlier entry, exactly as you confirmed it.`
 }
 
 /** The correction's own confirm line. Names what is kept, not what is replaced. */
@@ -429,6 +491,14 @@ export function correctionPreamble(original: NativeProgressObservation): string 
  * written: an in-flight save finishes a second later, and *"is still finishing"*
  * would then be a sentence on screen that is no longer true (review item 9). What
  * stays true is where the confirmed entry goes, so that is what it says.
+ *
+ * What it must NOT say is that the other child's record *received* the entry: the
+ * answer can still be lost or refused, and a notice promising a landing the
+ * surface has not seen is the claim PR-1897's review refused (P1). So the
+ * destination sentence carries its own exception — an unconfirmed write comes back
+ * as its own panel on this surface, with the entry intact and a retry bound to the
+ * child it names. It says *cannot confirm* rather than *did not save*, which the
+ * surface does not know either (round 2).
  */
 export function childSwitchNotice(
   previousChildName: string,
@@ -444,7 +514,7 @@ export function childSwitchNotice(
   }
   if (saveConfirmed) {
     parts.push(
-      `Anything you had already confirmed for ${previousChildName} goes to ${previousChildName}'s record, not this one.`,
+      `Anything you had already confirmed for ${previousChildName} goes to ${previousChildName}'s record, not this one — and anything the app cannot confirm is shown here so you can try again.`,
     )
   }
   return parts.join(' ')

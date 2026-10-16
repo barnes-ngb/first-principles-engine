@@ -176,7 +176,10 @@ export function useNativeProgressObservations(
       } catch (err) {
         console.error('[NativeProgress] Save failed:', err)
         // A refusal carries its own sentence — the rule, stated once, in the
-        // writer. Anything else is a failure, and says the entry is unsaved.
+        // writer — and it is determinate: the writer rejected the entry and the
+        // transaction never committed. Anything ELSE is indeterminate (the commit
+        // may have landed and the answer been lost), so it gets `failureNotice`,
+        // which claims neither (PR-1897 review, round 2).
         return {
           ok: false,
           message: err instanceof NativeProgressRefused ? err.message : failureNotice(),

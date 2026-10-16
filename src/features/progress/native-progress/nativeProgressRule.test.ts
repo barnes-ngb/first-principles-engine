@@ -7,14 +7,17 @@ import {
   type NativeProgressObservation,
 } from '../../../core/types/nativeProgress'
 import {
+  alreadyRecordedNotice,
   buildHistoryRows,
   childSwitchNotice,
   draftIsEmpty,
   emptyNativeProgressDraft,
   enteredOnLabel,
+  failureNotice,
   NATIVE_PROGRESS_NO_PLANNING_NOTICE,
   newEntryKey,
   NOTE_MAX_LENGTH,
+  notSentNotice,
   numberPhrase,
   observationSentence,
   parseNativeNumber,
@@ -23,6 +26,9 @@ import {
   reviewNativeProgressDraft,
   savedNotice,
   sortObservations,
+  strandedCorrectionNote,
+  strandedSaveNotice,
+  strandedSaveTitle,
   summarizeProgram,
   summarySentence,
   type NativeProgressDraft,
@@ -287,6 +293,65 @@ describe('the sentences', () => {
     const notice = childSwitchNotice('Lincoln', true, true) ?? ''
     expect(notice).toContain("Lincoln's record")
     expect(notice).not.toMatch(/still finishing|in progress|is saving|right now/i)
+  })
+
+  it('does not promise the other record RECEIVED the entry — or that it did not', () => {
+    // PR-1897 P1: the destination sentence carries its own exception rather than a
+    // landing nobody has seen yet. Round 2: that exception may not swing the other
+    // way either — the surface does not know the entry failed to save.
+    const notice = childSwitchNotice('Lincoln', false, true) ?? ''
+    expect(notice).toMatch(/cannot confirm/)
+    expect(notice).not.toMatch(/was saved to|has been saved|is on the record/i)
+    expect(notice).not.toMatch(/did not save|was not saved|nothing was written/i)
+  })
+
+  /**
+   * Round 2, finding 1. A generic failure is INDETERMINATE: the transaction may
+   * have committed and the answer been lost on the way home. So the wording may
+   * assert neither absence nor presence — only that nothing is confirmed, and that
+   * a retry checks the same entry rather than adding one.
+   */
+  it('says whose stranded entry is unconfirmed, without claiming it was lost', () => {
+    expect(strandedSaveTitle('Lincoln')).toBe('Not confirmed for Lincoln')
+    const notice = strandedSaveNotice('Lincoln')
+    expect(notice).toContain('Lincoln')
+    expect(notice).toContain('no confirmation')
+    expect(notice).toContain("Lincoln's record")
+    // ...and the promise the entry key keeps, in both directions.
+    expect(notice).toContain('cannot be recorded twice')
+    expect(notice).toContain('already recorded')
+
+    for (const sentence of [
+      strandedSaveTitle('Lincoln'),
+      notice,
+      strandedCorrectionNote('Lincoln'),
+    ]) {
+      expect(sentence).not.toMatch(/did not save|was not saved|nothing was written/i)
+      expect(sentence).not.toMatch(/was saved to|has been saved|is on the record/i)
+    }
+    // The correction link is a property of the entry whenever it lands, which is
+    // not the same claim as "it is filed".
+    expect(strandedCorrectionNote('Lincoln')).toContain('as a correction')
+  })
+
+  it('reports a generic failure as unconfirmed, and an unsent one as absent', () => {
+    const generic = failureNotice()
+    expect(generic).toContain('not confirmed as saved')
+    expect(generic).toContain('cannot be recorded twice')
+    expect(generic).not.toMatch(/did not save|was not saved|nothing was written/i)
+    // A detail rides along without changing the claim.
+    expect(failureNotice('permission denied')).toContain('(permission denied)')
+    // The one failure that may state absence: it never left the device.
+    const unsent = notSentNotice('no child is selected')
+    expect(unsent).toContain('was not sent')
+    expect(unsent).toContain('Nothing was written')
+  })
+
+  it('tells a retry that had already landed from one that is new', () => {
+    const already = alreadyRecordedNotice(observation(), 'Lincoln')
+    expect(already).toContain('Already recorded for Lincoln')
+    expect(already).toContain('Nothing was saved twice.')
+    expect(savedNotice(observation(), 'Lincoln')).not.toContain('Already recorded')
   })
 })
 

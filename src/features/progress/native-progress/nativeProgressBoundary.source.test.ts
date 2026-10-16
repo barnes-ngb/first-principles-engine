@@ -171,4 +171,23 @@ describe('the capability check is in the handler, not only the control', () => {
     const source = code(SECTION)
     expect(source).toMatch(/if \(isChildProfile\) \{\s*return \(/)
   })
+
+  it('the stranded retry refuses a kid profile and another family before the writer', () => {
+    // PR-1897 P1. The recovery panel is already filtered out of the render after a
+    // family change, so a cross-family retry cannot be TAPPED — which is exactly
+    // why the handler's own refusal is pinned here instead: the two layers
+    // `handleSave` uses, in the handler that re-sends a pinned request.
+    const source = code(SECTION)
+    const start = source.indexOf('const retryStrandedSave')
+    const end = source.indexOf('const dismissStrandedSave')
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    const body = source.slice(start, end)
+    expect(body).toContain('if (isChildProfile) return')
+    expect(body).toContain('request.familyId !== familyId')
+    const reachesWriter = body.indexOf('await save(')
+    expect(reachesWriter).toBeGreaterThan(-1)
+    expect(body.indexOf('if (isChildProfile) return')).toBeLessThan(reachesWriter)
+    expect(body.indexOf('request.familyId !== familyId')).toBeLessThan(reachesWriter)
+  })
 })

@@ -2,6 +2,10 @@
 
 **Ledger anchor:** FEAT-241 (`docs/review/REVIEW_HOME_BASE.md` §6).
 Status: **IMPLEMENTED** (2026-10-16) — local validation only; not released, no live family data involved.
+Repaired after PR-1897's review: a save whose child changed mid-flight and came back
+unconfirmed is kept and retryable (§7), that panel ends with its family visit rather
+than being merely hidden, failure wording no longer claims a write did not happen
+(§4), and a correction can be cancelled (§6). Local tests only.
 
 ---
 
@@ -128,10 +132,29 @@ Two independent guards, because they fail differently:
    cannot overwrite the first: the stored row comes back with `alreadyRecorded`, and
    the receipt reads *"Already recorded … Nothing was saved twice."*
 
-A failure leaves the entry on screen, unsaved, with its key intact, so *Save* again
-is a retry rather than a second row. **Editing a field after a failure mints a new
-key**, because changed content is a different entry and must not inherit the id of
-one that may already have landed.
+A failure leaves the entry on screen with its key intact, so *Save* again is a
+retry rather than a second row. **Editing a field after a failure mints a new key**,
+because changed content is a different entry and must not inherit the id of one that
+may already have landed. A failure that arrives after the child changed keeps the
+same key for the same reason, in the recovery panel of §7.
+
+### ...and what a failure is allowed to SAY
+
+A generic failure is **indeterminate**. The transaction may have committed with its
+answer lost on the way home — exactly the case `alreadyRecorded` exists for — so
+*"that was not saved"* is as much a guess as *"that was saved"*, and the first cut
+of this feature made it (PR-1897 review, round 2; the same correction `UX-359` made
+on the kid capture). The wording rule now:
+
+- **generic failures say `not confirmed`** (`failureNotice`, and the recovery panel
+  of §7) — nothing is asserted about absence or presence, and the sentence points
+  at the retry, which *checks* the same entry rather than adding one;
+- **a named refusal keeps its reason.** `NativeProgressRefused` is determinate — the
+  writer rejected the entry on its own validation, before or inside a transaction
+  that then aborted — so its message is accurate and is shown as it is;
+- **a pre-flight refusal may state absence.** `notSentNotice` is for a save that
+  never left the device (no child selected), where *"nothing was written"* is simply
+  true and manufactured doubt would be its own dishonesty.
 
 ## 5. Reading it back honestly
 
@@ -175,6 +198,17 @@ while a correction is open, with the reason under it.
 So a correction can neither dangle, nor join two children's records, nor silently
 change what it is about — through the one field nothing else validates.
 
+### ...and the way out of one
+
+**Cancel correction** is beside the correction notice, because *Correct this entry*
+is one tap on a history row and is therefore tapped by accident. It **writes
+nothing**: the link, the reviewed entry and the field errors are dropped and the
+draft comes back as a fresh standalone entry with a new key, so the Program field
+unlocks and the next save carries no `correctsObservationId`. Without it the only
+exits were a child switch or leaving the page, and every entry typed in between was
+filed against a row the parent never meant to touch. It is dead while a save is in
+flight, because the entry that save is carrying is still this correction.
+
 ## 7. Child-switch verdict: RESET
 
 Registry: `docs/review/CHILD_SWITCH_SURFACE_CENSUS_2026-09.md`.
@@ -193,10 +227,32 @@ Registry: `docs/review/CHILD_SWITCH_SURFACE_CENSUS_2026-09.md`.
   rather than an id comparison, because an A → B → A switch aliases onto a visit
   that is no longer this one (the `CertificateScanSection` lesson, UX-329 round 3).
 
+### A bound save that comes back UNCONFIRMED after the switch
+
+Matching the scope token used to mean *discarding* the outcome, which was right for
+a receipt and wrong for a failure: nothing was confirmed, the switch notice said the
+entry went to the other child's record, and the request existed nowhere but the
+closure that was ending. PR-1897's review refused that, correctly — the notice was
+claiming a landing the surface had never seen. The contract now:
+
+| | |
+|---|---|
+| **What is kept** | the confirmed `SaveObservationRequest`, unchanged — family, child, entry key, content and correction link. Nothing is rebuilt from the screen |
+| **What is shown** | a named panel (*"Not confirmed for Lincoln"*), outside the form, with the entry's own sentence and what a retry does. It asserts neither absence nor presence (see §4). A named `NativeProgressRefused` reason is shown above that, as it was given, because it is accurate and says why; the generic notice is **not** repeated there, since it says what the panel's body already says. The switch notice carries the matching exception rather than promising a landing |
+| **What a retry does** | re-sends exactly that request on an explicit tap. Same entry key, so the create-or-nothing transaction makes it a retry and not a second row — a first attempt that *had* landed comes back *"already recorded"*; same child, so it cannot be dragged onto whoever is on screen now |
+| **What never happens** | no automatic retry, no forced child switch, no second child selector, no success claimed before the writer confirms one, and no touch of the draft on screen — including a *later visit's* draft in an A → B → A switch, because the panel is separate state |
+| **Family change** | **ends it.** The panel is cleared in the render guard, and a completion arriving afterwards is *discarded rather than appended* — guarded on a **family visit token** plus the signed-in family, because an equal-id test passes again the moment the parent returns to that family and would resurrect the panel a frame of filtering had only hidden (round 2). The retry outcome is guarded the same way. A **child** switch, including A → B → A inside one family, keeps the panel and its retry. So the switch notice's standing offer to report an unconfirmed entry holds only while that family is still signed in; the bound write itself still goes where it was bound |
+| **Kid profile** | the whole surface is already gone, and the retry handler re-checks the capability the way `handleSave` does |
+
+Its limit, stated rather than hidden: the panel is component state, so an outcome
+arriving after the surface has been **unmounted** is gone with it (§10.6).
+Switching child inside the mounted surface — the case the review found — is safe.
+
 ## 8. The parent gate, stated at its real strength
 
-The form renders only for a parent profile and `handleSave` re-checks before the
-write — the two-layer rule `CurriculumTab`'s rename and set-lesson doors use.
+The form renders only for a parent profile and both handlers that can reach the
+writer re-check before it — `handleSave` and the stranded retry of §7 — the
+two-layer rule `CurriculumTab`'s rename and set-lesson doors use.
 
 **This is a UI capability gate, not server-side role separation.** `firestore.rules`
 grants the family subtree to the owning UID and the kids share that sign-in, so what
@@ -228,3 +284,10 @@ the gate claims — and all it claims — is that a kid profile cannot reach thi
 5. **Entry order is visible, not resolved.** The surface reports disagreement and
    out-of-order entry; it does not tell a parent which row to believe, because
    nothing in the repo knows.
+6. **A stranded outcome does not survive unmount.** The recovery panel of §7 lives
+   in component state: a write whose answer arrives after this surface has been
+   left is not queued anywhere, so the entry has to be typed again — and, since a
+   generic failure is indeterminate, re-typing it is a *new* entry key and could
+   therefore become a second row if the first had in fact landed. Persisting the
+   request would be an outbox — a separate decision about keeping a parent's
+   unconfirmed words on the device, not a repair of this bug.

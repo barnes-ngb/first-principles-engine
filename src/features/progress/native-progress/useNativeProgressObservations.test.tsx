@@ -68,6 +68,8 @@ import {
   NATIVE_PROGRESS_SAVE_IN_FLIGHT,
   useNativeProgressObservations,
 } from './useNativeProgressObservations'
+// The real sentence, so this cannot assert wording the hook has stopped using.
+import { failureNotice } from './nativeProgressRule'
 
 function row(overrides: Partial<NativeProgressObservation> = {}): NativeProgressObservation {
   return {
@@ -225,20 +227,26 @@ describe('recording', () => {
     expect(result.current.saving).toBe(false)
   })
 
-  it('reports a refusal with the writer’s own sentence, and a failure as unsaved', async () => {
+  it('reports a refusal with the writer’s own sentence, and any other failure as UNCONFIRMED', async () => {
     const { result } = renderHook(() => useNativeProgressObservations('lincoln'))
     act(() => emit([]))
 
+    // A named refusal is determinate — the writer rejected the entry — so its own
+    // accurate sentence comes straight back.
     saveMock.mockRejectedValueOnce(new Refused('The entry you were correcting is gone.'))
     let outcome = await result.current.save(request('lincoln'))
     expect(outcome).toEqual({ ok: false, message: 'The entry you were correcting is gone.' })
 
+    // A transport failure is NOT: the transaction may have committed and the
+    // answer been lost, so the message claims neither (PR-1897 review, round 2).
     saveMock.mockRejectedValueOnce(new Error('offline'))
     outcome = await result.current.save(request('lincoln'))
     expect(outcome.ok).toBe(false)
     if (outcome.ok) return
-    expect(outcome.message).toMatch(/not saved/i)
-    // Nothing was added to the list by a failure.
+    expect(outcome.message).toBe(failureNotice())
+    expect(outcome.message).toMatch(/not confirmed as saved/i)
+    expect(outcome.message).not.toMatch(/was not saved|did not save|nothing was written/i)
+    // Nothing is added to the list by an unconfirmed save either way.
     expect(result.current.observations).toEqual([])
   })
 

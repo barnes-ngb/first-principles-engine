@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Alert from '@mui/material/Alert'
+import AlertTitle from '@mui/material/AlertTitle'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Card from '@mui/material/Card'
@@ -17,6 +18,7 @@ import { useActiveChild } from '../../../core/hooks/useActiveChild'
 import type { NativeProgressObservation } from '../../../core/types/nativeProgress'
 import { formatDateShort, todayKey } from '../../../core/utils/dateKey'
 import {
+  alreadyRecordedNotice,
   buildHistoryRows,
   childSwitchNotice,
   correctionPreamble,
@@ -36,18 +38,55 @@ import {
   NATIVE_SOURCES,
   newEntryKey,
   NOTE_MAX_LENGTH,
+  notSentNotice,
   numberPhrase,
   observationSentence,
   previewSentence,
   reviewNativeProgressDraft,
   savedNotice,
+  strandedCorrectionNote,
+  strandedSaveNotice,
+  strandedSaveTitle,
   summarizeObservations,
   summarySentence,
   type NativeProgressDraft,
   type NativeProgressDraftErrors,
   type ReviewedObservation,
 } from './nativeProgressRule'
-import { useNativeProgressObservations } from './useNativeProgressObservations'
+import {
+  useNativeProgressObservations,
+  type SaveObservationRequest,
+} from './useNativeProgressObservations'
+
+/**
+ * A confirmed save whose answer never came back, after the surface had moved to
+ * another child.
+ *
+ * The one piece of this surface's state that OUTLIVES a child switch, and it has
+ * to: the entry was confirmed, the write was attempted, no confirmation arrived,
+ * and the only copy of what to retry lived in a closure that was about to end
+ * (PR-1897 review, P1). It holds the REQUEST unchanged — the same family, child,
+ * entry key, content and correction link it was confirmed under — so a retry
+ * CHECKS the record it was always bound to, cannot become a second row (the entry
+ * key is the document id, and the write is create-or-nothing), and cannot be
+ * dragged onto whoever is on screen now.
+ *
+ * It does not claim the entry was lost. A generic failure is indeterminate — the
+ * transaction may have committed with the answer lost on the way home — so the
+ * panel says *not confirmed* and the retry is what settles it (review round 2).
+ *
+ * No name is stored. The panel resolves it from `children` when it renders, the
+ * same single source of truth the switch notice uses.
+ */
+interface StrandedSave {
+  request: SaveObservationRequest
+  /** What came back instead of a confirmation. Held until a retry answers. */
+  message: string
+  phase: 'failed' | 'retrying' | 'saved'
+  /** Both set only once a retry has come back `ok` — never before. */
+  alreadyRecorded?: boolean
+  recorded?: NativeProgressObservation
+}
 
 /**
  * Write down what Mathseeds or Fast Phonics actually said (FEAT-241).
@@ -80,10 +119,39 @@ import { useNativeProgressObservations } from './useNativeProgressObservations'
  * appear over London's history — so every completion is matched against a scope
  * token before it is allowed to set any state.
  *
+ * ── ...and a bound save that came back UNCONFIRMED ──────────────────────────
+ *
+ * Matching the token used to mean *discarding* the outcome, which was right for a
+ * receipt and wrong for a failure: nothing was confirmed, the switch notice said
+ * the entry went to the other child's record, and the request existed nowhere
+ * else (PR-1897 review, P1). An unconfirmed outcome is now kept as a
+ * `StrandedSave` and shown in its own named panel, outside the form:
+ *
+ *   - the **request is pinned** — same child, program, content, correction link
+ *     and entry key — and the panel's one button re-sends exactly it, so the retry
+ *     checks the record it was confirmed for and cannot write a second row;
+ *   - **nothing is claimed either way.** A generic failure is indeterminate, so
+ *     the panel says *not confirmed* rather than *not saved*; a refusal the writer
+ *     NAMED keeps its own accurate reason beside it;
+ *   - **nothing is automatic.** No retry without a tap, no child switch, no second
+ *     selector, and no success claimed until the writer confirms one;
+ *   - **the draft on screen is untouched**, including the draft of a *later visit*
+ *     to the same child in an A → B → A switch: the panel is separate state, so a
+ *     stale outcome can never overwrite newer typing; and
+ *   - **a family change ends it.** The panel is cleared during render, and a
+ *     completion that arrives afterwards is DISCARDED rather than appended —
+ *     checked against a family visit token, because an equal-id test passes again
+ *     the moment the parent returns to that family and would resurrect it.
+ *
+ * Its limit, stated rather than hidden: this lives in component state, so an
+ * outcome that arrives after this surface has been **unmounted** is gone with it.
+ * Switching child inside the mounted surface — the case the review found — is safe.
+ *
  * ── Parent-only, on capability ──────────────────────────────────────────────
  *
- * The form renders only for a parent profile and the save handler re-checks, the
- * two-layer rule `CurriculumTab`'s rename and set-lesson doors use. **This is a
+ * The form renders only for a parent profile and both save handlers re-check — the
+ * confirmed one and the stranded retry — the two-layer rule `CurriculumTab`'s
+ * rename and set-lesson doors use. **This is a
  * UI capability gate, not server-side role separation**: `firestore.rules` grants
  * the whole family subtree to the owning UID and the kids share that sign-in, so a
  * kid profile is prevented from reaching the write *in the app*, which is what the
@@ -126,6 +194,14 @@ export default function NativeProgressSection() {
   const [receipt, setReceipt] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [switchNotice, setSwitchNotice] = useState<string | null>(null)
+  /**
+   * Confirmed saves left unconfirmed once the screen had moved on.
+   *
+   * A list, not one slot: a second switch can strand a second entry, and the fix
+   * for a dropped outcome cannot be a panel that drops the previous one. Keyed by
+   * entry key, so retrying the same entry replaces its row instead of stacking.
+   */
+  const [strandedSaves, setStrandedSaves] = useState<StrandedSave[]>([])
 
   /**
    * The family + child this surface's draft is bound to. Ids only.
@@ -157,6 +233,13 @@ export default function NativeProgressSection() {
   // previous child's draft under the new child's name, and a parent who taps Save
   // in that frame is the cross-child write the guard exists to prevent.
   const scopeKey = `${familyId ?? ''}|${activeChildId}`
+  if (bound.familyId !== (familyId ?? '')) {
+    // A family change is not a child switch. Nothing pinned to the previous
+    // family may stay on screen or stay retryable: the panel names a child from
+    // a family this sign-in may not read, and its request carries that family's
+    // id. Cleared before the child branch below so a change of both does both.
+    setStrandedSaves([])
+  }
   if (bound.familyId !== (familyId ?? '') || bound.childId !== activeChildId) {
     const hadDraft =
       !draftIsEmpty(draft, today) || pending !== null || correcting !== null
@@ -189,6 +272,28 @@ export default function NativeProgressSection() {
   useEffect(() => {
     scopeRun.current += 1
   }, [scopeKey])
+
+  /**
+   * The FAMILY's own visit token, and the family currently signed in.
+   *
+   * Separate from `scopeRun` because the two questions have different answers: a
+   * child switch may keep a stranded request (it is the same record set, and the
+   * retry is bound to its own child), a family change may not keep anything.
+   *
+   * A generation as well as the id, because the id alone is not enough — the
+   * render guard clears the panel on a family change, but a late completion
+   * ARRIVES after that and would append to the list, where an equal-id test
+   * passes again the moment the parent returns to the first family and
+   * resurrects it (PR-1897 review, round 2). A visit that has ended never comes
+   * back, so its outcome is discarded rather than stored. Bumped on `familyId`
+   * only, so A → B → A **by child** inside one family still keeps its retry.
+   */
+  const familyVisit = useRef(0)
+  const signedInFamily = useRef(familyId ?? '')
+  useEffect(() => {
+    familyVisit.current += 1
+    signedInFamily.current = familyId ?? ''
+  }, [familyId])
 
   const childName = activeChild?.name ?? 'this child'
   // The fallback is for a stored draft shape that outlived a program being
@@ -230,10 +335,13 @@ export default function NativeProgressSection() {
     // profile change with this section open would otherwise leave a live Save.
     if (isChildProfile) return
     if (!familyId || !activeChildId) {
-      setSaveError(failureNotice('no child is selected'))
+      // Refused here, before anything left the device — the one failure that may
+      // state absence outright.
+      setSaveError(notSentNotice('no child is selected'))
       return
     }
     const run = scopeRun.current
+    const familyRun = familyVisit.current
     const request = {
       familyId,
       childId: activeChildId,
@@ -245,18 +353,43 @@ export default function NativeProgressSection() {
     // The write is bound to `request` and has gone where it belongs. The SCREEN
     // may have moved on, and a receipt or a cleared form belongs to the scope that
     // asked for it.
-    if (scopeRun.current !== run) return
+    if (scopeRun.current !== run) {
+      // A confirmed success needs nothing from this screen: the switch notice
+      // already says a confirmed entry goes to the child it was confirmed for.
+      // An UNCONFIRMED outcome is the one that may not evaporate — it would leave
+      // that notice implying the other record settled the entry, with the request
+      // nowhere but in this closure. Kept as its own panel, which is why nothing
+      // below this line touches the draft: the child on screen may be another boy,
+      // or this one on a later visit with newer typing in the form.
+      //
+      // Unless the FAMILY has moved on. Then the request belongs to a sign-in
+      // that is no longer current and the panel would be another family's
+      // information — hidden now and resurrected on the way back, which is what
+      // appending here used to do (review round 2). Discarded instead: the write
+      // still went where it was bound, and nothing on this screen may speak for
+      // it.
+      if (
+        !outcome.ok &&
+        familyVisit.current === familyRun &&
+        signedInFamily.current === request.familyId
+      ) {
+        setStrandedSaves((prev) => [
+          ...prev.filter((s) => s.request.entryKey !== request.entryKey),
+          { request, message: outcome.message, phase: 'failed' },
+        ])
+      }
+      return
+    }
     if (!outcome.ok) {
-      // Unsaved, and the entry is left exactly as it was — including its
-      // `entryKey`, so tapping Save again cannot write a second row.
+      // Unconfirmed, and the entry is left exactly as it was — including its
+      // `entryKey`, so tapping Save again cannot write a second row whether the
+      // first attempt landed or not.
       setSaveError(outcome.message)
       return
     }
     setReceipt(
       outcome.alreadyRecorded
-        ? `Already recorded for ${childName}: ${numberPhrase(outcome.observation)}, seen ${formatDateShort(
-            outcome.observation.observedOn,
-          )}. Nothing was saved twice.`
+        ? alreadyRecordedNotice(outcome.observation, childName)
         : savedNotice(outcome.observation, childName),
     )
     resetDraft()
@@ -271,6 +404,64 @@ export default function NativeProgressSection() {
     childName,
     resetDraft,
   ])
+
+  /**
+   * Re-send one stranded request, unchanged, on an explicit tap.
+   *
+   * The request is not rebuilt from anything on screen: it IS the confirmed one,
+   * so the entry key makes this a retry rather than a second row, and the child
+   * and family are the ones it was confirmed under rather than the ones in the
+   * header now.
+   */
+  const retryStrandedSave = useCallback(
+    async (stranded: StrandedSave) => {
+      const { request } = stranded
+      // The same two checks the first attempt made, because this is the same
+      // write: a profile change with this panel open must not leave a live Save,
+      // and a request pinned to another family may not be sent under this one.
+      if (isChildProfile) return
+      if (!familyId || request.familyId !== familyId) return
+      const familyRun = familyVisit.current
+      // `map`, never append: an entry already cleared by a family change stays
+      // cleared, so an in-flight retry cannot resurrect it on the way back.
+      setStrandedSaves((prev) =>
+        prev.map((s) =>
+          s.request.entryKey === request.entryKey ? { ...s, phase: 'retrying' } : s,
+        ),
+      )
+      const outcome = await save(request)
+      // The same family-visit guard as the first attempt. `map` alone would hold,
+      // because the render guard empties the list on a family change — this says
+      // it on purpose rather than leaning on that.
+      if (
+        familyVisit.current !== familyRun ||
+        signedInFamily.current !== request.familyId
+      ) {
+        return
+      }
+      setStrandedSaves((prev) =>
+        prev.map((s) => {
+          if (s.request.entryKey !== request.entryKey) return s
+          // Still unconfirmed until the writer says otherwise — including when the
+          // answer is the in-flight latch turning a double tap into one write.
+          if (!outcome.ok) return { ...s, phase: 'failed', message: outcome.message }
+          return {
+            ...s,
+            phase: 'saved',
+            alreadyRecorded: outcome.alreadyRecorded,
+            recorded: outcome.observation,
+          }
+        }),
+      )
+    },
+    [isChildProfile, familyId, save],
+  )
+
+  const dismissStrandedSave = useCallback((entryKeyToDrop: string) => {
+    setStrandedSaves((prev) =>
+      prev.filter((s) => s.request.entryKey !== entryKeyToDrop),
+    )
+  }, [])
 
   const startCorrection = useCallback(
     (observation: NativeProgressObservation) => {
@@ -322,8 +513,85 @@ export default function NativeProgressSection() {
         </Alert>
       )}
 
+      {/* ── A confirmed save left unconfirmed after the screen moved ───────
+          Its own panel, above the form and outside it: the entry it describes
+          belongs to a child who may not be the one on screen, so it must never
+          read as the draft below. The family filter is belt to two braces — the
+          render guard's clear and the completion guard's discard — so nothing
+          from another sign-in is rendered or retryable. */}
+      {strandedSaves
+        .filter((stranded) => stranded.request.familyId === (familyId ?? ''))
+        .map((stranded) => {
+          const strandedName =
+            children.find((c) => c.id === stranded.request.childId)?.name ??
+            'the other child'
+          if (stranded.phase === 'saved') {
+            const landed = stranded.recorded ?? stranded.request.observation
+            return (
+              <Alert
+                key={stranded.request.entryKey}
+                severity="success"
+                onClose={() => dismissStrandedSave(stranded.request.entryKey)}
+              >
+                {stranded.alreadyRecorded
+                  ? alreadyRecordedNotice(landed, strandedName)
+                  : savedNotice(landed, strandedName)}
+              </Alert>
+            )
+          }
+          return (
+            <Alert key={stranded.request.entryKey} severity="error">
+              <AlertTitle>{strandedSaveTitle(strandedName)}</AlertTitle>
+              <Typography variant="body2">
+                {previewSentence(stranded.request.observation, strandedName)}
+              </Typography>
+              {/* The writer's NAMED reason, when there is one. The generic notice
+                  says what the panel's own body says next, and a panel that
+                  repeats itself twice over is a panel she skims. */}
+              {stranded.message !== failureNotice() && (
+                <Typography variant="body2">{stranded.message}</Typography>
+              )}
+              <Typography variant="body2">{strandedSaveNotice(strandedName)}</Typography>
+              {stranded.request.correctsObservationId && (
+                <Typography variant="body2">
+                  {strandedCorrectionNote(strandedName)}
+                </Typography>
+              )}
+              <Box sx={{ mt: 1 }}>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={() => void retryStrandedSave(stranded)}
+                  // One at a time, the latch's rule: a retry waits for whatever
+                  // write is already in the air, its own included.
+                  disabled={saving || stranded.phase === 'retrying'}
+                >
+                  {stranded.phase === 'retrying'
+                    ? 'Saving…'
+                    : `Try saving ${strandedName}'s entry again`}
+                </Button>
+              </Box>
+            </Alert>
+          )
+        })}
+
       {correcting && (
-        <Alert severity="info">{correctionPreamble(correcting)}</Alert>
+        <Alert
+          severity="info"
+          action={
+            // The way out of a correction started by accident (PR-1897 review,
+            // P2). It writes nothing: the link, the reviewed entry and the
+            // errors go, and the draft comes back as a fresh standalone entry
+            // with a new key — so the Program field unlocks and the next save
+            // carries no `correctsObservationId`. Dead while a save is in the
+            // air, because the entry that save is carrying is still this one.
+            <Button size="small" onClick={resetDraft} disabled={saving}>
+              Cancel correction
+            </Button>
+          }
+        >
+          {correctionPreamble(correcting)}
+        </Alert>
       )}
 
       {/* ── The form ─────────────────────────────────────────────────────── */}
