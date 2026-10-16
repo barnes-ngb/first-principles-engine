@@ -5,7 +5,11 @@ vi.mock("@anthropic-ai/sdk", () => ({
   default: vi.fn(() => ({ messages: { create: mockCreate } })),
 }));
 
-import { callClaude, formatEvalHistoryByDomain } from "./chatTypes.js";
+import {
+  callClaude,
+  callClaudeWithVision,
+  formatEvalHistoryByDomain,
+} from "./chatTypes.js";
 
 // ── formatEvalHistoryByDomain ─────────────────────────────────
 
@@ -88,6 +92,71 @@ describe("callClaude reasoning-effort", () => {
     });
 
     expect(result.text).toBe('{"narrative":"ok"}');
+  });
+});
+
+// ── callClaudeWithVision — reasoning-effort control ──────────
+// The vision path carries the same opt-in `output_config` passthrough as the
+// text path. Both halves matter: a task that asks for it must get it on the
+// wire, and a task that does not must send a byte-identical request to the one
+// it sent before the option existed.
+
+describe("callClaudeWithVision reasoning-effort", () => {
+  const visionOpts = {
+    apiKey: "k",
+    model: "claude-sonnet-5",
+    maxTokens: 1024,
+    systemPrompt: "SYS",
+    imageBase64: "AAAA",
+    mediaType: "image/jpeg" as const,
+    textPrompt: "What is on this page?",
+  };
+
+  beforeEach(() => {
+    mockCreate.mockReset();
+    mockCreate.mockResolvedValue({
+      content: [{ type: "text", text: "ok" }],
+      usage: { input_tokens: 1, output_tokens: 1 },
+      stop_reason: "end_turn",
+    });
+  });
+
+  it("sends output_config.effort when a per-task effort is provided", async () => {
+    await callClaudeWithVision({ ...visionOpts, effort: "low" });
+
+    expect(mockCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ output_config: { effort: "low" } }),
+    );
+  });
+
+  it("omits output_config entirely when no effort is provided (scan / analyzeWorkbook unchanged)", async () => {
+    await callClaudeWithVision(visionOpts);
+
+    const body = mockCreate.mock.calls[0][0] as Record<string, unknown>;
+    expect(body).not.toHaveProperty("output_config");
+  });
+
+  it("changes nothing else about the request body in either case", async () => {
+    await callClaudeWithVision(visionOpts);
+    await callClaudeWithVision({ ...visionOpts, effort: "low" });
+
+    const withoutEffort = mockCreate.mock.calls[0][0] as Record<string, unknown>;
+    const withEffort = mockCreate.mock.calls[1][0] as Record<string, unknown>;
+
+    // The effort-bearing body is the unchanged body PLUS output_config — so an
+    // existing caller's image, prompt and budget cannot drift under this option.
+    expect(withEffort).toEqual({ ...withoutEffort, output_config: { effort: "low" } });
+    expect(withoutEffort).toMatchObject({
+      model: "claude-sonnet-5",
+      max_tokens: 1024,
+      system: "SYS",
+    });
+    expect(Object.keys(withoutEffort).sort()).toEqual([
+      "max_tokens",
+      "messages",
+      "model",
+      "system",
+    ]);
   });
 });
 

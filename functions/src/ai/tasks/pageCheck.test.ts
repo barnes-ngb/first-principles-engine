@@ -131,6 +131,15 @@ describe("handlePageCheck always asks the prospective question", () => {
     expect(usageMock).not.toHaveBeenCalled();
   });
 
+  it("asks for low reasoning effort so the 1024-token budget reaches the answer", async () => {
+    await handlePageCheck(ctx(image));
+    const sent = visionMock.mock.calls[0][0];
+    // Without this, high-effort reasoning is charged against the same small
+    // budget and the call can end at `max_tokens` with no visible response.
+    expect(sent.effort).toBe("low");
+    expect(sent.maxTokens).toBe(1024);
+  });
+
   it("carries the capture context through as prompt context", async () => {
     await handlePageCheck(ctx({ ...image, captureContext: { itemLabel: "GATB Math" } }));
     expect(sentPrompt()).toContain("Planned activity: GATB Math");

@@ -118,6 +118,12 @@ export const handlePageCheck = async (
     apiKey,
     model,
     maxTokens: 1024,
+    // The prompt asks for a small structured object inside a 1024-token budget.
+    // At the API's default (high) effort, internal reasoning is charged against
+    // that same budget, so the call can stop at `max_tokens` with nothing
+    // visible for the parent to read — the check would silently say it could
+    // not read the page. `low` keeps the budget for the answer (FEAT-77).
+    effort: "low",
     systemPrompt,
     imageBase64,
     mediaType,
