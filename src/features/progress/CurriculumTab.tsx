@@ -57,6 +57,7 @@ import { activityNames } from '../../core/utils/activityNames'
 import { nameKey } from '../../core/utils/nameKey'
 import AddActivityDialog from './AddActivityDialog'
 import CertificateScanSection from './CertificateScanSection'
+import NativeProgressSection from './native-progress/NativeProgressSection'
 import RenameActivityDialog from './RenameActivityDialog'
 import { ALIAS_SECTION_LABEL } from './renameActivity'
 import SetPositionDialog from './SetPositionDialog'
@@ -1249,6 +1250,21 @@ export default function CurriculumTab() {
             Photograph a curriculum certificate or progress report to automatically update workbook progress.
           </Typography>
           <CertificateScanSection />
+        </SectionCard>
+
+        {/* FEAT-241 — the number the NATIVE app showed, written down as a record.
+            Sits beside the certificate door because it answers the same question
+            from the other direction: that one reads a page and moves the
+            curriculum; this one takes a parent's word and moves NOTHING. It is
+            deliberately not a row on a workbook card — `nativeProgressObservations`
+            is isolated from `activityConfigs`, so there is no position for a card
+            to show. See `docs/DESIGN_NATIVE_PROGRESS_CAPTURE.md`. */}
+        <SectionCard title="Mathseeds / Fast Phonics — your own record">
+          <Typography variant="body2" color="text.secondary">
+            Write down the exact lesson or peak the app showed, what it meant, and
+            the day you saw it. Kept as a record only.
+          </Typography>
+          <NativeProgressSection />
         </SectionCard>
 
         {/* Scan to Add New Workbook — multi-page staging + sequential apply */}

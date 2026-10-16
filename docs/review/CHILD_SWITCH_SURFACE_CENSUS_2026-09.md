@@ -389,6 +389,23 @@ by severity: {"P1":0,"P2":0,"P3":0,"—":95}
 census problems: 0
 ```
 
+### Not re-derived 2026-10-16 (FEAT-241 — native progress capture)
+
+**The block above is one row behind, and this says so rather than guessing a new one.**
+`FEAT-241` adds one candidate, `src/features/progress/native-progress/NativeProgressSection.tsx`
+(hook arm — it reads the shell's active child, holds an unconfirmed draft, and hands a `childId` to
+its save), classified **RESET** in §5 with the lines that make it true. Its three sibling modules are
+**not** candidates and that is checked rather than assumed: the writer and the pure rule module hold
+no React state, and the hook performs no Firestore write of its own (asserted by name in
+`nativeProgressBoundary.source.test.ts`), so the heuristic derives the same answer.
+
+The run that built it had **no shell authorisation**, so `npm run census:child-switch` was not run and
+no number here was re-derived. Per `CLAUDE.md`'s derived-numbers rule the qualifier is written instead
+of the figure: **one row added, none removed, so `candidates`, `census rows` and the `RESET` tally
+each move by one when the command is next run**, and `census problems` should stay 0 because the row
+exists. The enforcement does not depend on this prose — the invariant test compares
+the derived candidate set against the table, not against these blocks.
+
 ## 5. The registry
 
 | Surface (file) | Child-scoped state it holds | What it writes, and to which collection | Reachable by a switch today? | Verdict | Severity |
@@ -446,6 +463,7 @@ census problems: 0
 | `src/features/progress/ArmorTab.tsx` | a typed XP award — amount, reason, type | `xpLedger` via `addXpEvent`, plus armor unlocks | Selector (its own child chips) | **RESET** — the award form survived the switch and `doAward` reads the live `childId`. `formChildId` is now compared during render, the draft is cleared through `armorAwardOwnership.ts`, the **Correction** confirm dialog is closed with it (its own button calls `doAward` directly), and an `Alert` names both boys. It **prevents** a write rather than changing one, so no `xpLedger` write path changed — `DOC-25` attribution-only, all four terms in PR #1823. Fixed by FIX-223 (UX-336) | — |
 | `src/features/progress/CertificateScanSection.tsx` | a scanned certificate result awaiting Confirm, plus its preview | `activityConfigs` + `skillSnapshots` via `applyUpdate(familyId, activeChildId, pendingResult)` | Selector (inside `CurriculumTab` since UX-326) | **RESET** — `scanChildId` is compared during render; the pending result and preview are dropped and the parent is told to scan again, **and a run token discards a scan that completes after the change** (Codex round 3: `useScan` sets its result unconditionally, so an in-flight scan repopulated after the switch and reached `syncScanToConfig` with the new child's id — `WorkshopPage`'s round-4 defect on another surface). Fixed here (UX-329) — it **prevents** a write rather than changing one, so the `skillSnapshots` lane is untouched | — |
 | `src/features/progress/CurriculumTab.tsx` | staged scan pages, a strand-session draft, a certificate confirm | `activityConfigs`, `scans`, `skillSnapshots`, `childSkillMaps`, `artifacts` | Shell only — its own `ChildSelector` went with `UX-425` | **RESET** — `stagedChildId` is stamped at staging time, a switch drops the batch with one line saying so, the write path guards on it again, and a switch **during** a batch discards the completion (UX-275) | — |
+| `src/features/progress/native-progress/NativeProgressSection.tsx` | an unconfirmed observation draft — program, the native number, what it means, the day it was seen, source, note — plus the reviewed entry awaiting Save, the row being corrected, and the draft's own `entryKey` | `nativeProgressObservations` only, through `save({ familyId, childId, entryKey, … })` → `saveNativeProgressObservation` (FEAT-241). Nothing else: no `activityConfigs`, no learner model, no hours, XP or skills — pinned by name in `nativeProgressBoundary.source.test.ts` | Shell only — Curriculum has no in-page selector since `UX-425` | **RESET** — `bound.{familyId, childId}` is compared **during render** and the draft, the reviewed entry, the correction target, the `entryKey` and the previous child's receipt are all dropped, with `childSwitchNotice` naming in words what was cleared and whose it was. RESET rather than BIND because the draft is a number, a date and two choices — seconds to retype, and nothing was paid for; RESET rather than GATE because no part of the write is composed from the read (the entry is typed, the collection is append-only, and a correction's link is re-checked inside the writer's transaction), so an unsettled or failed history disables only the correction buttons it renders. A save already **confirmed** is bound instead — it carries the family, child and draft key it was confirmed under all the way to the document — and a scope **token** (bumped per family\|child visit, not an id comparison, so A → B → A cannot alias) stops its completion writing a receipt or clearing a form that now belongs to the other boy | — |
 | `src/features/progress/DispositionProfile.tsx` | an inline narrative override being typed, the AI `result` | `children/{activeChildId}.dispositionOverrides` | Shell only — its own `ChildSelector` went with `UX-425` | **RESET** — the child-change effect clears `overrides` and `editingKey`, and `handleEditSave` returns early without an `editingKey`, so the cross-child write is unreachable | — |
 | `src/features/progress/FoundationsDiagPanel.tsx` | per-child loading / error / model state | `learnerModels` via `bootstrapLearnerModel('reseed')` | Selector (Foundations tab, `?diag=1`) | **SAFE** — every piece of its state is a map **keyed by `childId`** and each action takes the child id of the row whose button was tapped | — |
 | `src/features/progress/FoundationsTab.tsx` | an open concept drawer, an override selection | `learnerModels/{activeChildId}` via `writeReviewAction` | Shell only — its own `ChildSelector` went with `UX-425` | **SAFE** — the override refuses when `action.childId !== activeChildId`, and the action is built from the same `childId` the drawer was opened under | — |
