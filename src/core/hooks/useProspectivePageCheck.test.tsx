@@ -3,6 +3,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { PAGE_CHECK_TASK, useProspectivePageCheck } from './useProspectivePageCheck'
 import { ScanFailureKind } from './scanAnalysis'
+// The REAL sanitizer, deliberately not mocked: the module mock below replaces
+// `../observability` (the index, which bootstraps the sink), while this is the
+// pure `scrubError` module itself. A row is only worth logging if it survives
+// this function, which is what the last case in this file checks.
+import { scrubError } from '../observability/scrubError'
 
 /**
  * The one call, and the fact that it is the ONLY thing that happens.
@@ -100,7 +105,9 @@ describe('useProspectivePageCheck', () => {
     // What this case pins is the CLASSIFICATION, against a client that throws.
     // The real `useAI.chat` catches a callable rejection and returns `null`, so
     // the production path for this refusal is the generic send failure asserted
-    // below in "a missing response is a send failure too"; `unsupported` is not
+    // below in "reports a null/undefined response as a send failure, exactly
+    // once, carrying the shape only" — which is also where that path's
+    // diagnostic row is pinned; `unsupported` is not
     // established as reachable through the shipped client.
     chat.mockRejectedValue(new Error(message))
     const outcome = await runner().check(file(), request)
@@ -152,7 +159,10 @@ describe('useProspectivePageCheck', () => {
     expect(outcome.kind).toBe(kind)
     expect(outcome.sendFailed).toBeUndefined()
     // Logged with the app's own words and the picture's SHAPE — never the
-    // model's text and never the photo.
+    // model's text and never the photo. This is the payload as REPORTED: the
+    // colon in these reply labels does NOT survive `safeName`, so the stored row
+    // carries them as a generic 'Error' and is read by its message. That is why
+    // the no-response label asserted below is a single bare identifier.
     const logged = reportError.mock.calls[0][0] as { name: string; message: string }
     expect(logged.name).toContain('PageCheck')
     expect(logged.message).toContain('door=scan-page-check')
@@ -165,9 +175,88 @@ describe('useProspectivePageCheck', () => {
     expect(outcome).toEqual({ results: null, sendFailed: true })
   })
 
-  it('a missing response is a send failure too', async () => {
-    chat.mockResolvedValue(undefined)
-    const outcome = await runner().check(file(), request)
+  // The branch the SHIPPED client actually takes when a call is refused:
+  // `useAI.chat` catches the callable's rejection and resolves with nothing. It
+  // returned silently before deployment review caught it, so the door's most
+  // common real failure left no diagnostic row at all.
+  it.each([
+    ['a null response', null],
+    ['an undefined response', undefined],
+  ])('reports %s as a send failure, exactly once, carrying the shape only', async (_label, response) => {
+    chat.mockResolvedValue(response)
+    const outcome = await runner().check(file(), {
+      ...request,
+      // Supplied so the row can be checked for it: the parent's own row context
+      // must not travel into the log just because it was available here.
+      captureContext: { itemLabel: 'GATB Math', subjectBucket: 'Math' },
+    })
+
+    // What the caller reads is unchanged — a generic send failure, no kind, no
+    // version-skew claim (the reason was swallowed before it got here).
     expect(outcome).toEqual({ results: null, sendFailed: true })
+
+    // One row: not zero (the bug) and not two (no double-report with the
+    // reply-failure path, which this return skips).
+    expect(reportError).toHaveBeenCalledTimes(1)
+    const logged = reportError.mock.calls[0][0] as {
+      name: string
+      message: string
+      section: string
+      stack: string | null
+    }
+    // The app's own constant words, and the picture's SHAPE.
+    expect(logged.name).toBe('PageCheckNoResponse')
+    expect(logged.section).toBe('scan-page-check')
+    expect(logged.stack).toBeNull()
+    expect(logged.message).toContain('door=scan-page-check')
+    expect(logged.message).toContain('in=image/jpeg')
+    expect(logged.message).toContain('call returned no reply')
+    // And nothing else: no bytes, no file name, no row context, no ids.
+    const serialized = JSON.stringify(logged)
+    for (const mustNotLeak of ['page.jpg', 'Ynl0ZXM', 'GATB', 'Math', 'lincoln', 'fam']) {
+      expect(serialized).not.toContain(mustNotLeak)
+    }
+  })
+
+  // Reporting it is only half the job: a row that the sanitizer flattens is a
+  // row nobody can find. So this runs the REAL `scrubError` — the single place
+  // that decides what may be stored — over the actual reported payload.
+  it('and the row is still identifiable after the real sanitizer runs', async () => {
+    chat.mockResolvedValue(null)
+    await runner().check(file(), {
+      ...request,
+      captureContext: { itemLabel: 'GATB Math', subjectBucket: 'Math' },
+    })
+
+    const raw = reportError.mock.calls[0][0] as Parameters<typeof scrubError>[0]
+    // Sensitive terms of the kind the real sink supplies from app context, so
+    // the redaction pass is exercised rather than skipped.
+    const stored = scrubError(raw, { sensitiveTerms: ['Lincoln', 'London', 'Barnes'] })
+
+    // `safeName` keeps a bare identifier and coerces anything else to 'Error'.
+    // This name reaching storage intact is what makes the row filterable.
+    expect(stored.name).toBe('PageCheckNoResponse')
+    expect(stored.name).not.toBe('Error')
+    // The shape survives redaction, the whitespace collapse and the clamp.
+    expect(stored.message).toContain('door=scan-page-check')
+    expect(stored.message).toContain('in=image/jpeg')
+    expect(stored.message).toContain('call returned no reply')
+    expect(stored.message).not.toBe('[empty]')
+    expect(stored.message).not.toContain('…') // not truncated
+    expect(stored.section).toBe('scan-page-check') // survives `scrubSection`
+    expect(stored.stack).toBeNull()
+    // And the stored record carries nothing of the page, its name, or the
+    // parent's row context — in any field.
+    const serialized = JSON.stringify(stored)
+    for (const mustNotLeak of ['page.jpg', 'Ynl0ZXM', 'GATB', 'Math', 'Lincoln', 'lincoln', 'fam']) {
+      expect(serialized).not.toContain(mustNotLeak)
+    }
+
+    // The contrast this label exists to avoid, asserted against the same
+    // sanitizer: the colon-namespaced spelling the reply failures still use
+    // arrives as a generic 'Error' and loses its name.
+    expect(scrubError({ name: 'PageCheck:unreadable', message: 'x', source: raw.source }).name).toBe(
+      'Error',
+    )
   })
 })
