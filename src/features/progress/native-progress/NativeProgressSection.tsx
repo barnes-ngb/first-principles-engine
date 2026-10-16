@@ -15,8 +15,9 @@ import Typography from '@mui/material/Typography'
 import { EmptyState, ErrorState, LoadingState } from '../../../components/states'
 import { useFamilyId } from '../../../core/auth/useAuth'
 import { useActiveChild } from '../../../core/hooks/useActiveChild'
+import { useTodayKey } from '../../../core/hooks/useTodayKey'
 import type { NativeProgressObservation } from '../../../core/types/nativeProgress'
-import { formatDateShort, todayKey } from '../../../core/utils/dateKey'
+import { formatDateShort } from '../../../core/utils/dateKey'
 import {
   alreadyRecordedNotice,
   buildHistoryRows,
@@ -164,22 +165,39 @@ interface StrandedSave {
 export default function NativeProgressSection() {
   const familyId = useFamilyId()
   const { activeChildId, activeChild, children, isChildProfile } = useActiveChild()
-  // Seeded once per mount: the date a fresh draft starts on, and the latest day a
-  // date field will accept. A clock read during every render would make "today"
-  // move under an open draft.
-  const [today] = useState(todayKey)
+  /**
+   * The LIVE allowed day: the latest date a field accepts, and the day a fresh
+   * draft starts on.
+   *
+   * `useState(todayKey)` pinned it at mount, and this is a phone-first tab that is
+   * rarely closed: a tab opened yesterday refused *today* as a day that "hasn't
+   * happened yet" until it was reloaded (PR-1897 review, round 4 P2). The
+   * rollover-aware hook moves it on focus, on visibility and on the minute tick.
+   * Nothing re-seeds the draft when it moves — see `draftSeededOn`.
+   */
+  const [today] = useTodayKey()
   const {
     observations,
     loading,
     error: readError,
-    observationsChildId,
+    observationsScope,
     saving,
+    savingRequest,
     save,
   } = useNativeProgressObservations(activeChildId)
 
   const [draft, setDraft] = useState<NativeProgressDraft>(() =>
     emptyNativeProgressDraft(today),
   )
+  /**
+   * The day the draft on screen was SEEDED on, which is not always today.
+   *
+   * "Has she typed anything?" is asked against the date the empty draft was given,
+   * so a day that rolls over under an untouched draft does not turn its seeded
+   * date into typing the switch notice then reports as lost. A fresh draft — new,
+   * reset or cancelled — is seeded on the current day and this moves with it.
+   */
+  const [draftSeededOn, setDraftSeededOn] = useState(today)
   const [fieldErrors, setFieldErrors] = useState<NativeProgressDraftErrors>({})
   /** The reviewed entry awaiting an explicit Save. Nothing is written yet. */
   const [pending, setPending] = useState<ReviewedObservation | null>(null)
@@ -222,14 +240,26 @@ export default function NativeProgressSection() {
     childId: activeChildId,
   })
 
+  /**
+   * The live day, readable after an await — in a layout effect, like the switch
+   * tokens below. `handleSave` holds the callback captured at the tap, so a write
+   * held across midnight would otherwise seed the next draft on yesterday.
+   */
+  const todayRef = useRef(today)
+  useLayoutEffect(() => {
+    todayRef.current = today
+  }, [today])
+
   const resetDraft = useCallback(() => {
-    setDraft(emptyNativeProgressDraft(today))
+    const day = todayRef.current
+    setDraft(emptyNativeProgressDraft(day))
+    setDraftSeededOn(day)
     setFieldErrors({})
     setPending(null)
     setCorrecting(null)
     setEntryKey(newEntryKey())
     setSaveError(null)
-  }, [today])
+  }, [])
 
   // ── The scope guard, during render ────────────────────────────────────────
   //
@@ -258,16 +288,26 @@ export default function NativeProgressSection() {
       setSwitchNotice(null)
     } else {
       const hadDraft =
-        !draftIsEmpty(draft, today) || pending !== null || correcting !== null
+        !draftIsEmpty(draft, draftSeededOn) || pending !== null || correcting !== null
       // The name of the child the draft belonged to, resolved now from the family
       // list rather than stored alongside the id. Reached only inside one family,
       // so the list being read is the list that child is in.
       const previousName =
         children.find((c) => c.id === bound.childId)?.name ?? 'the other child'
-      setSwitchNotice(childSwitchNotice(previousName, hadDraft, saving))
+      // A pending save is claimed for the child it belongs to, not for whoever is
+      // being left (round 4 P2). The hook's `saving` flag says only that A write
+      // is in the air, so with one held request and two switches (Lincoln →
+      // London → Luca) leaving London promised London's record an entry that was
+      // always Lincoln's, and offered to report back on a second one.
+      const leavingPendingSave =
+        savingRequest !== null &&
+        savingRequest.familyId === bound.familyId &&
+        savingRequest.childId === bound.childId
+      setSwitchNotice(childSwitchNotice(previousName, hadDraft, leavingPendingSave))
     }
     setBound({ familyId: familyId ?? '', childId: activeChildId })
     setDraft(emptyNativeProgressDraft(today))
+    setDraftSeededOn(today)
     setFieldErrors({})
     setPending(null)
     setCorrecting(null)
@@ -521,8 +561,13 @@ export default function NativeProgressSection() {
   )
 
   // The history this child's own subscription has answered for. A list stamped
-  // with another child — or not yet stamped at all — is not this child's record.
-  const settled = observationsChildId === activeChildId
+  // with another family or child — or not yet stamped at all — is not this
+  // child's record. The FAMILY is part of the test because a child id is unique
+  // inside a sign-in, not across them (round 4 P1).
+  const settled =
+    observationsScope !== null &&
+    observationsScope.familyId === (familyId ?? '') &&
+    observationsScope.childId === activeChildId
   const rows = settled ? buildHistoryRows(observations) : []
   const summaries = settled ? summarizeObservations(observations) : []
 

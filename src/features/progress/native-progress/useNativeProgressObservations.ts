@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { onSnapshot, query, where } from 'firebase/firestore'
 
 import { useFamilyId } from '../../../core/auth/useAuth'
@@ -23,13 +23,24 @@ import { failureNotice, type ReviewedObservation } from './nativeProgressRule'
  *
  * ── A failed read is not an empty record ────────────────────────────────────
  *
- * `observations` is cleared and `observationsChildId` nulled **during render**
+ * `observations` is cleared and `observationsScope` nulled **during render**
  * whenever the family or child changes, so one child's history can never be shown
  * under another child's name while a new subscription settles — the house rule
  * from `useDailyPlan` / `useSkillMap` (UX-344/345). A read that FAILS sets
- * `error` and leaves the list empty with the child stamped: a caller must be able
+ * `error` and leaves the list empty with the scope stamped: a caller must be able
  * to tell "nothing recorded yet" from "we could not find out", because the first
  * invites an entry and the second is a lie.
+ *
+ * ── Settlement is stamped with the FAMILY as well as the child ───────────────
+ *
+ * A child id is unique inside a family, not across sign-ins, so a settlement that
+ * named only the child let a queued callback from the account that just signed
+ * out present its rows as the new account's answer for the same id (PR-1897
+ * review, round 4 P1). Every settlement therefore names family + child, and both
+ * callbacks are checked against the scope **committed** at the time they fire and
+ * against the generation of the subscription that is current — so a callback from
+ * an unsubscribed listener can restore neither rows nor an error, including on an
+ * A → B → A round trip where the key is equal again and the visit is not.
  */
 export interface SaveObservationRequest {
   /** The family the draft was started under. Pinned by the caller, not read here. */
@@ -41,6 +52,26 @@ export interface SaveObservationRequest {
   observation: ReviewedObservation
   /** The row being corrected, when this is a correction. */
   correctsObservationId?: string
+}
+
+/** The family + child a read has answered for, or a write is addressed to. */
+export interface NativeProgressScope {
+  familyId: string
+  childId: string
+}
+
+/**
+ * The write actually in the air — not merely *that* one is.
+ *
+ * `saving` answers "is a write in flight" and nothing else, which a surface that
+ * attributes a pending save to a child cannot use: the parent may have moved on
+ * twice while one request was held (PR-1897 review, round 4 P2). This names the
+ * record the in-flight request was confirmed for, so a claim about it can be made
+ * for that child and family and no other. Set only when the latch has ACCEPTED
+ * the write, so a second tap that was refused never appears here.
+ */
+export interface InFlightSave extends NativeProgressScope {
+  entryKey: string
 }
 
 export type SaveObservationOutcome =
@@ -58,10 +89,16 @@ export interface UseNativeProgressObservationsResult {
   loading: boolean
   /** Set when the read failed. An empty list with an error is NOT "none". */
   error: string | null
-  /** Which child the three fields above describe. `null` until one answers. */
-  observationsChildId: string | null
+  /**
+   * Which family + child the three fields above describe — `null` until a
+   * subscription for the CURRENT pair has answered. The family is part of it
+   * because the same child id can belong to two sign-ins.
+   */
+  observationsScope: NativeProgressScope | null
   /** A confirmed save is in flight. One at a time — see `save`. */
   saving: boolean
+  /** Which record that in-flight write belongs to. `null` when none is. */
+  savingRequest: InFlightSave | null
   save: (request: SaveObservationRequest) => Promise<SaveObservationOutcome>
 }
 
@@ -86,35 +123,48 @@ export function useNativeProgressObservations(
   const [observations, setObservations] = useState<NativeProgressObservation[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [observationsChildId, setObservationsChildId] = useState<string | null>(null)
-  const [saving, setSaving] = useState(false)
+  const [observationsScope, setObservationsScope] = useState<NativeProgressScope | null>(
+    null,
+  )
+  const [savingRequest, setSavingRequest] = useState<InFlightSave | null>(null)
 
   const scopeKey = `${familyId ?? ''}|${childId}`
-  const [renderedScope, setRenderedScope] = useState(scopeKey)
-  if (renderedScope !== scopeKey) {
+  /**
+   * The scope, and which VISIT of it this is.
+   *
+   * The key alone cannot tell an A → B → A round trip from never having left, and
+   * a listener from the first visit is unsubscribed whether or not its key comes
+   * back — so the generation decides what may settle a read, while the key alone
+   * decides where a confirmed row belongs.
+   */
+  const [scope, setScope] = useState({ key: scopeKey, run: 0 })
+  if (scope.key !== scopeKey) {
     // During render, not in an effect: an effect runs after the children of this
     // hook's caller have already rendered once with the previous child's rows.
-    setRenderedScope(scopeKey)
+    setScope((prev) => ({ key: scopeKey, run: prev.run + 1 }))
     setObservations([])
-    setObservationsChildId(null)
+    setObservationsScope(null)
     setLoading(true)
     setError(null)
   }
 
   /**
-   * The scope this hook is CURRENTLY describing, readable after an await.
+   * The scope this hook is currently describing, as COMMITTED.
    *
    * The save closure holds the pinned scope on purpose — that is where the write
    * must go. This ref answers a different question: is the surface still showing
-   * that child, and may its local state therefore be touched? An A → B → A switch
-   * is handled by comparing the key rather than a counter, because the key is the
-   * thing being asked about: if the family and child are the same again, the rows
-   * belong here again.
+   * that family and child, and may its local state therefore be touched?
+   *
+   * In a layout effect, which is the whole guarantee (round 4 P1): a passive
+   * effect runs after paint, while a snapshot callback already queued and a save
+   * already in the air both arrive before that — so a switch that has committed
+   * was invisible to them and the previous scope's answer settled the new one. A
+   * layout effect is in step by the end of the commit that switched.
    */
-  const scopeRef = useRef(scopeKey)
-  useEffect(() => {
-    scopeRef.current = scopeKey
-  }, [scopeKey])
+  const committedScope = useRef(scope)
+  useLayoutEffect(() => {
+    committedScope.current = scope
+  }, [scope])
 
   /** One confirmed save at a time — the latch that makes a double tap one row. */
   const savingRef = useRef(false)
@@ -125,24 +175,45 @@ export function useNativeProgressObservations(
       nativeProgressObservationsCollection(familyId),
       where('childId', '==', childId),
     )
+    const settles: NativeProgressScope = { familyId, childId }
+    const run = scope.run
+    let live = true
+    /**
+     * May this listener still settle the read? Three things have to hold: it has
+     * not been unsubscribed, the committed scope is still the one it reads, and
+     * it is the subscription of the current visit rather than an earlier one.
+     */
+    const mine = () =>
+      live &&
+      committedScope.current.key === `${familyId}|${childId}` &&
+      committedScope.current.run === run
     const unsubscribe = onSnapshot(
       q,
       (snap) => {
+        if (!mine()) return
         setObservations(snap.docs.map((d) => ({ ...d.data(), id: d.id })))
-        setObservationsChildId(childId)
+        setObservationsScope(settles)
         setLoading(false)
         setError(null)
       },
       (err) => {
+        // Logged either way — a refused read is worth knowing about — but only a
+        // CURRENT one may be shown.
         console.error('[NativeProgress] Snapshot error:', err)
+        if (!mine()) return
+        // A current failure stays distinguishable from an empty history: the list
+        // is empty and the scope IS stamped.
         setObservations([])
-        setObservationsChildId(childId)
+        setObservationsScope(settles)
         setError(err.message)
         setLoading(false)
       },
     )
-    return unsubscribe
-  }, [familyId, childId])
+    return () => {
+      live = false
+      unsubscribe()
+    }
+  }, [familyId, childId, scope.run])
 
   const save = useCallback(
     async (request: SaveObservationRequest): Promise<SaveObservationOutcome> => {
@@ -152,7 +223,11 @@ export function useNativeProgressObservations(
         return { ok: false, message: NATIVE_PROGRESS_SAVE_IN_FLIGHT }
       }
       savingRef.current = true
-      setSaving(true)
+      setSavingRequest({
+        familyId: request.familyId,
+        childId: request.childId,
+        entryKey: request.entryKey,
+      })
       try {
         const result = await saveNativeProgressObservation({
           familyId: request.familyId,
@@ -164,8 +239,10 @@ export function useNativeProgressObservations(
         // Immediate readback, but only onto the scope that asked for it. A save
         // confirmed for one child completes against that child (the write is
         // bound to the pinned ids above); its ROW must not be spliced into the
-        // list the screen is now showing for the other one.
-        if (scopeRef.current === `${request.familyId}|${request.childId}`) {
+        // list the screen is now showing for the other one — or for another
+        // household whose child wears the same id. Read off the COMMITTED scope,
+        // so a switch in the commit this answer came back in is already seen.
+        if (committedScope.current.key === `${request.familyId}|${request.childId}`) {
           setObservations((prev) => mergeById(prev, result.observation))
         }
         return {
@@ -186,11 +263,21 @@ export function useNativeProgressObservations(
         }
       } finally {
         savingRef.current = false
-        setSaving(false)
+        setSavingRequest(null)
       }
     },
     [],
   )
 
-  return { observations, loading, error, observationsChildId, saving, save }
+  return {
+    observations,
+    loading,
+    error,
+    observationsScope,
+    // Derived, so there is one source of truth for "a write is in the air" and
+    // the record it belongs to: they can never disagree.
+    saving: savingRequest !== null,
+    savingRequest,
+    save,
+  }
 }

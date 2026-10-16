@@ -186,6 +186,16 @@ describe('the switch tokens are in step at the commit, not after the paint', () 
       expect(effectHolding(code(SECTION), token)).toBe('useLayoutEffect')
     })
   }
+
+  it('the hook’s committed scope is in step at the commit as well', () => {
+    // Round 4 P1: the same window, one layer down. A snapshot callback that was
+    // already queued and a save already in the air are both checked against this
+    // ref, so advancing it in a passive effect is what let the scope that had
+    // just been left settle the read — or splice its row — for the new one.
+    expect(effectHolding(code(HOOK), 'committedScope.current = scope')).toBe(
+      'useLayoutEffect',
+    )
+  })
 })
 
 describe('the capability check is in the handler, not only the control', () => {

@@ -115,7 +115,7 @@ form fields → reviewNativeProgressDraft() → preview card → Save
 | Field | Rule | Why |
 |---|---|---|
 | number | whole, ≥ 1, and storable **exactly** (`Number.isSafeInteger` plus a digit round-trip) | there is **no upper limit on the program**. An earlier draft guessed a four-digit ceiling and called it a typo guard; review refused it, correctly — a bound nobody can derive is an invented program range however it is labelled, and a parent reading a real number off a real screen would have been told it was a typo. The one bound that survives is a property of the *field*: past `Number.MAX_SAFE_INTEGER` the value stored is not the value typed, and the message says exactly that. Leading zeros are read as the keypad artefact they are (`007` → 7) |
-| date (`observedOn`) | a real calendar day, and not in the future — **in both the form and the writer** | backdating is the normal case and is accepted without comment; a future day is the one value that cannot be a reading of something that happened, so the writer refuses it too rather than trusting the form. "Today" is `todayKey()`, the app's one definition of a local day (injectable, so tests pin it instead of depending on the wall clock). The form additionally refuses a year before 2000 — a UI typo guard, deliberately *not* re-made in the writer, which refuses only what is false rather than what looks odd |
+| date (`observedOn`) | a real calendar day, and not in the future — **in both the form and the writer** | backdating is the normal case and is accepted without comment; a future day is the one value that cannot be a reading of something that happened, so the writer refuses it too rather than trusting the form. "Today" is `todayKey()`, the app's one definition of a local day (injectable, so tests pin it instead of depending on the wall clock), read through the rollover-aware `useTodayKey` rather than pinned at mount: this is a tab that is rarely closed, and one opened yesterday used to refuse *today* as a day that "hasn't happened yet" (round 4, P2). The live day moves the ceiling and seeds the next fresh draft; it never re-dates a date already typed, and "has she typed anything?" is asked against the day the draft on screen was seeded on. The form additionally refuses a year before 2000 — a UI typo guard, deliberately *not* re-made in the writer, which refuses only what is false rather than what looks odd |
 | `recordedAt` | must parse as a time | it is injectable, and a row whose entry stamp cannot be read would render an "Entered" date of nothing |
 | program / meaning / source | must be a known value | they come from selects today; a check that only guarded the typed fields would be a check that trusts the UI |
 
@@ -179,6 +179,16 @@ under another's name; a read that fails sets `error` and the surface says *"Coul
 load the entries you have saved. They are still there."* rather than *"Nothing
 recorded yet."*
 
+**Settlement names the family as well as the child**, and both snapshot callbacks
+are checked before they set anything — against the scope as **committed** (a layout
+effect, as in §7) and against the subscription's own generation. A child id is
+unique inside a family and not across sign-ins, so a stamp naming only the child let
+the queued answer of a household that had signed out present its rows, or its
+failure, as the new one's (round 4, P1). A listener that has been unsubscribed
+settles nothing — including on an A → B → A round trip by child or by family, where
+the key is equal again and the visit is not — and the immediate read-back of a
+confirmed save is matched against the same committed scope.
+
 ## 6. Corrections
 
 *Correct this entry* seeds the form from a stored row and files the new row with
@@ -238,6 +248,14 @@ Registry: `docs/review/CHILD_SWITCH_SURFACE_CENSUS_2026-09.md`.
   child's outcome would be taken for the current one's (round 3, P1). The account
   is also re-checked immediately after the save `await`, ahead of every outcome
   branch, rather than only inside the moved-on branch.
+- **The notice claims a pending save for the record it belongs to.** The hook
+  exposes the in-flight request's own family, child and entry key, not only the
+  flag that says *a* write is in the air; the sentence about a confirmed entry is
+  written only when the child being left is the one that request names. Read from
+  the flag, one held request made every later switch claim one — Lincoln → London →
+  Luca promised London's record an entry that was always Lincoln's, and offered a
+  second receipt for it (round 4, P2). A retry carries the same identity, so it
+  speaks for the same record and no other.
 
 ### A bound save that comes back UNCONFIRMED after the switch
 

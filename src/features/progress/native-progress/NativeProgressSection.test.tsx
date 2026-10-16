@@ -27,23 +27,42 @@ import {
  *
  * Added by its round 3: those verdicts hold for an answer that comes back at the
  * commit of the switch itself, and a change of ACCOUNT names nobody.
+ *
+ * Added by round 4: the allowed day follows the calendar under an open tab without
+ * rewriting what is typed, and a pending save is claimed only for the record it
+ * belongs to.
  */
 
 let familyId: string | null = 'fam-1'
 vi.mock('../../../core/auth/useAuth', () => ({ useFamilyId: () => familyId }))
 
 /**
- * The clock is pinned and nothing else is.
+ * The clock is pinned, movable, and nothing else is.
  *
  * The form refuses a future day, so a test with real dates in it would start
  * failing on its own at some point in the past or future depending on when the
  * suite runs. Only `todayKey` is replaced; `formatDateShort` stays real, because
  * the displayed dates are part of what is being asserted.
+ *
+ * It is a `let` rather than a constant because the surface now reads the day
+ * through `useTodayKey`, which re-reads it on focus and visibility — so a day
+ * boundary is driven by moving this and firing the event the real hook listens
+ * for, with no fake timers to leave running (round 4 P2). The minute tick is the
+ * same `refresh`, pinned in `useTodayKey.test.ts`.
  */
+let mockToday = '2026-10-16'
 vi.mock('../../../core/utils/dateKey', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../core/utils/dateKey')>()
-  return { ...actual, todayKey: () => '2026-10-16' }
+  return { ...actual, todayKey: () => mockToday }
 })
+
+/** Move the calendar under the open tab, the way midnight-then-focus does. */
+function rollOverTo(day: string) {
+  mockToday = day
+  act(() => {
+    window.dispatchEvent(new Event('focus'))
+  })
+}
 
 let isChildProfile = false
 let activeChildId = 'lincoln'
@@ -77,16 +96,22 @@ vi.mock('../../../core/hooks/useActiveChild', () => ({
 }))
 
 let observations: NativeProgressObservation[] = []
-let observationsChildId: string | null = 'lincoln'
+/** Which family + child the read above has answered for (round 4 P1). */
+let observationsScope: { familyId: string; childId: string } | null = {
+  familyId: 'fam-1',
+  childId: 'lincoln',
+}
 let readError: string | null = null
 let loading = false
 /**
- * The hook's in-flight flag, mutable here.
+ * WHOSE write is in the air, mutable here.
  *
- * The surface reads it for the switch notice and for every disabled control, so a
- * test about a save that is still in the air has to be able to say so.
+ * The surface reads the flag for every disabled control and the identity for the
+ * switch notice, so a test about a save that is still in the air has to be able to
+ * say which record it belongs to. `saving` is derived from it exactly as the hook
+ * derives it, so the two can never disagree in a test either.
  */
-let saving = false
+let savingRequest: { familyId: string; childId: string; entryKey: string } | null = null
 const saveMock = vi.fn()
 vi.mock('./useNativeProgressObservations', () => ({
   NATIVE_PROGRESS_SAVE_IN_FLIGHT: 'in flight',
@@ -94,8 +119,9 @@ vi.mock('./useNativeProgressObservations', () => ({
     observations,
     loading,
     error: readError,
-    observationsChildId,
-    saving,
+    observationsScope,
+    saving: savingRequest !== null,
+    savingRequest,
     save: (...a: unknown[]) => saveMock(...a),
   }),
 }))
@@ -138,16 +164,20 @@ const savedOk = (overrides: Partial<NativeProgressObservation> = {}) => ({
   alreadyRecorded: false,
 })
 
+/** The read has answered for this family and child. */
+const scopeOf = (childId: string, family = 'fam-1') => ({ familyId: family, childId })
+
 beforeEach(() => {
   isChildProfile = false
   activeChildId = 'lincoln'
   childrenById = CHILDREN
   familyId = 'fam-1'
+  mockToday = '2026-10-16'
   observations = []
-  observationsChildId = 'lincoln'
+  observationsScope = scopeOf('lincoln')
   readError = null
   loading = false
-  saving = false
+  savingRequest = null
   saveMock.mockReset()
   saveMock.mockResolvedValue(savedOk())
 })
@@ -155,20 +185,28 @@ beforeEach(() => {
 /**
  * A save that is held open, the way a real one is while the header moves.
  *
- * `saving` is flipped the way the hook flips it, because the surface renders from
- * it — the switch notice's confirmed-save sentence and every disabled control.
+ * The in-flight identity is set from the REQUEST and cleared on settlement, the
+ * way the hook does it, because the surface renders from both: every disabled
+ * control from the flag, and the switch notice's pending-save sentence from whose
+ * request it is.
  */
 function heldSave() {
   let settle!: (outcome: unknown) => void
-  saveMock.mockImplementation(() => {
-    saving = true
-    return new Promise((resolve) => {
-      settle = (outcome: unknown) => {
-        saving = false
-        resolve(outcome)
+  saveMock.mockImplementation(
+    (request: { familyId: string; childId: string; entryKey: string }) => {
+      savingRequest = {
+        familyId: request.familyId,
+        childId: request.childId,
+        entryKey: request.entryKey,
       }
-    })
-  })
+      return new Promise((resolve) => {
+        settle = (outcome: unknown) => {
+          savingRequest = null
+          resolve(outcome)
+        }
+      })
+    },
+  )
   return {
     /** Let the held write come back unconfirmed, and drain what that unblocks. */
     refuse: async (message = failureNotice()) => {
@@ -425,7 +463,7 @@ describe('when the child changes under it', () => {
     await user.click(screen.getByRole('button', { name: 'Check this entry' }))
 
     activeChildId = 'london'
-    observationsChildId = 'london'
+    observationsScope = scopeOf('london')
     rerender(<NativeProgressSection />)
 
     expect(await screen.findByText(/was cleared and not saved/)).toHaveTextContent('Lincoln')
@@ -444,7 +482,7 @@ describe('when the child changes under it', () => {
     expect(await screen.findByText(/Recorded for Lincoln/)).toBeInTheDocument()
 
     activeChildId = 'london'
-    observationsChildId = 'london'
+    observationsScope = scopeOf('london')
     rerender(<NativeProgressSection />)
 
     expect(screen.queryByText(/Recorded for Lincoln/)).not.toBeInTheDocument()
@@ -472,7 +510,7 @@ describe('a confirmed save left unconfirmed after the child changed', () => {
     const request = saveMock.mock.calls[0][0]
 
     activeChildId = 'london'
-    observationsChildId = 'london'
+    observationsScope = scopeOf('london')
     view.rerender(<NativeProgressSection />)
     // The notice that has to be true: it promises an unconfirmed entry is shown.
     expect(await screen.findByText(/goes to Lincoln's record/)).toBeInTheDocument()
@@ -513,7 +551,7 @@ describe('a confirmed save left unconfirmed after the child changed', () => {
     await confirmAndSave(user)
 
     activeChildId = 'london'
-    observationsChildId = 'london'
+    observationsScope = scopeOf('london')
     view.rerender(<NativeProgressSection />)
     await held.refuse('That entry corrects a row that is no longer there.')
 
@@ -582,10 +620,10 @@ describe('a confirmed save left unconfirmed after the child changed', () => {
     const request = saveMock.mock.calls[0][0]
 
     activeChildId = 'london'
-    observationsChildId = 'london'
+    observationsScope = scopeOf('london')
     view.rerender(<NativeProgressSection />)
     activeChildId = 'lincoln'
-    observationsChildId = 'lincoln'
+    observationsScope = scopeOf('lincoln')
     view.rerender(<NativeProgressSection />)
 
     // A different entry, typed for the same boy on this later visit.
@@ -764,7 +802,7 @@ describe('a completion that settles at the commit of the switch', () => {
     const request = saveMock.mock.calls[0][0]
 
     activeChildId = 'london'
-    observationsChildId = 'london'
+    observationsScope = scopeOf('london')
     view.rerender(tree(() => held.settleNow({ ok: false, message: failureNotice() })))
     await drain()
 
@@ -800,7 +838,7 @@ describe('a completion that settles at the commit of the switch', () => {
     await confirmAndSave(user)
 
     activeChildId = 'london'
-    observationsChildId = 'london'
+    observationsScope = scopeOf('london')
     view.rerender(tree(() => held.settleNow(savedOk())))
     await drain()
 
@@ -822,10 +860,10 @@ describe('a completion that settles at the commit of the switch', () => {
     await confirmAndSave(user)
 
     activeChildId = 'london'
-    observationsChildId = 'london'
+    observationsScope = scopeOf('london')
     view.rerender(tree())
     activeChildId = 'lincoln'
-    observationsChildId = 'lincoln'
+    observationsScope = scopeOf('lincoln')
     view.rerender(tree())
     // A different entry, typed for the same boy on this later visit.
     await fillEntry(user, '55', '2026-10-15')
@@ -953,11 +991,242 @@ describe('when the family changes under it', () => {
     await fillEntry(user)
 
     activeChildId = 'luca'
-    observationsChildId = 'luca'
+    observationsScope = scopeOf('luca', 'fam-2')
     view.rerender(<NativeProgressSection />)
 
     expect(await screen.findByText(/was cleared and not saved/)).toHaveTextContent('Leo')
     expect(screen.getByLabelText('Lesson number')).toHaveValue('')
+  })
+})
+
+/**
+ * PR-1897 review, round 4 P2 — the allowed day follows the calendar.
+ *
+ * `useState(todayKey)` pinned the day the form validates against at mount. This is
+ * a tab that is rarely closed, so a parent who opened it yesterday was told that
+ * TODAY "hasn't happened yet" and had no way to record what she had just read
+ * short of reloading. The live key fixes that and may not cost anything it was
+ * protecting: a date already typed stays typed, a reviewed entry is still the one
+ * that gets sent, and a day that has not happened is still refused.
+ */
+describe('when the day rolls over under an open tab', () => {
+  it('accepts the new day without a remount', async () => {
+    const user = userEvent.setup()
+    render(<NativeProgressSection />)
+    // Opened on the 16th; by the time she types, it is the 17th.
+    rollOverTo('2026-10-17')
+
+    await fillEntry(user, '42', '2026-10-17')
+    await user.click(screen.getByRole('button', { name: 'Check this entry' }))
+    await user.click(await screen.findByRole('button', { name: 'Save this record' }))
+
+    await waitFor(() => expect(saveMock).toHaveBeenCalledTimes(1))
+    expect(saveMock.mock.calls[0][0].observation.observedOn).toBe('2026-10-17')
+    // ...and the field's own ceiling moved with it.
+    expect(screen.getByLabelText('Day you saw this')).toHaveAttribute('max', '2026-10-17')
+  })
+
+  it('keeps a date already typed, and sends the entry exactly as reviewed', async () => {
+    const user = userEvent.setup()
+    render(<NativeProgressSection />)
+    await fillEntry(user, '42', '2026-10-16')
+    await user.click(screen.getByRole('button', { name: 'Check this entry' }))
+    expect(await screen.findByText(/seen Oct 16/)).toBeInTheDocument()
+
+    // Midnight passes with the entry reviewed, waiting for the second tap.
+    rollOverTo('2026-10-17')
+
+    expect(screen.getByLabelText('Day you saw this')).toHaveValue('2026-10-16')
+    expect(screen.getByLabelText('Lesson number')).toHaveValue('42')
+    // Still the entry she checked — nothing re-dated it behind the confirm step.
+    expect(screen.getByText(/seen Oct 16/)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Save this record' }))
+    await waitFor(() => expect(saveMock).toHaveBeenCalledTimes(1))
+    expect(saveMock.mock.calls[0][0].observation.observedOn).toBe('2026-10-16')
+  })
+
+  it('still refuses a day that has not happened', async () => {
+    const user = userEvent.setup()
+    render(<NativeProgressSection />)
+    rollOverTo('2026-10-17')
+    await fillEntry(user, '42', '2026-10-18')
+    await user.click(screen.getByRole('button', { name: 'Check this entry' }))
+
+    expect(await screen.findByText("That day hasn't happened yet.")).toBeInTheDocument()
+    expect(saveMock).not.toHaveBeenCalled()
+  })
+
+  it('starts a fresh draft on the new day', async () => {
+    const user = userEvent.setup()
+    render(<NativeProgressSection />)
+    await fillEntry(user, '42', '2026-10-16')
+    rollOverTo('2026-10-17')
+    await user.click(screen.getByRole('button', { name: 'Check this entry' }))
+    await user.click(await screen.findByRole('button', { name: 'Save this record' }))
+    expect(await screen.findByText(/Recorded for Lincoln/)).toBeInTheDocument()
+
+    // What was saved kept the day she saw it...
+    expect(saveMock.mock.calls[0][0].observation.observedOn).toBe('2026-10-16')
+    // ...and the draft that replaced it starts on the live day.
+    expect(screen.getByLabelText('Day you saw this')).toHaveValue('2026-10-17')
+  })
+
+  it('seeds the next draft on the new day when the save comes back after midnight', async () => {
+    // Sol, round 4: `handleSave` holds the reset callback captured at the tap, so
+    // a write held across midnight re-seeded the form on the day the tap happened
+    // even though the live day had already moved.
+    const user = userEvent.setup()
+    const held = heldSave()
+    render(<NativeProgressSection />)
+    await fillEntry(user, '42', '2026-10-16')
+    await confirmAndSave(user)
+
+    rollOverTo('2026-10-17')
+    await act(async () => {
+      held.settleNow(savedOk())
+      await Promise.resolve()
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(await screen.findByText(/Recorded for Lincoln/)).toBeInTheDocument()
+    // What was confirmed went unchanged...
+    expect(saveMock.mock.calls[0][0].observation.observedOn).toBe('2026-10-16')
+    // ...and the draft that replaced it is on the live day, within its ceiling.
+    const field = screen.getByLabelText('Day you saw this')
+    expect(field).toHaveValue('2026-10-17')
+    expect(field).toHaveAttribute('max', '2026-10-17')
+  })
+
+  it('brings a cancelled correction back on the new day', async () => {
+    const user = userEvent.setup()
+    observations = [row()]
+    render(<NativeProgressSection />)
+
+    await user.click(screen.getByRole('button', { name: 'Correct this entry' }))
+    expect(screen.getByLabelText('Day you saw this')).toHaveValue('2026-10-12')
+    rollOverTo('2026-10-17')
+    await user.click(screen.getByRole('button', { name: 'Cancel correction' }))
+
+    expect(screen.getByLabelText('Day you saw this')).toHaveValue('2026-10-17')
+  })
+
+  it('does not report an untouched draft as typing lost when the child changes', async () => {
+    // The seeded date is not typing. Judged against the live day it became
+    // "edited" the moment midnight passed, and the switch notice then claimed an
+    // entry had been cleared that never existed. (The control is the case above:
+    // a draft that WAS typed is still reported — *clears the draft and says what
+    // was lost*.)
+    const { rerender } = render(<NativeProgressSection />)
+    rollOverTo('2026-10-17')
+
+    activeChildId = 'london'
+    observationsScope = scopeOf('london')
+    rerender(<NativeProgressSection />)
+
+    expect(screen.queryByText(/was cleared and not saved/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Switched child/)).not.toBeInTheDocument()
+    // The new child's fresh draft is on the live day.
+    expect(screen.getByLabelText('Day you saw this')).toHaveValue('2026-10-17')
+  })
+})
+
+/**
+ * PR-1897 review, round 4 P2 — a pending save is claimed for ONE record.
+ *
+ * The notice read the hook's global in-flight flag as "this child has a save in
+ * the air". With one held request and two switches — Lincoln → London → Luca, or
+ * Lincoln → London → Lincoln — leaving London therefore promised that something
+ * confirmed for London had gone to London's record and that an unconfirmed one
+ * would be shown, inventing a second entry and a second receipt out of Lincoln's.
+ * The claim is now made from the in-flight request's own family and child.
+ */
+describe('a pending save is attributed to the child it belongs to', () => {
+  it('names it when leaving that child, and claims nothing for the next one', async () => {
+    const user = userEvent.setup()
+    childrenById = { ...CHILDREN, luca: { id: 'luca', name: 'Luca' } }
+    const held = heldSave()
+    const view = render(<NativeProgressSection />)
+    await fillEntry(user)
+    await confirmAndSave(user)
+
+    // Lincoln → London, with his entry in the air: the true claim, as before.
+    activeChildId = 'london'
+    observationsScope = scopeOf('london')
+    view.rerender(<NativeProgressSection />)
+    expect(await screen.findByText(/goes to Lincoln's record/)).toBeInTheDocument()
+
+    // London → Luca, the same request still held. London had nothing in the air.
+    activeChildId = 'luca'
+    observationsScope = scopeOf('luca')
+    view.rerender(<NativeProgressSection />)
+
+    expect(screen.queryByText(/goes to/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/London/)).not.toBeInTheDocument()
+    expect(saveMock).toHaveBeenCalledTimes(1)
+
+    // The held write is still Lincoln's, and still recoverable as his.
+    await held.refuse()
+    expect(await screen.findByText(strandedSaveTitle('Lincoln'))).toBeInTheDocument()
+    expect(screen.queryByText(strandedSaveTitle('London'))).not.toBeInTheDocument()
+    expect(saveMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('claims nothing for the child passed through on the way back (A → B → A)', async () => {
+    const user = userEvent.setup()
+    const held = heldSave()
+    const view = render(<NativeProgressSection />)
+    await fillEntry(user)
+    await confirmAndSave(user)
+    const request = saveMock.mock.calls[0][0]
+
+    activeChildId = 'london'
+    observationsScope = scopeOf('london')
+    view.rerender(<NativeProgressSection />)
+    expect(await screen.findByText(/goes to Lincoln's record/)).toBeInTheDocument()
+
+    // Back to Lincoln while his first entry is still held. Leaving LONDON is what
+    // this switch is, and London has nothing pending.
+    activeChildId = 'lincoln'
+    observationsScope = scopeOf('lincoln')
+    view.rerender(<NativeProgressSection />)
+
+    expect(screen.queryByText(/goes to/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/London/)).not.toBeInTheDocument()
+
+    // The one write still answers for itself, and a retry is still the same row.
+    await held.refuse()
+    expect(await screen.findByText(strandedSaveTitle('Lincoln'))).toBeInTheDocument()
+
+    saveMock.mockResolvedValue(savedOk())
+    await user.click(
+      screen.getByRole('button', { name: "Try saving Lincoln's entry again" }),
+    )
+    await waitFor(() => expect(saveMock).toHaveBeenCalledTimes(2))
+    expect(saveMock.mock.calls[1][0]).toMatchObject({
+      familyId: 'fam-1',
+      childId: 'lincoln',
+      entryKey: request.entryKey,
+    })
+  })
+
+  it('claims nothing for a child whose save has already come back', async () => {
+    const user = userEvent.setup()
+    const view = render(<NativeProgressSection />)
+    await fillEntry(user)
+    await confirmAndSave(user)
+    expect(await screen.findByText(/Recorded for Lincoln/)).toBeInTheDocument()
+
+    // Settled, so there is nothing to promise about: the notice says only what
+    // was lost from the form.
+    activeChildId = 'london'
+    observationsScope = scopeOf('london')
+    view.rerender(<NativeProgressSection />)
+
+    expect(screen.queryByText(/goes to/)).not.toBeInTheDocument()
+    expect(saveMock).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -1126,7 +1395,7 @@ describe('the history', () => {
 
   it('does not present another child’s rows while this child’s read is unsettled', () => {
     observations = [row()]
-    observationsChildId = 'london'
+    observationsScope = scopeOf('london')
     loading = true
     render(<NativeProgressSection />)
     expect(screen.queryByText(/working on lesson 42/)).not.toBeInTheDocument()
