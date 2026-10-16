@@ -52,6 +52,16 @@ import {
 // takes it: a KID opening Today must not seed or migrate anything, which
 // `useActivityConfigs` would.
 import { useChatActivityConfigs } from '../shelly-chat/useChatActivityConfigs'
+// A finished save may clear only the draft it was started from — the rule, and
+// the wording of the receipt when it may not (G1/G2). See the file header.
+import {
+  captureErrorText,
+  captureSuccessText,
+  captureUnsavedText,
+  classifyDraftClaim,
+  type CaptureDraftClaim,
+  type CaptureDraftVerdict,
+} from './captureDraftOwnership'
 import TodayEvidenceList from './TodayEvidenceList'
 import { EvidenceAudience, evidenceCopy } from './todayEvidence'
 
@@ -239,6 +249,98 @@ export default function UnifiedCaptureCard({
   const activeChildName =
     selectableChildren.find((c) => c.id === childId)?.name ?? activeChild?.name ?? 'child'
 
+  // ── Draft ownership (G1/G2) ───────────────────────────────────────────────
+  //
+  // The two counters `captureDraftOwnership` compares, held in refs so a
+  // completion can read the CURRENT values synchronously — the same reason the
+  // FIX-262 latch is a ref.
+  //
+  // `visit` is an epoch over the editor's scope, bumped during render so it has
+  // already moved by the time any handler created in this render can be used.
+  // Day A → day B → day A is visit 2, not visit 0 restored: the parent went
+  // somewhere and came back, so what is on screen is no longer the draft they
+  // submitted.
+  //
+  // The key holds every input that re-points the card: the family, the day, and
+  // BOTH children — the shell's `selectedChildId` leads the card's `childId` by
+  // a render, the sync below being an effect, so keying on both moves the visit
+  // in the render the prop changed in and catches a shell switch to the child
+  // the card's own picker already holds.
+  const scopeKey = `${familyId}\u0000${selectedChildId}\u0000${childId}\u0000${today}`
+  const visitRef = useRef({ key: scopeKey, visit: 0 })
+  if (visitRef.current.key !== scopeKey) {
+    visitRef.current = { key: scopeKey, visit: visitRef.current.visit + 1 }
+  }
+
+  // `revision` is both a ref and state. The ref is the current truth a
+  // completion is judged against; the state exists only to force the re-render
+  // that re-binds the claim below, because a media surface can change the draft
+  // (a photo staged, a recording discarded) without changing any state here.
+  const revisionRef = useRef(0)
+  const [revision, setRevision] = useState(0)
+
+  /**
+   * One edit to the draft. Called by every control that changes what WOULD be
+   * saved: chips, name, category, minutes, note, the media tab `resetForm`
+   * restores, and — through `onDraftChange` — the photos and audio a media
+   * surface stages on its own, which this card otherwise cannot see.
+   */
+  const markDraftEdited = useCallback(() => {
+    revisionRef.current += 1
+    setRevision(revisionRef.current)
+  }, [])
+
+  // ── The photo dialog's own identity ───────────────────────────────────────
+  //
+  // Counted per OPENING and retired by a cancel or a commit, so the commit
+  // callback an opening handed out can only ever close THAT dialog: Escape,
+  // reopen, and an old tap used to shut the parent's new one.
+  //
+  // Deliberately not the draft `revision` — opening a dialog edits nothing, and
+  // retiring one must not make a capture in flight look stale. A scope change
+  // does not retire it either: the dialog on screen is still the one being
+  // submitted, and whether the FORM may clear is the claim's question.
+  const dialogOpeningRef = useRef(0)
+  const dialogOpening = dialogOpeningRef.current
+
+  const openPhotoDialog = useCallback(() => {
+    dialogOpeningRef.current += 1
+    setPhotoDialogOpen(true)
+  }, [])
+
+  const closePhotoDialog = useCallback(() => {
+    dialogOpeningRef.current += 1
+    setPhotoDialogOpen(false)
+  }, [])
+
+  /**
+   * The identity of the draft AS THIS RENDER SHOWS IT, handed to every save
+   * handler at the point the handler is created.
+   *
+   * Bound to the render rather than read fresh when the handler runs, because
+   * the media surfaces hold a callback across an `await`: `PhotoCapture`
+   * compresses after the tap and `AudioRecorder` resolves a blob later, so a
+   * callback can be INVOKED after the day or the fields moved. Reading the refs
+   * at invocation would hand that stale payload permission to clear a draft it
+   * was never started from.
+   */
+  const renderedClaim: CaptureDraftClaim = {
+    visit: visitRef.current.visit,
+    revision,
+    childName: activeChildName,
+    day: today,
+  }
+
+  /** The verdict on a claim, against the editor as it stands right now. */
+  const verdictFor = useCallback(
+    (claim: CaptureDraftClaim): CaptureDraftVerdict =>
+      classifyDraftClaim(claim, {
+        visit: visitRef.current.visit,
+        revision: revisionRef.current,
+      }),
+    [],
+  )
+
   const resetForm = useCallback(() => {
     setSelectedPresetId(null)
     setActivityName('')
@@ -249,6 +351,7 @@ export default function UnifiedCaptureCard({
   }, [isKid])
 
   const handlePresetTap = useCallback((preset: CapturePreset) => {
+    markDraftEdited()
     if (selectedPresetId === preset.id) {
       // De-select: clear the three pre-filled fields
       setSelectedPresetId(null)
@@ -261,7 +364,7 @@ export default function UnifiedCaptureCard({
     setActivityName(preset.label)
     setSubjectBucket(preset.subjectBucket)
     setDurationInput(String(preset.suggestedMinutes))
-  }, [selectedPresetId])
+  }, [selectedPresetId, markDraftEdited])
 
   const buildArtifactBase = useCallback(
     (title: string, evidenceType: EvidenceType) => ({
@@ -305,30 +408,65 @@ export default function UnifiedCaptureCard({
     [familyId, childId, subjectBucket, today, activityName],
   )
 
-  const toastForResult = useCallback(
-    ({ artifactSaved, hoursMinutes, hoursOk }: { artifactSaved: boolean; hoursMinutes: number; hoursOk: boolean }) => {
+  /**
+   * The ONE completion for every pathway (note, time-only, photo, audio, kid).
+   * It decides both things a finished save does to the form — whether the
+   * fields clear and what the receipt says — from the one claim, so no pathway
+   * can clear a draft it does not own or report a save it did not make.
+   */
+  const completeSave = useCallback(
+    (
+      claim: CaptureDraftClaim,
+      { artifactSaved, hoursMinutes, hoursOk }: { artifactSaved: boolean; hoursMinutes: number; hoursOk: boolean },
+    ) => {
+      const verdict = verdictFor(claim)
+      const say = (base: string, severity: 'success' | 'error') =>
+        onSnackMessage({ text: captureSuccessText(base, verdict, claim), severity })
+      /** Hours refused: an error, and never the wording that claims a save. */
+      const unsaved = (base: string) =>
+        onSnackMessage({ text: captureUnsavedText(base, verdict, claim), severity: 'error' })
+
       if (artifactSaved && hoursMinutes > 0) {
-        onSnackMessage({
-          text: hoursOk
-            ? `Captured + ${hoursMinutes} min logged`
-            : "Captured (couldn't log hours — try again from Records)",
-          severity: hoursOk ? 'success' : 'error',
-        })
+        if (hoursOk) say(`Captured + ${hoursMinutes} min logged`, 'success')
+        else unsaved("Captured (couldn't log hours — try again from Records)")
       } else if (artifactSaved) {
-        onSnackMessage({ text: 'Captured', severity: 'success' })
+        say('Captured', 'success')
       } else if (hoursMinutes > 0) {
-        onSnackMessage({
-          text: hoursOk
-            ? `Logged ${hoursMinutes} min`
-            : "Couldn't log hours — try again from Records",
-          severity: hoursOk ? 'success' : 'error',
-        })
+        if (hoursOk) say(`Logged ${hoursMinutes} min`, 'success')
+        else unsaved("Couldn't log hours — try again from Records")
       }
+
+      // Whatever was written is written; only the FORM is conditional, and a
+      // draft that moved on keeps every field.
+      //
+      // An OWNED completion resets even when the hours were refused, which is
+      // the behaviour this card already had: the clear is the card's existing
+      // answer to a finished attempt, and the receipt above sends the parent to
+      // Records rather than offering a retry here. Nothing about that changes
+      // in this fix — durable recovery for a half-written capture is its own
+      // problem. What changes is WHOSE form may be reset.
+      if (verdict === 'owned') resetForm()
     },
-    [onSnackMessage],
+    [onSnackMessage, verdictFor, resetForm],
   )
 
-  const handleNoteSave = useCallback(async () => {
+  /**
+   * The same gate for a THROWN save — a note or an upload that never landed.
+   * These paths clear nothing at all (the form is kept for the retry the
+   * FIX-262 latch release makes possible), so this only decides what the error
+   * is ABOUT: a stale error must say which capture failed rather than appearing
+   * to judge the draft in front of the parent.
+   */
+  const failSave = useCallback(
+    (claim: CaptureDraftClaim, base: string) => {
+      onSnackMessage({ text: captureErrorText(base, verdictFor(claim), claim), severity: 'error' })
+    },
+    [onSnackMessage, verdictFor],
+  )
+
+  // Every pathway below takes its `claim` from the caller — the render that
+  // created the control the person used — rather than reading the refs here.
+  const handleNoteSave = useCallback(async (claim: CaptureDraftClaim) => {
     if (!beginSave()) return
     try {
       const content = noteText.trim()
@@ -353,7 +491,7 @@ export default function UnifiedCaptureCard({
           artifactSaved = true
         } catch (err) {
           console.error('Failed to save artifact', err)
-          onSnackMessage({ text: 'Failed to save note.', severity: 'error' })
+          failSave(claim, 'Failed to save note.')
           // The early return keeps the form filled for a retry; `finally`
           // releases the latch so that retry is possible at all.
           return
@@ -361,8 +499,7 @@ export default function UnifiedCaptureCard({
       }
 
       const hoursOk = minutes > 0 ? await writeHours(minutes, hoursNotes) : false
-      toastForResult({ artifactSaved, hoursMinutes: minutes, hoursOk })
-      resetForm()
+      completeSave(claim, { artifactSaved, hoursMinutes: minutes, hoursOk })
     } finally {
       endSave()
     }
@@ -376,14 +513,13 @@ export default function UnifiedCaptureCard({
     buildArtifactBase,
     familyId,
     setTodayArtifacts,
-    onSnackMessage,
     writeHours,
-    toastForResult,
-    resetForm,
+    completeSave,
+    failSave,
   ])
 
   const handlePhotoCapture = useCallback(
-    async (files: File[]) => {
+    async (files: File[], claim: CaptureDraftClaim) => {
       if (files.length === 0) return
       // Nothing was staged above, so no save was attempted and the latch is
       // not claimed — the check stays ahead of it.
@@ -416,11 +552,10 @@ export default function UnifiedCaptureCard({
         ])
         const minutes = parsedDuration
         const hoursOk = minutes > 0 ? await writeHours(minutes, title) : false
-        toastForResult({ artifactSaved: true, hoursMinutes: minutes, hoursOk })
-        resetForm()
+        completeSave(claim, { artifactSaved: true, hoursMinutes: minutes, hoursOk })
       } catch (err) {
         console.error('Photo upload failed', err)
-        onSnackMessage({ text: 'Photo upload failed.', severity: 'error' })
+        failSave(claim, 'Photo upload failed.')
       } finally {
         setMediaUploading(false)
         endSave()
@@ -434,16 +569,15 @@ export default function UnifiedCaptureCard({
       buildArtifactBase,
       familyId,
       setTodayArtifacts,
-      onSnackMessage,
       parsedDuration,
       writeHours,
-      toastForResult,
-      resetForm,
+      completeSave,
+      failSave,
     ],
   )
 
   const handleAudioCapture = useCallback(
-    async (fileOrBlob: File | Blob) => {
+    async (fileOrBlob: File | Blob, claim: CaptureDraftClaim) => {
       if (!beginSave()) return
       setMediaUploading(true)
       try {
@@ -468,11 +602,10 @@ export default function UnifiedCaptureCard({
         ])
         const minutes = parsedDuration
         const hoursOk = minutes > 0 ? await writeHours(minutes, title) : false
-        toastForResult({ artifactSaved: true, hoursMinutes: minutes, hoursOk })
-        resetForm()
+        completeSave(claim, { artifactSaved: true, hoursMinutes: minutes, hoursOk })
       } catch (err) {
         console.error('Audio upload failed', err)
-        onSnackMessage({ text: 'Audio upload failed.', severity: 'error' })
+        failSave(claim, 'Audio upload failed.')
       } finally {
         setMediaUploading(false)
         endSave()
@@ -486,11 +619,10 @@ export default function UnifiedCaptureCard({
       buildArtifactBase,
       familyId,
       setTodayArtifacts,
-      onSnackMessage,
       parsedDuration,
       writeHours,
-      toastForResult,
-      resetForm,
+      completeSave,
+      failSave,
     ],
   )
 
@@ -525,14 +657,13 @@ export default function UnifiedCaptureCard({
       ? 'Use + to add some minutes'
       : undefined
 
-  const handleKidSave = useCallback(async () => {
+  const handleKidSave = useCallback(async (claim: CaptureDraftClaim) => {
     if (kidSaveDisabled) return
     if (!beginSave()) return
     try {
       const minutes = parsedDuration
       const hoursOk = await writeHours(minutes, activityName.trim())
-      toastForResult({ artifactSaved: false, hoursMinutes: minutes, hoursOk })
-      resetForm()
+      completeSave(claim, { artifactSaved: false, hoursMinutes: minutes, hoursOk })
     } finally {
       endSave()
     }
@@ -543,15 +674,15 @@ export default function UnifiedCaptureCard({
     parsedDuration,
     writeHours,
     activityName,
-    toastForResult,
-    resetForm,
+    completeSave,
   ])
 
   const stepDuration = useCallback((delta: number) => {
     const current = parsedDuration
     const next = Math.max(0, Math.min(MAX_DURATION_MINUTES, current + delta))
+    markDraftEdited()
     setDurationInput(next === 0 ? '' : String(next))
-  }, [parsedDuration])
+  }, [parsedDuration, markDraftEdited])
 
   // ── Chip rendering helpers ──
   // A family chip carries no emoji by design (see `quickLogChips.ts`), so the
@@ -609,7 +740,7 @@ export default function UnifiedCaptureCard({
               variant="outlined"
               startIcon={<AddAPhotoIcon />}
               fullWidth
-              onClick={() => setPhotoDialogOpen(true)}
+              onClick={openPhotoDialog}
             >
               Add photos of today's work
             </Button>
@@ -683,7 +814,10 @@ export default function UnifiedCaptureCard({
               label="What is this?"
               placeholder="e.g. dentist visit, made a fort"
               value={activityName}
-              onChange={(event) => setActivityName(event.target.value)}
+              onChange={(event) => {
+                markDraftEdited()
+                setActivityName(event.target.value)
+              }}
             />
           )}
 
@@ -692,7 +826,10 @@ export default function UnifiedCaptureCard({
               label="Category"
               select
               value={subjectBucket}
-              onChange={(event) => setSubjectBucket(event.target.value as SubjectBucket)}
+              onChange={(event) => {
+                markDraftEdited()
+                setSubjectBucket(event.target.value as SubjectBucket)
+              }}
             >
               {Object.values(SubjectBucket).map((bucket) => (
                 <MenuItem key={bucket} value={bucket}>
@@ -777,11 +914,14 @@ export default function UnifiedCaptureCard({
                 onChange={(event) => {
                   const raw = event.target.value
                   if (raw === '') {
+                    markDraftEdited()
                     setDurationInput('')
                     return
                   }
                   const n = Math.floor(Number(raw))
+                  // A rejected keystroke changes nothing, so it is not an edit.
                   if (!Number.isFinite(n) || n < 0) return
+                  markDraftEdited()
                   setDurationInput(String(Math.min(n, MAX_DURATION_MINUTES)))
                 }}
                 inputProps={{
@@ -816,6 +956,10 @@ export default function UnifiedCaptureCard({
             value={mediaTab}
             exclusive
             onChange={(_event, value) => {
+              // The tab is part of the draft `resetForm` would restore, and
+              // leaving a tab unmounts whatever that surface had staged — so a
+              // save already in flight must not clear over it.
+              markDraftEdited()
               setMediaTab(value as MediaTab | null)
             }}
             fullWidth
@@ -833,12 +977,15 @@ export default function UnifiedCaptureCard({
                 multiline
                 minRows={3}
                 value={noteText}
-                onChange={(event) => setNoteText(event.target.value)}
+                onChange={(event) => {
+                  markDraftEdited()
+                  setNoteText(event.target.value)
+                }}
               />
               <Stack spacing={0.5}>
                 <Button
                   variant="contained"
-                  onClick={handleNoteSave}
+                  onClick={() => void handleNoteSave(renderedClaim)}
                   disabled={noteSaveDisabled || savePending}
                   title={noteSaveTooltip}
                 >
@@ -862,22 +1009,27 @@ export default function UnifiedCaptureCard({
           )}
           {mediaTab === 'photo' &&
             (isKid ? (
-              // Kid mode stays single-photo (one artifact per photo).
+              // Kid mode stays single-photo (one artifact per photo). The claim
+              // is this render's, so a shot still compressing when the day or a
+              // field moves lands as the capture it was taken for.
               <PhotoCapture
-                onCapture={(file) => handlePhotoCapture([file])}
+                onCapture={(file) => void handlePhotoCapture([file], renderedClaim)}
+                onDraftChange={markDraftEdited}
                 uploading={mediaBusy}
               />
             ) : (
               // Parent mode stages several photos into ONE artifact.
               <PhotoCapture
                 multiple
-                onCaptureBatch={handlePhotoCapture}
+                onCaptureBatch={(files) => void handlePhotoCapture(files, renderedClaim)}
+                onDraftChange={markDraftEdited}
                 uploading={mediaBusy}
               />
             ))}
           {mediaTab === 'audio' && (
             <AudioRecorder
-              onCapture={handleAudioCapture}
+              onCapture={(blob) => void handleAudioCapture(blob, renderedClaim)}
+              onDraftChange={markDraftEdited}
               uploading={mediaBusy}
               allowUpload={!isKid}
             />
@@ -888,7 +1040,7 @@ export default function UnifiedCaptureCard({
               <Button
                 variant="contained"
                 color={kidTheme.saveColor}
-                onClick={handleKidSave}
+                onClick={() => void handleKidSave(renderedClaim)}
                 disabled={kidSaveDisabled || savePending}
                 size="large"
                 fullWidth
@@ -970,23 +1122,28 @@ export default function UnifiedCaptureCard({
       )}
 
       {!isKid && (
-        <Dialog
-          fullWidth
-          maxWidth="xs"
-          open={photoDialogOpen}
-          onClose={() => setPhotoDialogOpen(false)}
-        >
+        <Dialog fullWidth maxWidth="xs" open={photoDialogOpen} onClose={closePhotoDialog}>
           <DialogTitle>Add photos</DialogTitle>
           <DialogContent>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
               Snap or upload several photos of today's work — they save together as one entry.
             </Typography>
+            {/* Opening or closing this dialog is not a draft change —
+                `resetForm` does not touch it — but the photos staged inside it
+                are, and they arrive through the same seam. */}
             <PhotoCapture
               multiple
               uploading={mediaBusy}
+              onDraftChange={markDraftEdited}
               onCaptureBatch={(files) => {
+                // Only the opening this callback came from may act. A callback
+                // kept from a retired opening writes nothing and, above all,
+                // closes nothing: the dialog on screen is a different one.
+                if (dialogOpeningRef.current !== dialogOpening) return
+                // This opening is done with: it has had its one commit.
+                dialogOpeningRef.current += 1
                 setPhotoDialogOpen(false)
-                if (files.length) void handlePhotoCapture(files)
+                if (files.length) void handlePhotoCapture(files, renderedClaim)
               }}
             />
           </DialogContent>
