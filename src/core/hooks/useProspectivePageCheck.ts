@@ -220,11 +220,23 @@ function isUnsupportedTask(message: string): boolean {
  * reason, so there is nothing truthful to interpolate — and a row for this
  * branch must not reach for the alternatives (the model's text, the file name,
  * the parent's capture context) to look more specific than the app can honestly
- * be. The label is namespaced like the reply failures so the two read as one
- * family in Diagnostics, and neither string carries a quote, a URL or a
- * four-digit run, so `redactText` leaves both intact.
+ * be.
+ *
+ * The label is ONE BARE IDENTIFIER rather than the colon-namespaced spelling
+ * the reply failures use, and that is not a style choice. `safeName` in
+ * `scrubError` — the central sanitizer every report goes through before it is
+ * stored — keeps a name only when it matches `[A-Za-z_$][A-Za-z0-9_$]{0,60}`
+ * and coerces anything else to `Error`. So `PageCheck:unreadable` and friends
+ * reach the stored row as `Error`, diagnosable only by their message; this one
+ * arrives intact and can be filtered on. The reply labels are left as they are
+ * (changing them is not this fix's business), but the new one does not repeat
+ * the mistake.
+ *
+ * Neither string carries a quote, a URL or a four-digit run, so `redactText`
+ * leaves the message intact too, and both are well inside the 300-character
+ * clamp.
  */
-const NO_RESPONSE_NAME = 'PageCheck:no-response'
+const NO_RESPONSE_NAME = 'PageCheckNoResponse'
 const NO_RESPONSE_DETAIL = 'call returned no reply, reason not carried back'
 
 /** The one path from a page-check failure to the log. The app's own words. */
