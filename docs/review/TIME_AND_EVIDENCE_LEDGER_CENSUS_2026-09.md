@@ -64,15 +64,15 @@ logs. No number, fold, rounding or stored row was changed by this run.
 ## 3. The derived numbers
 
 ```
-source files scanned (non-test, src/ + functions/src/): 896
-surfaces naming a time or evidence collection: 61
-by role: {"WRITE":15,"READ":21,"BOTH":25}
-by collection: {"hours":16,"hoursAdjustments":9,"days":29,"artifacts":32}
-census rows: 61
+source files scanned (non-test, src/ + functions/src/): 915
+surfaces naming a time or evidence collection: 60
+by role: {"WRITE":15,"READ":21,"BOTH":24}
+by collection: {"hours":16,"hoursAdjustments":9,"days":28,"artifacts":32}
+census rows: 60
 census problems: 0
-date-rule call sites (9 distinct rules): 34
+date-rule call sites (9 distinct rules): 35
    13  getWeekRange
-    6  weekRangeFromDateKey
+    7  weekRangeFromDateKey
     4  weekKeyFromDate
     3  getWeekMonday
     2  getSchoolYearRange
@@ -91,13 +91,32 @@ consumers of the shared counting path: 8
        src/features/weekly-review/weekBySubject.ts
 ```
 
+
+The 2026-10-16 re-derivation (the before-work page check —
+`docs/review/BEFORE_WORK_PAGE_CHECK.md`): **`TodayPage.tsx` no longer names a time
+collection at all**, so its §5 row is gone (`days` 29 → 28, `BOTH` 25 → 24, surfaces and
+census rows 61 → 60). The page's old pre-completion scan door wrote a checklist row, and
+the legacy identity preparation (`FIX-239`) existed to make that write land on the right
+twin row; the prospective check that replaced it binds no row, so the call went with the
+write. `prepareDayChecklistIdentitiesGuarded` itself is unchanged and still exported by
+`today/dayWriteGuard.ts` — only the page's call to it is gone. **This is not "TodayPage
+writes nothing":** the page still reaches the day log *indirectly*, through `useDayLog`,
+`liveDayEdit.ts` and `dayChecklistRowWrite.ts` (its one remaining row write, the
+accept-skip lane), each of which is its own row below and is unchanged. What moved is only
+whether the page names a collection itself, which is what makes a file a row here. No
+fold, no date rule, no stored number and no guard changed.
+
+The organizer re-ran the committed census generator on 2026-10-16 and pasted its complete output above: 915 source files, 60 surfaces/rows, zero classification problems and 35 date-rule call sites. No counting or classification implementation changed.
+
 Re-derived by `npm run census:time-ledger` on 2026-09-25 (`FIX-254` / `UX-443`). Today's
 `WeekRibbon.tsx` no longer names `days` — its reads moved to the Review's
 `useWeekHoursInputs`, which §5 already lists — so its §5 row is gone (`days` 30 → 29,
 `READ` 22 → 21, surfaces 62 → 61), and `weekRibbon.logic.ts` is the eighth consumer of the
 shared counting path. No writer moved and no arithmetic changed.
 
-The 2026-09-15 re-derivation (`FIX-239` / `UX-415`):
+The 2026-09-15 re-derivation (`FIX-239` / `UX-415`) — **its `TodayPage.tsx` sentence is
+superseded by the 2026-10-16 note above, and left standing because this document records
+what each survey saw:**
 Parent-requested identity preparation makes `TodayPage.tsx` a direct `days`
 surface again; its new §5 row is classified from the same source derivation.
 In `FIX-238` / `UX-367`, the artifact reader moved from `TodayPage.tsx` to `useTodayArtifacts.ts`, so §5
@@ -232,7 +251,6 @@ no document.
 | `src/features/today/LessonVideoDialog.tsx` | hoursAdjustments | WRITE | the day's own date — local | **WRITER.** *Log watch time*: an `hoursAdjustments` row, `reason` = *“Watched video: <topic>”* |
 | `src/features/today/liveDayEdit.ts` | days | BOTH | the edited day's key — local | **WRITER.** Today's live day edits, all through `setDayLogGuarded`; mirrors the DATA-14 item↔block correspondence |
 | `src/features/today/TeachBackSection.tsx` | artifacts | WRITE | — (no range rule) | **WRITER.** The parent-side teach-back artifact |
-| `src/features/today/TodayPage.tsx` | days | BOTH | the selected family/child/day through `dayLogDocId` — local | **WRITER.** Parent-requested legacy scan preparation (`FIX-239`) reaches the day only through `prepareDayChecklistIdentitiesGuarded`: adds existing optional row IDs after an exact identity-only proof, preserving all non-ID fields. The normal saved-day subscription renders the result and a fresh parent tap establishes scan intent. No minutes are written. Role is per file and includes the page's unrelated reads/writes |
 | `src/features/today/UnifiedCaptureCard.tsx` | hours · artifacts | WRITE | the selected day — local | **WRITER, and the door in the owner's report.** One tap writes an `artifacts` document **and** an `hours` document carrying the activity's name in `notes` — and **no checklist item**, which is why *what got done* could not name it (`UX-408`) |
 | `src/features/today/useDayLog.ts` | days | BOTH | `getWeekRange(new Date())` (`UX-366`) | **WRITER.** The day document's read and its one write lane, `persistDayLogImmediate` (`UX-351`) |
 | `src/features/today/useRolloverUnchecked.ts` | days | READ | yesterday's key — local | Reads the previous day to roll unchecked items forward |

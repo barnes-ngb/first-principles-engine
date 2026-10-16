@@ -28,6 +28,12 @@ export const ScanDoor = {
   Capture: 'scan-capture',
   /** The planner's workbook-page analysis. */
   Planner: 'scan-planner',
+  /**
+   * Today's before-work page check — the one PROSPECTIVE door. It persists no
+   * scan document and no image, so its failures are labelled apart from the
+   * retrospective ones they would otherwise be read as.
+   */
+  PageCheck: 'scan-page-check',
   /** A caller that named no door. */
   Unknown: 'scan',
 } as const

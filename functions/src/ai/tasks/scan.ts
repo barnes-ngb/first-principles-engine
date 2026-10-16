@@ -21,13 +21,122 @@ export interface ScanCaptureContext {
   subjectBucket?: string;
 }
 
+/*
+ * ── The before-work page check does not run through this file's HANDLER ──────
+ *
+ * It is its own task (`pageCheck`) with its own handler in
+ * `tasks/pageCheck.ts`. Nothing below branches on a declared purpose: a `scan`
+ * request behaves exactly as it did before that feature existed, even if it
+ * carries a `checkPurpose` field. That is what makes the split fail-closed in
+ * both directions — a forged purpose cannot turn a scan prospective, and a
+ * missing one cannot turn a page check retrospective.
+ *
+ * What DOES live here is the prospective PROMPT builder, next to the
+ * retrospective one it must not resemble, so the two can be read — and tested —
+ * against each other. It is called only by `handlePageCheck`.
+ */
+
+/**
+ * The prospective prompt — its own prompt, its own schema, nothing inherited.
+ *
+ * It is NOT a section bolted onto {@link buildScanSystemPrompt}. The first
+ * attempt did exactly that, and the result contradicted itself: the retrospective
+ * prompt also instructs the model on CERTIFICATE detection (returning
+ * `suggestedSnapshotUpdate.masteredSkills` and a `recommendedStartLevel`) and on
+ * COVER PAGE handling (*"use this to set up workbook tracking"*), both of which
+ * are instructions to propose exactly the record changes this check promises
+ * never to make. A prompt that forbids mastery claims in one paragraph and asks
+ * for a `masteredSkills` array in another is a prompt that will sometimes return
+ * the array.
+ *
+ * So this is a separate, smaller question with a separate, smaller answer:
+ * what is on the page, does it look workable today, why, what would you change,
+ * and what could you not tell. No certificates, no cover setup, no skill
+ * alignment, no snapshot suggestion.
+ *
+ * `pageType` is kept, and kept to the same vocabulary, because the client's
+ * shared reply reader (`readScanAnalysis`) uses it to tell an analysis from a
+ * refusal or an error envelope. Everything else here is this door's own.
+ */
+export function buildProspectiveCheckPrompt(
+  childGrade: string | undefined,
+  contextSections: string[],
+  captureContext?: ScanCaptureContext,
+): string {
+  const gradeLine = childGrade ? `The student is in grade ${childGrade}.` : "";
+  const captureSection = formatProspectiveCaptureContext(captureContext);
+  const context = contextSections.filter((section) => section.trim().length > 0);
+
+  return `You are helping a homeschool parent decide whether to use a page of work TODAY.
+
+THE SITUATION: the parent is holding up a page the student has **NOT done yet** and asking one question — does this look about right for this student today, and what would you change if we used it?
+${gradeLine ? `\n${gradeLine}\n` : ""}
+WHAT THIS PHOTO IS AND IS NOT EVIDENCE OF:
+- It is evidence about the PAGE: what it asks for, how much of it there is, how it is laid out.
+- It is NOT evidence about the STUDENT. The student has not touched it. Do not state or imply what they know, have mastered, have already learned, are proficient in, or are ready to move past.
+- The page's existence and its lesson/page number say NOTHING about whether earlier lessons, pages or levels were done. Never infer prior completion.
+- Nothing you return changes any learning or progress record: no level, plan, workbook position, skill map, snapshot, hour or reward is written from this answer. Do not propose such an update or describe one as though it will happen.
+- Do not claim to identify the student and do not use any name in any field.
+
+WHAT YOU KNOW ABOUT THE STUDENT is only what appears below. If it contains no recorded level, skill or history evidence for this student, then you CANNOT judge fit: say so in "limits" and return "unclear" for both "estimatedDifficulty" and "recommendation". An honest "I cannot tell" is the correct answer and is always better than a confident guess.
+
+${context.length > 0 ? context.join("\n\n") : "(No recorded level, skill or history evidence was supplied for this student.)"}${captureSection ? `\n\n${captureSection}` : ""}
+
+Respond ONLY with valid JSON (no markdown fences, no commentary), in exactly this shape:
+
+{
+  "pageType": "worksheet|textbook|test|activity|other",
+  "readable": true,
+  "subject": "math|reading|writing|spelling|phonics|science|other|unknown",
+  "specificTopic": "string — what the page actually asks for, e.g. 'two-digit addition with regrouping'. 120 characters MAX. Empty string if you cannot tell.",
+  "estimatedDifficulty": "easy|appropriate|challenging|too-hard|unclear",
+  "recommendation": "do|quick-review|modify|skip|unclear",
+  "recommendationReason": "string — 240 characters MAX, ONE or TWO plain sentences about the PAGE's demands against the recorded evidence above. Hedge where you are unsure ('looks', 'may'). No claim about what the student knows.",
+  "teacherNotes": "string — 240 characters MAX. The practical change you would make if they use it today: fewer problems, read it aloud, split it over two days, scaffold the first one. Empty string if you have none.",
+  "limits": "string — 160 characters MAX. What you could NOT tell from this photo or from the evidence above. Empty string only if there is genuinely nothing.",
+  "curriculumDetected": {
+    "name": "string — the curriculum/workbook name if it is printed on the page, else null",
+    "lessonNumber": "number — the lesson number if visible, else null",
+    "pageNumber": "number — the page number if visible, else null"
+  }
+}
+
+FIELD RULES:
+- "readable": false when the photo is blank, cut off, blurred, upside-down or not a page of work. When it is false, set pageType "other", subject "unknown", specificTopic "", and "unclear" for difficulty and recommendation, and say what went wrong in "limits".
+- "recommendation" is what the PARENT might do with this page today, never a verdict on the student:
+  - "do" = looks usable as it is;
+  - "quick-review" = looks easy for them, a little of it would do;
+  - "modify" = usable with the change you name in "teacherNotes";
+  - "skip" = it looks BELOW where the recorded evidence says they are working right now. This is a statement about the page's level, NOT a mastery claim, and it does not mean the student has finished anything;
+  - "unclear" = you cannot responsibly say.
+- Keep every string short, plain and specific. No praise, no diagnosis, no grade, no reading level, no prediction about what the student will achieve.
+- For a neurodivergent learner, density matters: too many problems on one page, dense text, or crowded layout belongs in "teacherNotes".`;
+}
+
+/** The bullet lines both prompts share. */
+function captureContextLines(ctx: ScanCaptureContext | undefined): string[] {
+  const lines: string[] = [];
+  if (ctx?.itemLabel) lines.push(`- Planned activity: ${ctx.itemLabel}`);
+  if (ctx?.subjectBucket) lines.push(`- Subject: ${ctx.subjectBucket}`);
+  return lines;
+}
+
 export function formatCaptureContext(ctx: ScanCaptureContext | undefined): string {
   if (!ctx) return "";
-  const lines: string[] = [];
-  if (ctx.itemLabel) lines.push(`- Planned activity: ${ctx.itemLabel}`);
-  if (ctx.subjectBucket) lines.push(`- Subject: ${ctx.subjectBucket}`);
+  const lines = captureContextLines(ctx);
   if (!lines.length) return "";
   return `CAPTURE CONTEXT (what the app knows about this photo — use it to ground contentNote):\n${lines.join("\n")}`;
+}
+
+/**
+ * The same context, for the prospective prompt — which has no `contentNote`
+ * field, so it must not be told to ground one. (The retrospective header above
+ * is left exactly as it was.)
+ */
+function formatProspectiveCaptureContext(ctx: ScanCaptureContext | undefined): string {
+  const lines = captureContextLines(ctx);
+  if (!lines.length) return "";
+  return `CAPTURE CONTEXT (what the app was told this photo is for — use it to help name the page, and ignore it where the image plainly disagrees):\n${lines.join("\n")}`;
 }
 
 export function buildScanSystemPrompt(

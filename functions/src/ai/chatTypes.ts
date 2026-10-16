@@ -197,6 +197,16 @@ export async function callClaudeWithVision(opts: {
   imageBase64: string;
   mediaType: "image/jpeg" | "image/png" | "image/gif" | "image/webp";
   textPrompt: string;
+  /**
+   * Reasoning-effort override, identical in meaning and wire shape to
+   * `callClaude`'s: when set, sent as `output_config.effort`. **Off by default**
+   * — when omitted no `output_config` is sent, so `scan`, `analyzeWorkbook` and
+   * every other existing vision caller sends the exact same request body as
+   * before. A vision task that asks for structured JSON on a tight `maxTokens`
+   * sets this to `low` so internal reasoning cannot eat the whole output budget
+   * and leave no visible answer (FEAT-77, applied to the vision path).
+   */
+  effort?: ReasoningEffort;
 }): Promise<{
   text: string;
   inputTokens: number;
@@ -229,6 +239,12 @@ export async function callClaudeWithVision(opts: {
         ],
       },
     ],
+    // Same opt-in passthrough as `callClaude`: `output_config.effort` is GA on
+    // the Messages API but not in the pinned SDK's types (0.78), so it is
+    // spread as an extra top-level body field, and only when asked for.
+    ...(opts.effort
+      ? ({ output_config: { effort: opts.effort } } as Record<string, unknown>)
+      : {}),
   });
 
   // Concatenate EVERY text block, exactly as `callClaude` does (UX-311).

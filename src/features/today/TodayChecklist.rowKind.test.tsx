@@ -35,6 +35,8 @@ function renderRow(
   item: ChecklistItem,
   opts: {
     onStrandSessionOpen?: ReturnType<typeof vi.fn>
+    /** The before-work page check's row door (the prospective one). */
+    onBeforeWorkPageCheck?: ReturnType<typeof vi.fn>
     configsLoading?: boolean
     configsFailed?: boolean
     /** A failed read really does leave the list empty — say so faithfully. */
@@ -61,7 +63,7 @@ function renderRow(
         configs={opts.configs ?? configs}
         configsLoading={opts.configsLoading ?? false}
         configsFailed={opts.configsFailed ?? false}
-        onPreCompletionScan={vi.fn()}
+        onBeforeWorkPageCheck={opts.onBeforeWorkPageCheck ?? vi.fn()}
         captureLoading={false}
         captureItemIndex={null}
         scanResult={null}
@@ -258,7 +260,7 @@ describe('TodayChecklist — an unbound workbook assertion promises nothing (rou
       itemType: 'workbook',
       skipGuidance: 'Check lesson 12 before you start',
     }))
-    expect(screen.queryByRole('button', { name: /scan lesson to check/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /check this page/i })).toBeNull()
   })
 
   it('POSITIVE CONTROL — the same assertion over a real config still says Add page', () => {
@@ -271,21 +273,37 @@ describe('TodayChecklist — the curriculum doors belong to a workbook row (UX-4
   const guided = (over: Partial<ChecklistItem> = {}) =>
     item({ skipGuidance: 'Check lesson 12 before you start', ...over })
 
-  it('the scan-to-skip door renders on a workbook row', () => {
+  // The door's LABEL and its handler changed with the before-work page check:
+  // it used to read "Scan lesson to check if you should skip" and take the photo
+  // on the row, then write `activityConfigs`, `childSkillMaps` and the row's
+  // `scanned` flag. It now opens the prospective check, which writes nothing.
+  // The visibility rule under test is unchanged.
+  it('the before-work door renders on a workbook row', () => {
     renderRow(guided({ label: 'GATB Math (30m)', subjectBucket: SubjectBucket.Math }))
-    expect(screen.getByRole('button', { name: /scan lesson to check/i })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /check this page before he starts/i })).toBeTruthy()
+  })
+
+  it('and it hands the ROW to the check — no file, no row write', () => {
+    const onBeforeWorkPageCheck = vi.fn()
+    renderRow(guided({ label: 'GATB Math (30m)', subjectBucket: SubjectBucket.Math }), {
+      onBeforeWorkPageCheck,
+    })
+    fireEvent.click(screen.getByRole('button', { name: /check this page before he starts/i }))
+    expect(onBeforeWorkPageCheck).toHaveBeenCalledWith(
+      expect.objectContaining({ label: 'GATB Math (30m)' }),
+      0,
+    )
   })
 
   it('and NOT on a routine row, whose photo may not write the curriculum', () => {
     // The gate used to be the guidance sentence alone — a string an AI wrote,
-    // which is no evidence that the row is a workbook. Behind it sits an
-    // untargeted `syncScanToConfig` plus `childSkillMaps`, unconfirmed.
+    // which is no evidence that the row is a workbook.
     renderRow(guided())
-    expect(screen.queryByRole('button', { name: /scan lesson to check/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /check this page/i })).toBeNull()
   })
 
   it('nor on a row the app cannot place', () => {
     renderRow(guided({ label: 'Trip to the museum (90m)' }))
-    expect(screen.queryByRole('button', { name: /scan lesson to check/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /check this page/i })).toBeNull()
   })
 })

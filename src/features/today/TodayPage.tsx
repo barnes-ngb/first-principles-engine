@@ -45,7 +45,6 @@ import { useScrollToHash } from '../../core/hooks/useScrollToHash'
 import { useAI, TaskType } from '../../core/ai/useAI'
 import {
   chapterBooksCollection,
-  daysCollection,
   scansCollection,
   skillSnapshotsCollection,
 } from '../../core/firebase/firestore'
@@ -83,9 +82,8 @@ import WatchLibraryPicker from '../watch/WatchLibraryPicker'
 import { useWatchLibrary } from '../watch/useWatchLibrary'
 import { useWatchItemCompletion } from '../watch/useWatchItemCompletion'
 import { appendWatchItemToDayLog } from '../watch/watchDayItem'
-import { checklistItemKey, prepareDayChecklistIdentitiesGuarded } from './dayWriteGuard'
-import { dayLogDocId } from './daylog.model'
-import { hasPersistentChecklistId, resolvePreCompletionScanIndex, type PreCompletionScanTarget } from './preCompletionScanIdentity'
+import { checklistItemKey } from './dayWriteGuard'
+import { resolvePreCompletionScanIndex, type PreCompletionScanTarget } from './preCompletionScanIdentity'
 import {
   liveDayEditLockReason,
   moveItemToLiveDay,
@@ -108,7 +106,6 @@ import {
   todayScopeKey,
   todayScopeResetNotice,
 } from './todayScope'
-import { updateSkillMapFromFindings } from '../../core/curriculum/updateSkillMapFromFindings'
 import { useRolloverUnchecked } from './useRolloverUnchecked'
 import { useUnappliedDraft } from './useUnappliedDraft'
 import { selectTodayDayBanner } from './unappliedDraft'
@@ -116,12 +113,11 @@ import { useUnifiedCapture } from './useUnifiedCapture'
 import { useTodayArtifacts } from './useTodayArtifacts'
 import SectionErrorBoundary from '../../components/SectionErrorBoundary'
 import DraftReadyCard from '../monthly-review/DraftReadyCard'
-import { captureRowWriteNotice, skipRowWriteNotice, writeChecklistRow } from './dayChecklistRowWrite'
-import {
-  captureMayRouteToCurriculum,
-  resolveTodayRow,
-  todayRowConfigsState,
-} from './todayRowKind'
+import { skipRowWriteNotice, writeChecklistRow } from './dayChecklistRowWrite'
+import { todayRowConfigsState } from './todayRowKind'
+import BeforeWorkPageCheckCard from './BeforeWorkPageCheckCard'
+import BeforeWorkPageCheckDialog from './BeforeWorkPageCheckDialog'
+import { useBeforeWorkPageCheck } from './useBeforeWorkPageCheck'
 import WeekFocusCard from './WeekFocusCard'
 import WeekRibbon from './WeekRibbon'
 import { ribbonWeekStart } from './weekRibbon.logic'
@@ -659,7 +655,9 @@ export default function TodayPage() {
     clearScan,
     recordScanAction,
     syncScanToConfig,
-    runScan,
+    // No `runScan` here any more: the before-work door was its only caller on
+    // this page, and the prospective check does not use the retrospective
+    // pipeline (which persists a `scans` document).
   } = useUnifiedCapture({
     familyId,
     childId: selectedChildId,
@@ -674,9 +672,18 @@ export default function TodayPage() {
     configsState: activityConfigsState,
   })
 
+  /**
+   * The retrospective scan-result panel's binding.
+   *
+   * Nothing sets this target any more: the before-work door that used to set it
+   * now runs the prospective check, which binds no row (see
+   * `handleBeforeWorkPageCheck` below). It is kept, with the panel and its
+   * handlers, because the panel's own writes and their tests are legacy
+   * retrospective behaviour this run is not changing — see
+   * `docs/review/BEFORE_WORK_PAGE_CHECK.md` § "What is left behind".
+   */
   const [preCompletionTarget, setPreCompletionTarget] = useState<PreCompletionScanTarget | null>(null)
   const preCompletionRequestRef = useRef<object | null>(null)
-  const [preparingScanRows, setPreparingScanRows] = useState(false)
   const scanResultItemIndex = resolvePreCompletionScanIndex(
     preCompletionTarget, { familyId, childId: selectedChildId, dateKey: today }, scanResult?.id, dayLog,
   )
@@ -1078,118 +1085,95 @@ export default function TodayPage() {
     }
   }, [dayLog, selectedChildId, activeChild, todaySnapshot, weekFocus, aiChat, familyId, setSnackMessage])
 
-  // --- Pre-completion scan handler (for "should I skip?" advice) ---
+  // ── The before-work page check (the PROSPECTIVE door) ──────────────────────
   //
-  // UX-403 — **the same rule as the capture, because this is the same route.**
-  // This door hands the page to an untargeted `syncScanToConfig` (which
-  // fuzzy-matches the cover text and may create or advance a workbook) and then
-  // writes `childSkillMaps`, with no confirm. Its button renders on any row whose
-  // AI-written `skipGuidance` says *check lesson*, which is not a claim that the
-  // row is a workbook — so on the owner's decision it is gated on the same
-  // resolved kind, at the write as well as at the button. A row that is not a
-  // workbook still gets the scan and its advice, and is still stamped `scanned`;
-  // what it no longer does is write the family's curriculum.
-  const handlePreparePreCompletionScan = useCallback(async () => {
-    if (!canEditLiveDay || !familyId || !selectedChildId || preparingScanRows) return
-    setPreparingScanRows(true)
-    try {
-      const outcome = await prepareDayChecklistIdentitiesGuarded(
-        doc(daysCollection(familyId), dayLogDocId(today, selectedChildId)), 'today-prepare-scan-identities',
-      )
-      setSnackMessage({
-        text: outcome === 'ready'
-          ? 'The rows are ready. Tap Scan lesson again when the list updates.'
-          : "That day's plan is no longer available. Refresh before scanning.",
-        severity: outcome === 'ready' ? 'success' : 'warning',
+  // This replaces the old pre-completion "should I skip?" scan, which asked a
+  // prospective question through a retrospective pipeline: it handed the page to
+  // an untargeted `syncScanToConfig` (which fuzzy-matched the cover text and
+  // could create or advance a workbook), wrote `childSkillMaps` from
+  // `alignsWithSnapshot`, stamped the row `scanned: true`, saved a `scans`
+  // document that `loadRecentScansContext` then read as evidence — equating its
+  // `skip` recommendation with mastery — and offered *Add to plan*, *Skip*,
+  // *Update position* and *Accept skip* under the answer. Every one of those is
+  // a claim about the child, from a page he had not touched.
+  //
+  // The replacement writes nothing at all (see `beforeWorkPageCheck.ts` for the
+  // contract and `docs/review/BEFORE_WORK_PAGE_CHECK.md` for the persistence
+  // decision). It is reachable two ways — the day's own card, which needs no
+  // planned workbook and no AI-written `skipGuidance`, and a planned row's
+  // button, which now opens the SAME safe flow rather than the old one. The
+  // identity preparation the old row write needed is gone with the write.
+  const pageCheckCanCheck = canEditLiveDay && !isKidProfile
+  const pageCheck = useBeforeWorkPageCheck({
+    familyId,
+    childId: selectedChildId ?? '',
+    dateKey: today,
+    // The gate at the ENTRY. The controller asks the same question again at the
+    // tap, off a ref rather than this render's value, and `canEdit` is the one
+    // canonical parent answer this page already reads.
+    canCheck: pageCheckCanCheck,
+  })
+
+  /**
+   * The sheet's open state is the SCOPE it was opened under, not a boolean.
+   *
+   * A boolean survives a child switch, and a sheet left open over a new child is
+   * a sheet whose next tap is about the wrong boy. Comparing against the
+   * controller's live `scopeToken` closes it in the same render the switch
+   * happens in — no effect, so nothing stale is ever painted.
+   *
+   * Deliberately the SCOPE token and not the selection token: the selection
+   * token also advances on close, cancel and retry, and keying the sheet to it
+   * would make "Check another page" close the sheet it is retrying in. Retiring
+   * the picker is a separate call below.
+   */
+  const [pageCheckOpenToken, setPageCheckOpenToken] = useState<string | null>(null)
+  const [pageCheckContext, setPageCheckContext] = useState<{ itemLabel?: string; subjectBucket?: string } | null>(null)
+  const pageCheckOpen = pageCheckOpenToken === pageCheck.scopeToken
+
+  const openPageCheck = useCallback(
+    (context?: { itemLabel?: string; subjectBucket?: string }) => {
+      if (!pageCheckCanCheck || !selectedChildId) return
+      // Opening is itself a retirement: a file still sitting in a picker opened
+      // before the sheet was last closed must not arrive as if it were this
+      // session's choice.
+      pageCheck.beginPickerSession()
+      setPageCheckContext(context ?? null)
+      setPageCheckOpenToken(pageCheck.scopeToken)
+    },
+    [pageCheckCanCheck, selectedChildId, pageCheck],
+  )
+
+  const closePageCheck = useCallback(() => {
+    setPageCheckOpenToken(null)
+    setPageCheckContext(null)
+    pageCheck.close()
+  }, [pageCheck])
+
+  /**
+   * A planned row's door. It carries the row's label and subject as capture
+   * CONTEXT for the prompt only — it binds no row, prepares no identity, and
+   * returns nothing that could be written back to one.
+   */
+  const handleBeforeWorkPageCheck = useCallback(
+    (item: ChecklistItemType) => {
+      openPageCheck({
+        itemLabel: item.label.replace(/\s*\(\d+m\)/, ''),
+        ...(item.subjectBucket ? { subjectBucket: item.subjectBucket } : {}),
       })
-    } catch (err) {
-      console.error('[TodayPage] Failed to prepare scan rows', err)
-      setSnackMessage({ text: "Couldn't prepare the rows for scanning. Refresh and try again.", severity: 'warning' })
-    } finally {
-      setPreparingScanRows(false)
-    }
-  }, [canEditLiveDay, familyId, selectedChildId, today, preparingScanRows, setSnackMessage])
+    },
+    [openPageCheck],
+  )
 
-  const handlePreCompletionScan = useCallback(async (file: File, index: number) => {
-    // This callback is captured by the camera click's render. Never replace
-    // its row with a current index after the camera or identity preparation.
-    const item = dayLog?.checklist?.[index]
-    if (!item || !hasPersistentChecklistId(item.id) || !familyId || !selectedChildId || dayLog?.childId !== selectedChildId || dayLog.date !== today) {
-      setSnackMessage({ text: 'Refresh the plan and tap Scan lesson again before taking the photo.', severity: 'warning' })
-      return
-    }
-    const origin = { familyId, childId: selectedChildId, dateKey: today, itemId: item.id }
-    const request = {}
-    preCompletionRequestRef.current = request
-    setPreCompletionTarget(null)
-    setScanItemIndex(index)
-    const curriculumRouteAllowed = !!item && captureMayRouteToCurriculum(
-      resolveTodayRow(item, activityConfigs, activityConfigsState).kind,
-    )
-    const record = await runScan(file, familyId, selectedChildId)
-
-    if (curriculumRouteAllowed && record?.results && record.results.pageType !== 'certificate') {
-      try {
-        const result = await syncScanToConfig(selectedChildId, record.results)
-        if (result.action === 'created') {
-          setSnackMessage({ text: `New workbook added: ${result.configName}`, severity: 'success' })
-        } else if (result.action === 'updated' && result.position) {
-          setSnackMessage({ text: `Updated ${result.configName} to lesson ${result.position}`, severity: 'success' })
-        }
-      } catch (err) {
-        // UX-360 — this used to be a `console.error` and nothing else. The
-        // curriculum write is the whole point of scanning a page before doing
-        // it, and its failure reached the parent as silence on a surface whose
-        // success path announces "Updated Math K to lesson 14". The photo and
-        // the analysis really are safe, so this is a warning, not an error —
-        // `useUnifiedCapture`'s own rule for the same failure, which this
-        // handler is the last copy of.
-        console.error('[TodayPage] Failed to sync scan to config:', err)
-        setSnackMessage({
-          text: "Couldn't update the workbook's position. The scan is saved.",
-          severity: 'warning',
-        })
-      }
-
-      const skills = record.results.skillsTargeted
-      if (skills.length > 0) {
-        try {
-          const findings = skills.map((s) => ({
-            skill: s.skill,
-            status: (s.alignsWithSnapshot === 'ahead' ? 'mastered' : 'emerging') as 'mastered' | 'emerging',
-            evidence: `Workbook scan: ${s.skill} (${s.level})`,
-            testedAt: new Date().toISOString(),
-          }))
-          await updateSkillMapFromFindings(familyId, selectedChildId, findings)
-        } catch (err) {
-          console.warn('[TodayPage] Failed to update skill map from scan (non-blocking):', err)
-        }
-      }
-    }
-
-    // UX-404, same class as the capture's: `dayLog` here is the document as it
-    // stood before an AI scan call that takes seconds, so writing it whole put
-    // back every edit made in between. One row, on the live document.
-    if (record?.results && item) {
-      const outcome = await writeChecklistRow({
-        familyId,
-        childId: selectedChildId,
-        dateKey: today,
-        itemKey: origin.itemId,
-        requireUniqueIdentity: true,
-        patch: { scanned: true },
-        // Only the persistent origin can receive the scan, even after reapply.
-        hint: { index, completed: !!item.completed },
-        context: 'today-pre-completion-scan',
-      })
-      const notice = captureRowWriteNotice(outcome)
-      if (notice) setSnackMessage({ text: notice, severity: 'warning' })
-    }
-    // Publish the matched result after its initial scan writes have settled.
-    if (record?.id && preCompletionRequestRef.current === request) {
-      setPreCompletionTarget({ ...origin, scanId: record.id })
-    }
-  }, [runScan, familyId, selectedChildId, syncScanToConfig, setSnackMessage, dayLog, setScanItemIndex, today, activityConfigs, activityConfigsState])
+  const handlePageCheckPick = useCallback(
+    (file: File, token: string) => {
+      // The token is the identity the camera / picker was opened under. The
+      // controller refuses it when it is no longer the live one, which is the
+      // case this page cannot see: the native picker is open above it.
+      void pageCheck.start(file, pageCheckContext ?? undefined, token)
+    },
+    [pageCheck, pageCheckContext],
+  )
 
   const handleScanAddToPlan = useCallback(() => {
     if (!scanResult?.results || scanResultItemIndex == null || !dayLog?.checklist) return
@@ -1648,6 +1632,36 @@ export default function TodayPage() {
         </SectionErrorBoundary>
       )}
 
+      {/* --- The before-work page check (parent, prospective, writes nothing) ---
+           Deliberately OUTSIDE the checklist block and outside the Life-day
+           condition: the whole point is that it is reachable with an empty
+           plan, with no workbook row, and with no AI-written skip guidance.
+           It names the child from the same active-child context the header
+           line above already read — there is no second selector here. */}
+      {selectedChild && (
+        <SectionErrorBoundary section="before-work page check">
+          <BeforeWorkPageCheckCard
+            childName={selectedChild.name}
+            canCheck={pageCheckCanCheck}
+            onOpen={() => openPageCheck()}
+          />
+          <BeforeWorkPageCheckDialog
+            open={pageCheckOpen}
+            childName={selectedChild.name}
+            status={pageCheck.status}
+            summary={pageCheck.summary}
+            photoPreviewUrl={pageCheck.photoPreviewUrl}
+            itemLabel={pageCheck.itemLabel}
+            cancelled={pageCheck.cancelled}
+            selectionToken={pageCheck.selectionToken}
+            onPick={handlePageCheckPick}
+            onCancel={pageCheck.cancel}
+            onRetry={pageCheck.close}
+            onClose={closePageCheck}
+          />
+        </SectionErrorBoundary>
+      )}
+
       {/* --- Today's Plan checklist (PRIMARY) --- */}
       {selectedChild && planType !== PlanType.Life && (
         <SectionErrorBoundary section="checklist">
@@ -1708,9 +1722,11 @@ export default function TodayPage() {
           // an empty curriculum. The hook already distinguishes the three states.
           configsLoading={activityConfigsLoading}
           configsFailed={!!activityConfigsError}
-          onPreCompletionScan={handlePreCompletionScan}
-          onPreparePreCompletionScan={handlePreparePreCompletionScan}
-          preparingScanRows={preparingScanRows}
+          // The planned row's before-work door, now the safe one. The old
+          // `onPreCompletionScan` / `onPreparePreCompletionScan` pair is no
+          // longer passed: this door takes no photo on the row, binds no row
+          // identity and prepares none.
+          onBeforeWorkPageCheck={handleBeforeWorkPageCheck}
           scanResultItemIndex={scanResultItemIndex}
           captureLoading={scanLoading}
           captureItemIndex={scanItemIndex}

@@ -12,6 +12,7 @@ import { handleDisposition } from "./disposition.js";
 import { handleConundrum } from "./conundrum.js";
 import { handleWeeklyFocus } from "./weeklyFocus.js";
 import { handleScan } from "./scan.js";
+import { handlePageCheck } from "./pageCheck.js";
 import { handleShellyChat } from "./shellyChat.js";
 import { handleFoundationsReview } from "./foundationsReview.js";
 import { handleChapterQuestions } from "./chapterQuestions.js";
@@ -37,6 +38,10 @@ export const CHAT_TASKS: Record<string, ChatTaskHandler> = {
   conundrum: handleConundrum,
   weeklyFocus: handleWeeklyFocus,
   scan: handleScan,
+  // The before-work page check. A DISTINCT task, so an old dispatcher rejects
+  // it (writing nothing) instead of treating it as an ordinary scan, and this
+  // registry — not a payload field — is what forces the prospective handler.
+  pageCheck: handlePageCheck,
   shellyChat: handleShellyChat,
   foundationsReview: handleFoundationsReview,
   chapterQuestions: handleChapterQuestions,
