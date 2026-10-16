@@ -773,7 +773,7 @@ describe('a completion that settles at the commit of the switch', () => {
     expect(
       screen.getByText('Lincoln: Mathseeds — working on lesson 42, seen Oct 12.'),
     ).toBeInTheDocument()
-    // ...nothing is claimed for London, and her form is untouched and usable.
+    // ...nothing is claimed for London, and his form is untouched and usable.
     expect(screen.queryByText(/Recorded for/)).not.toBeInTheDocument()
     expect(screen.getByLabelText('Lesson number')).toHaveValue('')
     expect(screen.getByText(/Recording for/)).toHaveTextContent('London')
