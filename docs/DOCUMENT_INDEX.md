@@ -8,6 +8,7 @@
 
 | Document | Status | Notes |
 |---|---|---|
+| `review/BEFORE_WORK_PAGE_CHECK.md` | **CURRENT** (2026-10-16) | The prospective before-work page check: the no-learning-record contract, why nothing is persisted (no `scans` document, no Storage object), the dedicated `pageCheck` task that fails closed through a release skew, the native-picker staleness rules, the separate prospective prompt, and the stated limits (heuristic prose filter, unproven unsupported-task copy). |
 | `review/STICKER_RESULT_IDENTITY_2026-09.md` | **CURRENT** (2026-09-17) | FIX-252 — completed sticker identity, failed redo preservation and save/generation exclusion; validation boundaries. |
 | `review/STICKER_CLEANUP_LAYOUT_2026-09.md` | **CURRENT** (2026-09-17) | FIX-251 — explicit large-image preview/consent and responsive cleanup layout; candidate validation boundaries. |
 | `review/BOOK_CONTROLS_2026-09.md` | **CURRENT** (2026-09-17) | FIX-250 — reachable picture actions, explicit off-page recovery, separate background controls and validation limits. |

@@ -28,6 +28,15 @@ export const TaskType = {
   BookLookup: 'bookLookup',
   LessonVideo: 'lessonVideo',
   HelpCard: 'helpCard',
+  /**
+   * The before-work page check (prospective). A DISTINCT task from `Scan` on
+   * purpose: hosting deploys before functions, so for a window this client
+   * talks to the previous dispatcher. An unknown task name is rejected there
+   * with `invalid-argument` before any write, which is the fail-closed
+   * behaviour this feature needs — a `scan` request with an intent flag in its
+   * payload would instead have been served as an ordinary retrospective scan.
+   */
+  PageCheck: 'pageCheck',
 } as const
 export type TaskType = (typeof TaskType)[keyof typeof TaskType]
 

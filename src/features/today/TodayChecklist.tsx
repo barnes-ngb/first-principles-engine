@@ -97,7 +97,6 @@ import {
 import { kidPalette } from '../../app/tokens'
 import { TodayDecision } from './todayScope'
 import { checklistItemKey } from './dayWriteGuard'
-import { hasPersistentChecklistId } from './preCompletionScanIdentity'
 
 const subjectBucketColor: Record<string, string> = {
   Reading: '#3b82f6',
@@ -266,8 +265,27 @@ interface TodayChecklistProps {
   configsLoading?: boolean
   /** The configs read failed. A failure is never rendered as an empty result. */
   configsFailed?: boolean
-  onPreCompletionScan: (file: File, index: number) => void
+  /**
+   * Open the before-work page check for this row (the PROSPECTIVE door).
+   *
+   * It hands over the row, not a file: the photo is taken inside the check's
+   * own sheet, where the disclosure is read first, and the answer is advice with
+   * no record-progress / add-to-plan / skip / complete action on it. It binds no
+   * row and prepares no row identity, because it writes nothing to bind.
+   */
+  onBeforeWorkPageCheck?: (item: ChecklistItemType, index: number) => void
+  /**
+   * @deprecated The old pre-completion scan pair, which took the photo on the
+   * row and then wrote `activityConfigs`, `childSkillMaps` and the row's
+   * `scanned` flag. Nothing calls them any more — the row door above replaced
+   * them — and they are retained in the type only so existing callers and tests
+   * of the retrospective result panel keep compiling. See
+   * `docs/review/BEFORE_WORK_PAGE_CHECK.md` § "What is left behind".
+   */
+  onPreCompletionScan?: (file: File, index: number) => void
+  /** @deprecated see `onPreCompletionScan`. */
   onPreparePreCompletionScan?: () => void
+  /** @deprecated see `onPreCompletionScan`. */
   preparingScanRows?: boolean
   scanResultItemIndex?: number | null
   captureLoading: boolean
@@ -321,9 +339,7 @@ export default function TodayChecklist({
   configs = [],
   configsLoading = false,
   configsFailed = false,
-  onPreCompletionScan,
-  onPreparePreCompletionScan,
-  preparingScanRows = false,
+  onBeforeWorkPageCheck,
   scanResultItemIndex = null,
   captureLoading,
   captureItemIndex,
@@ -1234,41 +1250,25 @@ export default function TodayChecklist({
                     {item.skipGuidance}
                   </Typography>
                 )}
-                {/* Scan-to-skip: prompt to scan lesson page when skip guidance says
-                    "check lesson". UX-403 — workbook rows only: this door reaches
-                    the untargeted `syncScanToConfig` and `childSkillMaps`, and its
-                    own condition is a sentence an AI wrote, which is no evidence
-                    that the row is a workbook. The premise is a workbook's too —
-                    there is no lesson to skip on a routine. */}
-                {mayRouteToCurriculum && item.skipGuidance && /check lesson/i.test(item.skipGuidance) && !item.completed && (
+                {/* The planned row's before-work door.
+                    It used to read "Scan lesson to check if you should skip" and
+                    take the photo here, then write the curriculum, the skill map
+                    and the row's `scanned` flag. It now opens the prospective
+                    check, which writes nothing: no camera on the row, no row
+                    identity preparation, no file handed back to be written.
+                    The visibility condition is UNCHANGED (UX-403: a workbook row
+                    whose guidance says *check lesson*) — the unconditional entry
+                    is the day's own card, which needs neither. */}
+                {mayRouteToCurriculum && item.skipGuidance && /check lesson/i.test(item.skipGuidance) && !item.completed && onBeforeWorkPageCheck && (
                   <Box sx={{ ml: 5, mt: 0.5 }}>
                     <Button
                       size="small"
                       variant="text"
-                      startIcon={captureLoading && captureItemIndex === index
-                        ? <CircularProgress size={14} />
-                        : <CameraAltIcon sx={{ fontSize: 16 }} />}
-                      disabled={preparingScanRows || (captureLoading && captureItemIndex === index)}
-                      onClick={() => {
-                        // Legacy preparation is its own tap. A new render must
-                        // supply the persistent row ID before camera opens.
-                        if (!hasPersistentChecklistId(item.id)) {
-                          onPreparePreCompletionScan?.()
-                          return
-                        }
-                        const input = document.createElement('input')
-                        input.type = 'file'
-                        input.accept = 'image/*'
-                        input.capture = 'environment'
-                        input.onchange = (e) => {
-                          const file = (e.target as HTMLInputElement).files?.[0]
-                          if (file) onPreCompletionScan(file, index)
-                        }
-                        input.click()
-                      }}
+                      startIcon={<CameraAltIcon sx={{ fontSize: 16 }} />}
+                      onClick={() => onBeforeWorkPageCheck(item, index)}
                       sx={{ fontSize: '0.7rem', color: 'text.secondary', textTransform: 'none' }}
                     >
-                      Scan lesson to check if you should skip
+                      Check this page before he starts
                     </Button>
                   </Box>
                 )}

@@ -142,17 +142,40 @@ describe('the effect of that gate on what a row claims', () => {
 // ── Codex round 2 (P2): every row write passes the duplicate-row hint ───────
 
 describe('every writeChecklistRow call site tells identical rows apart', () => {
-  it('TodayPage\'s pre-completion scan passes the hint the capture paths pass', () => {
-    // Apply retains a completed row and appends a fresh one with the same label
-    // and subject, so both carry the same `checklistItemKey`. Without the hint,
-    // `resolveChecklistRowIndex` falls back to the first match and stamps
-    // `scanned: true` on the older completed twin rather than on the row whose
-    // page was just scanned.
-    const call = TODAY_PAGE.slice(
-      TODAY_PAGE.indexOf("context: 'today-pre-completion-scan'") - 800,
-      TODAY_PAGE.indexOf("context: 'today-pre-completion-scan'"),
+  /**
+   * This case used to pin the hint on TodayPage's `today-pre-completion-scan`
+   * write. That door is gone — the before-work check is prospective and stamps
+   * nothing on the row it was pressed from — so the hint question no longer
+   * arises for it and the old assertion would have gone green on a slice of the
+   * end of the file. What replaces it is the property that made the hint
+   * unnecessary: this page's before-work path writes no row at all. The hint
+   * control over the writes that DO exist is the case below, unchanged.
+   */
+  it('the before-work door writes no row — so there is no hint to pass', () => {
+    expect(TODAY_PAGE).not.toContain("context: 'today-pre-completion-scan'")
+
+    // Bounded by name, and both bounds asserted: a `-1` from `indexOf` is what
+    // let the superseded assertion read the wrong 800 characters.
+    const start = TODAY_PAGE.indexOf('const handleBeforeWorkPageCheck = useCallback(')
+    const end = TODAY_PAGE.indexOf('const handlePageCheckPick = useCallback(', start)
+    expect(start, 'TodayPage no longer defines handleBeforeWorkPageCheck').toBeGreaterThan(-1)
+    expect(end, 'handlePageCheckPick no longer follows it').toBeGreaterThan(start)
+    const handler = TODAY_PAGE.slice(start, end)
+
+    // All it does is open the sheet with the row's label as prompt context.
+    expect(handler).toContain('openPageCheck({')
+    expect(handler).toMatch(/itemLabel: item\.label/)
+    expect(handler).not.toMatch(
+      /writeChecklistRow|Guarded\(|setDoc\(|updateDoc\(|addDoc\(|setPreCompletionTarget/,
     )
-    expect(call).toMatch(/hint: \{ index, completed: !!item\.completed \}/)
+  })
+
+  it('and the only row write left on this page is the accept-skip lane', () => {
+    // The count is the guard: a new door that writes a checklist row shows up
+    // here before it shows up in the record, and the case above cannot be
+    // satisfied by moving the old write a few lines down.
+    const contexts = TODAY_PAGE.match(/context: '[^']+'/g) ?? []
+    expect(contexts).toEqual(["context: 'today-accept-skip'"])
   })
 
   it('no writeChecklistRow call site is left without one', () => {
@@ -162,9 +185,17 @@ describe('every writeChecklistRow call site tells identical rows apart', () => {
       join(process.cwd(), 'src/features/today/useUnifiedCapture.ts'),
       'utf8',
     )
+    // The closing brace is matched at ANY indentation. Pinned to six spaces it
+    // silently skipped TodayPage's own remaining call site, which sits two
+    // levels deeper — a property test that quietly covers nothing is the
+    // failure this file keeps running into.
+    let checked = 0
     for (const source of [TODAY_PAGE, CAPTURE_HOOK]) {
-      const calls = source.match(/writeChecklistRow\(\{[\s\S]*?\n {6}\}\)/g) ?? []
+      const calls = source.match(/writeChecklistRow\(\{[\s\S]*?\n\s*\}\)/g) ?? []
       for (const call of calls) expect(call).toMatch(/hint:/)
+      checked += calls.length
     }
+    // …so the sweep is asserted to have found the call sites at all.
+    expect(checked).toBeGreaterThanOrEqual(2)
   })
 })
