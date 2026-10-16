@@ -5,6 +5,7 @@ import { claudeApiKey } from "./aiConfig.js";
 import { requireEmailAuth, checkRateLimit } from "./authGuard.js";
 import { STONEBRIDGE_BIBLE } from "./stonebridgeBible.js";
 import { ensureWorkbookActivityConfigsForChild } from "./workbookActivityConfigBackfill.js";
+import { isPageCheckTask } from "./prospectiveCheck.js";
 import { MATH_CONCEPT_BANDS_TEXT } from "./levelDefinitions.js";
 import { ALLOWED_OVERRIDE_MODELS, resolveModelForTask } from "./models.js";
 import {
@@ -47,6 +48,8 @@ export const TaskType = {
   Conundrum: "conundrum",
   WeeklyFocus: "weeklyFocus",
   Scan: "scan",
+  /** The before-work page check — prospective, and its own task (fail-closed). */
+  PageCheck: "pageCheck",
   ShellyChat: "shellyChat",
   FoundationsReview: "foundationsReview",
   ChapterQuestions: "chapterQuestions",
@@ -3044,21 +3047,39 @@ export const chat = onCall(
       // Guaranteed server-side workbook backfill (Phase 2B hardening).
       // Runs before any task can depend on workbook-type activityConfigs.
       // Wrapped in try/catch so backfill failures don't crash chat tasks.
-      try {
-        const backfillStats = await ensureWorkbookActivityConfigsForChild(
-          db,
+      //
+      // ── One exception: the before-work page check ───────────────────────
+      // This backfill CREATES and UPDATES workbook `activityConfigs` — a
+      // learning record — for every child on every task, before the handler is
+      // even chosen. The before-work page check must change no learning or
+      // progress record at all, so it is excluded here, by TASK NAME: an
+      // earlier version declared the intent in the message payload, which this
+      // code never looks at, and executing the real dispatcher showed the
+      // backfill running for prospective requests anyway. Anything that is not
+      // exactly the `pageCheck` task — `scan`, a scan carrying a forged
+      // purpose field, an unknown task — keeps the backfill exactly as before.
+      if (isPageCheckTask(taskType)) {
+        console.log("[activityConfigs.backfill] Skipped — prospective page check", {
           familyId,
           childId,
-        );
-        if (backfillStats.created > 0 || backfillStats.updated > 0) {
-          console.log("[activityConfigs.backfill] Applied workbook backfill", {
+        });
+      } else {
+        try {
+          const backfillStats = await ensureWorkbookActivityConfigsForChild(
+            db,
             familyId,
             childId,
-            ...backfillStats,
-          });
+          );
+          if (backfillStats.created > 0 || backfillStats.updated > 0) {
+            console.log("[activityConfigs.backfill] Applied workbook backfill", {
+              familyId,
+              childId,
+              ...backfillStats,
+            });
+          }
+        } catch (err) {
+          console.warn("[activityConfigs.backfill] Non-critical backfill failed:", err);
         }
-      } catch (err) {
-        console.warn("[activityConfigs.backfill] Non-critical backfill failed:", err);
       }
     }
 
