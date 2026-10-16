@@ -215,7 +215,12 @@ Registry: `docs/review/CHILD_SWITCH_SURFACE_CENSUS_2026-09.md`.
 
 - **RESET, not BIND**: an unconfirmed draft is a number, a date and two choices —
   seconds to retype, and nothing was paid for. It is cleared on a child change and
-  the loss is stated in words.
+  the loss is stated in words. On an **account** change it is cleared and *nothing
+  is said*: the notice would have to name the child the draft belonged to, and the
+  only lists available are the household that has just signed out — whose child's
+  name is not this parent's to read — and the new one, where the same id can be a
+  different boy. No children were switched either, so silence is the only true
+  sentence (round 3, P2).
 - **RESET, not GATE**: no part of the write is composed from the read (the entry is
   typed, the collection is append-only, the correction link is re-checked in the
   transaction), so an unsettled or failed history blocks only the correction
@@ -226,6 +231,13 @@ Registry: `docs/review/CHILD_SWITCH_SURFACE_CENSUS_2026-09.md`.
   screen, so a receipt for Lincoln can never appear over London's history. A token
   rather than an id comparison, because an A → B → A switch aliases onto a visit
   that is no longer this one (the `CertificateScanSection` lesson, UX-329 round 3).
+  The token — and the family visit/identity pair beside it — is advanced in a
+  **layout** effect, which is where the guarantee actually lives: a passive effect
+  runs after the paint, and a save in the air settles in a microtask before that,
+  so a committed switch would be invisible to the completion and the previous
+  child's outcome would be taken for the current one's (round 3, P1). The account
+  is also re-checked immediately after the save `await`, ahead of every outcome
+  branch, rather than only inside the moved-on branch.
 
 ### A bound save that comes back UNCONFIRMED after the switch
 

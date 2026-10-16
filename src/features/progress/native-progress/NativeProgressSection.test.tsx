@@ -1,3 +1,4 @@
+import { useLayoutEffect } from 'react'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -23,6 +24,9 @@ import {
  * changed stays visible and retryable against the child it was confirmed for —
  * without claiming it was lost, and without outliving the family it was confirmed
  * under — and a correction started by accident can be cancelled.
+ *
+ * Added by its round 3: those verdicts hold for an answer that comes back at the
+ * commit of the switch itself, and a change of ACCOUNT names nobody.
  */
 
 let familyId: string | null = 'fam-1'
@@ -47,11 +51,24 @@ const CHILDREN: Record<string, { id: string; name: string }> = {
   lincoln: { id: 'lincoln', name: 'Lincoln' },
   london: { id: 'london', name: 'London' },
 }
+/**
+ * The next household's list, where the id repeats and the boy does not.
+ *
+ * Round 3, P2: a child id is unique inside a family, not across sign-ins, so a
+ * surface that names a child from `children` after an account change can name
+ * either the family that just left (whose names are not this parent's to see) or
+ * a different boy wearing the same id. The whole list is swapped, the way a real
+ * account change swaps it.
+ */
+const OTHER_FAMILY_CHILDREN: Record<string, { id: string; name: string }> = {
+  lincoln: { id: 'lincoln', name: 'Leo' },
+}
+let childrenById = CHILDREN
 vi.mock('../../../core/hooks/useActiveChild', () => ({
   useActiveChild: () => ({
     activeChildId,
-    activeChild: CHILDREN[activeChildId],
-    children: Object.values(CHILDREN),
+    activeChild: childrenById[activeChildId],
+    children: Object.values(childrenById),
     setActiveChildId: vi.fn(),
     isChildProfile,
     isLoading: false,
@@ -124,6 +141,7 @@ const savedOk = (overrides: Partial<NativeProgressObservation> = {}) => ({
 beforeEach(() => {
   isChildProfile = false
   activeChildId = 'lincoln'
+  childrenById = CHILDREN
   familyId = 'fam-1'
   observations = []
   observationsChildId = 'lincoln'
@@ -162,7 +180,38 @@ function heldSave() {
         await Promise.resolve()
       })
     },
+    /**
+     * The raw settlement, for a caller that chooses the moment itself — the
+     * commit of a switch, via `SettleOnCommit`.
+     */
+    settleNow: (outcome: unknown) => settle(outcome),
   }
+}
+
+/**
+ * Let a held write come back DURING a commit, before any passive effect runs.
+ *
+ * Round 3, P1. The sequence this stands for is the one the review found: React
+ * commits the new child (or the new account), the passive effects it scheduled
+ * have not run yet, and the in-flight save's promise settles in a microtask in
+ * between. So the settlement is fired from a layout effect, which is the last
+ * thing the commit does — whatever the surface uses to decide *"is this outcome
+ * still mine"* has to be in step by then, and a token bumped after paint is not.
+ *
+ * It is the surface's later sibling, so the surface's own layout effects have
+ * already run when the answer comes back — every chance to be in step, and no
+ * passive effect yet.
+ *
+ * Mounted beside the surface from the first render and armed by giving it a
+ * `settle` prop later, so the surface's own element never changes position and
+ * is never remounted — a remount would lose the state these cases are about.
+ * Armed once per case, so it answers once.
+ */
+function SettleOnCommit({ settle }: { settle?: () => void }) {
+  useLayoutEffect(() => {
+    settle?.()
+  }, [settle])
+  return null
 }
 
 /** Confirm the entry on screen and tap Save, leaving the result to the caller. */
@@ -663,6 +712,252 @@ describe('a confirmed save left unconfirmed after the child changed', () => {
       childId: 'lincoln',
       entryKey: request.entryKey,
     })
+  })
+})
+
+/**
+ * PR-1897 review, round 3 P1 — an answer that arrives at the commit itself.
+ *
+ * The switch tokens are what decide whether a completion may touch the screen,
+ * and the review found them a frame late: advanced in a passive effect, which
+ * runs after paint, while a save already in the air settles in a microtask
+ * before that. In that window a committed switch is invisible to the completion,
+ * so the previous child's outcome is taken for the current one — clearing the
+ * new draft, or writing a receipt in the wrong boy's name.
+ *
+ * These cases hand the answer back from a layout effect in the switching commit:
+ * the earliest moment anything can come back, and the one the window lives in.
+ * The verdicts asked for are the same ones as above, which is the point — the
+ * timing may not change them.
+ *
+ * That the tokens are advanced in a LAYOUT effect is pinned on source, in
+ * `nativeProgressBoundary.source.test.ts`: the act-based renderer flushes a
+ * commit and the passive effects that commit scheduled in one step, so no render
+ * test can tell a layout effect from a passive one. These cases pin the
+ * behaviour; that one pins the ordering the behaviour rests on.
+ */
+describe('a completion that settles at the commit of the switch', () => {
+  /** The tree, with the settler armed or not — see `SettleOnCommit`. */
+  const tree = (settle?: () => void) => (
+    <>
+      <NativeProgressSection />
+      <SettleOnCommit settle={settle} />
+    </>
+  )
+
+  /** Run the microtask the settlement queued, and whatever it then set. */
+  async function drain() {
+    await act(async () => {
+      await Promise.resolve()
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+  }
+
+  it('recovers an unconfirmed entry when the child changed in that same commit', async () => {
+    const user = userEvent.setup()
+    const held = heldSave()
+    const view = render(tree())
+    await fillEntry(user)
+    await confirmAndSave(user)
+    const request = saveMock.mock.calls[0][0]
+
+    activeChildId = 'london'
+    observationsChildId = 'london'
+    view.rerender(tree(() => held.settleNow({ ok: false, message: failureNotice() })))
+    await drain()
+
+    // Lincoln's entry comes back in its own panel...
+    expect(await screen.findByText(strandedSaveTitle('Lincoln'))).toBeInTheDocument()
+    expect(
+      screen.getByText('Lincoln: Mathseeds — working on lesson 42, seen Oct 12.'),
+    ).toBeInTheDocument()
+    // ...nothing is claimed for London, and her form is untouched and usable.
+    expect(screen.queryByText(/Recorded for/)).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Lesson number')).toHaveValue('')
+    expect(screen.getByText(/Recording for/)).toHaveTextContent('London')
+
+    // And the recovery is the real one: still bound to the entry it was
+    // confirmed for, not to the child on screen.
+    saveMock.mockResolvedValue(savedOk())
+    await user.click(
+      screen.getByRole('button', { name: "Try saving Lincoln's entry again" }),
+    )
+    await waitFor(() => expect(saveMock).toHaveBeenCalledTimes(2))
+    expect(saveMock.mock.calls[1][0]).toMatchObject({
+      familyId: 'fam-1',
+      childId: 'lincoln',
+      entryKey: request.entryKey,
+    })
+  })
+
+  it('never turns a confirmation into the new child’s receipt', async () => {
+    const user = userEvent.setup()
+    const held = heldSave()
+    const view = render(tree())
+    await fillEntry(user)
+    await confirmAndSave(user)
+
+    activeChildId = 'london'
+    observationsChildId = 'london'
+    view.rerender(tree(() => held.settleNow(savedOk())))
+    await drain()
+
+    // The entry went to Lincoln's record, which is what the switch notice says.
+    // A receipt on this screen would read as London's, and there is none.
+    expect(screen.queryByText(/Recorded for/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Already recorded for/)).not.toBeInTheDocument()
+    // It was confirmed, so there is nothing to recover either.
+    expect(screen.queryByText(strandedSaveTitle('Lincoln'))).not.toBeInTheDocument()
+    expect(screen.queryByText(strandedSaveTitle('London'))).not.toBeInTheDocument()
+    expect(saveMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('leaves a newer draft for the same child alone when it confirms (A → B → A)', async () => {
+    const user = userEvent.setup()
+    const held = heldSave()
+    const view = render(tree())
+    await fillEntry(user)
+    await confirmAndSave(user)
+
+    activeChildId = 'london'
+    observationsChildId = 'london'
+    view.rerender(tree())
+    activeChildId = 'lincoln'
+    observationsChildId = 'lincoln'
+    view.rerender(tree())
+    // A different entry, typed for the same boy on this later visit.
+    await fillEntry(user, '55', '2026-10-15')
+
+    // The FIRST visit's save confirms only now: the same child by id, another
+    // visit by history, which is exactly what an id comparison cannot tell apart.
+    view.rerender(tree(() => held.settleNow(savedOk())))
+    await drain()
+
+    expect(screen.getByLabelText('Lesson number')).toHaveValue('55')
+    expect(screen.getByLabelText('Day you saw this')).toHaveValue('2026-10-15')
+    expect(screen.queryByText(/Recorded for/)).not.toBeInTheDocument()
+    expect(saveMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('discards an outcome when the ACCOUNT changed in that same commit', async () => {
+    const user = userEvent.setup()
+    const held = heldSave()
+    const view = render(tree())
+    await fillEntry(user)
+    await confirmAndSave(user)
+
+    // The next household is signed in by the time the answer comes back, and the
+    // commit that signed them in is the commit it came back in.
+    familyId = 'fam-2'
+    childrenById = OTHER_FAMILY_CHILDREN
+    view.rerender(tree(() => held.settleNow({ ok: false, message: failureNotice() })))
+    await drain()
+
+    expect(screen.queryByText(strandedSaveTitle('Lincoln'))).not.toBeInTheDocument()
+    expect(screen.queryByText(strandedSaveTitle('Leo'))).not.toBeInTheDocument()
+    expect(screen.queryByText(/working on lesson 42/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Try saving/ })).not.toBeInTheDocument()
+
+    // ...and going back does not resurrect it, as before.
+    familyId = 'fam-1'
+    childrenById = CHILDREN
+    view.rerender(tree())
+
+    expect(screen.queryByText(strandedSaveTitle('Lincoln'))).not.toBeInTheDocument()
+    expect(screen.queryByText(/working on lesson 42/)).not.toBeInTheDocument()
+    expect(saveMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+/**
+ * PR-1897 review, round 3 P2 — a family change names nobody.
+ *
+ * The reset branch was shared with the child switch and built the child-switch
+ * notice for an account change too, resolving a name out of `children`: either
+ * the list of the family that has just signed out — whose child's name is not
+ * this parent's to read — or the new family's, where the same id can be a
+ * different boy. Nothing was switched between children either, so the sentence
+ * was untrue as well as leaky. A family change clears the notice outright; only
+ * a child change inside one family names anyone.
+ */
+describe('when the family changes under it', () => {
+  it('clears the draft and names nobody, when the id repeats in the new family', async () => {
+    const user = userEvent.setup()
+    const view = render(<NativeProgressSection />)
+    await fillEntry(user)
+
+    familyId = 'fam-2'
+    childrenById = OTHER_FAMILY_CHILDREN
+    view.rerender(<NativeProgressSection />)
+
+    // The draft is cleared, as it always is on a change of scope...
+    expect(screen.getByLabelText('Lesson number')).toHaveValue('')
+    // ...and no notice is shown, under either household's name.
+    expect(screen.queryByText(/was cleared and not saved/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/goes to/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Lincoln/)).not.toBeInTheDocument()
+    expect(screen.getByText(/Recording for/)).toHaveTextContent('Leo')
+  })
+
+  it('names nobody when the children list is still the previous family’s', async () => {
+    const user = userEvent.setup()
+    const view = render(<NativeProgressSection />)
+    await fillEntry(user)
+
+    // Only the sign-in has changed so far. The list a name would be resolved
+    // from is still the family that has left, which is the name that may not be
+    // printed — the surface's own "Recording for" line reads from the shell's
+    // list and is the shell's to settle, but this surface's notice is not.
+    familyId = 'fam-2'
+    view.rerender(<NativeProgressSection />)
+
+    expect(screen.getByLabelText('Lesson number')).toHaveValue('')
+    expect(screen.queryByText(/was cleared and not saved/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Switched child/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/goes to/)).not.toBeInTheDocument()
+  })
+
+  it('promises nothing about a confirmed save that is still in the air', async () => {
+    const user = userEvent.setup()
+    const held = heldSave()
+    const view = render(<NativeProgressSection />)
+    await fillEntry(user)
+    await confirmAndSave(user)
+
+    familyId = 'fam-2'
+    childrenById = OTHER_FAMILY_CHILDREN
+    view.rerender(<NativeProgressSection />)
+
+    // The in-flight sentence would have named Lincoln to the next household and
+    // offered to report back on an entry this sign-in will never be shown.
+    expect(screen.queryByText(/goes to/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Lincoln/)).not.toBeInTheDocument()
+
+    await held.refuse()
+
+    expect(screen.queryByText(strandedSaveTitle('Lincoln'))).not.toBeInTheDocument()
+    expect(screen.queryByText(strandedSaveTitle('Leo'))).not.toBeInTheDocument()
+    expect(screen.queryByText(/working on lesson 42/)).not.toBeInTheDocument()
+    expect(saveMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('still names the child for a switch inside the new family', async () => {
+    // The clearing is scoped to the account change itself. Once this family is
+    // the bound one, a child switch is a child switch again.
+    const user = userEvent.setup()
+    familyId = 'fam-2'
+    childrenById = { ...OTHER_FAMILY_CHILDREN, luca: { id: 'luca', name: 'Luca' } }
+    const view = render(<NativeProgressSection />)
+    await fillEntry(user)
+
+    activeChildId = 'luca'
+    observationsChildId = 'luca'
+    view.rerender(<NativeProgressSection />)
+
+    expect(await screen.findByText(/was cleared and not saved/)).toHaveTextContent('Leo')
+    expect(screen.getByLabelText('Lesson number')).toHaveValue('')
   })
 })
 

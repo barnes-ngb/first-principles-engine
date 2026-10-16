@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 import Alert from '@mui/material/Alert'
 import AlertTitle from '@mui/material/AlertTitle'
 import Box from '@mui/material/Box'
@@ -104,8 +104,12 @@ interface StrandedSave {
  * Registry: `docs/review/CHILD_SWITCH_SURFACE_CENSUS_2026-09.md`.
  *
  * An unconfirmed draft is cleared when the shell's child changes, and the loss is
- * stated in words (`childSwitchNotice`). RESET rather than BIND because the draft
- * is a number, a date and two choices — seconds to retype, and nothing was paid
+ * stated in words (`childSwitchNotice`) — on a child change inside one family,
+ * which is the only case there is an honest name for; an ACCOUNT change clears the
+ * draft and says nothing (review round 3, P2).
+ *
+ * RESET rather than BIND because the draft is a number, a date and two choices —
+ * seconds to retype, and nothing was paid
  * for. RESET rather than GATE because no part of the write is composed from the
  * read: the entry is typed, the collection is append-only, and a correction's link
  * is re-checked inside the writer's transaction — so a history that has not
@@ -233,21 +237,35 @@ export default function NativeProgressSection() {
   // previous child's draft under the new child's name, and a parent who taps Save
   // in that frame is the cross-child write the guard exists to prevent.
   const scopeKey = `${familyId ?? ''}|${activeChildId}`
-  if (bound.familyId !== (familyId ?? '')) {
+  const familyChanged = bound.familyId !== (familyId ?? '')
+  if (familyChanged) {
     // A family change is not a child switch. Nothing pinned to the previous
     // family may stay on screen or stay retryable: the panel names a child from
     // a family this sign-in may not read, and its request carries that family's
     // id. Cleared before the child branch below so a change of both does both.
     setStrandedSaves([])
   }
-  if (bound.familyId !== (familyId ?? '') || bound.childId !== activeChildId) {
-    const hadDraft =
-      !draftIsEmpty(draft, today) || pending !== null || correcting !== null
-    // The name of the child the draft belonged to, resolved now from the family
-    // list rather than stored alongside the id.
-    const previousName =
-      children.find((c) => c.id === bound.childId)?.name ?? 'the other child'
-    setSwitchNotice(childSwitchNotice(previousName, hadDraft, saving))
+  if (familyChanged || bound.childId !== activeChildId) {
+    if (familyChanged) {
+      // No notice at all, rather than a child-switch notice (PR-1897 review,
+      // round 3 P2). The sentence would have to name the child the draft
+      // belonged to, and after a family change there is no honest name to use:
+      // `children` either still holds the family that just signed out — whose
+      // child's name is another household's information — or already holds this
+      // one, where the same id can be a different boy. Nothing was switched
+      // between children either, so the only true statement is silence; the
+      // draft is cleared below as it always is.
+      setSwitchNotice(null)
+    } else {
+      const hadDraft =
+        !draftIsEmpty(draft, today) || pending !== null || correcting !== null
+      // The name of the child the draft belonged to, resolved now from the family
+      // list rather than stored alongside the id. Reached only inside one family,
+      // so the list being read is the list that child is in.
+      const previousName =
+        children.find((c) => c.id === bound.childId)?.name ?? 'the other child'
+      setSwitchNotice(childSwitchNotice(previousName, hadDraft, saving))
+    }
     setBound({ familyId: familyId ?? '', childId: activeChildId })
     setDraft(emptyNativeProgressDraft(today))
     setFieldErrors({})
@@ -265,11 +283,19 @@ export default function NativeProgressSection() {
    *
    * A token rather than comparing ids, because A → B → A would alias a stale
    * completion onto a scope that is the same by name and a different visit by
-   * history — the `CertificateScanSection` lesson (UX-329, Codex round 3). Bumped
-   * in an effect, since a ref may not be assigned during render.
+   * history — the `CertificateScanSection` lesson (UX-329, Codex round 3).
+   *
+   * Bumped in an effect, since a ref may not be assigned during render — but a
+   * **layout** effect, which is the whole guarantee (review round 3, P1). A
+   * passive effect runs after paint, and an in-flight save's promise settles in
+   * a microtask: the switch commits, the completion comes back, and the token it
+   * is compared against has not moved yet, so an outcome belonging to the
+   * previous child is treated as this one's — clearing the new draft or writing
+   * the wrong receipt. A layout effect is in step by the end of the commit that
+   * switched, before anything queued can look.
    */
   const scopeRun = useRef(0)
-  useEffect(() => {
+  useLayoutEffect(() => {
     scopeRun.current += 1
   }, [scopeKey])
 
@@ -287,10 +313,14 @@ export default function NativeProgressSection() {
    * resurrects it (PR-1897 review, round 2). A visit that has ended never comes
    * back, so its outcome is discarded rather than stored. Bumped on `familyId`
    * only, so A → B → A **by child** inside one family still keeps its retry.
+   *
+   * In a layout effect for the same reason as `scopeRun`: an account change that
+   * has COMMITTED must be visible to a completion that settles before paint, or
+   * the panel is built for a sign-in that is already gone.
    */
   const familyVisit = useRef(0)
   const signedInFamily = useRef(familyId ?? '')
-  useEffect(() => {
+  useLayoutEffect(() => {
     familyVisit.current += 1
     signedInFamily.current = familyId ?? ''
   }, [familyId])
@@ -353,6 +383,19 @@ export default function NativeProgressSection() {
     // The write is bound to `request` and has gone where it belongs. The SCREEN
     // may have moved on, and a receipt or a cleared form belongs to the scope that
     // asked for it.
+    //
+    // The ACCOUNT is asked first, before either outcome branch (review round 3,
+    // P1). A family change ends this surface's claim on the outcome completely:
+    // whatever is on screen now belongs to another household, so there is no
+    // branch below — receipt, cleared form, error or recovery panel — that this
+    // answer may take. The write still went where it was bound; nothing here
+    // speaks for it.
+    if (
+      familyVisit.current !== familyRun ||
+      signedInFamily.current !== request.familyId
+    ) {
+      return
+    }
     if (scopeRun.current !== run) {
       // A confirmed success needs nothing from this screen: the switch notice
       // already says a confirmed entry goes to the child it was confirmed for.
@@ -362,17 +405,11 @@ export default function NativeProgressSection() {
       // below this line touches the draft: the child on screen may be another boy,
       // or this one on a later visit with newer typing in the form.
       //
-      // Unless the FAMILY has moved on. Then the request belongs to a sign-in
-      // that is no longer current and the panel would be another family's
-      // information — hidden now and resurrected on the way back, which is what
-      // appending here used to do (review round 2). Discarded instead: the write
-      // still went where it was bound, and nothing on this screen may speak for
-      // it.
-      if (
-        !outcome.ok &&
-        familyVisit.current === familyRun &&
-        signedInFamily.current === request.familyId
-      ) {
+      // The family it was confirmed under is still signed in — the check above
+      // has already discarded the outcome otherwise, rather than appending a
+      // panel that a frame of filtering only hides and the way back resurrects
+      // (review round 2).
+      if (!outcome.ok) {
         setStrandedSaves((prev) => [
           ...prev.filter((s) => s.request.entryKey !== request.entryKey),
           { request, message: outcome.message, phase: 'failed' },

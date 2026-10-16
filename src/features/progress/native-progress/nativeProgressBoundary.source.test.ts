@@ -154,6 +154,40 @@ describe('the feature touches one collection and no rail', () => {
   })
 })
 
+/**
+ * Round 3, P1 — pinned on source because the renderer cannot show it.
+ *
+ * The scope token and the family visit/identity pair are what a late completion
+ * is compared against, so they have to be in step by the end of the commit that
+ * switched: a passive effect runs after paint, and a save already in the air
+ * settles in a microtask before that, which is how an outcome belonging to the
+ * previous child came to be treated as the current one's. `act` flushes a commit
+ * and the passive effects that commit scheduled in one step, so a render test
+ * cannot tell the two kinds of effect apart — the behaviour either way is pinned
+ * in `NativeProgressSection.test.tsx`; the ordering it rests on is pinned here.
+ */
+describe('the switch tokens are in step at the commit, not after the paint', () => {
+  /** Which kind of effect the statement nearest above `token` belongs to. */
+  const effectHolding = (source: string, token: string) => {
+    const at = source.indexOf(token)
+    expect(at, `${token} should be in the section`).toBeGreaterThan(-1)
+    const layout = source.lastIndexOf('useLayoutEffect(', at)
+    const passive = source.lastIndexOf('useEffect(', at)
+    expect(layout, `${token} should sit inside an effect`).toBeGreaterThan(-1)
+    return layout > passive ? 'useLayoutEffect' : 'useEffect'
+  }
+
+  for (const token of [
+    'scopeRun.current += 1',
+    'familyVisit.current += 1',
+    'signedInFamily.current =',
+  ]) {
+    it(`${token} is advanced in a layout effect`, () => {
+      expect(effectHolding(code(SECTION), token)).toBe('useLayoutEffect')
+    })
+  }
+})
+
 describe('the capability check is in the handler, not only the control', () => {
   it('the save handler refuses a kid profile before it reaches the writer', () => {
     const source = code(SECTION)
