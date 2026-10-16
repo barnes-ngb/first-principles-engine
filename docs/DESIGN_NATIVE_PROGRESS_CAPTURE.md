@@ -37,7 +37,8 @@ It is **not**:
   it came from a certificate*, not that a certificate was uploaded or read;
 - **authoritative** — two rows may disagree and neither wins (§5);
 - **a position** — nothing derives a "current lesson" from these rows, and nothing
-  reads this collection except the surface that shows it back;
+  uses it as learning evidence. The report surface reads it back, and the
+  child-reference safety survey checks it before offering duplicate-child deletion;
 - **a completion claim** — *working on 42* is stored as `42` with
   `meaning: 'workingOn'`. There is no N−1 normalisation and no inference that
   lessons 1–41 are finished.
@@ -46,7 +47,7 @@ It is **not**:
 
 "Lesson 42" is ambiguous in the way that matters: it can mean the lesson being
 worked on (42 unfinished) or the last one finished (42 done). The app cannot tell,
-and a record that silently assumed one would be wrong about half the rows.
+and a record that silently assumed one can misrepresent what the parent observed.
 `uncertain` is a first-class answer, because a parent reading a progress screen a
 week later often genuinely does not know which it was — and forcing a guess makes
 the stored row *less* true than the honest shrug.
@@ -220,8 +221,8 @@ the gate claims — and all it claims — is that a kid profile cannot reach thi
    record or media was involved in building it.
 2. **Two programs.** A third is a new entry in the program table plus its unit
    label — a deliberate change, not an open text field.
-3. **Nothing reads it yet** except its own surface. That is the design, and it also
-   means the record is only as useful as a parent's habit of writing in it.
+3. **No planning integration.** Its readers are the report surface and the
+   child-reference safety survey. Its immediate value is a dated family record.
 4. **No delete.** A wrong row is corrected, never removed; a genuine deletion door
    is a separate decision about a parent's own record.
 5. **Entry order is visible, not resolved.** The surface reports disagreement and

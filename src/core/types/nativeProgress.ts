@@ -14,7 +14,8 @@
  * choice of changing the plan or keeping it on paper.
  *
  * This collection is the third answer: a **plain observation**, isolated from
- * every one of those rails. Nothing reads it but the surface that shows it back.
+ * every one of those rails. Its readers are the report surface and the existing
+ * child-reference safety survey, which prevents orphaning a child's reports.
  * That isolation is the feature, not a limitation — it is what makes it safe to
  * record a number a parent is only *fairly* sure of, out of order, weeks late.
  *
@@ -52,7 +53,7 @@ export type NativeProgressProgram =
  * "Lesson 42" is ambiguous in the way that matters: it can mean the lesson being
  * worked on now (42 is unfinished) or the last one finished (42 is done). The app
  * has no way to tell, and a record that silently assumes one of them is a record
- * that is wrong half the time.
+ * that can misrepresent what the parent observed.
  *
  * `Uncertain` is a first-class answer, not a failure to answer. A parent reading
  * a progress screen a week later often genuinely does not know which it was, and
