@@ -47,6 +47,7 @@ import {
   NativeProgressSource,
   type NativeProgressObservation,
 } from '../types/nativeProgress'
+import { todayKey } from '../utils/dateKey'
 import { parseDateYmd } from '../utils/format'
 import {
   db,
@@ -75,12 +76,21 @@ export interface SaveNativeProgressArgs {
   }
   /** The row being corrected, when this is a correction. */
   correctsObservationId?: string
-  /** Entry time. Injected so a test can assert it is separate from `observedOn`. */
+  /**
+   * Entry time. Injected so a test can pin it and assert it stays separate from
+   * `observedOn`; validated like any other input, because an unparseable stamp
+   * would make the whole history's "Entered …" column meaningless.
+   */
   recordedAt?: string
+  /**
+   * Today, as `YYYY-MM-DD` in the family's own local calendar.
+   *
+   * Defaults to `todayKey()` — the app's one definition of a local day, the same
+   * one the form's date field is bounded by. Injectable so a test pins it rather
+   * than depending on the wall clock (review item 6).
+   */
+  today?: string
 }
-
-/** The highest value the writer will store. Mirrors the form's typo guard. */
-export const NATIVE_NUMBER_STORED_MAX = 9999
 
 /**
  * `entryKey` shape. Narrow on purpose: it becomes part of a document path, so a
@@ -93,6 +103,18 @@ export const NATIVE_PROGRESS_CORRECTION_GONE =
 
 export const NATIVE_PROGRESS_CORRECTION_OTHER_CHILD =
   "That entry belongs to a different child, so it can't be corrected from here."
+
+/**
+ * A correction may not change which program the entry is about.
+ *
+ * `correctsObservationId` is the only thing joining two rows, and a row's program
+ * decides the unit its number is read in — so a "correction" that moved a lesson
+ * 42 entry to Fast Phonics would silently restate it as peak 41 and leave the
+ * history reading as though both had been observed. A different program is a
+ * different observation, which is a new entry rather than a fix (review item 7).
+ */
+export const NATIVE_PROGRESS_CORRECTION_OTHER_PROGRAM =
+  'That entry is about a different program. Save this as a new entry instead of a correction.'
 
 export interface SaveNativeProgressResult {
   /** The row on the record — the one just written, or the one already there. */
@@ -139,8 +161,13 @@ export async function saveNativeProgressObservation(
     throw new NativeProgressRefused('Pick where the number came from.')
   }
 
+  // Positive, whole, and storable exactly. There is deliberately NO ceiling: a
+  // bound this repo cannot derive would be an invented program range, and a real
+  // number read off a real screen must never be refused as a typo. What it can
+  // know is that past `Number.MAX_SAFE_INTEGER` the value stored is not the value
+  // sent, which is a property of the field (review item 5).
   const n = observation.nativeNumber
-  if (!Number.isInteger(n) || n < 1 || n > NATIVE_NUMBER_STORED_MAX) {
+  if (!Number.isSafeInteger(n) || n < 1) {
     throw new NativeProgressRefused('Use a whole number, like 42.')
   }
 
@@ -149,8 +176,26 @@ export async function saveNativeProgressObservation(
   if (!parseDateYmd(observation.observedOn)) {
     throw new NativeProgressRefused('Use a real date, like 2026-10-12.')
   }
+  // ...and not a day that has not happened. The same refusal as the form's, here
+  // as well as there, because the form decides what to TELL a parent and this
+  // decides what may be STORED — and a future observation is the one value that
+  // cannot be a reading of something that happened. Backdating stays freely
+  // allowed; the form's lower typo guard is a UI convenience and is not re-made
+  // here, so the writer refuses only what is false rather than what looks odd.
+  const localToday = args.today ?? todayKey()
+  if (!parseDateYmd(localToday)) {
+    throw new NativeProgressRefused('Could not read today’s date, so nothing was saved.')
+  }
+  if (observation.observedOn > localToday) {
+    throw new NativeProgressRefused("That day hasn't happened yet.")
+  }
 
+  // The entry time is validated too, since it may be injected: a row whose
+  // `recordedAt` cannot be read would render an "Entered" date of nothing.
   const recordedAt = args.recordedAt ?? new Date().toISOString()
+  if (Number.isNaN(new Date(recordedAt).getTime())) {
+    throw new NativeProgressRefused('Could not stamp the time of this entry, so nothing was saved.')
+  }
   const id = nativeProgressObservationDocId(childId, entryKey)
 
   const correctsObservationId = args.correctsObservationId?.trim() || undefined
@@ -199,8 +244,14 @@ export async function saveNativeProgressObservation(
       // A correction may not reach across children — that field is the only
       // thing joining two rows, and nothing else would notice if it joined two
       // children's records.
-      if (original.data()?.childId !== childId) {
+      const originalRow = original.data()
+      if (originalRow?.childId !== childId) {
         throw new NativeProgressRefused(NATIVE_PROGRESS_CORRECTION_OTHER_CHILD)
+      }
+      // ...nor across programs, for the same reason and with the same blast
+      // radius: the program decides the unit the number is read in.
+      if (originalRow?.program !== observation.program) {
+        throw new NativeProgressRefused(NATIVE_PROGRESS_CORRECTION_OTHER_PROGRAM)
       }
     }
 

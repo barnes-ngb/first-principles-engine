@@ -10,11 +10,12 @@
  *
  * ── The honesty rules that live here ────────────────────────────────────────
  *
- * **No invented ceiling.** The one upper bound is a typo guard. This repo does
- * not know how many lessons Mathseeds has or how many peaks Fast Phonics has, so
- * it refuses only what cannot be a reading of a screen (a slipped keypress, a
- * zero, a negative) and says so in those words. `manualPosition.ts` can say *"this
- * book has 60 lessons"* because a workbook's total is a number a parent typed in;
+ * **No invented ceiling.** This repo does not know how many lessons Mathseeds has
+ * or how many peaks Fast Phonics has, so there is no upper bound on the program at
+ * all: the only refusals are of values that cannot be a reading of a screen (a
+ * zero, a negative, a fraction) or cannot be stored exactly (see
+ * {@link nativeNumberIsStorableExactly}). `manualPosition.ts` can say *"this book
+ * has 60 lessons"* because a workbook's total is a number a parent typed in;
  * nothing here has an equivalent, and inventing one would reject a true reading.
  *
  * **No derived position.** Nothing in this module computes a "current lesson"
@@ -89,15 +90,21 @@ export const NATIVE_SOURCES: readonly NativeProgressSource[] = Object.values(
 )
 
 /**
- * The most any native number is allowed to be.
+ * The only upper bound: what a number can be stored as EXACTLY.
  *
- * A **typo guard**, not a curriculum limit — see the module note. Four digits is
- * far past anything either program counts to and still refuses the shape of a
- * slipped keypress (`4222` instead of `42` passes; `42222` does not). The message
- * this produces says which of the two it is, so a parent is never told the
- * program has fewer lessons than it does.
+ * An earlier draft of this module guessed a four-digit ceiling and called it a
+ * typo guard. Independent review was right to refuse it: a bound nobody can
+ * derive is an invented program range however it is labelled, and a parent
+ * reading a real number off a real screen would have been told it was a typo.
+ *
+ * So the rule is the one fact this repo actually knows — a JavaScript number
+ * holds integers exactly up to `Number.MAX_SAFE_INTEGER`, and past that the
+ * value stored is not the value typed. That is a property of the field, not of
+ * Mathseeds, and the message says so.
  */
-export const NATIVE_NUMBER_TYPO_CEILING = 9999
+export function nativeNumberIsStorableExactly(value: number, digits: string): boolean {
+  return Number.isSafeInteger(value) && String(value) === digits
+}
 
 /**
  * The earliest day an observation may be dated.
@@ -113,19 +120,19 @@ export const OBSERVED_ON_FLOOR = '2000-01-01'
 export const NOTE_MAX_LENGTH = 400
 
 /**
- * The one sentence this feature must never stop saying.
+ * The one thing this feature must say, said once and short.
  *
- * Every surface that renders the form, the confirmation and the history shows it.
- * The failure mode this feature could have — the reason a record-only collection
- * is worth the isolation — is a parent reasonably assuming that telling the app
- * where her son is changes what the app plans for him. It does not.
+ * The failure mode worth preventing is a parent reasonably assuming that telling
+ * the app where her son is changes what the app plans for him. A paragraph
+ * explaining that is a paragraph nobody reads twice, so it is one line, and it
+ * appears once above the form rather than beside every field.
  */
 export const NATIVE_PROGRESS_NO_PLANNING_NOTICE =
-  'This is a record for you. It changes nothing the app plans, counts or teaches — not lessons, not hours, not skills.'
+  'Saved for reference. This does not update plans, hours or skills.'
 
-/** ...and the matching sentence about the source. */
+/** ...and the matching line about the source. */
 export const NATIVE_PROGRESS_SOURCE_NOTICE =
-  'Saved as you reported it. Nothing here was checked against the program.'
+  'Saved as you report it — not checked against the program.'
 
 export interface NativeProgressDraft {
   program: NativeProgressProgram
@@ -192,9 +199,10 @@ export type ParsedNativeNumber =
 /**
  * Read a typed native number.
  *
- * Strict about what a number IS (a whole number, at least 1, under the typo
- * guard) and silent about what it MEANS — the meaning is its own field, and a
- * parser that guessed would be the inference this feature exists to avoid.
+ * Strict about what a number IS (a whole number, at least 1, storable exactly)
+ * and silent about what it MEANS — the meaning is its own field, and a parser
+ * that guessed would be the inference this feature exists to avoid. It has no
+ * opinion about how high the number may go, because nothing here knows.
  */
 export function parseNativeNumber(
   raw: string,
@@ -208,16 +216,18 @@ export function parseNativeNumber(
   if (!/^\d+$/.test(trimmed)) {
     return { ok: false, error: 'Use a whole number, like 42.' }
   }
-  const value = Number(trimmed)
+  // Leading zeros are a keypad artefact, not a different number: `007` is 7.
+  const digits = trimmed.replace(/^0+(?=\d)/, '')
+  const value = Number(digits)
   if (value < 1) {
     return { ok: false, error: `${NATIVE_PROGRAM_LABEL[program]} numbers start at 1.` }
   }
-  if (value > NATIVE_NUMBER_TYPO_CEILING) {
+  if (!nativeNumberIsStorableExactly(value, digits)) {
     return {
       ok: false,
-      // Says which kind of bound this is. The app does not know how far this
-      // program counts, and must not imply that it does.
-      error: `That looks like a slipped keypress. This field takes up to ${NATIVE_NUMBER_TYPO_CEILING} — it isn't a limit on the program.`,
+      // The honest sentence: this is what the FIELD can hold exactly, and it is
+      // not a claim about how far the program counts.
+      error: 'That number is too long to store exactly — check it and type the number the app showed.',
     }
   }
   return { ok: true, value }
@@ -308,10 +318,14 @@ export function reviewNativeProgressDraft(
 
 /** A new draft identity. The id a retry of the same save reuses. */
 export function newEntryKey(): string {
-  const uuid = globalThis.crypto?.randomUUID
-  if (uuid) return globalThis.crypto.randomUUID()
-  // jsdom and older WebViews: still unique enough for a per-draft key, and the
-  // writer validates the shape either way.
+  // `typeof`, not truthiness: the DOM lib types `randomUUID` as always present,
+  // so `if (crypto?.randomUUID)` is a condition TypeScript knows cannot be false
+  // (TS2774) while the older WebViews this runs on genuinely lack it.
+  if (typeof globalThis.crypto?.randomUUID === 'function') {
+    return globalThis.crypto.randomUUID()
+  }
+  // Still unique enough for a per-draft key, and the writer validates the shape
+  // either way.
   return `e-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
 }
 
@@ -408,24 +422,29 @@ export function correctionPreamble(original: NativeProgressObservation): string 
  * RESET, and the loss is named: the fields are cheap to retype (a number, a
  * date, two choices), so re-seeding is kinder than binding a half-typed entry to
  * a child who is no longer on screen. A save already CONFIRMED is a different
- * thing — it is bound to the child it was confirmed for and finishes — so the
- * sentence says that too rather than letting a receipt go missing.
+ * thing — it is bound to the child it was confirmed for — so the sentence says
+ * that too rather than letting a receipt go missing.
+ *
+ * **Both sentences are timeless**, because the notice outlives the moment it was
+ * written: an in-flight save finishes a second later, and *"is still finishing"*
+ * would then be a sentence on screen that is no longer true (review item 9). What
+ * stays true is where the confirmed entry goes, so that is what it says.
  */
 export function childSwitchNotice(
   previousChildName: string,
   hadDraft: boolean,
-  saveInFlight: boolean,
+  saveConfirmed: boolean,
 ): string | null {
-  if (!hadDraft && !saveInFlight) return null
+  if (!hadDraft && !saveConfirmed) return null
   const parts: string[] = []
   if (hadDraft) {
     parts.push(
       `Switched child — the entry you were typing for ${previousChildName} was cleared and not saved.`,
     )
   }
-  if (saveInFlight) {
+  if (saveConfirmed) {
     parts.push(
-      `A save you already confirmed for ${previousChildName} is still finishing and will be kept on ${previousChildName}'s record.`,
+      `Anything you had already confirmed for ${previousChildName} goes to ${previousChildName}'s record, not this one.`,
     )
   }
   return parts.join(' ')

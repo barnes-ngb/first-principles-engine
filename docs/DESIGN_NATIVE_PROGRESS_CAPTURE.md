@@ -100,16 +100,18 @@ form fields → reviewNativeProgressDraft() → preview card → Save
   across the feature's other modules by name.
 - **It re-validates what the form checked.** The UI rule decides what to *tell* a
   parent; the writer decides what may be *stored*. A caller arriving with a
-  fractional number, an impossible date or an unknown program is a bug, and a
-  writer that trusted its caller would record the bug.
+  fractional number, an impossible or future date, an unreadable entry stamp, an
+  unknown program or a cross-program correction is a bug, and a writer that
+  trusted its caller would record the bug.
 - **No photo, no AI call.** Nothing here uploads, scans or asks a model anything.
 
 ### Validation, and the ceiling we refuse to invent
 
 | Field | Rule | Why |
 |---|---|---|
-| number | whole, ≥ 1, ≤ 9999 | the ceiling is a **typo guard** (`4222` passes, `42222` does not), not a curriculum limit. This repo does not know how far either program counts, so the refusal says *"this field takes up to 9999 — it isn't a limit on the program"* and never implies otherwise |
-| date | a real calendar day, not in the future, not before 2000 | backdating is the normal case and is accepted without comment; a future day is the one value that cannot be a reading of something that happened. The floor is the same kind of typo guard (`0226-10-12`) |
+| number | whole, ≥ 1, and storable **exactly** (`Number.isSafeInteger` plus a digit round-trip) | there is **no upper limit on the program**. An earlier draft guessed a four-digit ceiling and called it a typo guard; review refused it, correctly — a bound nobody can derive is an invented program range however it is labelled, and a parent reading a real number off a real screen would have been told it was a typo. The one bound that survives is a property of the *field*: past `Number.MAX_SAFE_INTEGER` the value stored is not the value typed, and the message says exactly that. Leading zeros are read as the keypad artefact they are (`007` → 7) |
+| date (`observedOn`) | a real calendar day, and not in the future — **in both the form and the writer** | backdating is the normal case and is accepted without comment; a future day is the one value that cannot be a reading of something that happened, so the writer refuses it too rather than trusting the form. "Today" is `todayKey()`, the app's one definition of a local day (injectable, so tests pin it instead of depending on the wall clock). The form additionally refuses a year before 2000 — a UI typo guard, deliberately *not* re-made in the writer, which refuses only what is false rather than what looks odd |
+| `recordedAt` | must parse as a time | it is injectable, and a row whose entry stamp cannot be read would render an "Entered" date of nothing |
 | program / meaning / source | must be a known value | they come from selects today; a check that only guarded the typed fields would be a check that trusts the UI |
 
 ### Idempotency and the double tap
@@ -158,9 +160,19 @@ recorded yet."*
 *Correct this entry* seeds the form from a stored row and files the new row with
 `correctsObservationId`. The original is **kept and still rendered**, tagged *Later
 corrected*: what she believed on a Tuesday is a fact about that Tuesday even once
-she knows better. The writer checks the original **inside the transaction** — it
-must still exist and still belong to the same child — so a correction can neither
-dangle nor join two children's records through the one field nothing else validates.
+she knows better.
+
+The writer checks the original **inside the transaction**: it must still exist, still
+belong to the **same child**, and still be about the **same program**. The program
+check is there for the same reason as the child one and with the same blast radius —
+the program decides the unit the number is read in, so a cross-program "correction"
+would restate *lesson 42* as *peak 41* and leave both rows reading as though both had
+been observed. A different program is a different observation, which is a new entry
+rather than a fix. The form says so before she types: the Program field is locked
+while a correction is open, with the reason under it.
+
+So a correction can neither dangle, nor join two children's records, nor silently
+change what it is about — through the one field nothing else validates.
 
 ## 7. Child-switch verdict: RESET
 

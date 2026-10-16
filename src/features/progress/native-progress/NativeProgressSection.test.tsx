@@ -120,7 +120,9 @@ describe('before anything is written', () => {
   it('names the child and says planning has not moved', () => {
     render(<NativeProgressSection />)
     expect(screen.getByText(/Recording for/)).toHaveTextContent('Lincoln')
-    expect(screen.getByText(/changes nothing the app plans/i)).toBeInTheDocument()
+    expect(
+      screen.getByText('Saved for reference. This does not update plans, hours or skills.'),
+    ).toBeInTheDocument()
   })
 
   it('asks for the unit the chosen program uses', async () => {
@@ -412,6 +414,34 @@ describe('the history', () => {
     expect(saveMock.mock.calls[0][0]).toMatchObject({
       correctsObservationId: 'lincoln__e1',
       observation: { nativeNumber: 41 },
+    })
+  })
+
+  it('a correction stays with the program of the entry it fixes', async () => {
+    // Review item 7: the writer refuses a cross-program link, and the form says
+    // so before she types rather than after she taps Save. (That the Program
+    // field is also locked while correcting is pinned statically in
+    // `nativeProgressBoundary.source.test.ts`, which does not depend on how MUI
+    // renders a disabled select.)
+    const user = userEvent.setup()
+    observations = [row({ id: 'lincoln__e1', program: NativeProgressProgram.FastPhonics })]
+    render(<NativeProgressSection />)
+
+    await user.click(screen.getByRole('button', { name: 'Correct this entry' }))
+    expect(
+      await screen.findByText('A correction stays with the program of the entry it fixes.'),
+    ).toBeInTheDocument()
+
+    const field = screen.getByLabelText('Peak number')
+    await user.clear(field)
+    await user.type(field, '6')
+    await user.click(screen.getByRole('button', { name: 'Check this entry' }))
+    await user.click(await screen.findByRole('button', { name: 'Save this record' }))
+
+    await waitFor(() => expect(saveMock).toHaveBeenCalledTimes(1))
+    expect(saveMock.mock.calls[0][0]).toMatchObject({
+      correctsObservationId: 'lincoln__e1',
+      observation: { program: 'fastPhonics', nativeNumber: 6 },
     })
   })
 

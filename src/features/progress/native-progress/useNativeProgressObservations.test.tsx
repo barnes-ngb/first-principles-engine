@@ -51,7 +51,13 @@ vi.mock('../../../core/firebase/firestore', () => ({
   nativeProgressObservationsCollection: () => ({ __col: 'nativeProgressObservations' }),
 }))
 
-class Refused extends Error {}
+/**
+ * `vi.hoisted`, because this one is read when the FACTORY runs — i.e. during the
+ * import phase, before the module body — unlike `saveMock`, which is only read
+ * when the function the factory returns is called. A plain `const` here was a
+ * temporal-dead-zone error that stopped the whole file from loading.
+ */
+const { Refused } = vi.hoisted(() => ({ Refused: class Refused extends Error {} }))
 const saveMock = vi.fn()
 vi.mock('../../../core/firebase/nativeProgressWrites', () => ({
   NativeProgressRefused: Refused,

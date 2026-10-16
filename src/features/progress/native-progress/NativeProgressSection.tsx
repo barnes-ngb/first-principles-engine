@@ -91,7 +91,7 @@ import { useNativeProgressObservations } from './useNativeProgressObservations'
  */
 export default function NativeProgressSection() {
   const familyId = useFamilyId()
-  const { activeChildId, activeChild, isChildProfile } = useActiveChild()
+  const { activeChildId, activeChild, children, isChildProfile } = useActiveChild()
   // Seeded once per mount: the date a fresh draft starts on, and the latest day a
   // date field will accept. A clock read during every render would make "today"
   // move under an open draft.
@@ -127,11 +127,19 @@ export default function NativeProgressSection() {
   const [saveError, setSaveError] = useState<string | null>(null)
   const [switchNotice, setSwitchNotice] = useState<string | null>(null)
 
-  /** The family + child this surface is bound to, with the name for its notices. */
+  /**
+   * The family + child this surface's draft is bound to. Ids only.
+   *
+   * An earlier draft kept the bound child's NAME here too and refreshed it from
+   * an effect, which `react-hooks/set-state-in-effect` was right to refuse
+   * (review item 2). The name was never state: the switch notice needs the name
+   * of the child whose id this already holds, and `children` is on hand to
+   * resolve it at the moment the notice is written — one source of truth, no
+   * second copy to keep in step.
+   */
   const [bound, setBound] = useState({
     familyId: familyId ?? '',
     childId: activeChildId,
-    childName: activeChild?.name ?? 'this child',
   })
 
   const resetDraft = useCallback(() => {
@@ -152,12 +160,12 @@ export default function NativeProgressSection() {
   if (bound.familyId !== (familyId ?? '') || bound.childId !== activeChildId) {
     const hadDraft =
       !draftIsEmpty(draft, today) || pending !== null || correcting !== null
-    setSwitchNotice(childSwitchNotice(bound.childName, hadDraft, saving))
-    setBound({
-      familyId: familyId ?? '',
-      childId: activeChildId,
-      childName: activeChild?.name ?? 'this child',
-    })
+    // The name of the child the draft belonged to, resolved now from the family
+    // list rather than stored alongside the id.
+    const previousName =
+      children.find((c) => c.id === bound.childId)?.name ?? 'the other child'
+    setSwitchNotice(childSwitchNotice(previousName, hadDraft, saving))
+    setBound({ familyId: familyId ?? '', childId: activeChildId })
     setDraft(emptyNativeProgressDraft(today))
     setFieldErrors({})
     setPending(null)
@@ -181,16 +189,6 @@ export default function NativeProgressSection() {
   useEffect(() => {
     scopeRun.current += 1
   }, [scopeKey])
-
-  /** Keep the bound child's NAME current when only the name changes. */
-  useEffect(() => {
-    if (!activeChild) return
-    setBound((prev) =>
-      prev.childId === activeChild.id && prev.childName !== activeChild.name
-        ? { ...prev, childName: activeChild.name }
-        : prev,
-    )
-  }, [activeChild])
 
   const childName = activeChild?.name ?? 'this child'
   // The fallback is for a stored draft shape that outlived a program being
@@ -339,7 +337,17 @@ export default function NativeProgressSection() {
             editDraft({ program: e.target.value as NativeProgressDraft['program'] })
           }
           error={Boolean(fieldErrors.program)}
-          helperText={fieldErrors.program}
+          // Fixed while correcting (review item 7): a correction is a fix to one
+          // observation, and the program decides the unit its number is read in.
+          // The writer refuses a cross-program link anyway; locking the field is
+          // how a parent finds that out before she types, not after.
+          disabled={correcting !== null}
+          helperText={
+            fieldErrors.program ??
+            (correcting
+              ? 'A correction stays with the program of the entry it fixes.'
+              : undefined)
+          }
         >
           {NATIVE_PROGRAMS.map((program) => (
             <MenuItem key={program} value={program}>
@@ -439,8 +447,11 @@ export default function NativeProgressSection() {
             <Stack spacing={1.5}>
               <Typography variant="subtitle2">Check this before saving</Typography>
               <Typography variant="body1">{previewSentence(pending, childName)}</Typography>
+              {/* The source, named — not the notice again. It is already on the
+                  field she picked it in, and a confirm step that repeats two
+                  sentences she has just read is a confirm step she skims. */}
               <Typography variant="body2" color="text.secondary">
-                {NATIVE_SOURCE_LABEL[pending.source]} · {NATIVE_PROGRESS_SOURCE_NOTICE}
+                {NATIVE_SOURCE_LABEL[pending.source]}
               </Typography>
               {pending.note && (
                 <Typography variant="body2" color="text.secondary">

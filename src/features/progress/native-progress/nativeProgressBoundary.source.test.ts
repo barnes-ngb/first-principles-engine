@@ -123,15 +123,27 @@ describe('the feature touches one collection and no rail', () => {
     expect(source).toContain('saveNativeProgressObservation(')
   })
 
-  it('the two layers cannot drift on the typo guard', () => {
-    // The writer may not import from `src/features`, so the ceiling exists twice
-    // on purpose — the form's message and the storage limit. Two constants with
-    // one value need something that notices when only one of them moves, and
-    // reading them out of the source is cheaper than inverting the layering.
-    const formCeiling = code(RULE).match(/NATIVE_NUMBER_TYPO_CEILING = (\d+)/)?.[1]
-    const storedMax = code(WRITER).match(/NATIVE_NUMBER_STORED_MAX = (\d+)/)?.[1]
-    expect(formCeiling).toBeTruthy()
-    expect(storedMax).toBe(formCeiling)
+  it('neither layer invents a numeric ceiling', () => {
+    // Review item 5. The writer may not import from `src/features`, so the number
+    // rule exists in both layers; what must hold in both is that the ONLY upper
+    // bound is exact storage. A literal maximum reappearing in either is the
+    // regression this watches for — a guessed program range wearing a different
+    // name.
+    for (const file of [RULE, WRITER]) {
+      const source = code(file)
+      expect(source).toContain('Number.isSafeInteger')
+      // No named numeric bound on the native number...
+      expect(source).not.toMatch(/NATIVE_NUMBER\w*\s*=\s*\d/)
+      // ...and no inline comparison against one either.
+      expect(source).not.toMatch(/nativeNumber\s*>\s*\d/)
+      expect(source).not.toMatch(/\bvalue\s*>\s*\d/)
+    }
+  })
+
+  it('the Program field is locked while a correction is open', () => {
+    // The UI half of item 7, pinned here rather than in a render test because the
+    // assertion is about intent, not about how MUI marks a disabled select.
+    expect(code(SECTION)).toContain('disabled={correcting !== null}')
   })
 
   it('the pure rule module holds no Firestore and no React', () => {

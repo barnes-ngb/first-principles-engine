@@ -7,10 +7,11 @@
  * the app has never been able to hold the number a parent reads there. The two
  * places that look like they could — `activityConfigs.currentPosition` and the
  * learner model — are both *load-bearing for planning*: a position written there
- * moves what gets planned, what the Foundations projection believes, and what the
- * compliance fold counts. So a parent who simply wants to write down *"the app
- * said lesson 42 on Sunday"* had the choice of changing the plan or keeping it on
- * paper.
+ * moves what gets planned and what the Foundations projection believes (it does
+ * **not** move the compliance figures — `hoursContributions` folds day logs,
+ * `hours` and `hoursAdjustments`, and reads no curriculum position). So a parent
+ * who simply wants to write down *"the app said lesson 42 on Sunday"* had the
+ * choice of changing the plan or keeping it on paper.
  *
  * This collection is the third answer: a **plain observation**, isolated from
  * every one of those rails. Nothing reads it but the surface that shows it back.

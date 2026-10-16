@@ -19,9 +19,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
  * boundary across the feature's other modules.
  */
 
-const NATIVE_COLLECTION = { __col: 'nativeProgressObservations' } as const
-
-const collectionFor = vi.fn((_familyId: string) => NATIVE_COLLECTION)
+/**
+ * The collection stand-in carries the family it was resolved for, so an
+ * assertion can say *this write went to the native collection of the family the
+ * caller pinned* rather than merely *to some collection*.
+ */
+const collectionFor = vi.fn((familyId: string) => ({
+  __col: 'nativeProgressObservations',
+  __family: familyId,
+}))
 const docIdFor = vi.fn((childId: string, entryKey: string) => `${childId}__${entryKey}`)
 
 vi.mock('./firestore', () => ({
@@ -74,18 +80,22 @@ import {
 import {
   NATIVE_PROGRESS_CORRECTION_GONE,
   NATIVE_PROGRESS_CORRECTION_OTHER_CHILD,
+  NATIVE_PROGRESS_CORRECTION_OTHER_PROGRAM,
   NativeProgressRefused,
   saveNativeProgressObservation,
   type SaveNativeProgressArgs,
 } from './nativeProgressWrites'
 
 const ENTRY_KEY = 'draft-key-0001'
+/** Today, pinned — the writer refuses a future observation, so the clock cannot be real. */
+const TODAY = '2026-10-16'
 
 function args(overrides: Partial<SaveNativeProgressArgs> = {}): SaveNativeProgressArgs {
   return {
     familyId: 'fam-1',
     childId: 'lincoln',
     entryKey: ENTRY_KEY,
+    today: TODAY,
     recordedAt: '2026-10-16T14:00:00.000Z',
     observation: {
       program: NativeProgressProgram.Mathseeds,
@@ -112,7 +122,10 @@ describe('what it writes, and where', () => {
     const result = await saveNativeProgressObservation(args())
 
     expect(sets).toHaveLength(1)
-    expect(sets[0].ref.__col).toBe(NATIVE_COLLECTION)
+    expect(sets[0].ref.__col).toEqual({
+      __col: 'nativeProgressObservations',
+      __family: 'fam-1',
+    })
     expect(collectionFor).toHaveBeenCalledWith('fam-1')
     expect(result.alreadyRecorded).toBe(false)
   })
@@ -265,9 +278,14 @@ describe('refusals — nothing is written', () => {
     ['a fractional number', { nativeNumber: 4.5 }],
     ['zero', { nativeNumber: 0 }],
     ['a negative number', { nativeNumber: -3 }],
-    ['a number past the typo guard', { nativeNumber: 10000 }],
+    // The ONLY upper bound: a number that cannot be stored exactly. There is no
+    // invented program ceiling — see the "stores a big number" case below.
+    ['a number past exact integer storage', { nativeNumber: Number.MAX_SAFE_INTEGER + 2 }],
+    ['infinity', { nativeNumber: Number.POSITIVE_INFINITY }],
+    ['not a number at all', { nativeNumber: Number.NaN }],
     ['a date that is not a day', { observedOn: '2026-02-30' }],
     ['a date of the wrong shape', { observedOn: '12/10/2026' }],
+    ['a day that has not happened', { observedOn: '2026-10-17' }],
     ['an unknown program', { program: 'readingEggs' }],
     ['an unknown meaning', { meaning: 'nearly' }],
     ['an unknown source', { source: 'a friend' }],
@@ -286,6 +304,44 @@ describe('refusals — nothing is written', () => {
       expect(sets).toHaveLength(0)
     })
   }
+
+  it('stores a number far above any plausible lesson — there is no invented ceiling', async () => {
+    const base = args()
+    await saveNativeProgressObservation({
+      ...base,
+      observation: { ...base.observation, nativeNumber: 250_000 },
+    })
+    expect(sets).toHaveLength(1)
+    expect(sets[0].data.nativeNumber).toBe(250_000)
+  })
+
+  it('accepts today and any past day', async () => {
+    const base = args()
+    for (const observedOn of [TODAY, '2026-01-01', '2019-06-30']) {
+      sets = []
+      stored = {}
+      await saveNativeProgressObservation({
+        ...base,
+        entryKey: `key-${observedOn}`,
+        observation: { ...base.observation, observedOn },
+      })
+      expect(sets[0].data.observedOn).toBe(observedOn)
+    }
+  })
+
+  it('refuses an entry time it cannot read', async () => {
+    await expect(
+      saveNativeProgressObservation(args({ recordedAt: 'half past tuesday' })),
+    ).rejects.toThrow(NativeProgressRefused)
+    expect(sets).toHaveLength(0)
+  })
+
+  it('refuses a today it cannot read rather than storing against no bound', async () => {
+    await expect(saveNativeProgressObservation(args({ today: 'not-a-day' }))).rejects.toThrow(
+      NativeProgressRefused,
+    )
+    expect(sets).toHaveLength(0)
+  })
 
   it('surfaces a failed write as a failure, having written nothing', async () => {
     transactionThrows = new Error('offline')
@@ -332,6 +388,35 @@ describe('corrections', () => {
       saveNativeProgressObservation(args({ correctsObservationId: 'london__original' })),
     ).rejects.toThrow(NATIVE_PROGRESS_CORRECTION_OTHER_CHILD)
     expect(sets).toHaveLength(0)
+  })
+
+  it('refuses a correction that moves the entry to another program', async () => {
+    // Review item 7. The program decides the unit the number is read in, so a
+    // cross-program "correction" would restate lesson 42 as peak 41 and leave
+    // both rows reading as though both had been observed.
+    stored['lincoln__original'] = {
+      ...original,
+      program: NativeProgressProgram.FastPhonics,
+    }
+    await expect(
+      saveNativeProgressObservation(args({ correctsObservationId: 'lincoln__original' })),
+    ).rejects.toThrow(NATIVE_PROGRESS_CORRECTION_OTHER_PROGRAM)
+    expect(sets).toHaveLength(0)
+  })
+
+  it('allows a correction within the same program', async () => {
+    stored['lincoln__original'] = { ...original }
+    const base = args({ correctsObservationId: 'lincoln__original' })
+    await saveNativeProgressObservation({
+      ...base,
+      observation: { ...base.observation, nativeNumber: 41 },
+    })
+    expect(sets).toHaveLength(1)
+    expect(sets[0].data).toMatchObject({
+      program: NativeProgressProgram.Mathseeds,
+      nativeNumber: 41,
+      correctsObservationId: 'lincoln__original',
+    })
   })
 
   it('refuses an entry that corrects itself', async () => {

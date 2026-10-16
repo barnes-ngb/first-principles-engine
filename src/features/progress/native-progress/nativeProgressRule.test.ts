@@ -12,7 +12,6 @@ import {
   draftIsEmpty,
   emptyNativeProgressDraft,
   enteredOnLabel,
-  NATIVE_NUMBER_TYPO_CEILING,
   NATIVE_PROGRESS_NO_PLANNING_NOTICE,
   newEntryKey,
   NOTE_MAX_LENGTH,
@@ -91,23 +90,33 @@ describe('the number', () => {
     }
   })
 
-  it('refuses a slipped keypress WITHOUT claiming a program limit', () => {
-    const result = parseNativeNumber(
-      String(NATIVE_NUMBER_TYPO_CEILING + 1),
-      NativeProgressProgram.Mathseeds,
-    )
-    expect(result.ok).toBe(false)
-    if (result.ok) return
-    // The honesty case: this repo does not know how far Mathseeds counts, so the
-    // refusal must not imply it does.
-    expect(result.error).toContain("isn't a limit on the program")
-    expect(result.error).not.toMatch(/this program has|lessons in total|the last lesson/i)
+  it('reads leading zeros as the keypad artefact they are', () => {
+    expect(parseNativeNumber('007', NativeProgressProgram.Mathseeds)).toEqual({
+      ok: true,
+      value: 7,
+    })
   })
 
-  it('accepts a number far above any plausible lesson, up to the typo guard', () => {
-    expect(
-      parseNativeNumber(String(NATIVE_NUMBER_TYPO_CEILING), NativeProgressProgram.FastPhonics),
-    ).toEqual({ ok: true, value: NATIVE_NUMBER_TYPO_CEILING })
+  it('accepts a number far above any plausible lesson — no invented ceiling', () => {
+    // The review's item 5, as an assertion: the app does not know how far either
+    // program counts, so a real number read off a real screen is never refused as
+    // a typo, however unlikely it looks.
+    for (const big of ['9999', '10000', '250000', String(Number.MAX_SAFE_INTEGER)]) {
+      expect(parseNativeNumber(big, NativeProgressProgram.Mathseeds)).toEqual({
+        ok: true,
+        value: Number(big),
+      })
+    }
+  })
+
+  it('refuses only what cannot be stored exactly, and says that is what it is', () => {
+    const tooLong = '9007199254740993' // MAX_SAFE_INTEGER + 2, which rounds
+    const result = parseNativeNumber(tooLong, NativeProgressProgram.Mathseeds)
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error).toContain('too long to store exactly')
+    // It must not imply anything about the program's range.
+    expect(result.error).not.toMatch(/this program|lessons in total|the last lesson|limit/i)
   })
 })
 
@@ -247,11 +256,12 @@ describe('the sentences', () => {
     expect(savedNotice(observation(), 'Lincoln')).toContain('Nothing else changed.')
   })
 
-  it('says, in words, that planning has not moved', () => {
-    expect(NATIVE_PROGRESS_NO_PLANNING_NOTICE).toMatch(/changes nothing/i)
-    for (const rail of ['lessons', 'hours', 'skills']) {
-      expect(NATIVE_PROGRESS_NO_PLANNING_NOTICE).toContain(rail)
-    }
+  it('says, in one short line, that planning has not moved', () => {
+    expect(NATIVE_PROGRESS_NO_PLANNING_NOTICE).toBe(
+      'Saved for reference. This does not update plans, hours or skills.',
+    )
+    // Short enough to be read rather than skimmed (review item 10).
+    expect(NATIVE_PROGRESS_NO_PLANNING_NOTICE.length).toBeLessThan(90)
   })
 
   it('shows the entry day in local terms, not sliced off a UTC stamp', () => {
@@ -267,8 +277,16 @@ describe('the sentences', () => {
   it('names the loss when the child changes under a draft', () => {
     expect(childSwitchNotice('Lincoln', false, false)).toBeNull()
     expect(childSwitchNotice('Lincoln', true, false)).toContain('was cleared and not saved')
-    // A confirmed save is bound to the child it was confirmed for and finishes.
+    // A confirmed save is bound to the child it was confirmed for.
     expect(childSwitchNotice('Lincoln', false, true)).toContain("Lincoln's record")
+  })
+
+  it('states the confirmed save timelessly — the notice outlives the moment', () => {
+    // Review item 9: the notice stays on screen after the save has long finished,
+    // so it may not claim anything about what is happening right now.
+    const notice = childSwitchNotice('Lincoln', true, true) ?? ''
+    expect(notice).toContain("Lincoln's record")
+    expect(notice).not.toMatch(/still finishing|in progress|is saving|right now/i)
   })
 })
 
