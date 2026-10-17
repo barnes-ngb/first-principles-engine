@@ -41,6 +41,7 @@ import type {
   LearnerReviewSession,
   LessonCard,
   MonthlyReview,
+  NativeProgressObservation,
   PlannerConversation,
   ScanRecord,
   SightWordProgress,
@@ -748,6 +749,53 @@ export const watchLibraryCollection = (
   collection(db, `families/${familyId}/watchLibrary`).withConverter(
     watchVideoConverter,
   ) as CollectionReference<WatchVideo>
+
+// ── Native program progress observations (FEAT-241) ─────────────
+
+const nativeProgressObservationConverter: FirestoreDataConverter<NativeProgressObservation> = {
+  toFirestore: (data) => stripUndefined(data as unknown as Record<string, unknown>),
+  fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions) => {
+    const data = snapshot.data(options) as NativeProgressObservation
+    return { ...data, id: snapshot.id }
+  },
+}
+
+/**
+ * What a parent read in Mathseeds / Fast Phonics, as she read it (FEAT-241).
+ *
+ * **Isolated by design.** Nothing here feeds planning, the learner model, hours,
+ * XP, `activityConfigs.currentPosition` or any skill record — the one writer is
+ * `nativeProgressWrites.ts` and the one reader is the Curriculum surface that
+ * shows the rows back. A number a parent is unsure about can be recorded here
+ * precisely because recording it changes nothing.
+ *
+ * **Append-only.** A row is written once with `setDoc` and never updated; a
+ * correction is a new row carrying `correctsObservationId`. The id is
+ * `{childId}__{entryKey}` (`nativeProgressObservationDocId`) so that a retry of
+ * the same confirmed save is idempotent rather than a second row.
+ *
+ * Rows are read with an equality filter on `childId` and sorted in memory, so no
+ * composite index is required (`firestore.indexes.json` is untouched).
+ * Path: families/{familyId}/nativeProgressObservations/{childId}__{entryKey}
+ */
+export const nativeProgressObservationsCollection = (
+  familyId: string,
+): CollectionReference<NativeProgressObservation> =>
+  collection(db, `families/${familyId}/nativeProgressObservations`).withConverter(
+    nativeProgressObservationConverter,
+  ) as CollectionReference<NativeProgressObservation>
+
+/**
+ * The document id for one observation: the child, then the draft it came from.
+ *
+ * The child is in the id so a mis-filed row shows up in a console listing rather
+ * than only inside the document; the `entryKey` is what makes a retry land on the
+ * same document.
+ */
+export const nativeProgressObservationDocId = (
+  childId: string,
+  entryKey: string,
+): string => `${childId}__${entryKey}`
 
 // ── Error Log (ARCH-11 client error reporting) ──────────────────
 

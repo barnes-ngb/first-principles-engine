@@ -271,6 +271,17 @@ describe('the delete revalidates against live data (UX-394, Codex round 1)', () 
     expect(result.failed[0].error).toContain('now referenced by')
   })
 
+  it.each(['doc-id', 'child-field'])('preserves a child with a native progress %s reference', async (kind) => {
+    childDocs = [REAL_LINCOLN, childDoc('ghost-a', 'Lincoln', '2025-06-01T00:00:00.000Z')]
+    references.add(`nativeProgressObservations:${kind}:ghost-a`)
+
+    const result = await deleteGhostChildDocs('family-1', ['ghost-a'])
+
+    expect(deleted).toEqual([])
+    expect(result.deleted).toEqual([])
+    expect(result.failed[0].error).toContain('nativeProgressObservations')
+  })
+
   it('refuses a document that is no longer a duplicate of another child', async () => {
     // A rename in another tab can make the document the canonical child of a
     // name of its own. The delete re-derives the split rather than trusting the
