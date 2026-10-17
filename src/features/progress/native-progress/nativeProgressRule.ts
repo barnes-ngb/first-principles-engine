@@ -84,7 +84,6 @@ export const NATIVE_PROGRAMS: readonly NativeProgressProgram[] = Object.values(
   NativeProgressProgram,
 )
 export const NATIVE_MEANINGS: readonly NativeProgressMeaning[] = Object.values(
-  NOTE_MAX_LENGTH,
   NativeProgressMeaning,
 )
 export const NATIVE_SOURCES: readonly NativeProgressSource[] = Object.values(
