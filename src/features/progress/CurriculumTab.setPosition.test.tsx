@@ -111,6 +111,11 @@ vi.mock('firebase/firestore', () => ({
 vi.mock('../../core/firebase/firestore', () => ({
   scansCollection: vi.fn(() => ({})),
   nativeProgressObservationsCollection: vi.fn(() => ({})),
+  // FEAT-242: the tab also renders `ProgramCompletionPanel`, whose two
+  // subscriptions resolve these on mount. Added so this suite keeps testing the
+  // set-lesson door and nothing else; the panel has its own tests.
+  programCompletionStateCollection: vi.fn(() => ({})),
+  programCompletionEventsCollection: vi.fn(() => ({})),
 }))
 
 import CurriculumTab from './CurriculumTab'

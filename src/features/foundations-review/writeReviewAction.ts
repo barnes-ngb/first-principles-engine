@@ -24,6 +24,7 @@
 import { setDoc } from 'firebase/firestore'
 import type { DocumentReference } from 'firebase/firestore'
 
+import { updateLearnerModelInTransaction } from '../../core/firebase/modelTransaction'
 import { promotedModelStatus } from '../../core/foundations/modelStatus'
 import {
   applyReviewActionToModel,
@@ -68,18 +69,31 @@ export async function writeReviewAction(
 }
 
 /**
- * Apply one confirmed action to `base` and persist it, returning the next model.
- * The convenience form for callers that hold the model as plain state (the
- * Foundations tab reads it from the `useLearnerModel` snapshot); the Review-Chat
- * hook composes the two halves itself so it can thread its own `modelRef`.
+ * Apply one confirmed action and persist it — **transactionally** (FEAT-242),
+ * returning the model the document now holds.
+ *
+ * Both callers hold the model as plain client state: the Foundations tab from
+ * the `useLearnerModel` snapshot, the Review-Chat hook from a copy it loaded
+ * when the session opened. Applying against that copy and writing the result was
+ * a lost update with a long window — the Review-Chat copy can be minutes old,
+ * and `conceptStates.<id>.evidence` is an array, which `{ merge: true }`
+ * replaces wholesale. A confirmed program completion, a quest close or an eval
+ * landing in that window was dropped from the one concept the parent happened to
+ * be attesting.
+ *
+ * So the action is **recomputed inside the transaction**, against the stored
+ * model, and `fallbackBase` is used only when the document genuinely does not
+ * exist. The caller must update its own cache from the RESOLVED value, never
+ * before the commit: the callback can run more than once.
  */
 export async function applyAndWriteReviewAction(
   modelRef: DocumentReference<LearnerModel>,
-  base: LearnerModel,
+  fallbackBase: LearnerModel,
   action: FoundationsReviewAction,
   nowIso: string,
 ): Promise<LearnerModel> {
-  const applied = applyReviewActionToModel(base, action, nowIso)
-  await writeReviewAction(modelRef, applied)
-  return applied.model
+  return updateLearnerModelInTransaction<LearnerModel>(modelRef, (stored) => {
+    const applied = applyReviewActionToModel(stored ?? fallbackBase, action, nowIso)
+    return { merge: buildReviewActionMerge(applied), result: applied.model }
+  })
 }

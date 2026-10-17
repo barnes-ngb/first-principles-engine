@@ -13,16 +13,16 @@
 // The invariant-protected `skillSnapshots.conceptualBlocks[]` steering path is not
 // read or written here — this is a separate, learner-model-only mechanism.
 
-import { doc, getDoc, setDoc } from 'firebase/firestore'
+import { doc } from 'firebase/firestore'
 
 import { learnerModelsCollection } from '../../core/firebase/firestore'
+import { updateLearnerModelInTransaction } from '../../core/firebase/modelTransaction'
 import { promotedModelStatus } from '../../core/foundations/modelStatus'
 import {
   applyQuestResultsToModel,
   computeQuestConceptResults,
 } from '../../core/foundations/questTargeting'
 import type { AnsweredConceptQuestion } from '../../core/foundations/questTargeting'
-import type { LearnerModel } from '../../core/types/learnerModel'
 
 /**
  * Fold a finished session's targeted-concept results into the child's learner
@@ -52,25 +52,35 @@ export async function syncQuestResultsToModel(
     if (results.length === 0) return // no selected concept was probed — nothing to write
 
     const modelRef = doc(learnerModelsCollection(familyId), childId)
-    const modelSnap = await getDoc(modelRef)
-    if (!modelSnap.exists()) return // no seeded model yet — the Review Chat feeds it first
 
-    const model = modelSnap.data() as LearnerModel
-    const { model: next, changedConceptIds } = applyQuestResultsToModel(model, results, sessionId, nowIso)
+    // One transaction, results folded INSIDE it (FEAT-242). This writer sent the
+    // WHOLE model as its merge payload, so the read-then-write gap could revert
+    // every concept at once: anything landing in that window — a guided eval, a
+    // position sync, a confirmed program completion — was overwritten by the
+    // copy this close had read moments earlier, with no error anywhere. The
+    // payload shape is unchanged; only its atomicity is.
+    await updateLearnerModelInTransaction<void>(modelRef, (model) => {
+      if (!model) return { result: undefined } // no seeded model — Review Chat feeds it first
 
-    // A quest write-back that moved concept state marks the LLM synthesis stale
-    // (FEAT-57, D4) so the next beat regenerates whatMattersNext/narrative. Only
-    // when something actually changed — evidence-only appends don't invalidate it.
-    if (changedConceptIds.length > 0) next.synthesisStaleAt = nowIso
+      const { model: next, changedConceptIds } = applyQuestResultsToModel(
+        model,
+        results,
+        sessionId,
+        nowIso,
+      )
 
-    // UX-322 — a quest result is real evidence even when it moved no state
-    // (upgrade-only), so promote a model still stamped `no-data`. Shared rule.
-    const promoted = promotedModelStatus(next)
-    if (promoted) next.status = promoted
+      // A quest write-back that moved concept state marks the LLM synthesis stale
+      // (FEAT-57, D4) so the next beat regenerates whatMattersNext/narrative. Only
+      // when something actually changed — evidence-only appends don't invalidate it.
+      if (changedConceptIds.length > 0) next.synthesisStaleAt = nowIso
 
-    // Merge-only, JSON-scrubbed to drop any `undefined` (Firestore rejects them),
-    // exactly like the diag seeder and the other model writers.
-    await setDoc(modelRef, JSON.parse(JSON.stringify(next)), { merge: true })
+      // UX-322 — a quest result is real evidence even when it moved no state
+      // (upgrade-only), so promote a model still stamped `no-data`. Shared rule.
+      const promoted = promotedModelStatus(next)
+      if (promoted) next.status = promoted
+
+      return { merge: next, result: undefined }
+    })
   } catch (err) {
     // Never let a model write-back break the quest close — it is additive.
     console.warn('[quest] Failed to write quest results back to learner model', err)

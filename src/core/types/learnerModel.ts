@@ -49,6 +49,20 @@ export const EvidenceKind = {
   // `curriculumPosition` (§12.1) is added additively here — now that both are emitted.
   Attestation: 'attestation',
   CurriculumPosition: 'curriculumPosition',
+  /**
+   * Slice FEAT-242 — a parent CONFIRMED a whole external program is finished,
+   * and the reviewed completion mapping turned that one confirmation into
+   * coverage evidence per concept.
+   *
+   * Deliberately its own kind rather than a `curriculumPosition`: that kind is
+   * load-bearing for the Fast Phonics divisor conflict rule
+   * (`maxWitnessedNativePosition` reads it as a *witnessed position*), and a
+   * completion is not a position — it is a statement about the whole program.
+   * Keeping it separate is what lets the position sync, the completion
+   * contribution and a parent's word coexist on one concept without any of them
+   * being read as another.
+   */
+  ProgramCompletionCoverage: 'programCompletionCoverage',
 } as const
 export type EvidenceKind = (typeof EvidenceKind)[keyof typeof EvidenceKind]
 
@@ -107,6 +121,94 @@ export interface EvidenceRef {
    * Absent on refs written before FEAT-66; readers fall back to `entry.state`.
    */
   readState?: ConceptStateKind
+  // ── `programCompletionCoverage` structured fields (FEAT-242) ─────────
+  /**
+   * Lifecycle of the ref itself. Absent ⇒ active (every pre-FEAT-242 ref).
+   *
+   * A withdrawn contribution is marked `'superseded'` and **kept**: what a
+   * parent confirmed in October is a fact about October even once she corrects
+   * it. Every reader that forms a judgment filters on this
+   * (`activeEvidence`, shared module), so a superseded ref is history and
+   * nothing else.
+   */
+  status?: 'active' | 'superseded'
+  supersededAt?: string
+  /** Why it was superseded — the parent's own correction reason. */
+  supersededReason?: string
+  /**
+   * Which completion confirmation owns this ref: `{program}:{entryKey}`.
+   *
+   * **The ownership key for withdrawal.** Never the `source` string: two
+   * confirmations of the same program are two separate facts, and withdrawing
+   * one must not touch the other's refs.
+   */
+  completionId?: string
+  /** The reviewed completion mapping version that produced this ref. */
+  mappingVersion?: number
+  /** How much of the concept this claim speaks to (`direct` / `partial`). */
+  coverageQualifier?: 'direct' | 'partial'
+  /**
+   * The highest state a COVERAGE claim asserts it can support (FEAT-242 repair),
+   * stamped by the two writers whose claim can be weaker than the `forming` cap:
+   * the workbook position sync (always the cap) and a Review-Chat `covered`
+   * action (whatever the parent's proposal clamped to — `frontier` and `not-yet`
+   * are both reachable).
+   *
+   * **Not `readState`, and not `entry.state`.** Both of those record where a
+   * concept LANDED after every writer had its say; this records what the claim
+   * itself is worth, which is the only thing that can answer "does anything still
+   * support this state?" once a completion contribution is withdrawn from above
+   * it. Absent on refs written before the field existed — see
+   * `coverageSupportedState` in the shared module for exactly how those read.
+   */
+  coverageCeiling?: ConceptStateKind
+  /** True only when THIS ref actually moved the concept's state. */
+  promoted?: boolean
+  /**
+   * True while the owning confirmation HOLDS the concept's promotion — carried
+   * forward across an idempotent re-apply and a mapping-version upgrade, where
+   * the individual ref moves nothing because the confirmation itself already
+   * raised the concept.
+   *
+   * `promoted` is about this one write; this is about the claim. A withdrawal
+   * asks the second question, so a re-applied confirmation still knows it owns
+   * what it raised.
+   */
+  ownsPromotion?: boolean
+  /** Why it did not, when it did not — shown on tap, never inferred later. */
+  withheldReason?: string
+  /**
+   * The state the concept held immediately before this ref promoted it — the
+   * withdrawal BASELINE.
+   *
+   * Recorded at write time because it cannot be recovered afterwards: a
+   * withdrawal that guessed (or took the highest state any historical ref ever
+   * asserted) would let a stale `solid` outrank a later calibrated eval. With
+   * the baseline stored, a retraction returns the concept to the basis it
+   * actually had, and where no baseline exists the entry is flagged rather than
+   * guessed at.
+   */
+  priorState?: ConceptStateKind
+  /**
+   * The ORIGINAL baseline of the owning confirmation, carried across every
+   * re-apply of it.
+   *
+   * `priorState` describes the write that produced *this* ref; once a
+   * confirmation has raised a concept, a later ref of the same confirmation
+   * sees the already-raised state and would record `forming` as its "prior".
+   * This is the state before that confirmation touched the concept at all, so a
+   * withdrawal after any number of re-applies still knows where to return to.
+   */
+  baselineState?: ConceptStateKind
+  /**
+   * When the row was WRITTEN, where that differs from `observedAt`.
+   *
+   * A completion's `observedAt` is the day the parent observed the program
+   * finished — not the day she typed it in — so that a later evaluation stays
+   * later than a backdated completion. The save clock is kept here so the export
+   * can show both.
+   */
+  recordedAt?: string
 }
 
 /**
@@ -132,6 +234,23 @@ export interface ConceptStateEntry {
    * to false once a later eval agrees with the standing state.
    */
   needsReconcile?: boolean
+  /**
+   * Set (FEAT-242) when a withdrawn completion contribution's prior basis could
+   * not be reconstructed — the stored state may have been raised by the claim
+   * that has just been retracted, and nothing records what it was before.
+   *
+   * The state is left exactly as it is (history is not rewritten) and this flag
+   * makes it read conservatively instead: every advice consumer reads the
+   * concept through `effectiveConceptState`, which caps a flagged entry at the
+   * working edge until a parent's word or a diagnostic settles it.
+   *
+   * **Deliberately not `needsReconcile`.** That flag means one other specific
+   * thing — an evaluation disagreeing with a parent's attestation — and is
+   * resolved by one specific act (the parent giving their word again). Reusing
+   * it would make the Foundations tab offer "keep my word" for a question
+   * nobody asked, which is UX-322's field-meaning drift arriving again.
+   */
+  completionReviewNeeded?: boolean
 }
 
 /**

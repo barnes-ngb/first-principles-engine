@@ -83,7 +83,12 @@ describe('the feature touches one collection and no rail', () => {
     })
   }
 
-  it('the writer imports exactly three things from firestore.ts', () => {
+  it('the writer imports exactly four things from firestore.ts', () => {
+    // Three since FEAT-241, and ONE more with FEAT-242: the correction-marker
+    // collection. The marker is the only thing a completion transaction can read
+    // BY ID to learn that a row it is about to cite has been corrected, and a
+    // transaction cannot run the query that would find the correction instead.
+    // The list stays exhaustive on purpose — a fifth name is a visible diff here.
     const source = code(WRITER)
     const match = source.match(/import\s*\{([^}]*)\}\s*from\s*'\.\/firestore'/)
     expect(match).toBeTruthy()
@@ -94,6 +99,7 @@ describe('the feature touches one collection and no rail', () => {
       .sort()
     expect(names).toEqual([
       'db',
+      'nativeProgressCorrectionMarkersCollection',
       'nativeProgressObservationDocId',
       'nativeProgressObservationsCollection',
     ])
@@ -105,7 +111,68 @@ describe('the feature touches one collection and no rail', () => {
       expect(source.includes(verb), `${verb} should not appear`).toBe(false)
     }
     expect(source).toContain('runTransaction(')
-    expect(source.match(/tx\.set\(/g)).toHaveLength(1)
+    // The row, and the correction marker that must be written with it (FEAT-242
+    // — once on the fresh-save path, once on the retry path that finds the row
+    // already there). Nothing else: the authorized completion revocation adds
+    // its writes through the shared coordinator's `commit`, not a lane here.
+    expect(source.match(/tx\.set\(/g)).toHaveLength(3)
+    expect(source).toContain('tx.set(ref, row)')
+    expect(source.match(/correctionMarkerId\(/g)?.length ?? 0).toBeGreaterThanOrEqual(2)
+  })
+
+  it('a correction writes its marker even when no completion cites the row', () => {
+    // FEAT-242 blocking finding 1: the marker is the only thing a completion
+    // transaction can read, BY ID, to learn that a row it is about to cite has
+    // been corrected. Writing it only when a completion already exists would
+    // leave every future confirmation citing a superseded row.
+    const source = code(WRITER)
+    const markerWrite = source.indexOf('tx.set(doc(markers, correctionMarkerId(')
+    const revokeCommit = source.indexOf('revoke?.commit(tx)')
+    expect(markerWrite).toBeGreaterThan(-1)
+    // ...and it is not nested inside the revocation branch.
+    expect(markerWrite).toBeLessThan(revokeCommit)
+  })
+
+  it('the ONE authorized integration is the completion coordinator, and it is planned before any write', () => {
+    // FEAT-242. The isolation above is still the rule for an ordinary report;
+    // this is the single, named exception, and it is pinned rather than trusted:
+    //
+    //   - it goes through the shared coordinator, so the model write and the
+    //     report validation are not re-implemented here;
+    //   - the PLAN (which does the reads) is called before the row write, and
+    //     the COMMIT (which does the writes) after it, because Firestore
+    //     requires every read in a transaction to precede every write; and
+    //   - it is reached only from the correction branch.
+    const source = code(WRITER)
+    expect(source).toContain('planCompletionRevokeForCorrection(tx, {')
+    expect(source).toContain('revoke?.commit(tx)')
+    // TWO call sites, and no more: the fresh-save correction branch, and the
+    // retry of a correction whose answer was lost — where the coordinator is
+    // asked again because what the first attempt did to a completion is
+    // unknown, and the retry's receipt may not guess. Each is reached only from
+    // a correction path, and each plans (reads) before its own writes.
+    const planSites = [
+      ...source.matchAll(/planCompletionRevokeForCorrection\(tx, \{/g),
+    ].map((m) => m.index ?? -1)
+    expect(planSites).toHaveLength(2)
+    const [retryPlanAt, freshPlanAt] = planSites
+    const rowWriteAt = source.indexOf('tx.set(ref, row)')
+    const committedAt = source.indexOf('revoke?.commit(tx)')
+    const retryCommittedAt = source.indexOf('retryRevoke?.commit(tx)')
+    expect(rowWriteAt).toBeGreaterThan(freshPlanAt)
+    expect(committedAt).toBeGreaterThan(rowWriteAt)
+    expect(retryCommittedAt).toBeGreaterThan(retryPlanAt)
+    // ...and neither is on the plain-save path: the fresh one is inside the
+    // correction branch, the retry one inside its `storedCorrects` guard.
+    const correctionBranchAt = source.indexOf('if (correctsObservationId) {')
+    const storedCorrectsAt = source.indexOf('const storedCorrects =')
+    expect(correctionBranchAt).toBeGreaterThan(-1)
+    expect(freshPlanAt).toBeGreaterThan(correctionBranchAt)
+    expect(retryPlanAt).toBeGreaterThan(storedCorrectsAt)
+    expect(retryPlanAt).toBeLessThan(correctionBranchAt)
+    // The retry path reads the program off the STORED row, never off the
+    // caller's payload: a retry's payload is not the record.
+    expect(source).toContain('stored?.program ?? observation.program')
   })
 
   it('the hook writes nothing itself — the writer is the one lane', () => {

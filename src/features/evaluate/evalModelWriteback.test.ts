@@ -11,9 +11,29 @@ vi.mock('firebase/firestore', () => ({
   doc: vi.fn(() => ({ __ref: true })),
   getDoc: (...args: unknown[]) => getDoc(...args),
   setDoc: (...args: unknown[]) => setDoc(...args),
+  // FEAT-242 — a working fake transaction whose get/set route to the same spies
+  // these tests already assert on (see `workbookPositionSync.test.ts`).
+  runTransaction: async (
+    _db: unknown,
+    fn: (tx: {
+      get: (ref: unknown) => unknown
+      set: (ref: unknown, data: unknown, opts?: unknown) => void
+    }) => unknown,
+  ) => {
+    const writes: unknown[] = []
+    const out = await fn({
+      get: (ref: unknown) => getDoc(ref),
+      set: (ref: unknown, data: unknown, opts?: unknown) => {
+        writes.push(setDoc(ref, data, opts))
+      },
+    })
+    await Promise.all(writes)
+    return out
+  },
 }))
 
 vi.mock('../../core/firebase/firestore', () => ({
+  db: {},
   learnerModelsCollection: () => ({}),
 }))
 

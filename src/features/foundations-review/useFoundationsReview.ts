@@ -28,6 +28,8 @@ import { downscaleImage } from '../../core/utils/downscaleImage'
 import { buildUploadMessageContent } from './uploadImageMessage'
 import { UploadTimeoutError, withTimeout } from './uploadTimeout'
 import {
+  activeEvidence,
+  effectiveConceptState,
   fastPhonicsBridge,
   FOUNDATION_NODE_MAP,
   foundationNodesForDomain,
@@ -38,12 +40,9 @@ import type {
   LearnerModel,
   ReviewSessionMessage,
 } from '../../core/types/learnerModel'
-import {
-  applyReviewActionToModel,
-  parseFoundationsReviewActions,
-} from './foundationsReviewActions'
+import { parseFoundationsReviewActions } from './foundationsReviewActions'
 import type { FoundationsReviewAction } from './foundationsReviewActions'
-import { writeReviewAction } from './writeReviewAction'
+import { applyAndWriteReviewAction } from './writeReviewAction'
 import { groundCoveredProposals } from './uploadGrounding'
 
 /** How many concepts the agenda carries — enough for a ~10-min walk, bounded tokens. */
@@ -147,8 +146,8 @@ function buildAgenda(model: LearnerModel | null, domain: FoundationDomain) {
       conceptId: id,
       name: node?.kidName ?? id,
       description: node?.parentDescription ?? '',
-      state: entry?.state ?? 'not-yet',
-      evidence: (entry?.evidence ?? []).map((e) => e.note).slice(0, 3),
+      state: effectiveConceptState(entry),
+      evidence: activeEvidence(entry?.evidence).map((e) => e.note).slice(0, 3),
     }
   })
   return { domain, subjectLabel: domain, concepts, bridges: bridgesForDomain(domain) }
@@ -271,10 +270,28 @@ export function useFoundationsReview({ familyId, childId, domain }: Args) {
 
       const existing = sessionSnap.exists() ? sessionSnap.data().messages : []
       if (existing && existing.length > 0) {
-        // Resume: show the conversation, re-derive staging from the last assistant.
-        setMessages(existing)
-        messagesRef.current = existing
-        const lastAssistant = [...existing].reverse().find((m) => m.role === 'assistant')
+        // The conversation is history, but its agenda must describe the model
+        // loaded now: a completion may have been withdrawn since this session.
+        // The server reads the FIRST marker, so appending a new one is not enough.
+        const marker = /\[FOUNDATIONS_REVIEW\][\s\S]*?\[\/FOUNDATIONS_REVIEW\]/g
+        const payload = `[FOUNDATIONS_REVIEW]${JSON.stringify(buildAgenda(model, domain))}[/FOUNDATIONS_REVIEW]`
+        let refreshedMarker = false
+        const refreshed: ReviewSessionMessage[] = existing.map((m: ReviewSessionMessage) => {
+          if (m.role !== 'user' || !m.content.includes('[FOUNDATIONS_REVIEW]')) return m
+          const content = m.content.replace(marker, () => {
+            refreshedMarker = true
+            return payload
+          })
+          return { ...m, content }
+        })
+        if (!refreshedMarker) {
+          refreshed.unshift({ role: 'user', hidden: true, content: payload, at: now() })
+        }
+        setMessages(refreshed)
+        // persistSession updates the in-memory transport first, even if saving
+        // the refreshed agenda fails. Visible history and timestamps stay intact.
+        await persistSession(refreshed)
+        const lastAssistant = [...refreshed].reverse().find((m) => m.role === 'assistant')
         if (lastAssistant) restageFrom(lastAssistant.content, lastAssistant.at)
         setStatus('active')
         return
@@ -298,7 +315,7 @@ export function useFoundationsReview({ familyId, childId, domain }: Args) {
     } finally {
       setSending(false)
     }
-  }, [modelDocRef, sessionDocRef, restageFrom, runTurn, domain])
+  }, [modelDocRef, sessionDocRef, restageFrom, runTurn, domain, persistSession])
 
   /** Parent replies with free text. */
   const send = useCallback(
@@ -408,13 +425,24 @@ export function useFoundationsReview({ familyId, childId, domain }: Args) {
         )
         return
       }
-      const applied = applyReviewActionToModel(base, action, now())
-      modelRef.current = applied.model
-
       try {
-        // The one shared merge-write (FEAT-66) — the Foundations tab's concept
-        // override calls the same writer, so the payload shape has one definition.
-        await writeReviewAction(modelDocRef(), applied)
+        // The one shared writer (FEAT-66) — the Foundations tab's concept
+        // override calls it too, so the payload shape has one definition. Since
+        // FEAT-242 it RE-APPLIES the action inside a transaction against the
+        // stored model: the copy this hook loaded when the session opened can be
+        // minutes old, and writing a result computed from it dropped whatever
+        // had landed meanwhile (an eval, a quest close, a confirmed program
+        // completion) from the concept being attested.
+        //
+        // The cache is therefore updated from the COMMITTED result, after the
+        // await — never from a pre-computed apply, which is what made the stale
+        // copy authoritative for the rest of the session as well.
+        modelRef.current = await applyAndWriteReviewAction(
+          modelDocRef(),
+          base,
+          action,
+          now(),
+        )
       } catch (err) {
         console.error('[foundationsReview] failed to write learner model:', err)
         setError('Could not save that — try again.')

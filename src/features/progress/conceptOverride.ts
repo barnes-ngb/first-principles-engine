@@ -43,6 +43,19 @@ export const RECONCILE_NOTICE =
 /** The short form of {@link RECONCILE_NOTICE} for the terrain chip's marker. */
 export const RECONCILE_CHIP_TITLE = 'The model has a new take on this'
 
+/**
+ * The line for a concept whose withdrawn completion left no earlier reading to
+ * return to (FEAT-242, `completionReviewNeeded`).
+ *
+ * Nobody disagreed with anybody here, so it is deliberately not worded like
+ * {@link RECONCILE_NOTICE} and offers no "keep my word" choice: what happened is
+ * that the support for a reading was withdrawn, the reading was left alone
+ * rather than guessed at, and it is being treated cautiously until something
+ * direct — a parent's word below, or an evaluation — settles it.
+ */
+export const COMPLETION_REVIEW_NOTICE =
+  'A finished-program record this rested on was withdrawn, and there was no earlier reading to go back to. Nothing was changed here, and it is treated cautiously in plans and advice until you record what you have seen or an evaluation covers it.'
+
 /** The three states a parent may attest, in strongest-first order (§ReviewProposedState). */
 export const PARENT_STATE_CHOICES: readonly ReviewProposedState[] = [
   'solid',

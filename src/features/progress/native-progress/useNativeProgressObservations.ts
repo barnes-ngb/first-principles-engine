@@ -80,6 +80,14 @@ export type SaveObservationOutcome =
       observation: NativeProgressObservation
       /** The entry was already on the record; this call wrote nothing. */
       alreadyRecorded: boolean
+      /**
+       * Set (FEAT-242) when this correction also invalidated a confirmed
+       * whole-program completion that cited the row being corrected — the one
+       * authorized integration, carried out in the same transaction as the row.
+       * The finished-program surface reads the same outcome off its own record,
+       * so this is here for callers that want to say so immediately.
+       */
+      completionRevoked?: { status: 'revoked' | 'pending'; detail?: string }
     }
   | { ok: false; message: string }
 
@@ -249,6 +257,9 @@ export function useNativeProgressObservations(
           ok: true,
           observation: result.observation,
           alreadyRecorded: result.alreadyRecorded,
+          ...(result.completionRevoked
+            ? { completionRevoked: result.completionRevoked }
+            : {}),
         }
       } catch (err) {
         console.error('[NativeProgress] Save failed:', err)

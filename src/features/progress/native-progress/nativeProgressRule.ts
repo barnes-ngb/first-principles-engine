@@ -131,6 +131,30 @@ export { NOTE_MAX_LENGTH } from '../../../core/types/nativeProgress'
 export const NATIVE_PROGRESS_NO_PLANNING_NOTICE =
   'Saved for reference. This does not update plans, hours or skills.'
 
+/**
+ * The same line while a CORRECTION is open, which is the one case where it
+ * would be false (FEAT-242 review item 4).
+ *
+ * An ordinary report still changes nothing anywhere — that claim is the feature
+ * and it is kept exactly as it was. But a correction of a row that a confirmed
+ * finished-program record was pointed at withdraws that record, in the same
+ * transaction, and takes back what it had marked as covered. Saying "this does
+ * not update skills" over that act would be the app telling a parent her
+ * correction was inert while it retracted coverage.
+ */
+export const NATIVE_PROGRESS_CORRECTION_PLANNING_NOTICE =
+  'Saved for reference. A correction changes no plans, hours or rewards either — with one exception: if you confirmed a program was finished and pointed that record at this entry, correcting it withdraws that record too.'
+
+/**
+ * The warning at the confirm step of a correction, BEFORE anything is written.
+ *
+ * Stated conditionally because this surface does not read the finished-program
+ * record and must not imply it knows one exists — but a parent has to be told
+ * what the second tap can do before she takes it, not in the receipt.
+ */
+export const CORRECTION_LINKED_COMPLETION_WARNING =
+  'If a finished-program record points at the entry you are correcting, saving this withdraws that record and takes back what it had marked as covered. The entry you are correcting stays in the history either way.'
+
 /** ...and the matching line about the source. */
 export const NATIVE_PROGRESS_SOURCE_NOTICE =
   'Saved as you report it — not checked against the program.'
@@ -389,24 +413,58 @@ export function previewSentence(
   )}, seen ${formatDateShort(reviewed.observedOn)}.`
 }
 
-/** The receipt. Says what landed and, again, that nothing else moved. */
+/** What a save did to a finished-program record that cited the corrected row. */
+export interface LinkedCompletionOutcome {
+  status: 'revoked' | 'pending'
+  detail?: string
+}
+
+/**
+ * The receipt's last sentence about anything OTHER than the row itself.
+ *
+ * "Nothing else changed." is the ordinary truth and the whole point of the
+ * feature — and it is exactly what must not be said when this save withdrew a
+ * finished-program record. The two withdrawal outcomes are kept apart as well:
+ * `revoked` means the coverage is already back off the learning picture,
+ * `pending` means it is not, and the parent has one button left to press.
+ */
+export function linkedCompletionTail(
+  revoked?: LinkedCompletionOutcome,
+): string {
+  if (!revoked) return 'Nothing else changed.'
+  return revoked.status === 'revoked'
+    ? 'The finished-program record that pointed at the entry you corrected has been withdrawn, and what it had marked as covered has been taken back. No hours, rewards or lesson numbers changed.'
+    : 'The finished-program record that pointed at the entry you corrected has been withdrawn, but the learning picture could not be updated — open Finished programs and use “Update the learning picture” to finish it. No hours, rewards or lesson numbers changed.'
+}
+
+/** The receipt. Says what landed and, again, what else moved — or did not. */
 export function savedNotice(
   reviewed: Pick<ReviewedObservation, 'program' | 'nativeNumber' | 'meaning' | 'observedOn'>,
   childName: string,
+  revoked?: LinkedCompletionOutcome,
 ): string {
   return `Recorded for ${childName}: ${NATIVE_PROGRAM_LABEL[reviewed.program]} ${numberPhrase(
     reviewed,
-  )}, seen ${formatDateShort(reviewed.observedOn)}. Nothing else changed.`
+  )}, seen ${formatDateShort(reviewed.observedOn)}. ${linkedCompletionTail(revoked)}`
 }
 
-/** The receipt for a retry whose first attempt had already landed. */
+/**
+ * The receipt for a retry whose first attempt had already landed.
+ *
+ * A retry carries the withdrawal answer too (the writer re-consults the
+ * completion coordinator on that path, because the first attempt's answer was
+ * lost and what it did is unknown): "nothing was saved twice" must not be read
+ * as "and nothing else happened".
+ */
 export function alreadyRecordedNotice(
   reviewed: Pick<ReviewedObservation, 'program' | 'nativeNumber' | 'meaning' | 'observedOn'>,
   childName: string,
+  revoked?: LinkedCompletionOutcome,
 ): string {
+  const tail = revoked ? ` ${linkedCompletionTail(revoked)}` : ''
   return `Already recorded for ${childName}: ${numberPhrase(
     reviewed,
-  )}, seen ${formatDateShort(reviewed.observedOn)}. Nothing was saved twice.`
+  )}, seen ${formatDateShort(reviewed.observedOn)}. Nothing was saved twice.${tail}`
 }
 
 /**

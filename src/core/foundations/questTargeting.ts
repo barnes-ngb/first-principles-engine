@@ -211,17 +211,25 @@ export function applyQuestResultsToModel(
     const prev: ConceptStateEntry | undefined = conceptStates[result.conceptId]
     const fromState: ConceptStateKind = prev?.state ?? 'not-yet'
     const toState = upgradedQuestState(fromState, result)
+    const establishesState = result.total >= MIN_QUESTIONS_TO_UPGRADE && result.correct === result.total
 
     const evidence: EvidenceRef = {
       kind: 'quest',
       sourceId: sessionId,
       note: questEvidenceNote(result, dateSlice),
       observedAt: nowIso,
+      ...(establishesState ? { readState: toState } : {}),
     }
     conceptStates[result.conceptId] = {
+      // Spread first (FEAT-242): `needsReconcile` and any later field survive a
+      // write that has no opinion about them.
+      ...(prev ?? {}),
       state: toState,
       evidence: [...(prev?.evidence ?? []), evidence],
       seededAt: prev?.seededAt ?? nowIso,
+      // A failed/short round leaves state unchanged by design; it cannot settle
+      // the unsupported state retained after an ambiguous completion withdrawal.
+      ...(establishesState && prev?.completionReviewNeeded ? { completionReviewNeeded: false } : {}),
     }
 
     if (toState !== fromState) {

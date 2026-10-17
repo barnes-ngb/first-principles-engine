@@ -8,8 +8,33 @@ vi.mock('firebase/firestore', () => ({
   doc: vi.fn(() => ({ __ref: true })),
   getDoc: (...args: unknown[]) => getDoc(...args),
   setDoc: (...args: unknown[]) => setDoc(...args),
+  // FEAT-242 — the writer reads and writes inside a transaction now. A WORKING
+  // fake, not a stub: `tx.get` / `tx.set` route to the same `getDoc` / `setDoc`
+  // spies these tests already assert on, so every existing expectation keeps
+  // measuring the same thing and the new atomicity is what changed.
+  runTransaction: async (
+    _db: unknown,
+    fn: (tx: {
+      get: (ref: unknown) => unknown
+      set: (ref: unknown, data: unknown, opts?: unknown) => void
+    }) => unknown,
+  ) => {
+    // Writes are awaited after the callback so a rejecting `setDoc` still fails
+    // the transaction (the real `tx.set` is synchronous; the commit is what can
+    // fail), which is what the writer's `error` outcome is asserted on.
+    const writes: unknown[] = []
+    const out = await fn({
+      get: (ref: unknown) => getDoc(ref),
+      set: (ref: unknown, data: unknown, opts?: unknown) => {
+        writes.push(setDoc(ref, data, opts))
+      },
+    })
+    await Promise.all(writes)
+    return out
+  },
 }))
 vi.mock('../firebase/firestore', () => ({
+  db: {},
   learnerModelsCollection: () => ({}),
 }))
 
