@@ -115,16 +115,26 @@ vi.mock('./firestore', () => ({
   programCompletionStateCollection: () => ({ __path: 'state' }),
 }))
 
+import { runTransaction } from 'firebase/firestore'
+import type { Transaction } from 'firebase/firestore'
+
 import {
   PROGRAM_COMPLETION_ALREADY_ACTIVE,
   PROGRAM_COMPLETION_CITATION_CHANGED,
   PROGRAM_COMPLETION_REPORT_CORRECTED,
   PROGRAM_COMPLETION_REPORT_NOT_ELIGIBLE,
+  PROGRAM_COMPLETION_TOO_MANY_EVENTS,
   ProgramCompletionRefused,
   applyProgramCompletionProjection,
   confirmProgramCompletion,
+  planCompletionRevokeForCorrection,
   withdrawProgramCompletion,
 } from './programCompletionWrites'
+import {
+  COMPLETION_WITHDRAWAL_CEILING,
+  MAX_CLAIMING_COMPLETION_EVENTS,
+  MAX_COMPLETION_EVENTS,
+} from '../types/programCompletion'
 import { FAST_PHONICS_COMPLETION_CONCEPT_IDS } from '../foundations/fastPhonicsCompletion'
 
 const FAMILY = 'f1'
@@ -666,5 +676,509 @@ describe('withdrawProgramCompletion and the apply retry', () => {
     })
     expect(again.alreadyRecorded).toBe(true)
     expect(store.writes.length).toBe(before)
+  })
+})
+
+/**
+ * The capacity bound must never cost a parent the undo (finding 4303871053).
+ *
+ * The bound was spent first-come-first-served, so the fiftieth slot could go to
+ * a CONFIRMATION: the claim then stood on the learner model, raising concepts,
+ * and the withdrawal that would take it back was refused for being the
+ * fifty-first act. The old sequence that reached it was ordinary — a confirm, a
+ * same-version re-apply and a withdrawal (three acts), then twenty-three
+ * confirm/withdraw pairs (forty-nine), and the fiftieth act was accepted as a
+ * standing claim.
+ *
+ * The rule under test is one sentence: **accepting a confirmation, or a
+ * re-apply that keeps one, must never remove the ability to withdraw it.**
+ */
+describe('event capacity — the withdrawal slot is reserved', () => {
+  const statePath = `state/${CHILD}__fastPhonics`
+
+  /** A record with a history behind it and nothing in force — the usual shape. */
+  function seedInactiveStateAt(eventCount: number) {
+    store.set(statePath, {
+      id: `${CHILD}__fastPhonics`,
+      childId: CHILD,
+      program: 'fastPhonics',
+      activeEntryKey: null,
+      activeAssertion: null,
+      activeConfirmedAt: null,
+      activeMappingVersion: null,
+      projection: { status: 'withdrawn' },
+      eventCount,
+      lastEventAt: NOW,
+      sourceConflict: null,
+      updatedAt: NOW,
+    })
+  }
+
+  /**
+   * Age a REAL record's counter — how a document written before the reserve
+   * existed is reproduced without faking its coverage or its history.
+   */
+  function setEventCount(eventCount: number) {
+    store.set(statePath, { ...(store.get(statePath) ?? {}), eventCount })
+  }
+
+  /**
+   * Age an APPLIED record's coverage to an EARLIER reviewed map version — how a
+   * record confirmed before a re-curation is reproduced. Only the version the
+   * projection records moves; the refs on the model are the real ones the
+   * confirmation wrote, which is what makes the upgrade a genuine new act.
+   */
+  function setAppliedMappingVersion(version: number) {
+    const state = (store.get(statePath) ?? {}) as Record<string, unknown> & {
+      projection?: Record<string, unknown>
+    }
+    store.set(statePath, {
+      ...state,
+      projection: { ...(state.projection ?? {}), appliedMappingVersion: version },
+    })
+  }
+
+  const historyPaths = () => [...store.docs.keys()].filter((p) => p.startsWith('events/'))
+
+  const countOf = () => (store.get(statePath) as { eventCount: number }).eventCount
+  const stateDoc = () =>
+    store.get(statePath) as {
+      eventCount: number
+      activeEntryKey: string | null
+      projection: { status: string }
+      sourceConflict?: { correctedByObservationId: string } | null
+    }
+  const conceptOf = () =>
+    (
+      store.get(`learnerModels/${CHILD}`) as {
+        conceptStates: Record<
+          string,
+          { state: string; evidence: Array<{ kind: string; status?: string }> }
+        >
+      }
+    ).conceptStates[CVC]
+
+  const withdraw = (
+    entryKey: string,
+    withdrawsEntryKey: string,
+    reason: 'mistake' | 'notComplete' | 'partial' = 'mistake',
+  ) =>
+    withdrawProgramCompletion({
+      familyId: FAMILY,
+      childId: CHILD,
+      program: 'fastPhonics',
+      entryKey,
+      withdrawsEntryKey,
+      reason,
+      recordedAt: NOW,
+    })
+
+  it('refuses a confirmation one short of the bound, in words and with ZERO writes', async () => {
+    // The act that used to be accepted. Nothing is in force, so refusing costs
+    // the parent nothing she cannot get back by correcting the record.
+    seedModel()
+    seedInactiveStateAt(MAX_CLAIMING_COMPLETION_EVENTS)
+    store.writes = []
+
+    await expect(confirm()).rejects.toThrow(PROGRAM_COMPLETION_TOO_MANY_EVENTS)
+    expect(store.writes).toHaveLength(0)
+    expect(store.get(`events/${CHILD}__fastPhonics__${KEY}`)).toBeUndefined()
+    expect(countOf()).toBe(MAX_CLAIMING_COMPLETION_EVENTS)
+    expect(stateDoc().activeEntryKey).toBeNull()
+    // No coverage reached the model, so there is nothing stranded on it.
+    expect(conceptOf()).toBeUndefined()
+  })
+
+  it('accepts the last claiming slot and still honours the withdrawal it reserved', async () => {
+    seedModel()
+    seedInactiveStateAt(MAX_CLAIMING_COMPLETION_EVENTS - 1)
+
+    const confirmed = await confirm()
+    expect(confirmed.applied).toBe(true)
+    expect(countOf()).toBe(MAX_CLAIMING_COMPLETION_EVENTS)
+    expect(conceptOf().state).toBe('forming')
+
+    const undone = await withdraw('withdraw-key-001', KEY, 'notComplete')
+    expect(undone.state.activeEntryKey).toBeNull()
+    expect(countOf()).toBe(MAX_COMPLETION_EVENTS)
+    expect(conceptOf().state).toBe('not-yet')
+    expect(store.get(`events/${CHILD}__fastPhonics__withdraw-key-001`)).toBeDefined()
+
+    // And the record is now full: the refusal lands on a NEW claim, which is
+    // the only act it can land on without trapping anyone.
+    await expect(confirm({}, 'draft-key-0002')).rejects.toThrow(
+      PROGRAM_COMPLETION_TOO_MANY_EVENTS,
+    )
+  })
+
+  it('cannot be driven, by any chain of real acts, into a claim it cannot withdraw', async () => {
+    // The reported sequence, run for real: confirm/withdraw pairs until the
+    // writer refuses. Whatever it refuses, the record must never be left
+    // holding a confirmation with no capacity to end it.
+    seedModel()
+    let pairs = 0
+    let refusal: string | null = null
+    for (let i = 0; i < 40; i += 1) {
+      const key = `chain-key-${String(i).padStart(4, '0')}`
+      try {
+        await confirm({}, key)
+      } catch (err) {
+        refusal = (err as Error).message
+        break
+      }
+      // The claim is in force here — and the undo is never refused.
+      await withdraw(`chain-wd-${String(i).padStart(4, '0')}`, key)
+      expect(stateDoc().activeEntryKey).toBeNull()
+      pairs += 1
+    }
+
+    expect(refusal).toBe(PROGRAM_COMPLETION_TOO_MANY_EVENTS)
+    expect(pairs).toBe(MAX_COMPLETION_EVENTS / 2)
+    expect(countOf()).toBe(MAX_COMPLETION_EVENTS)
+    expect(stateDoc().activeEntryKey).toBeNull()
+
+    // The history is whole: one document per counted act, none overwritten.
+    const history = [...store.docs.keys()].filter((p) => p.startsWith('events/'))
+    expect(history).toHaveLength(countOf())
+  })
+
+  it('lets a record already sitting AT the cap, with a live claim, be withdrawn', async () => {
+    // The legacy state: written by the old rule, which let the fiftieth act be
+    // a confirmation. Its coverage is real, so the recovery is the real undo —
+    // not a reset, and not a rewrite of what is already recorded.
+    seedModel()
+    await confirm()
+    setEventCount(MAX_COMPLETION_EVENTS)
+
+    const undone = await withdraw('withdraw-key-001', KEY, 'notComplete')
+    expect(undone.state.activeEntryKey).toBeNull()
+    expect(conceptOf().state).toBe('not-yet')
+    expect(conceptOf().evidence.every((e) => e.status === 'superseded')).toBe(true)
+    // One act above the bound, which is exactly the headroom the ceiling names.
+    expect(countOf()).toBe(COMPLETION_WITHDRAWAL_CEILING)
+    // Both acts are still on the record — the recovery added history, took none.
+    expect(store.get(`events/${CHILD}__fastPhonics__${KEY}`)).toBeDefined()
+    expect(store.get(`events/${CHILD}__fastPhonics__withdraw-key-001`)).toBeDefined()
+    // Still bounded: nothing new may be claimed on this record.
+    await expect(confirm({}, 'draft-key-0002')).rejects.toThrow(
+      PROGRAM_COMPLETION_TOO_MANY_EVENTS,
+    )
+  })
+
+  it('still refuses past the recovery ceiling — the bound was reserved, not removed', async () => {
+    seedModel()
+    await confirm()
+    setEventCount(COMPLETION_WITHDRAWAL_CEILING)
+    store.writes = []
+
+    await expect(withdraw('withdraw-key-001', KEY)).rejects.toThrow(
+      PROGRAM_COMPLETION_TOO_MANY_EVENTS,
+    )
+    expect(store.writes).toHaveLength(0)
+    expect(stateDoc().activeEntryKey).toBe(KEY)
+  })
+
+  it('counts no second act for a retry at the boundary', async () => {
+    seedModel()
+    seedInactiveStateAt(MAX_CLAIMING_COMPLETION_EVENTS - 1)
+    await confirm()
+
+    const again = await confirm()
+    expect(again.alreadyRecorded).toBe(true)
+    expect(countOf()).toBe(MAX_CLAIMING_COMPLETION_EVENTS)
+    expect(conceptOf().evidence).toHaveLength(1)
+
+    // The retry did not eat the reserved slot.
+    const undone = await withdraw('withdraw-key-001', KEY)
+    expect(undone.state.activeEntryKey).toBeNull()
+    expect(countOf()).toBe(MAX_COMPLETION_EVENTS)
+  })
+
+  it('finishes a PENDING application at the boundary through the APPLY BUTTON', async () => {
+    // Independent review F2. Confirmed with no learner model to write to, in
+    // the last claiming slot: the record sits `pending` at forty-nine. The
+    // visible apply button is the only route a surface offers to an outstanding
+    // application — `needsApplyRetry` lights it up and nothing re-sends a stored
+    // confirmation — so charging it a re-apply act left the record pending for
+    // good: the one remaining slot belongs to the withdrawal, and no amount of
+    // waiting or retrying frees another.
+    seedInactiveStateAt(MAX_CLAIMING_COMPLETION_EVENTS - 1)
+    const pending = await confirm()
+    expect(pending.applicationPending).toBe(true)
+    expect(countOf()).toBe(MAX_CLAIMING_COMPLETION_EVENTS)
+
+    seedModel()
+    const finished = await applyProgramCompletionProjection({
+      familyId: FAMILY,
+      childId: CHILD,
+      program: 'fastPhonics',
+      expectedEntryKey: KEY,
+      recordedAt: '2026-10-17T13:00:00.000Z',
+    })
+    expect(finished.applied).toBe(true)
+    expect(finished.applicationPending).toBe(false)
+    expect(conceptOf().state).toBe('forming')
+
+    // It finished the confirmation already recorded, so it is not a new act: no
+    // re-apply event, no count, and the confirmation's own date stands.
+    expect(finished.event).toBeNull()
+    expect(store.get(`events/${CHILD}__fastPhonics__${KEY}-v1`)).toBeUndefined()
+    expect(historyPaths()).toEqual([`events/${CHILD}__fastPhonics__${KEY}`])
+    expect(countOf()).toBe(MAX_CLAIMING_COMPLETION_EVENTS)
+    expect((store.get(statePath) as { lastEventAt: string }).lastEventAt).toBe(NOW)
+
+    // ...so the slot that confirmation reserved is still the withdrawal's.
+    const undone = await withdraw('withdraw-key-001', KEY, 'partial')
+    expect(undone.state.activeEntryKey).toBeNull()
+    expect(countOf()).toBe(MAX_COMPLETION_EVENTS)
+    expect(conceptOf().state).toBe('not-yet')
+  })
+
+  it('accepts a reviewed mapping UPGRADE in the last claiming slot', async () => {
+    // The other side of the same button, and the act that must stay counted: an
+    // upgrade changes what the record claims was covered, so it is history.
+    seedModel()
+    await confirm()
+    setAppliedMappingVersion(0)
+    setEventCount(MAX_CLAIMING_COMPLETION_EVENTS - 1)
+
+    const upgraded = await applyProgramCompletionProjection({
+      familyId: FAMILY,
+      childId: CHILD,
+      program: 'fastPhonics',
+      expectedEntryKey: KEY,
+      recordedAt: '2026-10-17T13:00:00.000Z',
+    })
+    expect(upgraded.event?.kind).toBe('reapply')
+    expect(upgraded.event?.entryKey).toBe(`${KEY}-v1`)
+    expect(upgraded.event?.mappingVersion).toBe(1)
+    // Counted and dated, because it is a new act.
+    expect(countOf()).toBe(MAX_CLAIMING_COMPLETION_EVENTS)
+    expect((store.get(statePath) as { lastEventAt: string }).lastEventAt).toBe(
+      '2026-10-17T13:00:00.000Z',
+    )
+    expect(store.get(`events/${CHILD}__fastPhonics__${KEY}-v1`)).toBeDefined()
+
+    // And the claim it kept can still be taken back.
+    const undone = await withdraw('withdraw-key-001', KEY, 'notComplete')
+    expect(undone.state.activeEntryKey).toBeNull()
+    expect(countOf()).toBe(MAX_COMPLETION_EVENTS)
+    expect(conceptOf().state).toBe('not-yet')
+  })
+
+  it('refuses a mapping UPGRADE at the bound, with zero writes, and stays withdrawable', async () => {
+    // The pending finish above costs no capacity; this does, so the refusal has
+    // to land here and nowhere else. Refused in words, before any write, with
+    // the record exactly as it was — including the coverage it already carries.
+    seedModel()
+    await confirm()
+    setAppliedMappingVersion(0)
+    setEventCount(MAX_CLAIMING_COMPLETION_EVENTS)
+    store.writes = []
+
+    await expect(
+      applyProgramCompletionProjection({
+        familyId: FAMILY,
+        childId: CHILD,
+        program: 'fastPhonics',
+        expectedEntryKey: KEY,
+        recordedAt: '2026-10-17T13:00:00.000Z',
+      }),
+    ).rejects.toThrow(PROGRAM_COMPLETION_TOO_MANY_EVENTS)
+    expect(store.writes).toHaveLength(0)
+    expect(store.get(`events/${CHILD}__fastPhonics__${KEY}-v1`)).toBeUndefined()
+    expect(countOf()).toBe(MAX_CLAIMING_COMPLETION_EVENTS)
+    expect(stateDoc().activeEntryKey).toBe(KEY)
+    expect(stateDoc().projection.status).toBe('applied')
+
+    // The claim it refused to upgrade is still a claim she can end.
+    const undone = await withdraw('withdraw-key-001', KEY, 'notComplete')
+    expect(undone.state.activeEntryKey).toBeNull()
+    expect(countOf()).toBe(MAX_COMPLETION_EVENTS)
+    expect(conceptOf().state).toBe('not-yet')
+  })
+
+  it('repeats an existing-event repair on a record that is full', async () => {
+    // The upgrade act is already on the record, and the refs under it went
+    // missing again. Restoring them reuses that act, so it costs no capacity —
+    // a full record must not be a record whose graph cannot be repaired.
+    seedModel()
+    await confirm()
+    /** A ref goes missing under the model — the graph repair this button is for. */
+    const loseARef = () => {
+      const model = store.get(`learnerModels/${CHILD}`) as {
+        conceptStates: Record<string, { evidence: unknown[] }>
+      }
+      model.conceptStates[CVC].evidence = []
+      store.set(`learnerModels/${CHILD}`, model as unknown as Record<string, unknown>)
+    }
+    loseARef()
+    const first = await applyProgramCompletionProjection({
+      familyId: FAMILY,
+      childId: CHILD,
+      program: 'fastPhonics',
+      recordedAt: '2026-10-17T13:00:00.000Z',
+    })
+    expect(first.event?.recordedAt).toBe('2026-10-17T13:00:00.000Z')
+    setEventCount(MAX_CLAIMING_COMPLETION_EVENTS)
+
+    loseARef()
+    const repaired = await applyProgramCompletionProjection({
+      familyId: FAMILY,
+      childId: CHILD,
+      program: 'fastPhonics',
+      recordedAt: '2026-10-17T14:00:00.000Z',
+    })
+    expect(repaired.applied).toBe(true)
+    expect(conceptOf().evidence).toHaveLength(1)
+    // The act on the record is the earlier one, unmoved, and uncounted twice.
+    expect(repaired.event?.recordedAt).toBe('2026-10-17T13:00:00.000Z')
+    expect(countOf()).toBe(MAX_CLAIMING_COMPLETION_EVENTS)
+
+    const undone = await withdraw('withdraw-key-001', KEY, 'mistake')
+    expect(undone.state.activeEntryKey).toBeNull()
+    expect(countOf()).toBe(MAX_COMPLETION_EVENTS)
+  })
+
+  it('finishes an outstanding WITHDRAWAL on a record above the bound', async () => {
+    // The legacy-at-fifty recovery leaves the counter at the ceiling, and the
+    // retraction it recorded may still be outstanding — the learner model was
+    // unreachable when it ran. Finishing it writes no act (it completes one
+    // already recorded), so the ceiling is not a reason to leave superseded
+    // coverage standing on the graph.
+    seedModel()
+    await confirm()
+    setEventCount(MAX_COMPLETION_EVENTS)
+    const liveModel = store.get(`learnerModels/${CHILD}`) as Record<string, unknown>
+    store.docs.delete(`learnerModels/${CHILD}`)
+
+    const undone = await withdraw('withdraw-key-001', KEY, 'notComplete')
+    expect(undone.applicationPending).toBe(true)
+    expect(countOf()).toBe(COMPLETION_WITHDRAWAL_CEILING)
+    expect(stateDoc().projection.status).toBe('withdrawalPending')
+
+    // The model is reachable again, with this record's refs still live on it.
+    store.set(`learnerModels/${CHILD}`, liveModel)
+    const finished = await applyProgramCompletionProjection({
+      familyId: FAMILY,
+      childId: CHILD,
+      program: 'fastPhonics',
+      recordedAt: '2026-10-17T15:00:00.000Z',
+    })
+    expect(finished.event).toBeNull()
+    expect(finished.applicationPending).toBe(false)
+    expect(countOf()).toBe(COMPLETION_WITHDRAWAL_CEILING)
+    expect(stateDoc().projection.status).toBe('withdrawn')
+    expect(conceptOf().state).toBe('not-yet')
+    expect(conceptOf().evidence.every((e) => e.status === 'superseded')).toBe(true)
+  })
+
+  it('never refuses the AUTOMATIC revocation of a corrected citation', async () => {
+    // It runs inside the native-progress correction's own transaction: refusing
+    // it would fail the parent's correction because the completion record was
+    // full. It only ever ENDS a claim, so it is allowed and stays in bounds.
+    const cited = seedReport()
+    seedModel()
+    await confirm({ reportObservationId: cited })
+    setEventCount(MAX_CLAIMING_COMPLETION_EVENTS)
+    const inTransaction = runTransaction as unknown as (
+      db: unknown,
+      fn: (tx: Transaction) => Promise<unknown>,
+    ) => Promise<unknown>
+
+    const status = (await inTransaction({}, async (tx) => {
+      const plan = await planCompletionRevokeForCorrection(tx, {
+        familyId: FAMILY,
+        childId: CHILD,
+        program: 'fastPhonics',
+        correctedObservationId: cited,
+        correctionObservationId: `${CHILD}__r9`,
+        correctionEntryKey: 'r9-entry-key',
+        nowIso: NOW,
+      })
+      plan.commit(tx)
+      return plan.status
+    })) as string
+
+    expect(status).toBe('revoked')
+    expect(stateDoc().activeEntryKey).toBeNull()
+    expect(stateDoc().sourceConflict?.correctedByObservationId).toBe(`${CHILD}__r9`)
+    expect(countOf()).toBe(MAX_COMPLETION_EVENTS)
+    expect(countOf()).toBeLessThanOrEqual(COMPLETION_WITHDRAWAL_CEILING)
+    expect(conceptOf().state).toBe('not-yet')
+    expect(
+      store.get(`events/${CHILD}__fastPhonics__src-r9-entry-key`),
+    ).toBeDefined()
+  })
+
+  it('revokes automatically on a LEGACY record already at the bound', async () => {
+    // The document the reserve did not exist for: fifty acts with a claim still
+    // in force. The parent corrects the entry it rested on, and that correction
+    // must land — the revocation takes the one slot the ceiling holds for it.
+    const cited = seedReport()
+    seedModel()
+    await confirm({ reportObservationId: cited })
+    setEventCount(MAX_COMPLETION_EVENTS)
+    const inTransaction = runTransaction as unknown as (
+      db: unknown,
+      fn: (tx: Transaction) => Promise<unknown>,
+    ) => Promise<unknown>
+
+    const status = (await inTransaction({}, async (tx) => {
+      const plan = await planCompletionRevokeForCorrection(tx, {
+        familyId: FAMILY,
+        childId: CHILD,
+        program: 'fastPhonics',
+        correctedObservationId: cited,
+        correctionObservationId: `${CHILD}__r10`,
+        correctionEntryKey: 'r10-entry-key',
+        nowIso: NOW,
+      })
+      plan.commit(tx)
+      return plan.status
+    })) as string
+
+    expect(status).toBe('revoked')
+    expect(stateDoc().activeEntryKey).toBeNull()
+    expect(conceptOf().state).toBe('not-yet')
+    // One act above the bound — the headroom the ceiling names, and no further.
+    expect(countOf()).toBe(COMPLETION_WITHDRAWAL_CEILING)
+    await expect(confirm({}, 'draft-key-0002')).rejects.toThrow(
+      PROGRAM_COMPLETION_TOO_MANY_EVENTS,
+    )
+  })
+
+  it('leaves independent evidence standing when the reserved withdrawal runs', async () => {
+    seedModel({
+      conceptStates: {
+        [CVC]: {
+          state: 'frontier',
+          evidence: [
+            {
+              kind: 'eval',
+              sourceId: 'sess-9',
+              note: 'guided eval',
+              observedAt: '2026-10-16T00:00:00.000Z',
+              readState: 'frontier',
+            },
+          ],
+        },
+      },
+    })
+    seedInactiveStateAt(MAX_CLAIMING_COMPLETION_EVENTS - 1)
+    await confirm()
+    await withdraw('withdraw-key-001', KEY, 'notComplete')
+
+    const evidence = conceptOf().evidence
+    const evals = evidence.filter((e) => e.kind === 'eval')
+    expect(evals).toHaveLength(1)
+    // The withdrawal retracts ITS OWN contribution and nothing else.
+    expect(evals[0].status).toBeUndefined()
+    expect(
+      evidence
+        .filter((e) => e.kind === 'programCompletionCoverage')
+        .every((e) => e.status === 'superseded'),
+    ).toBe(true)
+    expect(conceptOf().state).not.toBe('not-yet')
   })
 })

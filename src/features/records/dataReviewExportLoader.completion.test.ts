@@ -72,6 +72,7 @@ vi.mock('../../core/firebase/firestore', () => {
 })
 
 import { COMPLETION_EVENT_CAP, loadCompletionRecord } from './dataReviewExportLoader'
+import { COMPLETION_WITHDRAWAL_CEILING } from '../../core/types/programCompletion'
 
 /** `n` act documents, named the way the writer names them. */
 const acts = (n: number) =>
@@ -102,6 +103,19 @@ describe('loadCompletionRecord — the read is what is bounded', () => {
     // No ordering constraint: document-id order needs no composite index, and
     // the section text makes no newest-first claim.
     expect(captured.constraints.some((c) => c.kind === 'orderBy')).toBe(false)
+  })
+
+  it('reads past the writer’s own ceiling, so a recovery act is never cut off', async () => {
+    // The withdrawal that rescues a record sitting at the cap is written ABOVE
+    // `MAX_COMPLETION_EVENTS` (the reserve's recovery headroom). An export cap
+    // at or below that ceiling would make the act that undid the claim the one
+    // act the audit could not see.
+    expect(COMPLETION_EVENT_CAP).toBeGreaterThan(COMPLETION_WITHDRAWAL_CEILING)
+
+    getDocsMock.mockResolvedValueOnce({ docs: acts(COMPLETION_WITHDRAWAL_CEILING) })
+    const whole = await loadCompletionRecord('fam-1', 'c1')
+    expect(whole.events).toHaveLength(COMPLETION_WITHDRAWAL_CEILING)
+    expect(whole.truncated).toBe(false)
   })
 
   it('addresses the state document by id, never by a query', async () => {

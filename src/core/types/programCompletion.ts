@@ -253,6 +253,51 @@ export interface ProgramCompletionState {
  */
 export const MAX_COMPLETION_EVENTS = 50
 
+/**
+ * The slot held back for the act that ENDS a claim.
+ *
+ * The bound was spent first-come-first-served, so the last slot could go to a
+ * confirmation — leaving a claim standing on the learner model with no capacity
+ * left to withdraw it. A bound that can trap a parent inside an assertion she
+ * wants to take back is worse than no bound: the record she cannot correct is
+ * the one the app keeps showing. One slot per active claim is all this needs,
+ * because a withdrawal can only follow a confirmation and a confirmation cannot
+ * be recorded without reserving the slot the withdrawal will use.
+ */
+export const COMPLETION_WITHDRAWAL_RESERVE = 1
+
+/**
+ * The count at or above which an act that CREATES or KEEPS a claim — a
+ * confirmation, or a re-apply that records a mapping upgrade — is refused.
+ *
+ * Forty-nine: a confirmation at forty-eight writes act forty-nine and leaves
+ * the fiftieth for its withdrawal. The refusal is in words and before any write,
+ * so a parent is told the record is full while it is still correctable, instead
+ * of discovering it when the undo refuses.
+ *
+ * It is a bound on NEW acts, which is what keeps it from trapping anyone the
+ * other way: finishing an act already recorded — applying a `Pending`
+ * confirmation's coverage at the version it was confirmed under, restoring refs
+ * a stored re-apply already accounts for, or completing an outstanding
+ * withdrawal — writes no event and is never refused here.
+ */
+export const MAX_CLAIMING_COMPLETION_EVENTS =
+  MAX_COMPLETION_EVENTS - COMPLETION_WITHDRAWAL_RESERVE
+
+/**
+ * The hard ceiling a withdrawal itself may not cross — the recovery headroom.
+ *
+ * New writes cannot reach it: the reserve above keeps the normal chain at or
+ * under {@link MAX_COMPLETION_EVENTS}. It exists for documents written BEFORE
+ * the reserve existed, which could already be sitting active at fifty, and for
+ * the automatic source-correction revocation, which is never refused (refusing
+ * it would fail the parent's native-progress correction around it). Those states
+ * get the one slot they need to be undone, and no more: still a bound, still
+ * refused in words beyond it, and no history is rewritten to make room.
+ */
+export const COMPLETION_WITHDRAWAL_CEILING =
+  MAX_COMPLETION_EVENTS + COMPLETION_WITHDRAWAL_RESERVE
+
 /** The document id for one completion event. */
 export const programCompletionEventId = (
   childId: string,

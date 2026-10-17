@@ -55,11 +55,12 @@ import {
 } from '../foundations/programCompletionProjection'
 import { promotedModelStatus } from '../foundations/modelStatus'
 import {
+  COMPLETION_WITHDRAWAL_CEILING,
   CompletionAssistance,
   CompletionEventKind,
   CompletionProjectionStatus,
   CompletionWithdrawReason,
-  MAX_COMPLETION_EVENTS,
+  MAX_CLAIMING_COMPLETION_EVENTS,
   completionIdFor,
   correctionMarkerId,
   programCompletionEventId,
@@ -470,7 +471,11 @@ export async function confirmProgramCompletion(
       throw new ProgramCompletionRefused(PROGRAM_COMPLETION_ALREADY_ACTIVE)
     }
     const eventCount = storedState?.eventCount ?? 0
-    if (eventCount >= MAX_COMPLETION_EVENTS) {
+    // One short of the bound, not at it: a confirmation that spent the last slot
+    // would stand on the learner model with no capacity left to withdraw it. The
+    // slot the undo needs is reserved before the claim is accepted, and the
+    // refusal happens here — after every read, before any write.
+    if (eventCount >= MAX_CLAIMING_COMPLETION_EVENTS) {
       throw new ProgramCompletionRefused(PROGRAM_COMPLETION_TOO_MANY_EVENTS)
     }
 
@@ -654,6 +659,12 @@ export interface ApplyProjectionArgs {
  * refs carry an older mapping version. **Never called on a view load** — a
  * surface that re-applied by rendering would make a reviewed re-curation
  * invisible and unauditable.
+ *
+ * Only ONE of those records a new act: a reviewed mapping upgrade, which is
+ * history and is capacity-bounded like any claim. Finishing an outstanding
+ * application or withdrawal completes an act already recorded, so it writes no
+ * event and spends no capacity — which is what keeps the last claiming slot
+ * finishable and the slot above it available for the undo.
  */
 export async function applyProgramCompletionProjection(
   args: ApplyProjectionArgs,
@@ -808,24 +819,53 @@ export async function applyProgramCompletionProjection(
     }
 
     const previousMappingVersion = state.projection.appliedMappingVersion
+    // ── Finishing a PENDING confirmation is the same act, not a new one ──────
+    //
+    // `pending` means the confirmation is on the record and its coverage write
+    // never happened — there was no learner model to write it to. Writing that
+    // coverage now completes the act already recorded, at the version it was
+    // recorded under, so it records no event and spends no capacity. The
+    // same-key confirm retry has always finished it exactly this way; this
+    // button is the only route a surface offers to it, and charging it a
+    // re-apply act left a confirmation accepted in the LAST claiming slot
+    // permanently unfinishable — the one remaining slot is the withdrawal's, so
+    // the refusal could never be satisfied by waiting or by trying again.
+    //
+    // Narrow on purpose, so nothing else becomes a free act: only a `pending`
+    // projection (an `applied` one whose refs went missing is a repair and
+    // records its own act), only one that has applied NOTHING yet, and only at
+    // the version the confirmation itself names — a reviewed mapping UPGRADE is
+    // a genuine new act and stays bounded by the check below.
+    const finishesPendingConfirmation =
+      state.projection.status === CompletionProjectionStatus.Pending &&
+      previousMappingVersion == null &&
+      state.activeMappingVersion === mapping.mappingVersion
     // A re-apply is an act: it is recorded in the history like any other, so a
     // mapping upgrade is auditable rather than a silent change of meaning. A
     // REPEAT repair at the same version is not a second act — it restores refs
     // the act already recorded — so it reuses that event and adds no parent act.
-    const newEvent: ProgramCompletionEvent | null = storedReapply
-      ? null
-      : {
-          id: reapplyRef.id,
-          childId,
-          program,
-          entryKey: reapplyKey,
-          kind: CompletionEventKind.Reapply,
-          recordedAt,
-          mappingVersion: mapping.mappingVersion,
-          ...(previousMappingVersion ? { previousMappingVersion } : {}),
-          detail: `applied reviewed coverage map version ${mapping.mappingVersion}`,
-        }
-    if (newEvent && state.eventCount >= MAX_COMPLETION_EVENTS) {
+    const newEvent: ProgramCompletionEvent | null =
+      storedReapply || finishesPendingConfirmation
+        ? null
+        : {
+            id: reapplyRef.id,
+            childId,
+            program,
+            entryKey: reapplyKey,
+            kind: CompletionEventKind.Reapply,
+            recordedAt,
+            mappingVersion: mapping.mappingVersion,
+            ...(previousMappingVersion ? { previousMappingVersion } : {}),
+            detail: `applied reviewed coverage map version ${mapping.mappingVersion}`,
+          }
+    // A re-apply KEEPS a standing claim, so it holds back the withdrawal slot
+    // too: a mapping upgrade must not be the act that makes the claim it
+    // upgraded impossible to take back. The two cases that write no act
+    // (`newEvent` is null above) — a REPEAT repair at the same version, and
+    // finishing a pending confirmation — cost no capacity, so both stay
+    // available on a record that is full, and the withdrawal slot each
+    // confirmation reserved is still there afterwards.
+    if (newEvent && state.eventCount >= MAX_CLAIMING_COMPLETION_EVENTS) {
       throw new ProgramCompletionRefused(PROGRAM_COMPLETION_TOO_MANY_EVENTS)
     }
 
@@ -851,7 +891,8 @@ export async function applyProgramCompletionProjection(
     return {
       state: nextState,
       // The act on the RECORD, which for a repeat repair is the earlier one,
-      // byte-for-byte. The coverage below it was still rewritten, so this is not
+      // byte-for-byte, and `null` when this call only finished the confirmation
+      // already recorded. The coverage below it was still written, so neither is
       // reported as "nothing needed changing".
       event: newEvent ?? storedReapply,
       alreadyRecorded: false,
@@ -973,7 +1014,14 @@ export async function withdrawProgramCompletion(
     if (state.activeEntryKey !== withdrawsEntryKey || !state.activeEntryKey) {
       throw new ProgramCompletionRefused(PROGRAM_COMPLETION_NOT_ACTIVE)
     }
-    if (state.eventCount >= MAX_COMPLETION_EVENTS) {
+    // The withdrawal spends the slot every confirmation reserved for it, so this
+    // is NOT the claiming bound: refusing here is what trapped a parent inside
+    // an assertion she had already been allowed to make. It is still bounded —
+    // a withdrawal needs an active confirmation (checked just above), and a
+    // confirmation cannot be recorded without leaving room for this act — and
+    // the ceiling above the bound is the headroom a record written before the
+    // reserve existed, or ended by an automatic revocation, needs to be undone.
+    if (state.eventCount >= COMPLETION_WITHDRAWAL_CEILING) {
       throw new ProgramCompletionRefused(PROGRAM_COMPLETION_TOO_MANY_EVENTS)
     }
 
@@ -1089,6 +1137,16 @@ export interface CompletionRevokePlan {
  * records *why*; re-establishing it needs a fresh confirmation, because a
  * correction is a statement about a number, not a new assertion that the program
  * is finished.
+ *
+ * **It is deliberately not capacity-refused.** This runs inside the correction's
+ * own transaction, so a refusal here would fail the parent's native-progress
+ * correction as well — the app would be unable to accept "he hadn't finished it"
+ * because the completion record was full, which is the trap this repair exists
+ * to remove, pointed the other way. It stays bounded without a check: it only
+ * ever ENDS a claim, it cannot run without one, and a claim can only be recorded
+ * by `confirmProgramCompletion`, which refuses at
+ * `MAX_CLAIMING_COMPLETION_EVENTS` — so the act it writes lands at or under
+ * `COMPLETION_WITHDRAWAL_CEILING`, which is the headroom that ceiling names.
  */
 /**
  * What an EARLIER attempt of this same correction already did to a completion

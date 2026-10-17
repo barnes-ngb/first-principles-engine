@@ -41,6 +41,37 @@ transaction:
 Bounded: `MAX_COMPLETION_EVENTS = 50` per child and program, refused **in words**
 at the limit rather than absorbed silently.
 
+**The last slot is reserved for the undo.** The bound used to be spent
+first-come-first-served, so the fiftieth act could be a *confirmation* — leaving
+a claim standing on the learner model and the withdrawal refused as the
+fifty-first. A bound that can trap a parent inside an assertion she wants to take
+back is worse than no bound, so:
+
+| | |
+|---|---|
+| `MAX_CLAIMING_COMPLETION_EVENTS = 49` | the count at or above which an act that **creates or keeps** a claim — a confirmation, or a re-apply recording a mapping upgrade — is refused, before any write |
+| `COMPLETION_WITHDRAWAL_CEILING = 51` | the hard ceiling a **withdrawal** may not cross: one slot of recovery headroom for records written before the reserve existed (already active at fifty) and for the automatic source-correction revocation, which is never refused because it runs inside the parent's own correction transaction |
+
+The withdrawal is not held to the claiming bound, and is still bounded: it needs
+an active confirmation, and no confirmation is recorded without leaving room for
+it. Nothing is rewritten to make room — the recovery *adds* an act. A repeat
+repair at the same mapping version reuses its stored act, so it costs no
+capacity and stays available on a full record.
+
+**Finishing an act already recorded is not a new act.** A confirmation made with
+no learner model to write to sits `pending`, and the apply button is the only
+route a surface offers to it. Charging that button a re-apply act made a
+confirmation accepted in the *last* claiming slot impossible to finish — the one
+remaining slot belongs to the withdrawal, so the refusal could never be
+satisfied. So the apply button writes no event, and spends no capacity, when it
+completes the pending application (at the version the confirmation names, having
+applied nothing yet) or an outstanding withdrawal. Only a reviewed **mapping
+upgrade** records an act there, and that one is still refused at
+`MAX_CLAIMING_COMPLETION_EVENTS`, before any write, with the claim it declined to
+upgrade still withdrawable. The export reads up to
+`COMPLETION_EVENT_CAP = 200` acts per child, well above the ceiling, so the act
+that undid a claim is never the one the audit cannot see.
+
 ## 3. The completion fact
 
 `ProgramCompletionAssertion` is the parent's own claim: the day she observed the
@@ -237,7 +268,11 @@ The repair button's event id is deterministic (`{entryKey}-v{mappingVersion}`),
 so a second repair at the same mapping version addresses the **same** document.
 It is read inside the transaction before anything is written: the stored bytes
 win, `recordedAt` never moves, and only a genuinely new act is counted in
-`eventCount` / `lastEventAt` (and refused at `MAX_COMPLETION_EVENTS`). A repeat
+`eventCount` / `lastEventAt` (and refused at `MAX_CLAIMING_COMPLETION_EVENTS`,
+because a mapping upgrade must not be the act that makes the claim it upgraded
+impossible to take back). Finishing a `pending` application at the same mapping
+version records no event at all — it completes the confirmation already on the
+record — so that refusal cannot strand one. A repeat
 repair still rewrites the coverage it restored, so it is not reported as "nothing
 needed changing".
 
