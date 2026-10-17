@@ -102,7 +102,13 @@ the stored disclosure says so.
 `functions/src/shared/foundations/completionCoverage.ts`, compiled by both
 projects:
 
-1. coverage caps at `forming`, never `solid`, never downgrades;
+1. coverage caps at `forming`, never `solid`, never downgrades — and a claim that
+   asserts *less* than the cap is worth only what it asserted. The Review Chat
+   may propose `frontier` or `not-yet` and the writer honours it, so both
+   `curriculumPosition` writers stamp `coverageCeiling` (the position sync: always
+   the cap; a `covered` action: its clamped proposal). Without it, a withdrawal
+   read every surviving position as cap-strength support and could leave a
+   `forming` nobody had claimed;
 2. **direct evidence governs** — an active `attestation` / `eval` / `quest` ref is
    an observation of the *child*, so a coverage claim records its evidence and
    moves nothing. This narrowed the pre-existing workbook and Review-Chat paths
@@ -131,11 +137,26 @@ recomputes it in this order:
 1. a direct observation made **after** the completion's own observation controls
    outright, whatever it said and however often the write is replayed;
 2. otherwise whatever **surviving** evidence justifies — the *latest* direct read,
-   or the coverage cap when an independent coverage claim (a workbook position,
-   another confirmation) still stands. **Never a maximum over history**, so a
-   stale `solid` cannot beat a later calibrated eval;
-3. otherwise the recorded baseline, clamped so a release can only lower;
+   or, when an independent coverage claim (a workbook position, another
+   confirmation) still stands, **the state that claim asserted**
+   (`coverageCeiling`), strongest claim first. **Never a maximum over history**,
+   so a stale `solid` cannot beat a later calibrated eval, and never the cap by
+   assumption;
+3. the recorded baseline is the other floor: the **higher** of it and (2) is
+   restored, clamped so a release can only lower. A claim weaker than the
+   baseline cannot erase the state the concept already stood on, and a baseline
+   cannot cancel a claim that outlives it;
 4. otherwise keep the state and flag `completionReviewNeeded`.
+
+**Old records need no migration.** A `curriculumPosition` ref written before
+`coverageCeiling` existed is read by its producer: a position sync's own write
+(`positionSync`) could never have claimed anything but the cap, so it still
+supports `forming`; an unstamped *manual* ref recorded no claim, so it supports
+nothing and the release falls to the baseline — which is the state the concept
+actually held while that ref was already on the entry, so nothing the ref did is
+lost and nothing is invented. Completion refs are unaffected: they claim the cap
+by construction. No stored document is rewritten, and no backfill can recover a
+claim that was never written down.
 
 A reviewed revision walks the **union** of the new targets and the concepts the
 confirmation still owns, so a dropped or downgraded target is released rather

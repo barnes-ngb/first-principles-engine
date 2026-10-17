@@ -147,6 +147,21 @@ export interface EvidenceRef {
   mappingVersion?: number
   /** How much of the concept this claim speaks to (`direct` / `partial`). */
   coverageQualifier?: 'direct' | 'partial'
+  /**
+   * The highest state a COVERAGE claim asserts it can support (FEAT-242 repair),
+   * stamped by the two writers whose claim can be weaker than the `forming` cap:
+   * the workbook position sync (always the cap) and a Review-Chat `covered`
+   * action (whatever the parent's proposal clamped to — `frontier` and `not-yet`
+   * are both reachable).
+   *
+   * **Not `readState`, and not `entry.state`.** Both of those record where a
+   * concept LANDED after every writer had its say; this records what the claim
+   * itself is worth, which is the only thing that can answer "does anything still
+   * support this state?" once a completion contribution is withdrawn from above
+   * it. Absent on refs written before the field existed — see
+   * `coverageSupportedState` in the shared module for exactly how those read.
+   */
+  coverageCeiling?: ConceptStateKind
   /** True only when THIS ref actually moved the concept's state. */
   promoted?: boolean
   /**

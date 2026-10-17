@@ -22,7 +22,10 @@
 
 import { readingGraph } from './readingGraph'
 import { mathGraph } from './mathGraph'
-import { coveragePromotion } from '../../../functions/src/shared/foundations/completionCoverage'
+import {
+  COVERAGE_CAP,
+  coveragePromotion,
+} from '../../../functions/src/shared/foundations/completionCoverage'
 import { normalizeSourceName, fastPhonicsWorkbookBridge } from './fastPhonicsBridge'
 import { mathseedsBridge } from './mathseedsBridge'
 import { tgtbLa1Bridge } from './tgtbLa1Bridge'
@@ -440,6 +443,11 @@ export function applyBridgeCoverageToModel(
       unit: unitLabel,
       via,
       positionSync: true, // marks this as the sync's OWN write, not a witness
+      // A bridged position claims the full coverage cap — this writer proposes
+      // nothing weaker (no parameter for it) — and says so on the ref, so a
+      // withdrawal above it knows the position still supports `forming` even
+      // when THIS write promoted nothing (`already-at-or-above`).
+      coverageCeiling: COVERAGE_CAP,
       ...(promotion.withheldReason ? { withheldReason: promotion.withheldReason } : {}),
     }
     // Dedup by source, but ONLY our own prior sync writes (re-sync = update). A

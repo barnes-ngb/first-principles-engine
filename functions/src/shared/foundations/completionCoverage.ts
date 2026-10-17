@@ -21,7 +21,11 @@
  * ── The rules, stated once ──────────────────────────────────────────────────
  *
  * 1. **Coverage caps at `forming`.** It never reaches `solid` and never
- *    downgrades — the §13 "covered ≠ mastered" clamp, now in one place.
+ *    downgrades — the §13 "covered ≠ mastered" clamp, now in one place. A claim
+ *    that asserts LESS than the cap (the Review Chat may propose `frontier`, or
+ *    `not-yet`) is worth only what it asserted: `coverageCeiling` records that
+ *    on the ref, so releasing a stronger claim from above it leaves the concept
+ *    on support somebody actually gave rather than on the cap.
  * 2. **Direct evidence governs.** An active `attestation` / `eval` / `quest` ref
  *    is a direct observation *of the child*; coverage is a statement about
  *    *material*. So a coverage claim appends its evidence but does **not** move
@@ -50,6 +54,16 @@
 
 /** The evidence kind a confirmed whole-program completion writes. */
 export const PROGRAM_COMPLETION_COVERAGE = "programCompletionCoverage";
+
+/**
+ * The evidence kind a workbook position (`applyBridgeCoverageToModel`) and a
+ * Review-Chat `covered` action (`applyReviewActionToModel`) both write.
+ *
+ * Named here because this module now has to ASK the question — "is this ref a
+ * coverage claim about material?" — in the one place that reads what surviving
+ * coverage is worth.
+ */
+export const CURRICULUM_POSITION_COVERAGE = "curriculumPosition";
 
 /** An evidence ref's lifecycle. Absent is read as `active` (every pre-FEAT-242 ref). */
 export const EvidenceRefStatus = {
@@ -137,6 +151,29 @@ export interface CoverageEvidenceLike {
   /** The reviewed mapping version behind this ref. */
   mappingVersion?: number;
   coverageQualifier?: string;
+  /**
+   * The highest state THIS coverage claim asserts it can support, before any
+   * precedence rule is applied — stamped by the coverage writers whose claim can
+   * be weaker than {@link COVERAGE_CAP}.
+   *
+   * Deliberately NOT `readState`, and deliberately not the state the concept
+   * landed at. A Review-Chat `covered` action may propose `frontier` or
+   * `not-yet` (its LLM does, and the parser honours it); the same claim may also
+   * be withheld, so the entry's state belongs to whatever else was speaking. The
+   * ceiling is the only thing that says what the CLAIM is worth, which is the
+   * one question {@link survivingSupportedState} has to answer when something
+   * else is released from under it.
+   */
+  coverageCeiling?: string;
+  /**
+   * True on the workbook position sync's OWN writes (`applyBridgeCoverageToModel`).
+   *
+   * Read here for ONE legacy question: a `curriculumPosition` ref written before
+   * `coverageCeiling` existed carries no record of what it claimed, and the
+   * position sync is the one producer that could never have claimed anything but
+   * the cap. See {@link coverageSupportedState}.
+   */
+  positionSync?: boolean;
   /**
    * Why a coverage claim moved nothing, where its writer stamped one
    * ({@link CoverageWithheldReason}).
@@ -359,6 +396,72 @@ export function completionRefsFor<T extends CoverageEvidenceLike>(
   );
 }
 
+/** Rule 1 in one expression: nothing a coverage claim says may exceed the cap. */
+function clampToCoverageCap(state: CoverageState): CoverageState {
+  return COVERAGE_STATE_RANK[state] > COVERAGE_STATE_RANK[COVERAGE_CAP]
+    ? COVERAGE_CAP
+    : state;
+}
+
+/**
+ * What ONE surviving coverage ref still supports on its own — `undefined` when
+ * it supports nothing.
+ *
+ * The question is "what does this CLAIM assert?", never "where did the concept
+ * end up?". A claim that was withheld still covers its material: the workbook
+ * position written while a completion already held the concept at the cap is the
+ * whole reason surviving coverage is read at all (it is stamped
+ * `already-at-or-above`, and dropping it would discard a position that still
+ * stands). Equally, a claim that asserted only `frontier` supports only
+ * `frontier`, whatever the entry says today — reading every `curriculumPosition`
+ * ref as cap-strength support is what left a withdrawal standing on an
+ * unsupported `forming`.
+ *
+ * ── Refs written before `coverageCeiling` existed ───────────────────────────
+ * The position sync (`applyBridgeCoverageToModel`) proposes the cap and nothing
+ * else — it has no parameter for anything weaker — so its own writes
+ * (`positionSync: true`) are read at the cap, which is a fact about that producer
+ * and not a guess about that record. A manual `covered` ref carries no such
+ * guarantee: it may have claimed `forming`, `frontier` or `not-yet` and nothing
+ * on the ref says which, so it supports nothing here and the caller falls back to
+ * the recorded baseline — the state the concept actually held while that very ref
+ * was already on the entry. Inventing cap-strength support for it would be
+ * inventing history; inventing `frontier` would be inventing a claim nobody made.
+ */
+export function coverageSupportedState(
+  ref: CoverageEvidenceLike | undefined,
+): CoverageState | undefined {
+  if (!ref) return undefined;
+  // `partial` was recorded as evidence precisely because it does not stand for
+  // the whole concept (rule 3).
+  if (ref.coverageQualifier === CoverageQualifier.Partial) return undefined;
+
+  if (isCompletionCoverageRef(ref)) {
+    // A SECOND confirmation of the same material is an independent claim, and it
+    // is normally withheld for one uninteresting reason: the first confirmation
+    // had already raised the concept to the cap. Reading only `ownsPromotion`
+    // there dropped the concept to `not-yet` the moment the first was withdrawn,
+    // discarding a claim that still stood.
+    const stillClaims =
+      ref.ownsPromotion === true ||
+      ref.promoted === true ||
+      ref.withheldReason === CoverageWithheldReason.AlreadyAtOrAbove;
+    if (!stillClaims) return undefined;
+    // `applyCompletionCoverage` proposes the cap for every `direct` target and
+    // has no way to propose less, so an unstamped completion ref is a cap claim.
+    // Its `readState` is NOT consulted: that field records where the concept
+    // landed, which a governing eval can hold below what the program covered.
+    return clampToCoverageCap(
+      asCoverageState(ref.coverageCeiling) ?? COVERAGE_CAP,
+    );
+  }
+
+  if (ref.kind !== CURRICULUM_POSITION_COVERAGE) return undefined;
+  const asserted = asCoverageState(ref.coverageCeiling);
+  if (asserted) return clampToCoverageCap(asserted);
+  return ref.positionSync === true ? COVERAGE_CAP : undefined;
+}
+
 /**
  * The state SURVIVING evidence justifies on an entry, once a confirmation's own
  * refs are out of the reckoning — or `undefined` when nothing active justifies
@@ -367,13 +470,13 @@ export function completionRefsFor<T extends CoverageEvidenceLike>(
  * **Not a maximum over history.** A direct observation of the child decides
  * outright, and the LATEST one decides — so a stale `solid` attestation can
  * never outrank a later, lower, calibrated evaluation. Only when no direct ref
- * survives does coverage speak, and then only up to {@link COVERAGE_CAP}: an
- * independent workbook position or another program's completion still covers
- * the material, so releasing one claim must not drop the concept below what the
- * others continue to support.
- *
- * `partial` coverage justifies nothing: it was recorded as evidence precisely
- * because it does not stand for the whole concept.
+ * survives does coverage speak, and then at **the strength each claim actually
+ * asserted**, never higher than {@link COVERAGE_CAP}: an independent workbook
+ * position or another program's completion still covers the material, so
+ * releasing one claim must not drop the concept below what the others continue
+ * to support — and must not hold it above that either. The strongest surviving
+ * claim wins; they are concurrent claims, not a history
+ * ({@link coverageSupportedState} decides each one).
  */
 export function survivingSupportedState<T extends CoverageEvidenceLike>(
   entry: { evidence?: T[] } | undefined,
@@ -396,24 +499,18 @@ export function survivingSupportedState<T extends CoverageEvidenceLike>(
     return asCoverageState(latestDirect.readState);
   }
 
-  const coverageSurvives = live.some((ref) => {
-    if (ref.coverageQualifier === CoverageQualifier.Partial) return false;
-    if (isCompletionCoverageRef(ref)) {
-      // A SECOND confirmation of the same material is an independent claim, and
-      // it is normally withheld for one uninteresting reason: the first
-      // confirmation had already raised the concept to the cap. Reading only
-      // `ownsPromotion` there dropped the concept to `not-yet` the moment the
-      // first was withdrawn, discarding a claim that still stood — the same
-      // mistake as ignoring a surviving workbook position.
-      return (
-        ref.ownsPromotion === true ||
-        ref.promoted === true ||
-        ref.withheldReason === CoverageWithheldReason.AlreadyAtOrAbove
-      );
+  let supported: CoverageState | undefined;
+  for (const ref of live) {
+    const claim = coverageSupportedState(ref);
+    if (claim === undefined) continue;
+    if (
+      supported === undefined ||
+      COVERAGE_STATE_RANK[claim] > COVERAGE_STATE_RANK[supported]
+    ) {
+      supported = claim;
     }
-    return ref.kind === "curriculumPosition";
-  });
-  return coverageSurvives ? COVERAGE_CAP : undefined;
+  }
+  return supported;
 }
 
 /** Narrow an arbitrary string to a concept state, or undefined. */

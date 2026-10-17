@@ -288,11 +288,15 @@ export function applyReviewActionToModel(
     // naming a curriculum has told us about the MATERIAL, not about the child,
     // and the previous behaviour let that raise a concept a guided evaluation had
     // just read lower.
-    const promotion = coveragePromotion(
-      prev,
-      CoverageQualifier.Direct,
-      clampCoveredState(action.proposedState ?? 'forming'),
-    )
+    // What this claim asserts, §13-clamped — stamped on the ref below as
+    // `coverageCeiling`. It is NOT the same as `toState`: this claim may be
+    // withheld (a governing eval, a concept already higher), and then the state
+    // belongs to whatever else was speaking while the claim still covers exactly
+    // this much material. A withdrawal reading the ref later needs the claim,
+    // not the outcome — otherwise a `frontier` claim props up a `forming` nobody
+    // asserted.
+    const ceiling = clampCoveredState(action.proposedState ?? 'forming')
+    const promotion = coveragePromotion(prev, CoverageQualifier.Direct, ceiling)
     toState = promotion.state
     const detailSuffix = action.detail ? ` — ${action.detail}` : ''
     const unitSuffix = action.unit ? ` ${action.unit}` : ''
@@ -305,6 +309,7 @@ export function applyReviewActionToModel(
       ...(action.unit ? { unit: action.unit } : {}),
       ...(action.detail ? { detail: action.detail } : {}),
       via: 'manual',
+      coverageCeiling: ceiling,
       ...(promotion.withheldReason ? { withheldReason: promotion.withheldReason } : {}),
     }
     cause = promotion.promoted

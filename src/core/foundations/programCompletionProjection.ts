@@ -33,8 +33,10 @@
 //
 //   1. a direct observation made AFTER the completion's own observation controls
 //      outright — the state stays where that evidence put it;
-//   2. otherwise the recorded `priorState` is restored (clamped so it can only
-//      ever lower, never raise);
+//   2. otherwise the higher of (a) what any surviving independent coverage claim
+//      actually asserted — `coverageCeiling`, not the cap by assumption — and
+//      (b) the recorded `priorState` is restored (clamped so it can only ever
+//      lower, never raise);
 //   3. otherwise — no provenance, which only a pre-FEAT-242 or hand-edited ref
 //      can be — the state is KEPT and the entry is flagged
 //      `completionReviewNeeded`, which makes every advice consumer read it
@@ -125,11 +127,13 @@ export interface WithdrawnCompletionCoverage {
  *      observation controls outright, whatever it said and however often this
  *      is replayed;
  *   2. otherwise, whatever SURVIVING evidence justifies — the latest direct
- *      read, or the coverage cap when an independent coverage claim (a workbook
- *      position, another program's completion) still stands. Never a maximum
- *      over history;
- *   3. otherwise the recorded completion-owned baseline, clamped so a release
- *      can only ever lower a state;
+ *      read, or, when an independent coverage claim (a workbook position,
+ *      another program's completion) still stands, the state THAT CLAIM
+ *      asserted. Never the cap by default, and never a maximum over history;
+ *   3. the recorded completion-owned baseline is the other floor: the higher of
+ *      it and (2) is restored, clamped so a release can only ever lower a state.
+ *      A claim weaker than the baseline cannot erase what the concept already
+ *      stood on, and a baseline cannot cancel a claim that outlives it;
  *   4. and where none of those can justify the stored state — a legacy ref with
  *      no provenance — the state is KEPT and the entry flagged
  *      `completionReviewNeeded`, which every advice consumer reads
@@ -176,7 +180,22 @@ function releaseCompletionOnConcept(
 
   const supported = survivingSupportedState(released, completionId)
   const baseline = asCoverageState(holder.baselineState ?? holder.priorState)
-  const candidate = supported ?? baseline
+  // Surviving support and the recorded baseline are both FLOORS, and the higher
+  // one is the answer. Neither can raise anything — the clamp below only ever
+  // lowers — but a surviving claim that asserted only `frontier` must not cancel
+  // the state the concept already stood at before this confirmation, and a
+  // baseline of `not-yet` must not cancel a claim that outlives it. Taking
+  // `supported` alone would have let the weaker of two recorded facts decide.
+  //
+  // The claim is only said to be holding the concept up when it is STRICTLY
+  // stronger than the baseline: where the two agree, the baseline alone gives
+  // the same answer, and the parent's line should say the concept went back to
+  // what it was rather than that something else is carrying it.
+  const claimDecides =
+    supported !== undefined &&
+    (baseline === undefined ||
+      COVERAGE_STATE_RANK[supported] > COVERAGE_STATE_RANK[baseline])
+  const candidate = claimDecides ? supported : baseline
   if (!candidate) {
     return {
       entry: { ...released, completionReviewNeeded: true },
@@ -197,7 +216,7 @@ function releaseCompletionOnConcept(
       // left under review here.
       ...(prev.completionReviewNeeded ? { completionReviewNeeded: false } : {}),
     },
-    outcome: supported ? 'supported' : 'reverted',
+    outcome: claimDecides ? 'supported' : 'reverted',
     from,
     to,
   }

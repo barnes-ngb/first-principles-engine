@@ -9,9 +9,19 @@ import {
 } from './programCompletionProjection'
 import { applyBridgeCoverageToModel } from './workbookBridge'
 import { applyEvalFindingsToModel } from './evalModelSync'
-import { effectiveConceptState } from '../../../functions/src/shared/foundations/completionCoverage'
+import { applyReviewActionToModel } from '../../features/foundations-review/foundationsReviewActions'
+import {
+  coverageSupportedState,
+  effectiveConceptState,
+  survivingSupportedState,
+} from '../../../functions/src/shared/foundations/completionCoverage'
 import type { CompletionCoverageTarget } from './fastPhonicsCompletion'
-import type { ConceptStateEntry, EvidenceRef, LearnerModel } from '../types/learnerModel'
+import type {
+  ConceptStateEntry,
+  ConceptStateKind,
+  EvidenceRef,
+  LearnerModel,
+} from '../types/learnerModel'
 
 const CVC = 'reading.phonics.cvc'
 const BLENDS = 'reading.phonics.blends'
@@ -305,5 +315,225 @@ describe('withdrawal (Sol finding 2 and the organizer rule)', () => {
     const confirmed = applyCompletionCoverage(other, write([direct(CVC)]), NOW).model
     const withdrawn = withdrawCompletionCoverage(confirmed, 'fastPhonics:draft-1', LATER, 'mistake')
     expect(withdrawn.model.conceptStates[BLENDS]).toEqual(other.conceptStates[BLENDS])
+  })
+})
+
+/**
+ * A withdrawal may only rest on support that was actually ASSERTED (PR1900 P1).
+ *
+ * The defect: every active `curriculumPosition` ref was read as cap-strength
+ * support. A Review-Chat `covered` action may propose `frontier` or `not-yet` —
+ * the parser validates both and the writer honours them — so a completion that
+ * promoted such a concept to `forming` and was then withdrawn left the concept
+ * standing at `forming` on a claim that had never said more than "the edge".
+ *
+ * **Negative control for a reviewer:** make `coverageSupportedState` return
+ * `COVERAGE_CAP` for every `curriculumPosition` ref (the pre-repair line) and the
+ * first two cases below fail with `forming` — an unsupported state served as
+ * settled, with no `completionReviewNeeded` flag to mark it.
+ */
+describe('withdrawal rests only on support that was actually asserted', () => {
+  const coveredIn = (proposedState: ConceptStateKind) =>
+    ({
+      kind: 'covered',
+      childId: 'c1',
+      conceptId: CVC,
+      source: 'Fast Phonics',
+      unit: 'Peak 7',
+      proposedState,
+    }) as const
+
+  const EARLY = '2026-08-20T00:00:00.000Z' // before the completion's own observation
+
+  it('keeps a `frontier` manual claim at frontier — not at the coverage cap', () => {
+    const covered = applyReviewActionToModel(model(), coveredIn('frontier'), NOW).model
+    expect(covered.conceptStates[CVC].state).toBe('frontier')
+    expect(covered.conceptStates[CVC].evidence.at(-1)!.coverageCeiling).toBe('frontier')
+
+    const confirmed = applyCompletionCoverage(covered, write([direct(CVC)]), NOW).model
+    expect(confirmed.conceptStates[CVC].state).toBe('forming')
+    expect(refsOn(confirmed, CVC).at(-1)!.baselineState).toBe('frontier')
+
+    const withdrawn = withdrawCompletionCoverage(confirmed, 'fastPhonics:draft-1', LATER, 'notComplete')
+    const entry = withdrawn.model.conceptStates[CVC]
+    expect(entry.state).toBe('frontier')
+    // Reconstructable from two agreeing records (the claim and the baseline), so
+    // there is nothing for a parent to settle.
+    expect(entry.completionReviewNeeded).toBeFalsy()
+    expect(withdrawn.revertedConceptIds).toContain(CVC)
+    expect(effectiveConceptState(entry)).toBe('frontier')
+  })
+
+  it('keeps a `not-yet` manual claim at not-yet', () => {
+    const covered = applyReviewActionToModel(model(), coveredIn('not-yet'), NOW).model
+    const ref = covered.conceptStates[CVC].evidence.at(-1)!
+    expect(covered.conceptStates[CVC].state).toBe('not-yet')
+    // Withheld AND stamped: what the claim is worth is recorded either way.
+    expect(ref.withheldReason).toBe('already-at-or-above')
+    expect(ref.coverageCeiling).toBe('not-yet')
+
+    const confirmed = applyCompletionCoverage(covered, write([direct(CVC)]), NOW).model
+    expect(confirmed.conceptStates[CVC].state).toBe('forming')
+
+    const withdrawn = withdrawCompletionCoverage(confirmed, 'fastPhonics:draft-1', LATER, 'notComplete')
+    const entry = withdrawn.model.conceptStates[CVC]
+    expect(entry.state).toBe('not-yet')
+    expect(entry.completionReviewNeeded).toBeFalsy()
+  })
+
+  it('positive control: a `forming` manual claim DOES hold the cap after a withdrawal', () => {
+    const confirmed = applyCompletionCoverage(model(), write([direct(CVC)]), NOW).model
+    const covered = applyReviewActionToModel(confirmed, coveredIn('forming'), LATER).model
+    const ref = covered.conceptStates[CVC].evidence.at(-1)!
+    // It moved nothing — the completion had already raised the concept — and
+    // that is exactly the claim a withdrawal must not discard.
+    expect(ref.withheldReason).toBe('already-at-or-above')
+    expect(ref.coverageCeiling).toBe('forming')
+
+    const withdrawn = withdrawCompletionCoverage(covered, 'fastPhonics:draft-1', LATER, 'notComplete')
+    expect(withdrawn.model.conceptStates[CVC].state).toBe('forming')
+    expect(withdrawn.supportedConceptIds).toContain(CVC)
+  })
+
+  it('stamps what each coverage writer claims, §13-clamped', () => {
+    const synced = applyBridgeCoverageToModel(
+      model(),
+      [{ conceptId: CVC, unitLabel: 'Peak 7' }],
+      'fastPhonics',
+      NOW,
+      'scan',
+    ).model
+    // The position sync has no way to claim anything but the cap.
+    expect(synced.conceptStates[CVC].evidence.at(-1)!.coverageCeiling).toBe('forming')
+
+    const claimedSolid = applyReviewActionToModel(model(), coveredIn('solid'), NOW).model
+    expect(claimedSolid.conceptStates[CVC].evidence.at(-1)!.coverageCeiling).toBe('forming')
+    expect(claimedSolid.conceptStates[CVC].state).toBe('forming')
+  })
+
+  it('reverts to the recorded baseline for a legacy manual ref that recorded no claim', () => {
+    // A `curriculumPosition` ref written before `coverageCeiling` existed: it may
+    // have claimed anything, and nothing on it says which. The baseline is the
+    // state the concept actually held while that very ref was on the entry, so
+    // reverting to it neither invents cap support nor loses what the ref did.
+    const legacy = model({
+      [CVC]: {
+        state: 'frontier',
+        evidence: [
+          {
+            kind: 'curriculumPosition',
+            sourceId: 'Fast Phonics',
+            note: 'Covered in Fast Phonics Peak 7',
+            observedAt: EARLY,
+            source: 'Fast Phonics',
+            via: 'manual',
+          },
+        ],
+        seededAt: NOW,
+      },
+    })
+    const before = legacy.conceptStates[CVC].evidence[0]
+    const confirmed = applyCompletionCoverage(legacy, write([direct(CVC)]), NOW).model
+    expect(confirmed.conceptStates[CVC].state).toBe('forming')
+
+    const withdrawn = withdrawCompletionCoverage(confirmed, 'fastPhonics:draft-1', LATER, 'notComplete')
+    const entry = withdrawn.model.conceptStates[CVC]
+    expect(entry.state).toBe('frontier')
+    expect(entry.completionReviewNeeded).toBeFalsy()
+    expect(withdrawn.revertedConceptIds).toContain(CVC)
+    // The old ref is read, never rewritten.
+    expect(entry.evidence[0]).toEqual(before)
+  })
+
+  it('reads an unstamped ref by its PRODUCER, and a partial claim as nothing', () => {
+    // The position sync's own writes (`positionSync`) could only ever have
+    // claimed the cap, so a pre-stamp sync ref still supports `forming`; an
+    // unstamped manual ref supports nothing, because nothing says what it said.
+    expect(
+      coverageSupportedState({ kind: 'curriculumPosition', positionSync: true }),
+    ).toBe('forming')
+    expect(coverageSupportedState({ kind: 'curriculumPosition' })).toBeUndefined()
+    expect(
+      coverageSupportedState({ kind: 'curriculumPosition', coverageCeiling: 'frontier' }),
+    ).toBe('frontier')
+    // Rule 1 still holds on the read side, whatever a ref carries.
+    expect(
+      coverageSupportedState({ kind: 'curriculumPosition', coverageCeiling: 'solid' }),
+    ).toBe('forming')
+    expect(
+      coverageSupportedState({
+        kind: 'curriculumPosition',
+        coverageCeiling: 'forming',
+        coverageQualifier: 'partial',
+      }),
+    ).toBeUndefined()
+    // A completion claims the cap by construction, stamp or no stamp.
+    expect(
+      coverageSupportedState({
+        kind: 'programCompletionCoverage',
+        completionId: 'fastPhonics:other',
+        withheldReason: 'already-at-or-above',
+      }),
+    ).toBe('forming')
+  })
+
+  it('takes the STRONGEST surviving claim, and a direct read still outranks all of them', () => {
+    const claims = [
+      { kind: 'curriculumPosition', coverageCeiling: 'frontier' },
+      { kind: 'curriculumPosition', coverageCeiling: 'forming' },
+    ]
+    expect(survivingSupportedState({ evidence: claims }, 'fastPhonics:draft-1')).toBe('forming')
+    expect(
+      survivingSupportedState(
+        { evidence: [...claims, { kind: 'eval', observedAt: EARLY, readState: 'frontier' }] },
+        'fastPhonics:draft-1',
+      ),
+    ).toBe('frontier')
+  })
+
+  it('leaves a surviving direct read in control of the release, cap or no cap', () => {
+    // Guard, not a change: a backdated completion (observed 1 Sep) withdrawn
+    // while the only direct read was observed BEFORE it — so the "later direct
+    // evidence governs" branch does not fire and the release recomputes. The
+    // eval's own read decides, and the surviving `forming` workbook claim must
+    // not raise the concept back over it.
+    const confirmed = applyCompletionCoverage(model(), write([direct(CVC)]), NOW).model
+    const synced = applyBridgeCoverageToModel(
+      confirmed,
+      [{ conceptId: CVC, unitLabel: 'Peak 7' }],
+      'fastPhonics',
+      NOW,
+      'scan',
+    ).model
+    const evaluated = applyEvalFindingsToModel(
+      synced,
+      [{ conceptId: CVC, state: 'frontier', note: 'backdated eval read' }],
+      'sess-2',
+      EARLY,
+    ).model
+    expect(evaluated.conceptStates[CVC].state).toBe('frontier')
+
+    const withdrawn = withdrawCompletionCoverage(evaluated, 'fastPhonics:draft-1', LATER, 'mistake')
+    expect(withdrawn.model.conceptStates[CVC].state).toBe('frontier')
+    expect(withdrawn.directlyGovernedConceptIds).not.toContain(CVC)
+  })
+
+  it('rewrites no history: the claim is untouched and the released refs are kept, marked', () => {
+    const covered = applyReviewActionToModel(model(), coveredIn('frontier'), NOW).model
+    const confirmed = applyCompletionCoverage(covered, write([direct(CVC)]), NOW).model
+    const claimBefore = refsOn(confirmed, CVC).find((r) => r.kind === 'curriculumPosition')
+
+    const withdrawn = withdrawCompletionCoverage(confirmed, 'fastPhonics:draft-1', LATER, 'notComplete')
+    const after = refsOn(withdrawn.model, CVC)
+    expect(after).toHaveLength(refsOn(confirmed, CVC).length) // nothing deleted
+    expect(after.find((r) => r.kind === 'curriculumPosition')).toEqual(claimBefore)
+
+    const ours = after.find((r) => r.kind === 'programCompletionCoverage')!
+    expect(ours.status).toBe('superseded')
+    expect(ours.supersededAt).toBe(LATER)
+    expect(ours.supersededReason).toBe('notComplete')
+    // What the confirmation claimed in October stays readable afterwards.
+    expect(ours.baselineState).toBe('frontier')
+    expect(ours.readState).toBe('forming')
   })
 })
