@@ -1231,6 +1231,127 @@ describe('a pending save is attributed to the child it belongs to', () => {
 })
 
 /**
+ * PR-1897 review, continuation 1 — the draft may not be edited while IT is
+ * being written.
+ *
+ * `saving` was enough for the buttons and not for the fields: the six of them
+ * stayed live while the request carrying the entry was unanswered, so typing
+ * edited the very draft in the air. A confirmation then cleared the new typing
+ * with a receipt for the old content, and an edit made before any failure kept
+ * the `entryKey` — a changed entry under the id of one that may already have
+ * landed.
+ *
+ * The guard is matched on family + child + entry key, never on `saving` alone,
+ * which is what the last case here is about: a draft the held request does NOT
+ * belong to stays editable, as the cross-child and A → B → A cases above require.
+ */
+describe('a draft whose own save is still in the air', () => {
+  /** The commit the real hook makes when it records the in-flight request. */
+  const showInFlight = (view: ReturnType<typeof render>) =>
+    view.rerender(<NativeProgressSection />)
+
+  it('locks the fields and the correction button, and keeps the entry as confirmed', async () => {
+    const user = userEvent.setup()
+    observations = [row({ id: 'lincoln__e1', nativeNumber: 42 })]
+    const held = heldSave()
+    const view = render(<NativeProgressSection />)
+    await fillEntry(user)
+    await confirmAndSave(user)
+    showInFlight(view)
+
+    expect(screen.getByLabelText('Lesson number')).toBeDisabled()
+    expect(screen.getByLabelText('Day you saw this')).toBeDisabled()
+    expect(screen.getByLabelText('Note (optional)')).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Correct this entry' })).toBeDisabled()
+
+    // The events a `disabled` attribute does not stop: one already queued when
+    // the write began, and a programmatic tap on the correction button.
+    fireEvent.change(screen.getByLabelText('Lesson number'), { target: { value: '99' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Correct this entry' }))
+
+    expect(screen.getByLabelText('Lesson number')).toHaveValue('42')
+    expect(screen.queryByText(/That entry stays on the record/)).not.toBeInTheDocument()
+
+    // ...and the confirmation describes what was actually sent.
+    await act(async () => {
+      held.settleNow(savedOk())
+      await Promise.resolve()
+    })
+    expect(await screen.findByText(/Recorded for Lincoln/)).toBeInTheDocument()
+    expect(saveMock).toHaveBeenCalledTimes(1)
+    expect(saveMock.mock.calls[0][0].observation.nativeNumber).toBe(42)
+    // The form is free again, and empty rather than holding the blocked edit.
+    expect(screen.getByLabelText('Lesson number')).toBeEnabled()
+    expect(screen.getByLabelText('Lesson number')).toHaveValue('')
+  })
+
+  it('hands the entry back unchanged when the answer is unconfirmed', async () => {
+    const user = userEvent.setup()
+    const held = heldSave()
+    const view = render(<NativeProgressSection />)
+    await fillEntry(user)
+    await confirmAndSave(user)
+    showInFlight(view)
+    fireEvent.change(screen.getByLabelText('Lesson number'), { target: { value: '99' } })
+
+    await held.refuse()
+
+    expect(await screen.findByText(/not confirmed as saved/)).toBeInTheDocument()
+    // Hers to retry or edit, and it says what she confirmed.
+    const field = screen.getByLabelText('Lesson number')
+    expect(field).toBeEnabled()
+    expect(field).toHaveValue('42')
+
+    // A retry is the same row...
+    saveMock.mockResolvedValue({ ok: false, message: failureNotice() })
+    await user.click(screen.getByRole('button', { name: 'Save this record' }))
+    await waitFor(() => expect(saveMock).toHaveBeenCalledTimes(2))
+    expect(saveMock.mock.calls[1][0].entryKey).toBe(saveMock.mock.calls[0][0].entryKey)
+
+    // ...and an edit, which is allowed again now, is a different one.
+    await user.type(screen.getByLabelText('Lesson number'), '3')
+    await user.click(screen.getByRole('button', { name: 'Check this entry' }))
+    await user.click(await screen.findByRole('button', { name: 'Save this record' }))
+    await waitFor(() => expect(saveMock).toHaveBeenCalledTimes(3))
+    expect(saveMock.mock.calls[2][0].entryKey).not.toBe(saveMock.mock.calls[0][0].entryKey)
+    expect(saveMock.mock.calls[2][0].observation.nativeNumber).toBe(423)
+  })
+
+  it('leaves a draft the held request does not belong to editable', async () => {
+    // The retry of a stranded entry carries the OLD key, so the newer draft for
+    // the same child is not the one in the air and must not freeze behind it.
+    const user = userEvent.setup()
+    const held = heldSave()
+    const view = render(<NativeProgressSection />)
+    await fillEntry(user)
+    await confirmAndSave(user)
+
+    activeChildId = 'london'
+    observationsScope = scopeOf('london')
+    view.rerender(<NativeProgressSection />)
+    activeChildId = 'lincoln'
+    observationsScope = scopeOf('lincoln')
+    view.rerender(<NativeProgressSection />)
+    await fillEntry(user, '55', '2026-10-15')
+    await held.refuse()
+    expect(await screen.findByText(strandedSaveTitle('Lincoln'))).toBeInTheDocument()
+
+    // The retry is held in its turn, with the stranded entry's key.
+    heldSave()
+    await user.click(
+      screen.getByRole('button', { name: "Try saving Lincoln's entry again" }),
+    )
+    await waitFor(() => expect(saveMock).toHaveBeenCalledTimes(2))
+    showInFlight(view)
+
+    const field = screen.getByLabelText('Lesson number')
+    expect(field).toBeEnabled()
+    await user.type(field, '6')
+    expect(field).toHaveValue('556')
+  })
+})
+
+/**
  * PR-1897 review, P2 — the way out of a correction started by accident.
  *
  * Without it the Program field stayed locked and every later entry was filed as a

@@ -365,6 +365,43 @@ export default function NativeProgressSection() {
     signedInFamily.current = familyId ?? ''
   }, [familyId])
 
+  /**
+   * THIS draft's own save is in the air — not merely that some write is.
+   *
+   * `saving` answers the second question, and the controls that only need to be
+   * one-at-a-time (Save, Back, Cancel correction, a stranded retry) are right to
+   * use it. The fields are a different matter: while the request carrying this
+   * entry is unanswered, typing into them edited the very draft being written
+   * (PR-1897 review, continuation 1). Two things went wrong at once — a success
+   * cleared the new typing with a receipt for the old content, and an edit made
+   * before any failure kept the same `entryKey`, so a changed entry would be
+   * written under the id of one that may already have landed.
+   *
+   * Matched on family + child + entry key, never on `saving` alone. A draft for a
+   * child the parent has since switched to — or a NEW entry for the same child
+   * after a stranded one — is deliberately editable while that earlier request is
+   * still out: it is a different entry, its key says so, and freezing it would
+   * break the contract that a switch gives you a usable form.
+   */
+  const draftSaving =
+    savingRequest !== null &&
+    savingRequest.familyId === (familyId ?? '') &&
+    savingRequest.childId === activeChildId &&
+    savingRequest.entryKey === entryKey
+
+  /**
+   * The same answer, readable from a handler that was captured earlier.
+   *
+   * `disabled` stops the taps a parent can see; this stops the ones she cannot —
+   * an event already queued when the save began, or a programmatic call holding a
+   * closure from a render before it. A layout effect for the reason the tokens
+   * above use one: it is in step by the end of the commit that started the write.
+   */
+  const draftSavingRef = useRef(draftSaving)
+  useLayoutEffect(() => {
+    draftSavingRef.current = draftSaving
+  }, [draftSaving])
+
   const childName = activeChild?.name ?? 'this child'
   // The fallback is for a stored draft shape that outlived a program being
   // renamed; the field label must never render as "Undefined number".
@@ -372,6 +409,9 @@ export default function NativeProgressSection() {
 
   const editDraft = useCallback(
     (patch: Partial<NativeProgressDraft>) => {
+      // The entry in the air is this one — see `draftSaving`. Changing it now
+      // would be written off by the answer either way, and silently.
+      if (draftSavingRef.current) return
       setDraft((prev) => ({ ...prev, ...patch }))
       setFieldErrors({})
       // Editing after a failure makes this a different entry — see `entryKey`.
@@ -542,6 +582,9 @@ export default function NativeProgressSection() {
 
   const startCorrection = useCallback(
     (observation: NativeProgressObservation) => {
+      // Starting a correction replaces the draft and mints a new key, which is
+      // the same mutation of an unanswered entry that `editDraft` refuses.
+      if (draftSavingRef.current) return
       setCorrecting(observation)
       setDraft({
         program: observation.program,
@@ -690,8 +733,9 @@ export default function NativeProgressSection() {
           // Fixed while correcting (review item 7): a correction is a fix to one
           // observation, and the program decides the unit its number is read in.
           // The writer refuses a cross-program link anyway; locking the field is
-          // how a parent finds that out before she types, not after.
-          disabled={correcting !== null}
+          // how a parent finds that out before she types, not after. Fixed while
+          // THIS draft is being written for the separate reason in `draftSaving`.
+          disabled={correcting !== null || draftSaving}
           helperText={
             fieldErrors.program ??
             (correcting
@@ -716,6 +760,7 @@ export default function NativeProgressSection() {
             fieldErrors.numberInput ??
             `Exactly the ${unit} number the app showed — type it as you saw it.`
           }
+          disabled={draftSaving}
           // A numeric keypad without `type="number"`, which brings spinners and
           // reports "" for values the browser dislikes. The rule module validates.
           inputMode="numeric"
@@ -731,6 +776,7 @@ export default function NativeProgressSection() {
             editDraft({ meaning: e.target.value as NativeProgressDraft['meaning'] })
           }
           error={Boolean(fieldErrors.meaning)}
+          disabled={draftSaving}
           helperText={fieldErrors.meaning ?? 'Working on it, finished it, or not sure.'}
         >
           {NATIVE_MEANINGS.map((meaning) => (
@@ -747,6 +793,7 @@ export default function NativeProgressSection() {
           value={draft.observedOn}
           onChange={(e) => editDraft({ observedOn: e.target.value })}
           error={Boolean(fieldErrors.observedOn)}
+          disabled={draftSaving}
           helperText={
             fieldErrors.observedOn ??
             'The day the progress was seen — not today, if you are catching up.'
@@ -763,6 +810,7 @@ export default function NativeProgressSection() {
             editDraft({ source: e.target.value as NativeProgressDraft['source'] })
           }
           error={Boolean(fieldErrors.source)}
+          disabled={draftSaving}
           helperText={fieldErrors.source ?? NATIVE_PROGRESS_SOURCE_NOTICE}
         >
           {NATIVE_SOURCES.map((source) => (
@@ -780,6 +828,7 @@ export default function NativeProgressSection() {
           value={draft.note}
           onChange={(e) => editDraft({ note: e.target.value })}
           error={Boolean(fieldErrors.note)}
+          disabled={draftSaving}
           helperText={fieldErrors.note ?? `Up to ${NOTE_MAX_LENGTH} characters.`}
         />
 
@@ -892,7 +941,13 @@ export default function NativeProgressSection() {
                 </Stack>
               )}
               <Box>
-                <Button size="small" onClick={() => startCorrection(observation)}>
+                <Button
+                  size="small"
+                  onClick={() => startCorrection(observation)}
+                  // Dead while this draft's own save is unanswered: it would
+                  // replace the entry that write is carrying (`draftSaving`).
+                  disabled={draftSaving}
+                >
                   Correct this entry
                 </Button>
               </Box>

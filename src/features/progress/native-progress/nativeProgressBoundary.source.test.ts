@@ -142,8 +142,23 @@ describe('the feature touches one collection and no rail', () => {
 
   it('the Program field is locked while a correction is open', () => {
     // The UI half of item 7, pinned here rather than in a render test because the
-    // assertion is about intent, not about how MUI marks a disabled select.
-    expect(code(SECTION)).toContain('disabled={correcting !== null}')
+    // assertion is about intent, not about how MUI marks a disabled select. The
+    // correction lock is one of two reasons the field can be dead — continuation
+    // 1 added `draftSaving` — so the clause is asserted, not the whole expression.
+    expect(code(SECTION)).toMatch(/disabled=\{correcting !== null(\s*\|\|[^}]*)?\}/)
+  })
+
+  it('every field and the history correction button is dead while this draft is in the air', () => {
+    // Continuation 1, pinned here for the same reason as the lock above: a render
+    // test cannot read a disabled MUI select without asserting MUI's internals.
+    // What the guard is FOR — no mutation of the entry being written, and no
+    // freeze on a draft the request does not belong to — is pinned in
+    // `NativeProgressSection.test.tsx`.
+    const source = code(SECTION)
+    // Five fields and the Correct-this-entry button take the guard on its own...
+    expect(source.match(/disabled=\{draftSaving\}/g)).toHaveLength(6)
+    // ...and Program, which already has the correction lock, takes it as well.
+    expect(source).toContain('disabled={correcting !== null || draftSaving}')
   })
 
   it('the pure rule module holds no Firestore and no React', () => {
@@ -181,6 +196,10 @@ describe('the switch tokens are in step at the commit, not after the paint', () 
     'scopeRun.current += 1',
     'familyVisit.current += 1',
     'signedInFamily.current =',
+    // Continuation 1: the same window for the field guard. An edit handler
+    // captured before the write began reads this ref, so it has to be true by the
+    // end of the commit that started the save, not after the paint.
+    'draftSavingRef.current = draftSaving',
   ]) {
     it(`${token} is advanced in a layout effect`, () => {
       expect(effectHolding(code(SECTION), token)).toBe('useLayoutEffect')
