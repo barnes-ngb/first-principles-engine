@@ -156,9 +156,11 @@ projects:
    withdrawal — a newly confirmed completion covering the same concept `direct`,
    a workbook position — lifts the read to exactly the strength it asserted
    (never past the cap, and never over a live direct read), and superseding that
-   claim restores the uncertainty in the same breath. Only a parent's word or a
-   diagnostic clears the flag itself, so no baseline, `readState` or provenance
-   is ever invented to make an ambiguous `forming` read as settled.
+   claim restores the uncertainty in the same breath. The flag itself is cleared
+   only by a writer that answers its question — a parent's word, a diagnostic,
+   or the UX-291 working-level projection *establishing* a fresh higher state in
+   place of the one under review — so no baseline, `readState` or provenance is
+   ever invented to make an ambiguous `forming` read as settled.
 
 No prerequisite traversal, no quest queued, no attestation created, and
 `needsReconcile` is never read or written by this path.
@@ -308,8 +310,11 @@ asynchronously through the existing stale mark; nothing re-plans inline.
    closed, which can refuse a save that a transient read error made unverifiable;
    the parent retries.
 4. **A `completionReviewNeeded` entry is conservative, not resolved.** It clears
-   when a parent's word or a diagnostic lands on the concept. A fresh coverage
-   claim does **not** clear it — it only raises what the entry is read at while
+   when a parent's word or a diagnostic lands on the concept, and when the
+   working-level projection raises the concept to a freshly derived state (that
+   write replaces the state the flag was asking about and carries its own
+   `workingLevel` ref; a blocked, equal or lower projection clears nothing). A
+   fresh coverage claim does **not** clear it — it only raises what the entry is read at while
    that claim stands (§5 rule 5), so the Foundations drawer and the prompt say
    which of the two is true rather than promising caution that is not happening.
 5. **A stranded outcome does not survive unmount** — the recovery panel is

@@ -245,7 +245,8 @@ export interface ConceptStateEntry {
    * `completionReviewCeiling` — the working edge, or whatever a LIVE claim on
    * the entry actually supports, so a confirmation landing after the withdrawal
    * is read at the strength it asserted and its own withdrawal puts the cap
-   * back. Only a parent's word or a diagnostic clears the flag itself.
+   * back. A parent's word, a diagnostic, or an eligible working-level projection
+   * that raises the state can clear the flag itself.
    *
    * **Deliberately not `needsReconcile`.** That flag means one other specific
    * thing — an evaluation disagreeing with a parent's attestation — and is

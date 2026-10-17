@@ -52,9 +52,13 @@
  *    completion, a workbook position — raises the read to exactly the strength
  *    it asserted, and withdrawing that claim drops it straight back to the edge.
  *    Deriving the ceiling is what keeps both halves honest: the flag is never
- *    cleared by a statement about material (only a parent's word or a diagnostic
- *    does that), and no baseline, provenance or `readState` is ever invented to
- *    make an ambiguous `forming` look proven.
+ *    cleared by a statement about material, and no baseline, provenance or
+ *    `readState` is ever invented to make an ambiguous `forming` look proven.
+ *    Clearing it is for the writers that answer its question — a parent's word,
+ *    a diagnostic, or a derived writer that ESTABLISHES a fresh state in place
+ *    of the one under review (the UX-291 working-level projection, whose
+ *    band-derived ref is deliberately not support this reader values: a fresh
+ *    reading of the child replaces the state rather than propping it up).
  *
  * Pure, dependency-free and structurally typed on purpose: the client's
  * `ConceptStateEntry` / `EvidenceRef` and the server's `StoredConceptState` /

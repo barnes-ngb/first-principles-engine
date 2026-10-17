@@ -13,6 +13,11 @@ import {
   applyWorkingLevelProjection,
   shouldReprojectWorkingLevels,
 } from './workingLevelProjection'
+// The round-2 block below drives the flag through the REAL withdrawal writer
+// rather than hand-setting it, and reads the result through the one reader every
+// advice consumer uses.
+import { withdrawCompletionCoverage } from './programCompletionProjection'
+import { effectiveConceptState } from '../../../functions/src/shared/foundations/completionCoverage'
 import type { EvidenceKind, LearnerModel } from '../types/learnerModel'
 import type { SkillSnapshot } from '../types/evaluation'
 
@@ -397,5 +402,160 @@ describe('withdrawn evidence is history, not a projection guard (PR1900 round3)'
     const projected = applyWorkingLevelProjection(current, foundationGraphs, 'c1', snapshot(7), NOW)
     expect(projected.model.conceptStates[id]).toEqual(current.conceptStates[id])
     expect(projected.changedConceptIds).not.toContain(id)
+  })
+})
+
+/**
+ * A fresh level ESTABLISHES a state, so it ends the completion review (round 2,
+ * finding 4304817073).
+ *
+ * The defect: this projection wrote a fresh `solid` over an entry an
+ * unreconstructable completion withdrawal had flagged, and spread
+ * `completionReviewNeeded: true` through to it. The shared support reader values
+ * coverage claims and direct observations — a band-derived `workingLevel` ref is
+ * neither — so `effectiveConceptState` capped the new reading at `frontier` and
+ * nothing in the system could ever lift it: every advice surface went on serving
+ * the working edge for a concept the child's own level had just established.
+ *
+ * The repair retires the flag on exactly the concepts this pass raises, and
+ * nowhere else. It does NOT teach `survivingSupportedState` about `workingLevel`
+ * refs: that reader is also the withdrawal's, so a new kind of support there
+ * would change what props a concept up when a completion is released.
+ *
+ * **Negative control for a reviewer:** drop the one `completionReviewNeeded`
+ * line from the fold and the first case fails on `effective` (`frontier`, with
+ * the flag still `true`). Move it above the rule 1 / rule 2 guards — clearing
+ * the flag on every flagged concept the pass merely visits — and the blocked and
+ * lower controls fail on the flag. The equal control is the one that pins that
+ * no flag-only sweep was added: it still gets the same model object back.
+ */
+describe('a raised state retires the completion review (round 2)', () => {
+  const ID = 'reading.phonics.longVowels'
+  /** The pre-FEAT-242 ref an old confirmation left: it owned the promotion and recorded no baseline. */
+  const legacy = {
+    kind: 'programCompletionCoverage' as const,
+    sourceId: 'fastPhonics:old',
+    completionId: 'fastPhonics:old',
+    note: 'Fast Phonics finished',
+    observedAt: SEEDED_AT,
+    promoted: true,
+  }
+
+  /**
+   * The real lifecycle, not a hand-set flag: a legacy confirmation raised a
+   * band-seeded concept, and withdrawing it could not reconstruct the basis.
+   *
+   * `level` is the level the model was seeded at, and `state` the state the
+   * withdrawal is left holding.
+   */
+  function flaggedModel(level: number, state: 'forming' | 'solid'): LearnerModel {
+    const current = storedAt(level)
+    const seeded = current.conceptStates[ID]
+    current.conceptStates[ID] = {
+      ...seeded,
+      state,
+      // An unrelated standing field: a withdrawal must not touch it, and neither
+      // may the retirement below (FEAT-76 is resolved by one specific act).
+      needsReconcile: true,
+      evidence: [...(seeded.evidence ?? []), legacy],
+    }
+    const withdrawn = withdrawCompletionCoverage(current, 'fastPhonics:old', LEVEL_MOVED_AT, 'mistake')
+    expect(withdrawn.reviewNeededConceptIds).toContain(ID)
+    const entry = withdrawn.model.conceptStates[ID]
+    expect(entry.state).toBe(state) // history is not rewritten
+    expect(entry.completionReviewNeeded).toBe(true)
+    // The band-derived ref sitting right there is NOT support the shared reader
+    // values, which is the whole reason the flag has to be retired rather than
+    // out-voted: advice reads the working edge until something establishes a state.
+    expect(effectiveConceptState(entry)).toBe('frontier')
+    return withdrawn.model
+  }
+
+  it('reads a freshly projected solid as solid, flag retired, history intact', () => {
+    const uncertain = flaggedModel(5, 'forming')
+    const legacyAfterWithdrawal = uncertain.conceptStates[ID].evidence.find(
+      (e) => e.completionId === 'fastPhonics:old',
+    )
+    expect(legacyAfterWithdrawal?.status).toBe('superseded')
+
+    // Level 7 reads `solid` where level 5 read `frontier`, so this is a genuine
+    // raise over the `forming` the withdrawal was left holding.
+    const { model: next, changedConceptIds } = project(uncertain, 7)
+    const entry = next.conceptStates[ID]
+    expect(changedConceptIds).toContain(ID)
+    expect(entry.state).toBe('solid')
+    // Explicitly `false`, never absent: the writer MERGES this entry into
+    // Firestore (and JSON-scrubs `undefined`), where a missing key would leave
+    // the stored `true` behind.
+    expect(entry.completionReviewNeeded).toBe(false)
+    expect('completionReviewNeeded' in entry).toBe(true)
+    // ...so every advice consumer now reads what the level established.
+    expect(effectiveConceptState(entry)).toBe('solid')
+
+    // Nothing else moved: the record of the withdrawal, the standing reconcile
+    // question, and the new reading's own evidence.
+    expect(entry.needsReconcile).toBe(true)
+    expect(entry.evidence).toContainEqual(legacyAfterWithdrawal)
+    expect(entry.evidence.at(-1)?.kind).toBe('workingLevel')
+    expect(next.changeFeed.some((c) => c.conceptId === ID && c.to === 'solid')).toBe(true)
+    // And a concept that never carried the flag does not acquire the key.
+    const untouched = next.conceptStates['reading.phonics.vowelTeams']
+    expect('completionReviewNeeded' in untouched).toBe(false)
+  })
+
+  it('blocked: an ACTIVE claim beside the flag keeps rule 1, and the derived read', () => {
+    // A fresh confirmation's own ref is active, so rule 1 skips the concept
+    // outright — a derived writer may not overwrite what is currently claimed.
+    // The entry is therefore unchanged, flag included, and the reading comes
+    // from the live claim through the shared reader rather than from this pass.
+    const uncertain = flaggedModel(5, 'forming')
+    uncertain.conceptStates[ID] = {
+      ...uncertain.conceptStates[ID],
+      evidence: [
+        ...uncertain.conceptStates[ID].evidence,
+        {
+          kind: 'programCompletionCoverage',
+          sourceId: 'fastPhonics:fresh',
+          completionId: 'fastPhonics:fresh',
+          note: 'Fast Phonics finished',
+          observedAt: LEVEL_MOVED_AT,
+          status: 'active',
+          coverageQualifier: 'direct',
+          withheldReason: 'already-at-or-above',
+        },
+      ],
+    }
+    const before = structuredClone(uncertain.conceptStates[ID])
+
+    const { model: next, changedConceptIds } = project(uncertain, 7)
+    expect(changedConceptIds).not.toContain(ID)
+    expect(next.conceptStates[ID]).toEqual(before)
+    expect(next.conceptStates[ID].completionReviewNeeded).toBe(true)
+    // The core fresh-completion behaviour is untouched by this repair: the live
+    // claim supports the coverage cap, so advice reads `forming` — not `solid`,
+    // which no claim and no level has established here.
+    expect(effectiveConceptState(next.conceptStates[ID])).toBe('forming')
+  })
+
+  it('equal: a projection that confirms the stored state retires nothing', () => {
+    // Seeded at 7 and projected at 7: the band pass offers the state the entry
+    // already holds, so rule 2 skips it. Nothing was established, so the
+    // uncertainty stands — and rule 4 still returns the SAME object, which is
+    // what a flag-only sweep would have broken.
+    const uncertain = flaggedModel(7, 'solid')
+    const result = project(uncertain, 7)
+    expect(result.changedConceptIds).toEqual([])
+    expect(result.model).toBe(uncertain)
+    expect(result.model.conceptStates[ID].completionReviewNeeded).toBe(true)
+    expect(effectiveConceptState(result.model.conceptStates[ID])).toBe('frontier')
+  })
+
+  it('lower: a level that moved DOWN retires nothing and demotes nothing', () => {
+    const uncertain = flaggedModel(7, 'solid')
+    const { model: next, changedConceptIds } = project(uncertain, 5)
+    expect(changedConceptIds).not.toContain(ID)
+    expect(next.conceptStates[ID].state).toBe('solid')
+    expect(next.conceptStates[ID].completionReviewNeeded).toBe(true)
+    expect(effectiveConceptState(next.conceptStates[ID])).toBe('frontier')
   })
 })
