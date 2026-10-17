@@ -32,7 +32,11 @@
  *    a concept that already carries direct evidence — in either direction, and
  *    whatever that evidence said. It is the calibration guard the eval writer
  *    has (`FEAT-76` attestation-freeze) extended to the writer that cannot
- *    measure anything.
+ *    measure anything. Reading a STATE out of direct evidence is the narrower
+ *    question, and it is a different one: only a ref that actually recorded a
+ *    `readState` read anything, so a failed quest blocks a coverage promotion
+ *    ({@link governingDirectEvidence}) while leaving the last genuine assessment
+ *    standing ({@link governingDirectRead}).
  * 3. **A broad concept takes `partial` coverage.** Where a program teaches part
  *    of what a graph concept means, the claim is recorded as evidence and
  *    promotes nothing (`coverageQualifier: 'partial'`).
@@ -241,27 +245,85 @@ export function isGoverningDirectKind(kind: string | undefined): boolean {
 }
 
 /**
- * The most recent ACTIVE direct observation on an entry, or undefined.
+ * The latest ACTIVE direct ref on an entry — the ONE loop behind both questions
+ * this module asks about direct evidence.
  *
  * `sinceIso`, when given, restricts the answer to direct evidence observed
- * strictly AFTER that stamp — which is how a withdrawal asks "has anything
- * actually measured this child since the completion claimed it?". ISO stamps
- * compare lexicographically; a ref with no `observedAt` is treated as older than
- * any stamp, because an undated ref cannot be shown to be later.
+ * strictly AFTER that stamp. ISO stamps compare lexicographically; a ref with no
+ * `observedAt` is treated as older than any stamp, because an undated ref cannot
+ * be shown to be later. Ties go to the ref appended last, which is the order its
+ * writer wrote in.
+ *
+ * `requireRead` is the whole difference between the two questions, and the
+ * distinction is a real one: a failed or short quest records that the child WAS
+ * OBSERVED without recording any state — `questTargeting` stamps `readState`
+ * only on a qualifying result — so it is a direct observation that establishes
+ * nothing. One question wants every observation, the other only the ones that
+ * actually read a state.
  */
-export function governingDirectEvidence<T extends CoverageEvidenceLike>(
+function latestDirectRef<T extends CoverageEvidenceLike>(
   entry: { evidence?: T[] } | undefined,
-  sinceIso?: string,
+  sinceIso: string | undefined,
+  requireRead: boolean,
 ): T | undefined {
   let best: T | undefined;
   for (const ref of activeEvidence(entry?.evidence)) {
     if (!isGoverningDirectKind(ref.kind)) continue;
+    if (requireRead && !asCoverageState(ref.readState)) continue;
     if (sinceIso) {
       if (!ref.observedAt || ref.observedAt <= sinceIso) continue;
     }
     if (!best || (ref.observedAt ?? "") >= (best.observedAt ?? "")) best = ref;
   }
   return best;
+}
+
+/**
+ * The most recent ACTIVE direct observation on an entry, or undefined —
+ * "has this child been looked at here at all?", whatever the look concluded.
+ *
+ * This is the rule-2 guard's question: a coverage claim may not move a concept
+ * that carries a direct observation, **in either direction and whatever that
+ * evidence said**, so a failed quest counts here exactly as a passing one does.
+ * A reader that needs the state somebody actually READ wants
+ * {@link governingDirectRead} instead.
+ *
+ * `sinceIso`, when given, restricts the answer to direct evidence observed
+ * strictly AFTER that stamp.
+ */
+export function governingDirectEvidence<T extends CoverageEvidenceLike>(
+  entry: { evidence?: T[] } | undefined,
+  sinceIso?: string,
+): T | undefined {
+  return latestDirectRef(entry, sinceIso, false);
+}
+
+/**
+ * The most recent ACTIVE direct observation that actually READ a state — the
+ * latest genuine assessment of the child, or undefined when nothing has read
+ * one.
+ *
+ * The question every reader of a *state* has to ask, because the two are not the
+ * same ref: a later observation that established nothing (a failed or short
+ * quest, which stamps no `readState`) does not retract the reading that came
+ * before it, and the writers agree — `applyQuestResultsToModel` leaves the
+ * stored state exactly where the earlier eval put it. Asking only for the LATEST
+ * direct ref and then reading its `readState` therefore discarded a valid
+ * assessment and recomputed from a baseline the child had since outgrown
+ * (finding 4304869773).
+ *
+ * It is still "the latest read decides", never a maximum over history: a
+ * genuine lower read observed after a higher one governs, and a ref that read
+ * nothing is simply not a read. `sinceIso` behaves as it does above, so a
+ * withdrawal can ask the narrower question "has anything actually MEASURED this
+ * child since the completion claimed it?" — and an observation that measured
+ * nothing cannot answer yes.
+ */
+export function governingDirectRead<T extends CoverageEvidenceLike>(
+  entry: { evidence?: T[] } | undefined,
+  sinceIso?: string,
+): T | undefined {
+  return latestDirectRef(entry, sinceIso, true);
 }
 
 /** Why a coverage claim did not move a concept. */
@@ -548,9 +610,12 @@ export function coverageSupportedState(
  * any state.
  *
  * **Not a maximum over history.** A direct observation of the child decides
- * outright, and the LATEST one decides — so a stale `solid` attestation can
- * never outrank a later, lower, calibrated evaluation. Only when no direct ref
- * survives does coverage speak, and then at **the strength each claim actually
+ * outright, and the LATEST one that actually READ a state decides
+ * ({@link governingDirectRead}) — so a stale `solid` attestation can never
+ * outrank a later, lower, calibrated evaluation, while a later observation that
+ * established nothing (a failed quest) leaves the last genuine reading standing
+ * rather than erasing it. Only when no surviving direct ref has read a state
+ * does coverage speak, and then at **the strength each claim actually
  * asserted**, never higher than {@link COVERAGE_CAP}: an independent workbook
  * position or another program's completion still covers the material, so
  * releasing one claim must not drop the concept below what the others continue
@@ -577,20 +642,19 @@ export function survivingSupportedState<T extends CoverageEvidenceLike>(
       ),
   );
 
-  let latestDirect: T | undefined;
-  for (const ref of live) {
-    if (!isGoverningDirectKind(ref.kind)) continue;
-    if (!latestDirect || (ref.observedAt ?? "") >= (latestDirect.observedAt ?? "")) {
-      latestDirect = ref;
-    }
-  }
-  if (latestDirect) {
-    const directState = asCoverageState(latestDirect.readState);
-    if (directState) return directState;
-    // A failed/insufficient quest records an observation, not a state read.
-    // Do not resurrect an older direct read, or hide independent coverage that
-    // still stands. The caller can then use this support or its owned baseline.
-  }
+  // The latest direct ref that actually READ a state, not simply the latest
+  // direct ref. A failed or insufficient quest records an observation and no
+  // state, and it retracts nothing: the eval that read the concept last week is
+  // still the last word anybody took on this child, which is why the quest
+  // writer left the stored state alone. Reading the latest direct ref and
+  // accepting its missing `readState` as "no direct evidence" discarded that
+  // assessment and dropped the entry to whatever coverage or baseline survived
+  // (finding 4304869773). A ref that read nothing cannot hide independent
+  // coverage either — it is not consulted at all.
+  const directState = asCoverageState(
+    governingDirectRead({ evidence: live })?.readState,
+  );
+  if (directState) return directState;
 
   let supported: CoverageState | undefined;
   for (const ref of live) {

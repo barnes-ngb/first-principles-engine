@@ -103,6 +103,7 @@ export {
   effectiveConceptState,
   effectiveConceptStates,
   governingDirectEvidence,
+  governingDirectRead,
   isActiveEvidence,
   isCompletionCoverageRef,
   isGoverningDirectKind,

@@ -176,7 +176,7 @@ Releasing a concept (withdrawal, or a revision that drops/downgrades a target)
 recomputes it in this order:
 
 1. a direct observation made **after** the completion's own observation controls
-   outright, whatever it said and however often the write is replayed;
+   outright when it establishes a valid state, however often the write is replayed. A later observation with no state read does not erase the latest actual assessment;
 2. otherwise whatever **surviving** evidence justifies — the *latest* direct read,
    or, when an independent coverage claim (a workbook position, another
    confirmation) still stands, **the state that claim asserted**

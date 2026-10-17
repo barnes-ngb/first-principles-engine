@@ -16,6 +16,8 @@ import {
   completionReviewSupported,
   coverageSupportedState,
   effectiveConceptState,
+  governingDirectEvidence,
+  governingDirectRead,
   survivingSupportedState,
 } from '../../../functions/src/shared/foundations/completionCoverage'
 import type { CompletionCoverageTarget } from './fastPhonicsCompletion'
@@ -828,5 +830,203 @@ describe('fresh coverage on an entry still under completion review', () => {
     expect(withdrawn.directlyGovernedConceptIds).toContain(CVC)
     expect(withdrawn.model.conceptStates[CVC].state).toBe('frontier')
     expect(withdrawn.model.conceptStates[CVC].completionReviewNeeded).toBe(false)
+  })
+})
+
+/**
+ * An observation that read NOTHING does not erase the assessment before it
+ * (finding 4304869773).
+ *
+ * The defect: both readers of direct evidence took the LATEST direct ref and
+ * then asked for its `readState`. A failed or short quest is a direct ref that
+ * stamps no `readState` — `applyQuestResultsToModel` writes one only on a
+ * qualifying result, and leaves the stored state exactly where the eval put it —
+ * so a real sequence (completion → eval reads `solid` → quest 0/2 → withdrawal)
+ * threw away a genuine `solid` assessment and reverted the concept to the
+ * completion's `not-yet` baseline. The quest had retracted nothing; it was
+ * simply the last ref in the array.
+ *
+ * The repair splits the two questions the module actually asks and names both:
+ * `governingDirectEvidence` — *has this child been looked at here at all?*, the
+ * rule-2 promotion guard, where a failed look counts exactly as a passing one
+ * does — and `governingDirectRead` — *what did the last genuine assessment
+ * read?*, which both the release and `survivingSupportedState` use. Still the
+ * LATEST read, never a maximum over history, and still nothing invented: where
+ * no surviving ref has read a state, the release falls through to surviving
+ * coverage and the recorded baseline exactly as before.
+ *
+ * **Negative controls for a reviewer:** point the release and
+ * `survivingSupportedState` back at `governingDirectEvidence` (the pre-repair
+ * lines) and the first two cases below fail — the reproduction with `not-yet`,
+ * and the lower-read case with `not-yet`. The read-after-quest case is a positive control.
+ * Conversely, make `governingDirectRead` the rule-2 guard inside
+ * `coveragePromotion` and the last case fails, a statement about material having
+ * promoted a concept the child had just been measured on.
+ */
+describe('a later observation that read nothing (finding 4304869773)', () => {
+  const LATEST = '2026-10-19T12:00:00.000Z'
+  const FAILED = { correct: 0, total: 2 }
+
+  /** The reported sequence, through the real writers, up to the withdrawal. */
+  function afterEvalThenFailedQuest(): LearnerModel {
+    const confirmed = applyCompletionCoverage(model(), write([direct(CVC)]), NOW).model
+    expect(confirmed.conceptStates[CVC].state).toBe('forming')
+
+    const evaluated = applyEvalFindingsToModel(
+      confirmed,
+      [{ conceptId: CVC, state: 'solid', note: 'Guided eval — reads all three sounds' }],
+      'sess-eval',
+      NOW,
+    ).model
+    expect(evaluated.conceptStates[CVC].state).toBe('solid')
+
+    const quested = applyQuestResultsToModel(evaluated, [{ conceptId: CVC, ...FAILED }], 'quest-fail', LATER).model
+    // The quest writer's own verdict: it read no state and moved nothing.
+    expect(quested.conceptStates[CVC].evidence.at(-1)!.readState).toBeUndefined()
+    expect(quested.conceptStates[CVC].state).toBe('solid')
+    return quested
+  }
+
+  it('keeps the measured state when the completion is withdrawn after a failed quest', () => {
+    const quested = afterEvalThenFailedQuest()
+    const before = refsOn(quested, CVC).filter((r) => r.kind !== 'programCompletionCoverage')
+
+    const withdrawn = withdrawCompletionCoverage(quested, 'fastPhonics:draft-1', LATEST, 'notComplete')
+    const entry = withdrawn.model.conceptStates[CVC]
+    expect(entry.state).toBe('solid')
+    expect(withdrawn.directlyGovernedConceptIds).toContain(CVC)
+    expect(withdrawn.revertedConceptIds).not.toContain(CVC)
+    // Nothing is left uncertain — the concept was measured, not guessed at.
+    expect(entry.completionReviewNeeded).toBeFalsy()
+    // ...and the shared read every advice consumer and the server slice use
+    // quotes the measured state rather than a baseline the child outgrew.
+    expect(effectiveConceptState(entry)).toBe('solid')
+    expect(survivingSupportedState(entry, 'fastPhonics:draft-1')).toBe('solid')
+
+    // History is untouched: the eval and the quest refs stand byte-identical and
+    // only this confirmation's own ref is marked.
+    expect(refsOn(withdrawn.model, CVC).filter((r) => r.kind !== 'programCompletionCoverage')).toEqual(before)
+    expect(refsOn(withdrawn.model, CVC).find((r) => r.kind === 'programCompletionCoverage')!.status).toBe('superseded')
+  })
+
+  it('follows a LOWER genuine read, not the higher one before it, after a failed quest', () => {
+    const confirmed = applyCompletionCoverage(model(), write([direct(CVC)]), NOW).model
+    const high = applyEvalFindingsToModel(
+      confirmed,
+      [{ conceptId: CVC, state: 'solid', note: 'first eval' }],
+      'sess-high',
+      NOW,
+    ).model
+    const low = applyEvalFindingsToModel(
+      high,
+      [{ conceptId: CVC, state: 'frontier', note: 'later, calibrated eval' }],
+      'sess-low',
+      LATER,
+    ).model
+    expect(low.conceptStates[CVC].state).toBe('frontier')
+
+    const quested = applyQuestResultsToModel(low, [{ conceptId: CVC, ...FAILED }], 'quest-fail', LATEST).model
+    expect(quested.conceptStates[CVC].state).toBe('frontier')
+
+    const withdrawn = withdrawCompletionCoverage(quested, 'fastPhonics:draft-1', LATEST, 'notComplete')
+    // The latest READ decides — the stale `solid` is not restored, and the
+    // `frontier` the child was actually measured at is not thrown away either.
+    expect(withdrawn.model.conceptStates[CVC].state).toBe('frontier')
+    expect(withdrawn.directlyGovernedConceptIds).toContain(CVC)
+  })
+
+  it('follows a valid read that arrives AFTER a failed quest', () => {
+    const confirmed = applyCompletionCoverage(model(), write([direct(CVC)]), NOW).model
+    const quested = applyQuestResultsToModel(confirmed, [{ conceptId: CVC, ...FAILED }], 'quest-fail', NOW).model
+    expect(quested.conceptStates[CVC].state).toBe('forming')
+
+    const evaluated = applyEvalFindingsToModel(
+      quested,
+      [{ conceptId: CVC, state: 'solid', note: 'eval after the failed round' }],
+      'sess-eval',
+      LATER,
+    ).model
+    const withdrawn = withdrawCompletionCoverage(evaluated, 'fastPhonics:draft-1', LATEST, 'notComplete')
+    expect(withdrawn.model.conceptStates[CVC].state).toBe('solid')
+    expect(withdrawn.directlyGovernedConceptIds).toContain(CVC)
+  })
+
+  it('a failed quest ALONE cannot keep a completion-only promotion', () => {
+    // The guard on the repair: nothing has ever read this concept, so the
+    // release still returns to the baseline the confirmation recorded. A failed
+    // round is not support, and it must not become support by being ignored.
+    const confirmed = applyCompletionCoverage(model(), write([direct(CVC)]), NOW).model
+    const quested = applyQuestResultsToModel(confirmed, [{ conceptId: CVC, ...FAILED }], 'quest-fail', LATER).model
+    expect(quested.conceptStates[CVC].state).toBe('forming')
+
+    const withdrawn = withdrawCompletionCoverage(quested, 'fastPhonics:draft-1', LATEST, 'notComplete')
+    expect(withdrawn.model.conceptStates[CVC].state).toBe('not-yet')
+    expect(withdrawn.revertedConceptIds).toContain(CVC)
+    expect(withdrawn.directlyGovernedConceptIds).not.toContain(CVC)
+    expect(withdrawn.supportedConceptIds).not.toContain(CVC)
+    expect(withdrawn.model.conceptStates[CVC].completionReviewNeeded).toBeFalsy()
+    expect(withdrawn.model.changeFeed.at(-1)).toMatchObject({ from: 'forming', to: 'not-yet' })
+  })
+
+  it('still blocks a coverage claim from promoting a concept the child failed', () => {
+    // Rule 2 is unchanged and deliberately asks the WIDER question: a failed
+    // quest is a direct observation of the child, so a statement about material
+    // may not move the concept in either direction.
+    const quested = applyQuestResultsToModel(model(), [{ conceptId: CVC, ...FAILED }], 'quest-fail', NOW).model
+    expect(quested.conceptStates[CVC].state).toBe('not-yet')
+
+    const synced = applyBridgeCoverageToModel(
+      quested,
+      [{ conceptId: CVC, unitLabel: 'Peak 7' }],
+      'fastPhonics',
+      LATER,
+      'scan',
+    ).model
+    expect(synced.conceptStates[CVC].state).toBe('not-yet')
+    expect(refsOn(synced, CVC).at(-1)!.withheldReason).toBe('governing-direct-evidence')
+
+    const confirmed = applyCompletionCoverage(synced, write([direct(CVC)]), LATER)
+    expect(confirmed.model.conceptStates[CVC].state).toBe('not-yet')
+    expect(refsOn(confirmed.model, CVC).at(-1)!.withheldReason).toBe('governing-direct-evidence')
+    expect(confirmed.promotedConceptIds).not.toContain(CVC)
+  })
+
+  it('separates the two shared questions, and keeps every other rail', () => {
+    const read = { kind: 'eval', sourceId: 'e1', note: 'read', observedAt: NOW, readState: 'solid' }
+    const readNothing = { kind: 'quest', sourceId: 'q1', note: 'mine', observedAt: LATER }
+
+    // "Was the child looked at?" answers with the quest; "what was read?" with
+    // the eval. Both are the latest of their own kind — neither is a maximum.
+    expect(governingDirectEvidence({ evidence: [read, readNothing] })).toBe(readNothing)
+    expect(governingDirectRead({ evidence: [read, readNothing] })).toBe(read)
+    expect(survivingSupportedState({ evidence: [read, readNothing] })).toBe('solid')
+
+    // Chronology still decides between two genuine reads.
+    const lower = { kind: 'eval', sourceId: 'e2', note: 'later read', observedAt: LATER, readState: 'frontier' }
+    expect(survivingSupportedState({ evidence: [read, lower, readNothing] })).toBe('frontier')
+
+    // A ref that read nothing supports nothing on its own...
+    expect(governingDirectRead({ evidence: [readNothing] })).toBeUndefined()
+    expect(survivingSupportedState({ evidence: [readNothing] })).toBeUndefined()
+    // ...and does not hide an independent coverage claim that still stands.
+    expect(
+      survivingSupportedState({
+        evidence: [readNothing, { kind: 'curriculumPosition', coverageCeiling: 'forming' }],
+      }),
+    ).toBe('forming')
+
+    // Supersession (rule 4) is unchanged: a withdrawn read is not resurrected.
+    expect(
+      survivingSupportedState({ evidence: [{ ...read, status: 'superseded' }, readNothing] }),
+    ).toBeUndefined()
+    // And `sinceIso` still means strictly later, undated refs included.
+    expect(governingDirectRead({ evidence: [read, readNothing] }, LATER)).toBeUndefined()
+    expect(governingDirectRead({ evidence: [read, readNothing] }, OBSERVED)).toBe(read)
+    expect(
+      governingDirectRead(
+        { evidence: [{ kind: 'eval', sourceId: 'e3', note: 'undated read', readState: 'solid' }] },
+        OBSERVED,
+      ),
+    ).toBeUndefined()
   })
 })

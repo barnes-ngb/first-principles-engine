@@ -31,8 +31,10 @@
 // a later, calibrated, lower eval read, so this module never does that. The
 // order of precedence on withdrawal is:
 //
-//   1. a direct observation made AFTER the completion's own observation controls
-//      outright — the state stays where that evidence put it;
+//   1. a direct observation made AFTER the completion's own observation that
+//      READ a state controls outright — the state stays where that evidence put
+//      it. A later look that established nothing (a failed quest) is not that
+//      observation and does not displace the last one that was;
 //   2. otherwise the higher of (a) what any surviving independent coverage claim
 //      actually asserted — `coverageCeiling`, not the cap by assumption — and
 //      (b) the recorded `priorState` is restored (clamped so it can only ever
@@ -60,7 +62,7 @@ import {
   asCoverageState,
   completionRefsFor,
   coveragePromotion,
-  governingDirectEvidence,
+  governingDirectRead,
   survivingSupportedState,
 } from '../../../functions/src/shared/foundations/completionCoverage'
 import type { CompletionCoverageTarget } from './fastPhonicsCompletion'
@@ -129,8 +131,10 @@ export interface WithdrawnCompletionCoverage {
  * must not disagree. Precedence, in order:
  *
  *   1. a direct observation of the child made AFTER this confirmation's own
- *      observation controls outright, whatever it said and however often this
- *      is replayed;
+ *      observation controls outright, whatever it READ and however often this is
+ *      replayed — but it has to have read something: a failed or short quest
+ *      observed later measured nothing, and a release cannot follow an
+ *      observation that established no state;
  *   2. otherwise, whatever SURVIVING evidence justifies — the latest direct
  *      read, or, when an independent coverage claim (a workbook position,
  *      another program's completion) still stands, the state THAT CLAIM
@@ -184,7 +188,16 @@ function releaseCompletionOnConcept(
     return { entry: released, outcome: 'evidence-only', from, to: from }
   }
 
-  const governing = governingDirectEvidence(released, holder.observedAt)
+  // The latest direct observation since this confirmation that actually READ a
+  // state. A failed quest observed later still measured nothing, so it neither
+  // governs the release nor cancels the eval that read the concept in between —
+  // asking for the latest direct ref and taking its missing `readState` as "no
+  // later direct evidence" is what dropped a measured concept back to a
+  // completion baseline (finding 4304869773). Where nothing since the
+  // confirmation has read a state, this is undefined and the release falls
+  // through to surviving support and the recorded baseline exactly as before,
+  // which is why a failed quest alone cannot keep a completion-only promotion.
+  const governing = governingDirectRead(released, holder.observedAt)
   const directState = asCoverageState(governing?.readState)
   if (directState) {
     const to = COVERAGE_STATE_RANK[directState] < COVERAGE_STATE_RANK[from] ? directState : from
