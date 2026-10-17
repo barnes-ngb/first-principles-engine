@@ -23,7 +23,7 @@
 | `PROCESS_OVERVIEW.md` | **CURRENT** (new 2026-06-20) | How the project is developed (dev loop, ledger discipline), the audit pipeline (daily health / weekly test builder / monthly ARCH_AUDIT / monthly human deep-audit + COLLISION rule), and the kid learning loop with its loose points. **Audits read this first** (linked from `PROMPT_ARCH_AUDIT.md` Step 0). |
 | ~~`PARENT_EXPERIENCE_AUDIT.md`~~ | REMOVED | Superseded by `FIRST_PRINCIPLES_ALIGNMENT.md` |
 | ~~`PARENT_EXPERIENCE_ALIGNMENT_PLAN.md`~~ | REMOVED | All items done Mar 25, 2026. Superseded by `FIRST_PRINCIPLES_ALIGNMENT.md` |
-| `FIRESTORE_AUDIT.md` | **STALE** (Mar 21) | Data model, indexes, collections audit — stale since Mar 21. CLAUDE.md table is now authoritative; `firestore.ts` defines <!-- gen:collection-count -->47<!-- /gen --> exported collection helpers (count generated + verified by `npm run docs:check`; see `DOCS_ALIGNMENT.md`). |
+| `FIRESTORE_AUDIT.md` | **STALE** (Mar 21) | Data model, indexes, collections audit — stale since Mar 21. CLAUDE.md table is now authoritative; `firestore.ts` defines <!-- gen:collection-count -->48<!-- /gen --> exported collection helpers (count generated + verified by `npm run docs:check`; see `DOCS_ALIGNMENT.md`). |
 | `WEEKLY_CONUNDRUM_ARC.md` | **CURRENT** | Weekly conundrum story arc design — Stonebridge narrative, recurring characters, ethical reasoning scenarios |
 | `KNOWLEDGE_MINE_BRIEF.md` | **CURRENT** | Interactive evaluation design doc (Knowledge Mine) — Phase 1 shipped |
 | `barnes-story-game-workshop-design.md` | **CURRENT** | Story Game Workshop design doc — wizard, 3 game types, art gen, voice recording, playtester, play experience |
@@ -103,6 +103,7 @@
 | `ARCH-10_rules_hardening_plan.md` | **CURRENT** (2026-06-01) | Firestore rules hardening plan for portal writes |
 | `investigations/backend-reliability-assessment.md` | **CURRENT** | Backend reliability investigation |
 | `DESIGN_MONTHLY_REVIEW_BOOK.md` | **CURRENT** | Monthly review book design — per-child monthly narrative, photo curation, section types, reader layouts. Phase 1 shipped. |
+| `DESIGN_NATIVE_PROGRESS_CAPTURE.md` | **CURRENT** (2026-10-16) | Native progress capture (FEAT-241) — recording the exact Mathseeds lesson / Fast Phonics peak a parent read, what it means (working on / finished through / not sure), the day it was observed and the source she asserts. An isolated append-only `nativeProgressObservations` collection: propose → confirm → write, create-or-nothing idempotency on a draft key, corrections as new rows that keep the original, no derived "current position", and no write to `activityConfigs` / learner model / hours / XP / skills. Local validation only; not released. Ledger anchor: FEAT-241. |
 | `review/REVIEW_HOME_BASE.md` | **NEW** (2026-05-29) | Monthly deep audit coordination hub — 4-tier review priority, prompt-driven audit methodology |
 | `review/ARCHITECTURE_AUDIT_2026-05.md` | **HISTORICAL** (2026-05-29) | May 2026 architecture audit — baseline green, Band 1 largest file analysis (ARCH-01–09), decomposition candidates |
 | `review/ARCHITECTURE_AUDIT_2026-06.md` | **HISTORICAL** (2026-06-01) | June 2026 primary monthly architecture audit |

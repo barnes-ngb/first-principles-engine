@@ -167,6 +167,7 @@ export const PROBED_COLLECTIONS: readonly string[] = [
   'learnerReviewSessions',
   'lessonCards',
   'monthlyReviews',
+  'nativeProgressObservations',
   'orders',
   'plannerConversations',
   'scans',

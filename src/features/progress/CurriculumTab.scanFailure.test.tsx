@@ -110,7 +110,12 @@ vi.mock('firebase/firestore', () => ({
   query: vi.fn(),
   where: vi.fn(),
 }))
-vi.mock('../../core/firebase/firestore', () => ({ scansCollection: vi.fn(() => ({})) }))
+// FEAT-241: the tab now renders `NativeProgressSection`, whose subscription
+// resolves this collection on mount.
+vi.mock('../../core/firebase/firestore', () => ({
+  scansCollection: vi.fn(() => ({})),
+  nativeProgressObservationsCollection: vi.fn(() => ({})),
+}))
 
 import CurriculumTab from './CurriculumTab'
 
