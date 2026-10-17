@@ -72,6 +72,7 @@ vi.mock('firebase/firestore', () => ({
   },
 }))
 
+import { NOTE_MAX_LENGTH } from '../../features/progress/native-progress/nativeProgressRule'
 import {
   NativeProgressMeaning,
   NativeProgressProgram,
@@ -347,6 +348,54 @@ describe('refusals — nothing is written', () => {
     transactionThrows = new Error('offline')
     await expect(saveNativeProgressObservation(args())).rejects.toThrow('offline')
     expect(sets).toHaveLength(0)
+  })
+})
+
+describe('the note length the form checks is the one the writer stores by', () => {
+  /** A note with `n` characters in it. */
+  const noteOf = (n: number) => 'n'.repeat(n)
+
+  const withNote = (note: string | undefined) => {
+    const base = args()
+    return { ...base, observation: { ...base.observation, note } }
+  }
+
+  it('refuses a note one character over the limit, before the transaction', async () => {
+    await expect(
+      saveNativeProgressObservation(withNote(noteOf(NOTE_MAX_LENGTH + 1))),
+    ).rejects.toThrow(NativeProgressRefused)
+    expect(sets).toHaveLength(0)
+    // Refused before anything was addressed, not inside the transaction: neither
+    // the collection nor the document id was resolved.
+    expect(collectionFor).not.toHaveBeenCalled()
+    expect(docIdFor).not.toHaveBeenCalled()
+  })
+
+  it('stores a note of exactly the limit, trimmed rather than truncated', async () => {
+    const note = noteOf(NOTE_MAX_LENGTH)
+    // Outer whitespace is trimmed first, so a note that is exactly the limit once
+    // trimmed is stored whole — the same reading the form's rule makes.
+    await saveNativeProgressObservation(withNote(`  ${note}\n`))
+    expect(sets).toHaveLength(1)
+    expect(sets[0].data.note).toBe(note)
+  })
+
+  it('leaves an empty or whitespace-only note undefined, as before', async () => {
+    const base = args()
+    for (const [name, note] of [
+      ['empty', ''],
+      ['whitespace', '   '],
+      ['absent', undefined],
+    ] as Array<[string, string | undefined]>) {
+      sets = []
+      stored = {}
+      await saveNativeProgressObservation({
+        ...base,
+        entryKey: `key-note-${name}`,
+        observation: { ...base.observation, note },
+      })
+      expect(sets[0].data.note).toBeUndefined()
+    }
   })
 })
 

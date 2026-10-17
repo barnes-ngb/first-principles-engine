@@ -40,6 +40,8 @@
  * the unit cannot show the number honestly. A third program is a new entry here
  * plus its unit label — a small, deliberate change, not an open door.
  */
+export const NOTE_MAX_LENGTH = 400
+
 export const NativeProgressProgram = {
   Mathseeds: 'mathseeds',
   FastPhonics: 'fastPhonics',

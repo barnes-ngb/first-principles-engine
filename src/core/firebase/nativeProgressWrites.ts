@@ -42,6 +42,7 @@
 import { doc, runTransaction } from 'firebase/firestore'
 
 import {
+  NOTE_MAX_LENGTH,
   NativeProgressMeaning,
   NativeProgressProgram,
   NativeProgressSource,
@@ -196,6 +197,17 @@ export async function saveNativeProgressObservation(
   if (Number.isNaN(new Date(recordedAt).getTime())) {
     throw new NativeProgressRefused('Could not stamp the time of this entry, so nothing was saved.')
   }
+
+  // The note's one bound, trimmed once and checked against the SAME constant the
+  // form checks — imported rather than restated, because two copies of a length
+  // would drift and the longer one would decide what is stored. Refused rather
+  // than truncated: a note cut mid-sentence is a sentence the parent did not
+  // write, stored as though she had.
+  const note = observation.note?.trim() || undefined
+  if (note && note.length > NOTE_MAX_LENGTH) {
+    throw new NativeProgressRefused(`Keep the note under ${NOTE_MAX_LENGTH} characters.`)
+  }
+
   const id = nativeProgressObservationDocId(childId, entryKey)
 
   const correctsObservationId = args.correctsObservationId?.trim() || undefined
@@ -211,7 +223,7 @@ export async function saveNativeProgressObservation(
     meaning: observation.meaning,
     observedOn: observation.observedOn,
     source: observation.source,
-    note: observation.note?.trim() ? observation.note.trim() : undefined,
+    note,
     recordedAt,
     entryKey,
     correctsObservationId,
