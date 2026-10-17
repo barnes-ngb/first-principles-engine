@@ -42,6 +42,8 @@ import {
   hoursAdjustmentsCollection,
   hoursCollection,
   learnerModelsCollection,
+  programCompletionEventsCollection,
+  programCompletionStateCollection,
   sightWordProgressCollection,
   skillSnapshotsCollection,
   workbookConfigsCollection,
@@ -54,6 +56,10 @@ import {
   TAG_CONCEPT_BRIDGE_VERSION,
   TGTB_LA1_BRIDGE_VERSION,
 } from '../../core/foundations'
+import {
+  ProgramCompletionProgram,
+  programCompletionStateId,
+} from '../../core/types/programCompletion'
 import { getStateConfig } from '../../core/compliance/stateCompliance'
 import { getSchoolYearRange } from '../../core/utils/time'
 import { deriveChildIdFromDocId, parseDateFromDocId } from '../../core/utils/docId'
@@ -77,10 +83,76 @@ import type {
 import type {
   CollectionReadReport,
   DataReviewChild,
+  DataReviewCompletion,
   DataReviewEvaluationSession,
   DataReviewExportInput,
   DataReviewExportMode,
 } from './dataReviewExport.logic'
+
+/**
+ * The most finished-program acts this export reads (FEAT-242).
+ *
+ * Well above the writer's own `MAX_COMPLETION_EVENTS` per child and program, so
+ * hitting it means something unexpected — and when it is hit the section SAYS the
+ * history is partial rather than presenting it as whole.
+ */
+export const COMPLETION_EVENT_CAP = 200
+
+/**
+ * The parent-side finished-program record, in **two bounded reads** (FEAT-242,
+ * review item 3).
+ *
+ * The raw learner model already carries the coverage refs, but what the PARENT
+ * asserted — the day, the asserted source, the assistance answer, the citation,
+ * the corrections — lives only here, and an export that audits a claim should
+ * carry the claim.
+ *
+ *   • the state document is addressed **by id** (one child, one program), so
+ *     there is no query, no index, and the id itself carries the child, which is
+ *     what keeps another child's row out of this section;
+ *   • the history is bounded **at Firestore** with `cap + 1` — the extra
+ *     document is how truncation is detected without reading the whole
+ *     collection. An in-memory `slice` of an unbounded `getDocs` was a cap that
+ *     bounded the output and not the read.
+ *
+ * One equality filter plus a limit means **document-id order**, so no composite
+ * index is added — and the section text says the listed acts are the first by
+ * id, never that they are the most recent.
+ *
+ * A failed read is reported as a failed read, never as an empty record.
+ */
+export async function loadCompletionRecord(
+  familyId: string,
+  childId: string,
+): Promise<DataReviewCompletion> {
+  try {
+    const [stateSnap, eventSnap] = await Promise.all([
+      getDoc(
+        doc(
+          programCompletionStateCollection(familyId),
+          programCompletionStateId(childId, ProgramCompletionProgram.FastPhonics),
+        ),
+      ),
+      getDocs(
+        query(
+          programCompletionEventsCollection(familyId),
+          where('childId', '==', childId),
+          firestoreLimit(COMPLETION_EVENT_CAP + 1),
+        ),
+      ),
+    ])
+    const read = eventSnap.docs.map((d) => ({ ...d.data(), id: d.id }))
+    return {
+      state: stateSnap.exists() ? { ...stateSnap.data(), id: stateSnap.id } : null,
+      events: read.slice(0, COMPLETION_EVENT_CAP),
+      readFailed: false,
+      truncated: read.length > COMPLETION_EVENT_CAP,
+    }
+  } catch (err) {
+    console.warn('[dataReviewExport] finished-program record unreadable', err)
+    return { state: null, events: [], readFailed: true, truncated: false }
+  }
+}
 
 /**
  * Per-collection **scan** caps — the maximum number of documents read from each
@@ -214,6 +286,10 @@ export async function loadDataReviewExportInput(
       getDocs(workbookConfigsCollection(familyId)),
       getDoc(doc(xpLedgerCollection(familyId), childId)),
     ])
+
+  // The parent-side finished-program record (FEAT-242) — see
+  // `loadCompletionRecord`.
+  const completion = await loadCompletionRecord(familyId, childId)
 
   const childExtras = (childSnap.data() ?? {}) as ChildDocExtras
   const activityConfigs: ActivityConfig[] = configSnap.docs.map((d) => d.data())
@@ -396,6 +472,7 @@ export async function loadDataReviewExportInput(
     activityConfigs,
     workbookConfigs,
     learnerModel: modelSnap.exists() ? (modelSnap.data() as LearnerModel) : null,
+    completion,
     skillSnapshot: snapshotSnap.exists()
       ? (snapshotSnap.data() as SkillSnapshot)
       : null,

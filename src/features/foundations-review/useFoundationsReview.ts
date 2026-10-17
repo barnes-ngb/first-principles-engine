@@ -38,12 +38,9 @@ import type {
   LearnerModel,
   ReviewSessionMessage,
 } from '../../core/types/learnerModel'
-import {
-  applyReviewActionToModel,
-  parseFoundationsReviewActions,
-} from './foundationsReviewActions'
+import { parseFoundationsReviewActions } from './foundationsReviewActions'
 import type { FoundationsReviewAction } from './foundationsReviewActions'
-import { writeReviewAction } from './writeReviewAction'
+import { applyAndWriteReviewAction } from './writeReviewAction'
 import { groundCoveredProposals } from './uploadGrounding'
 
 /** How many concepts the agenda carries — enough for a ~10-min walk, bounded tokens. */
@@ -408,13 +405,24 @@ export function useFoundationsReview({ familyId, childId, domain }: Args) {
         )
         return
       }
-      const applied = applyReviewActionToModel(base, action, now())
-      modelRef.current = applied.model
-
       try {
-        // The one shared merge-write (FEAT-66) — the Foundations tab's concept
-        // override calls the same writer, so the payload shape has one definition.
-        await writeReviewAction(modelDocRef(), applied)
+        // The one shared writer (FEAT-66) — the Foundations tab's concept
+        // override calls it too, so the payload shape has one definition. Since
+        // FEAT-242 it RE-APPLIES the action inside a transaction against the
+        // stored model: the copy this hook loaded when the session opened can be
+        // minutes old, and writing a result computed from it dropped whatever
+        // had landed meanwhile (an eval, a quest close, a confirmed program
+        // completion) from the concept being attested.
+        //
+        // The cache is therefore updated from the COMMITTED result, after the
+        // await — never from a pre-computed apply, which is what made the stale
+        // copy authoritative for the rest of the session as well.
+        modelRef.current = await applyAndWriteReviewAction(
+          modelDocRef(),
+          base,
+          action,
+          now(),
+        )
       } catch (err) {
         console.error('[foundationsReview] failed to write learner model:', err)
         setError('Could not save that — try again.')

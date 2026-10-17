@@ -167,9 +167,14 @@ export const PROBED_COLLECTIONS: readonly string[] = [
   'learnerReviewSessions',
   'lessonCards',
   'monthlyReviews',
+  'nativeProgressCorrectionMarkers',
   'nativeProgressObservations',
   'orders',
   'plannerConversations',
+  // FEAT-242 — both halves of the finished-program record are child-scoped, so
+  // the duplicate-child safety survey must see them before offering a deletion.
+  'programCompletionEvents',
+  'programCompletionState',
   'scans',
   'shellyChatThreads',
   'sightWordProgress',

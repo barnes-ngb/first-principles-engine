@@ -58,6 +58,7 @@ import { nameKey } from '../../core/utils/nameKey'
 import AddActivityDialog from './AddActivityDialog'
 import CertificateScanSection from './CertificateScanSection'
 import NativeProgressSection from './native-progress/NativeProgressSection'
+import ProgramCompletionPanel from './program-completion/ProgramCompletionPanel'
 import RenameActivityDialog from './RenameActivityDialog'
 import { ALIAS_SECTION_LABEL } from './renameActivity'
 import SetPositionDialog from './SetPositionDialog'
@@ -1265,6 +1266,20 @@ export default function CurriculumTab() {
             the day you saw it. Kept as a record only.
           </Typography>
           <NativeProgressSection />
+        </SectionCard>
+
+        {/* FEAT-242 — the explicit, separate claim: a whole program is FINISHED.
+            Next to the record above because a parent arrives at both from the
+            same place, and deliberately distinct from it: that one changes
+            nothing anywhere, while this one — once confirmed — marks what the
+            program covered on the child's learning picture (covered, never
+            mastered; no quests queued; no hours, rewards or lesson numbers
+            touched). See `docs/DESIGN_FAST_PHONICS_COMPLETION.md`. */}
+        <SectionCard title="Finished a whole program?">
+          <Typography variant="body2" color="text.secondary">
+            Confirm it once, see what it covered, and correct it if you need to.
+          </Typography>
+          <ProgramCompletionPanel />
         </SectionCard>
 
         {/* Scan to Add New Workbook — multi-page staging + sequential apply */}

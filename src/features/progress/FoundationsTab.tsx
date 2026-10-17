@@ -49,6 +49,7 @@ import { useFoundationsBootstrap } from './useFoundationsBootstrap'
 import {
   buildOverrideAction,
   buildReconcileView,
+  COMPLETION_REVIEW_NOTICE,
   KEEP_MY_WORD_NOTE,
   PARENT_STATE_CHOICES,
   proposableState,
@@ -724,6 +725,18 @@ function ConceptDrawerBody({
               )}
             </Stack>
           )}
+        </Alert>
+      )}
+
+      {/* FEAT-242 — a confirmed program completion was withdrawn and nothing
+          recorded what this concept rested on beforehand. The state is left
+          exactly as it was (the record is not rewritten) and every advice
+          surface reads it cautiously until a parent's word or an evaluation
+          settles it, so the drawer says that plainly here. Deliberately NOT the
+          eval-vs-parent reconcile notice above: nobody disagreed with anybody. */}
+      {concept.entry.completionReviewNeeded && (
+        <Alert severity="info" sx={{ mb: 1.5 }}>
+          {COMPLETION_REVIEW_NOTICE}
         </Alert>
       )}
 

@@ -57,6 +57,11 @@ import type {
 } from '../types'
 import type { ChildSkillMap } from '../curriculum/skillStatus'
 import type { ErrorLog } from '../types/errorLog'
+import type {
+  NativeProgressCorrectionMarker,
+  ProgramCompletionEvent,
+  ProgramCompletionState,
+} from '../types/programCompletion'
 import { app } from './firebase'
 
 export const db = initializeFirestore(app, { ignoreUndefinedProperties: true })
@@ -796,6 +801,87 @@ export const nativeProgressObservationDocId = (
   childId: string,
   entryKey: string,
 ): string => `${childId}__${entryKey}`
+
+// ── Whole-program completion: events + active projection (FEAT-242) ────
+
+const programCompletionEventConverter: FirestoreDataConverter<ProgramCompletionEvent> = {
+  toFirestore: (data) => stripUndefined(data as unknown as Record<string, unknown>),
+  fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions) => {
+    const data = snapshot.data(options) as ProgramCompletionEvent
+    return { ...data, id: snapshot.id }
+  },
+}
+
+const programCompletionStateConverter: FirestoreDataConverter<ProgramCompletionState> = {
+  toFirestore: (data) => stripUndefined(data as unknown as Record<string, unknown>),
+  fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions) => {
+    const data = snapshot.data(options) as ProgramCompletionState
+    return { ...data, id: snapshot.id }
+  },
+}
+
+/**
+ * The IMMUTABLE history of completion acts (FEAT-242).
+ *
+ * One document per act — a confirmation, a correction, a reviewed re-apply —
+ * written once with a transactional `set` and never updated. The id is
+ * `{childId}__{program}__{entryKey}` (`programCompletionEventId`), so a retry of
+ * the same confirmed save lands on the same document instead of recording the
+ * act twice.
+ *
+ * Read with one equality filter on `childId` and sorted in memory, so no
+ * composite index is required (`firestore.indexes.json` is untouched).
+ * Path: families/{familyId}/programCompletionEvents/{childId}__{program}__{entryKey}
+ */
+export const programCompletionEventsCollection = (
+  familyId: string,
+): CollectionReference<ProgramCompletionEvent> =>
+  collection(db, `families/${familyId}/programCompletionEvents`).withConverter(
+    programCompletionEventConverter,
+  ) as CollectionReference<ProgramCompletionEvent>
+
+/**
+ * The MUTABLE active projection: which confirmation is in force for one child
+ * and program, and what the learner model currently carries for it (FEAT-242).
+ *
+ * One document per child+program (`programCompletionStateId`), read and written
+ * inside every completion transaction. That single contended document is what
+ * makes "at most one active confirmation" an invariant rather than a hope: a
+ * Firestore transaction cannot run a query, so the rule needs a document whose
+ * id is derivable without one.
+ *
+ * It is updated in place, and is named for what it is — the projection, not the
+ * record. The record is the event collection above.
+ * Path: families/{familyId}/programCompletionState/{childId}__{program}
+ */
+export const programCompletionStateCollection = (
+  familyId: string,
+): CollectionReference<ProgramCompletionState> =>
+  collection(db, `families/${familyId}/programCompletionState`).withConverter(
+    programCompletionStateConverter,
+  ) as CollectionReference<ProgramCompletionState>
+
+const correctionMarkerConverter: FirestoreDataConverter<NativeProgressCorrectionMarker> = {
+  toFirestore: (data) => stripUndefined(data as unknown as Record<string, unknown>),
+  fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions) => {
+    const data = snapshot.data(options) as NativeProgressCorrectionMarker
+    return { ...data, id: snapshot.id }
+  },
+}
+
+/**
+ * "That row has been corrected" — one marker per corrected native-progress row
+ * (FEAT-242). Written by `nativeProgressWrites` for every correction, read by
+ * id inside the completion transactions. The id IS the corrected row's id, so
+ * the lookup needs no query and no truncation (see the type's docstring).
+ * Path: families/{familyId}/nativeProgressCorrectionMarkers/{observationId}
+ */
+export const nativeProgressCorrectionMarkersCollection = (
+  familyId: string,
+): CollectionReference<NativeProgressCorrectionMarker> =>
+  collection(db, `families/${familyId}/nativeProgressCorrectionMarkers`).withConverter(
+    correctionMarkerConverter,
+  ) as CollectionReference<NativeProgressCorrectionMarker>
 
 // ── Error Log (ARCH-11 client error reporting) ──────────────────
 

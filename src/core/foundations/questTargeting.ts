@@ -219,9 +219,16 @@ export function applyQuestResultsToModel(
       observedAt: nowIso,
     }
     conceptStates[result.conceptId] = {
+      // Spread first (FEAT-242): `needsReconcile` and any later field survive a
+      // write that has no opinion about them.
+      ...(prev ?? {}),
       state: toState,
       evidence: [...(prev?.evidence ?? []), evidence],
       seededAt: prev?.seededAt ?? nowIso,
+      // A Mine round is a direct look at the child, so it settles an entry that
+      // was being read cautiously only because a withdrawn completion left no
+      // reconstructable basis (FEAT-242) — whether the round went well or not.
+      ...(prev?.completionReviewNeeded ? { completionReviewNeeded: false } : {}),
     }
 
     if (toState !== fromState) {

@@ -47,6 +47,70 @@ export {
   TAG_CONCEPT_BRIDGE_VERSION,
 } from './tagConceptBridge'
 export { LESSONS_PER_PEAK } from './fastPhonicsBridge'
+export {
+  FAST_PHONICS_COMPLETION_CONCEPT_IDS,
+  FAST_PHONICS_COMPLETION_MAPPING_VERSION,
+  FAST_PHONICS_COMPLETION_SCOPE_NOTE,
+  FAST_PHONICS_COMPLETION_TARGETS,
+  FAST_PHONICS_DEPTH_ONLY_NOTE,
+  FAST_PHONICS_FINAL_PEAK,
+  FAST_PHONICS_IE_DISCREPANCY_NOTE,
+  FAST_PHONICS_LABEL,
+  FAST_PHONICS_SOURCE_ID,
+  PARTIAL_COVERAGE_REASON,
+  PROGRAM_COMPLETION_MAPPINGS,
+  completionMappingFor,
+  completionTargetFor,
+} from './fastPhonicsCompletion'
+export type {
+  CompletionCoverageTarget,
+  ProgramCompletionMapping,
+} from './fastPhonicsCompletion'
+export {
+  applyCompletionCoverage,
+  completionCoverageHasActiveRefs,
+  completionCoverageIsApplied,
+  withdrawCompletionCoverage,
+} from './programCompletionProjection'
+export type {
+  AppliedCompletionCoverage,
+  CompletionCoverageWrite,
+  WithdrawnCompletionCoverage,
+} from './programCompletionProjection'
+
+/**
+ * The coverage precedence + completion-evidence reader rules (FEAT-242) have ONE
+ * definition, in `functions/src/shared/foundations/completionCoverage.ts`,
+ * compiled by both this app and the Cloud Functions project — the same ARCH-47
+ * pattern the graph itself follows. Re-exported here so an app consumer reaches
+ * them through the barrel like everything else.
+ */
+export {
+  COVERAGE_CAP,
+  COVERAGE_REVIEW_CEILING,
+  COVERAGE_STATE_RANK,
+  CoverageQualifier,
+  CoverageWithheldReason,
+  EvidenceRefStatus,
+  GOVERNING_DIRECT_KINDS,
+  PROGRAM_COMPLETION_COVERAGE,
+  activeCompletionRefsFor,
+  activeEvidence,
+  completionReviewNeeded,
+  coveragePromotion,
+  effectiveConceptState,
+  effectiveConceptStates,
+  governingDirectEvidence,
+  isActiveEvidence,
+  isCompletionCoverageRef,
+  isGoverningDirectKind,
+} from '../../../functions/src/shared/foundations/completionCoverage'
+export type {
+  CoverageEntryLike,
+  CoverageEvidenceLike,
+  CoveragePromotion,
+  CoverageState,
+} from '../../../functions/src/shared/foundations/completionCoverage'
 
 /**
  * The spine and its derivations now have ONE definition, in

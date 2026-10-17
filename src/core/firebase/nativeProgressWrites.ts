@@ -8,8 +8,15 @@
 //     particular NOT `setActivityConfigPosition`, whose whole job is to move a
 //     workbook's bookmark and, through `syncActivityPositionToModel`, the
 //     learner model with it;
-//   • no `learnerModels`, `childSkillMaps`, `skillSnapshots` or `evaluations` —
-//     a parent reading a number off a screen has not evidenced a skill;
+//   • no `childSkillMaps`, `skillSnapshots` or `evaluations` — a parent reading a
+//     number off a screen has not evidenced a skill;
+//   • no `learnerModels` **from an ordinary report**, in either direction: typing
+//     "lesson 42" still changes nothing anywhere. The ONE exception, authorized
+//     with FEAT-242 and implemented through the shared completion coordinator
+//     rather than by reaching into the model from here, is a CORRECTION that
+//     invalidates a whole-program completion which cited the corrected row — see
+//     `planCompletionRevokeForCorrection` at the call site below for why that one
+//     has to share this transaction;
 //   • no `hours`, `hoursAdjustments` or `days` — nothing here is time taught;
 //   • no `xpLedger`, no `dailyArmorSessions` — nothing here is earned;
 //   • no `artifacts` and no Storage — a photo is not required and none is taken.
@@ -48,13 +55,23 @@ import {
   NativeProgressSource,
   type NativeProgressObservation,
 } from '../types/nativeProgress'
+import { correctionMarkerId } from '../types/programCompletion'
+import type {
+  NativeProgressCorrectionMarker,
+  ProgramCompletionProgram,
+} from '../types/programCompletion'
 import { todayKey } from '../utils/dateKey'
 import { parseDateYmd } from '../utils/format'
 import {
   db,
+  nativeProgressCorrectionMarkersCollection,
   nativeProgressObservationDocId,
   nativeProgressObservationsCollection,
 } from './firestore'
+import {
+  planCompletionRevokeForCorrection,
+  readRecordedCorrectionRevocation,
+} from './programCompletionWrites'
 
 /** Thrown before anything is written. The message is parent-readable. */
 export class NativeProgressRefused extends Error {}
@@ -120,6 +137,17 @@ export const NATIVE_PROGRESS_CORRECTION_OTHER_PROGRAM =
 export interface SaveNativeProgressResult {
   /** The row on the record — the one just written, or the one already there. */
   observation: NativeProgressObservation
+  /**
+   * What this save did to a confirmed whole-program completion that CITED the
+   * row being corrected (FEAT-242), when it did anything.
+   *
+   * `revoked` — the completion was withdrawn and its coverage retracted in this
+   * same transaction. `pending` — withdrawn here, but the learner model could not
+   * be reached, so the surface must offer the apply retry rather than claim the
+   * learning picture was updated. Absent — nothing cited this row, or the
+   * correction still supports the completion.
+   */
+  completionRevoked?: { status: 'revoked' | 'pending'; detail?: string }
   /**
    * True when this entry was already stored and this call wrote nothing.
    *
@@ -231,6 +259,21 @@ export async function saveNativeProgressObservation(
 
   const rows = nativeProgressObservationsCollection(familyId)
   const ref = doc(rows, id)
+  const markers = nativeProgressCorrectionMarkersCollection(familyId)
+
+  /**
+   * The marker for a corrected row (FEAT-242). Written for EVERY correction —
+   * not only when a completion happens to cite the row today — because a
+   * completion confirmed tomorrow has no other way to learn, inside its own
+   * transaction, that the row it is about to cite has been superseded.
+   */
+  const markerFor = (correctedId: string): NativeProgressCorrectionMarker => ({
+    id: correctionMarkerId(correctedId),
+    childId,
+    correctionObservationId: id,
+    correctionEntryKey: entryKey,
+    correctedAt: recordedAt,
+  })
 
   // One transaction, both reads inside it: whether this entry is already on the
   // record, and — for a correction — whether the row it names is still there and
@@ -241,12 +284,79 @@ export async function saveNativeProgressObservation(
     const existing = await tx.get(ref)
     if (existing.exists()) {
       const stored = existing.data()
-      // Never overwritten. The first write of an entry key is the record.
+      const storedCorrects = stored?.correctsObservationId
+      // A retry whose first attempt landed must not silently omit the marker:
+      // the row is on the record either way, and a missing marker would leave a
+      // corrected row looking citable forever. Read first, then write — the
+      // transaction's ordering rule.
+      const markerRef = storedCorrects
+        ? doc(markers, correctionMarkerId(storedCorrects))
+        : null
+      const markerSnap = markerRef ? await tx.get(markerRef) : null
+      // ...and the completion coordinator is consulted on this path too. The
+      // first attempt's ANSWER was lost, so what it did to a finished-program
+      // record citing this row is unknown — and the retry's receipt may not
+      // claim "nothing else changed" without knowing. The plan is idempotent:
+      // an ACTIVE completion citing the row is withdrawn, anything else is a
+      // no-op, and the status it returns is what the receipt says. Reads here,
+      // writes below, in that order.
+      //
+      // The program is read off the STORED row, not off this caller's payload:
+      // the record is what was written, and a retry's payload is not.
+      const retryRevoke = storedCorrects
+        ? await planCompletionRevokeForCorrection(tx, {
+            familyId,
+            childId,
+            program: (stored?.program ?? observation.program) as ProgramCompletionProgram,
+            correctedObservationId: storedCorrects as string,
+            correctionObservationId: id,
+            correctionEntryKey: entryKey,
+            nowIso: recordedAt,
+          })
+        : null
+      // ...and when the plan has nothing to do, the act this correction already
+      // performed is recovered from its own recorded event (review item 5). The
+      // first attempt may have committed the withdrawal and lost its answer, in
+      // which case there is no active completion left to revoke and a silent
+      // `none` would let the receipt claim nothing else changed. This reads only
+      // THIS correction's recorded act, so a newer, unrelated confirmation is
+      // neither touched nor spoken for.
+      const recordedRevoke =
+        storedCorrects && (!retryRevoke || retryRevoke.status === 'none')
+          ? await readRecordedCorrectionRevocation(tx, {
+              familyId,
+              childId,
+              program: (stored?.program ?? observation.program) as ProgramCompletionProgram,
+              correctionObservationId: id,
+              correctionEntryKey: (stored?.entryKey as string) ?? entryKey,
+            })
+          : null
+
+      if (markerRef && !markerSnap?.exists()) {
+        tx.set(markerRef, markerFor(storedCorrects as string))
+      }
+      retryRevoke?.commit(tx)
+      // The row itself is never overwritten. The first write of an entry key is
+      // the record.
+      const retryOutcome =
+        retryRevoke && retryRevoke.status !== 'none'
+          ? { status: retryRevoke.status, detail: retryRevoke.detail }
+          : recordedRevoke
       return {
         observation: stored ? { ...stored, id } : row,
         alreadyRecorded: true,
+        ...(retryOutcome
+          ? {
+              completionRevoked: {
+                status: retryOutcome.status,
+                ...(retryOutcome.detail ? { detail: retryOutcome.detail } : {}),
+              },
+            }
+          : {}),
       }
     }
+
+    let revoke: Awaited<ReturnType<typeof planCompletionRevokeForCorrection>> | null = null
 
     if (correctsObservationId) {
       const original = await tx.get(doc(rows, correctsObservationId))
@@ -265,9 +375,56 @@ export async function saveNativeProgressObservation(
       if (originalRow?.program !== observation.program) {
         throw new NativeProgressRefused(NATIVE_PROGRESS_CORRECTION_OTHER_PROGRAM)
       }
+
+      // ── The ONE authorized integration (FEAT-242) ─────────────────────
+      //
+      // This collection is otherwise isolated from every rail, and still is: a
+      // plain report never moves a plan, a position or a skill, and this call
+      // changes nothing about that. What it does is close a hole the isolation
+      // could not: a parent can CONFIRM, separately and explicitly, that a whole
+      // program is finished, and may cite one of these rows as her evidence.
+      // Correcting that row to "he hadn't finished" while the confirmation's
+      // coverage stayed live would leave the app's advice resting on a record the
+      // parent had just corrected — and leaving it to an optional button means
+      // the disagreement lasts until she happens to find one.
+      //
+      // So the revocation is planned HERE (reads) and committed in THIS
+      // transaction (writes below), which is the only way the two can never
+      // disagree. It is still narrow: it fires only for a correction, only when
+      // an ACTIVE completion cites exactly this row, and only when the correction
+      // no longer supports it. It never transfers the claim to the corrected row
+      // — a completion can only be re-established by a fresh confirmation.
+      revoke = await planCompletionRevokeForCorrection(tx, {
+        familyId,
+        childId,
+        program: observation.program as ProgramCompletionProgram,
+        correctedObservationId: correctsObservationId,
+        correctionObservationId: id,
+        correctionEntryKey: entryKey,
+        nowIso: recordedAt,
+      })
     }
 
+    // Every read is done; the writes begin here (Firestore's ordering rule).
     tx.set(ref, row)
-    return { observation: row, alreadyRecorded: false }
+    if (correctsObservationId) {
+      // The marker is written for the correction itself, independent of any
+      // completion. Overwritten on purpose when a row is corrected twice: the
+      // marker answers "has this been corrected, and by what most recently".
+      tx.set(doc(markers, correctionMarkerId(correctsObservationId)), markerFor(correctsObservationId))
+    }
+    revoke?.commit(tx)
+    return {
+      observation: row,
+      alreadyRecorded: false,
+      ...(revoke && revoke.status !== 'none'
+        ? {
+            completionRevoked: {
+              status: revoke.status,
+              ...(revoke.detail ? { detail: revoke.detail } : {}),
+            },
+          }
+        : {}),
+    }
   })
 }
