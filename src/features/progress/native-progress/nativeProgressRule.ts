@@ -34,6 +34,7 @@
 import { formatDateShort } from '../../../core/utils/dateKey'
 import { formatDateYmd, parseDateYmd } from '../../../core/utils/format'
 import {
+  NOTE_MAX_LENGTH,
   NativeProgressMeaning,
   NativeProgressProgram,
   NativeProgressSource,
@@ -117,7 +118,7 @@ export function nativeNumberIsStorableExactly(value: number, digits: string): bo
 export const OBSERVED_ON_FLOOR = '2000-01-01'
 
 /** Longest note kept. Long enough for a sentence or two about what she saw. */
-export const NOTE_MAX_LENGTH = 400
+export { NOTE_MAX_LENGTH } from '../../../core/types/nativeProgress'
 
 /**
  * The one thing this feature must say, said once and short.
