@@ -335,7 +335,12 @@ export function applyReviewActionToModel(
     // until something direct settles it — and a parent's own word is exactly
     // that. So an `attest` clears the flag (explicitly `false`, because this
     // entry is merged into Firestore where an absent key leaves `true` behind);
-    // a `covered` claim, which is not direct evidence, leaves it standing.
+    // a `covered` claim, which is not direct evidence, leaves it standing. The
+    // claim is not therefore worthless to a reader: `completionReviewCeiling`
+    // asks the live refs what they support, so a `covered` action carries the
+    // concept at the strength its `coverageCeiling` asserts while the flag — the
+    // record that the withdrawn basis is still unsettled — stays exactly as it
+    // is. The raised read lasts only as long as the claim does.
     ...(prev?.completionReviewNeeded
       ? { completionReviewNeeded: action.kind !== 'attest' }
       : {}),

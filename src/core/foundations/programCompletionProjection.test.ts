@@ -12,6 +12,8 @@ import { applyEvalFindingsToModel } from './evalModelSync'
 import { applyQuestResultsToModel } from './questTargeting'
 import { applyReviewActionToModel } from '../../features/foundations-review/foundationsReviewActions'
 import {
+  completionReviewCeiling,
+  completionReviewSupported,
   coverageSupportedState,
   effectiveConceptState,
   survivingSupportedState,
@@ -585,5 +587,246 @@ describe('withdrawal after a quest (PR1900 round3)', () => {
     expect(withdrawn.model.conceptStates[CVC].state).toBe('frontier')
     expect(withdrawn.model.changeFeed.at(-1)).toMatchObject({ from: 'forming', to: 'frontier' })
     expect(withdrawn.directlyGovernedConceptIds).toContain(CVC)
+  })
+})
+
+/**
+ * A legacy ambiguity is not a permanent one (finding 4304724649).
+ *
+ * The defect: an entry left at `forming` with `completionReviewNeeded` by an
+ * unreconstructable withdrawal went on being read at `frontier` even after a
+ * NEW confirmation's reviewed mapping covered the same concept `direct`. That
+ * claim is withheld — the stored state is already at the coverage cap, so there
+ * is nothing to promote — and the old reader asked only "is the flag set?", so a
+ * current, independent, cap-strength claim counted for nothing.
+ *
+ * The repair stores no new field and clears no flag: the review ceiling is
+ * DERIVED from the live refs (`completionReviewCeiling`), which is also what
+ * makes the reverse true — superseding that claim restores the uncertainty by
+ * itself, with no baseline, `readState` or provenance invented to carry the
+ * `forming` through. The release's own flag-clearing is narrowed to the one
+ * branch that earns it (a direct observation), pinned by the last two cases.
+ *
+ * **Negative control for a reviewer:** restore `effectiveConceptState` to the
+ * flat `COVERAGE_REVIEW_CEILING` cap (`return rank[state] > rank[frontier] ?
+ * frontier : state`) and the first case below fails on the fresh confirmation's
+ * `forming`; drop the flag on apply instead and the same case fails on the
+ * withdrawal's `frontier`.
+ */
+describe('fresh coverage on an entry still under completion review', () => {
+  /** A real pre-FEAT-242 ref: it owned the promotion and recorded no baseline. */
+  const legacyModel = (state: ConceptStateKind = 'forming'): LearnerModel =>
+    model({
+      [CVC]: {
+        state,
+        evidence: [
+          {
+            kind: 'programCompletionCoverage',
+            sourceId: 'fastPhonics:old',
+            note: 'legacy',
+            observedAt: OBSERVED,
+            completionId: 'fastPhonics:old',
+            promoted: true,
+          },
+        ],
+        seededAt: NOW,
+      },
+    })
+
+  /** The withdrawal that can only flag, plus the state it leaves behind. */
+  function flagged(state: ConceptStateKind = 'forming'): LearnerModel {
+    const withdrawn = withdrawCompletionCoverage(legacyModel(state), 'fastPhonics:old', LATER, 'mistake')
+    expect(withdrawn.reviewNeededConceptIds).toContain(CVC)
+    expect(withdrawn.model.conceptStates[CVC].completionReviewNeeded).toBe(true)
+    return withdrawn.model
+  }
+
+  const freshRef = (m: LearnerModel, completionId: string): EvidenceRef =>
+    refsOn(m, CVC).filter((r) => r.completionId === completionId).at(-1)!
+
+  it('reads the ambiguous state at the edge, at the fresh claim, then at the edge again', () => {
+    const uncertain = flagged()
+    const legacyBefore = refsOn(uncertain, CVC)[0]
+    expect(effectiveConceptState(uncertain.conceptStates[CVC])).toBe('frontier')
+    expect(completionReviewSupported(uncertain.conceptStates[CVC])).toBe(false)
+
+    // A fresh confirmation covers the same concept `direct`. It promotes nothing
+    // — the stored state is already at the cap — and that is the whole point.
+    const confirmed = applyCompletionCoverage(uncertain, write([direct(CVC)], 1, 'fastPhonics:fresh'), LATER)
+    const entry = confirmed.model.conceptStates[CVC]
+    const fresh = freshRef(confirmed.model, 'fastPhonics:fresh')
+    expect(fresh.promoted).toBe(false)
+    expect(fresh.ownsPromotion).toBe(false)
+    expect(fresh.withheldReason).toBe('already-at-or-above')
+    // Nothing is fabricated to carry the reading: no state anybody read, and a
+    // baseline that is only the state actually found on the entry.
+    expect(fresh.readState).toBeUndefined()
+    expect(fresh.baselineState).toBe('forming')
+    expect(confirmed.promotedConceptIds).not.toContain(CVC)
+    // The record of the ambiguity stands — the flag is NOT cleared by a
+    // statement about material — while the read now follows the live claim.
+    expect(entry.state).toBe('forming')
+    expect(entry.completionReviewNeeded).toBe(true)
+    expect(completionReviewCeiling(entry)).toBe('forming')
+    expect(effectiveConceptState(entry)).toBe('forming')
+    expect(completionReviewSupported(entry)).toBe(true)
+    // ...and the legacy ref is read, never rewritten.
+    expect(refsOn(confirmed.model, CVC)[0]).toEqual(legacyBefore)
+
+    // Withdrawing the fresh claim puts the uncertainty back, by itself.
+    const withdrawn = withdrawCompletionCoverage(confirmed.model, 'fastPhonics:fresh', LATER, 'notComplete')
+    const after = withdrawn.model.conceptStates[CVC]
+    expect(after.state).toBe('forming') // history still not rewritten
+    expect(after.completionReviewNeeded).toBe(true)
+    expect(effectiveConceptState(after)).toBe('frontier')
+    expect(completionReviewSupported(after)).toBe(false)
+    expect(freshRef(withdrawn.model, 'fastPhonics:fresh').status).toBe('superseded')
+    expect(refsOn(withdrawn.model, CVC)[0]).toEqual(legacyBefore)
+    // Nothing was reverted or promoted: the claim never held this promotion.
+    expect(withdrawn.revertedConceptIds).not.toContain(CVC)
+    expect(withdrawn.supportedConceptIds).not.toContain(CVC)
+  })
+
+  it('keeps the claim and its provenance across a re-apply and a mapping upgrade', () => {
+    const confirmed = applyCompletionCoverage(flagged(), write([direct(CVC)], 1, 'fastPhonics:fresh'), LATER).model
+    const again = applyCompletionCoverage(confirmed, write([direct(CVC)], 1, 'fastPhonics:fresh'), LATER).model
+    // Idempotent: the retry replaced its own ref rather than appending one.
+    expect(refsOn(again, CVC)).toHaveLength(refsOn(confirmed, CVC).length)
+    expect(effectiveConceptState(again.conceptStates[CVC])).toBe('forming')
+
+    const v2 = applyCompletionCoverage(again, write([direct(CVC)], 2, 'fastPhonics:fresh'), LATER).model
+    const refs = refsOn(v2, CVC).filter((r) => r.completionId === 'fastPhonics:fresh')
+    expect(refs.map((r) => [r.mappingVersion, r.status])).toEqual([
+      [1, 'superseded'],
+      [2, 'active'],
+    ])
+    // The re-curation is visible and the stamps never drift upward.
+    for (const ref of refs) {
+      expect(ref.baselineState).toBe('forming')
+      expect(ref.ownsPromotion).toBe(false)
+      expect(ref.readState).toBeUndefined()
+    }
+    expect(v2.conceptStates[CVC].completionReviewNeeded).toBe(true)
+    expect(effectiveConceptState(v2.conceptStates[CVC])).toBe('forming')
+
+    const withdrawn = withdrawCompletionCoverage(v2, 'fastPhonics:fresh', LATER, 'notComplete')
+    expect(effectiveConceptState(withdrawn.model.conceptStates[CVC])).toBe('frontier')
+  })
+
+  it('is not resolved by a partial claim, nor by a quest that read nothing', () => {
+    const partialClaim = applyCompletionCoverage(flagged(), write([partial(CVC)], 1, 'fastPhonics:fresh'), LATER).model
+    const entry = partialClaim.conceptStates[CVC]
+    expect(refsOn(partialClaim, CVC).at(-1)!.coverageQualifier).toBe('partial')
+    // A claim that stands for part of the concept supports no state (rule 3).
+    expect(completionReviewCeiling(entry)).toBe('frontier')
+    expect(effectiveConceptState(entry)).toBe('frontier')
+
+    const failed = applyQuestResultsToModel(partialClaim, [{ conceptId: CVC, correct: 0, total: 2 }], 'quest-fail', LATER).model
+    expect(failed.conceptStates[CVC].completionReviewNeeded).toBe(true)
+    expect(effectiveConceptState(failed.conceptStates[CVC])).toBe('frontier')
+  })
+
+  it('lets a later direct observation prevail over the fresh claim', () => {
+    const confirmed = applyCompletionCoverage(flagged(), write([direct(CVC)], 1, 'fastPhonics:fresh'), LATER).model
+    expect(effectiveConceptState(confirmed.conceptStates[CVC])).toBe('forming')
+
+    // A live direct read of the CHILD outranks any statement about material,
+    // including this one — the same precedence a release uses.
+    confirmed.conceptStates[CVC].evidence.push({
+      kind: 'eval', sourceId: 'eval-later', readState: 'frontier', observedAt: LATER, note: 'Direct read',
+    })
+    expect(completionReviewCeiling(confirmed.conceptStates[CVC])).toBe('frontier')
+    expect(effectiveConceptState(confirmed.conceptStates[CVC])).toBe('frontier')
+
+    // And the real eval path settles the basis outright, flag included.
+    const evaluated = applyEvalFindingsToModel(
+      confirmed,
+      [{ conceptId: CVC, state: 'frontier', note: 'calibrated read' }],
+      'sess-fresh',
+      LATER,
+    ).model
+    expect(evaluated.conceptStates[CVC].state).toBe('frontier')
+    expect(evaluated.conceptStates[CVC].completionReviewNeeded).toBe(false)
+  })
+
+  it('survives either withdrawal order when two confirmations overlap', () => {
+    const both = applyCompletionCoverage(
+      applyCompletionCoverage(flagged(), write([direct(CVC)], 1, 'fastPhonics:fresh-a'), LATER).model,
+      write([direct(CVC)], 1, 'fastPhonics:fresh-b'),
+      LATER,
+    ).model
+
+    for (const [first, second] of [
+      ['fastPhonics:fresh-a', 'fastPhonics:fresh-b'],
+      ['fastPhonics:fresh-b', 'fastPhonics:fresh-a'],
+    ]) {
+      const one = withdrawCompletionCoverage(both, first, LATER, 'notComplete').model
+      const survivor = freshRef(one, second)
+      // The other claim stands on its own, at the strength IT asserted...
+      expect(survivor.status).not.toBe('superseded')
+      expect(survivor.baselineState).toBe('forming')
+      expect(survivor.ownsPromotion).toBe(false)
+      expect(one.conceptStates[CVC].state).toBe('forming')
+      expect(one.conceptStates[CVC].completionReviewNeeded).toBe(true)
+      expect(effectiveConceptState(one.conceptStates[CVC])).toBe('forming')
+
+      // ...and only when both are gone does the uncertainty come back.
+      const none = withdrawCompletionCoverage(one, second, LATER, 'notComplete').model
+      expect(none.conceptStates[CVC].state).toBe('forming')
+      expect(none.conceptStates[CVC].completionReviewNeeded).toBe(true)
+      expect(effectiveConceptState(none.conceptStates[CVC])).toBe('frontier')
+    }
+  })
+
+  it('never lets coverage read an uncertain solid as solid', () => {
+    const confirmed = applyCompletionCoverage(flagged('solid'), write([direct(CVC)], 1, 'fastPhonics:fresh'), LATER).model
+    const entry = confirmed.conceptStates[CVC]
+    expect(entry.state).toBe('solid') // the record is untouched
+    // Coverage caps at `forming` (rule 1), so the strongest thing it can lift an
+    // uncertain entry to is `forming` — mastery is never inferred from material.
+    expect(completionReviewCeiling(entry)).toBe('forming')
+    expect(effectiveConceptState(entry)).toBe('forming')
+    // Coverage does not reach the stored `solid`, so nothing is "standing
+    // behind" this reading and the cautious wording is still the true one.
+    expect(completionReviewSupported(entry)).toBe(false)
+  })
+
+  it('keeps the open review when a release only reverts to its own baseline', () => {
+    // The flagged state here is `frontier` — low enough for a fresh
+    // confirmation to actually promote it — so the release takes the `reverted`
+    // branch rather than the evidence-only one. Reverting to the baseline the
+    // confirmation itself recorded answers "where was this concept?", not "was
+    // the withdrawn basis sound?", so the flag must survive: clearing it there
+    // would retire an open question nobody had answered.
+    const uncertain = flagged('frontier')
+    const confirmed = applyCompletionCoverage(uncertain, write([direct(CVC)], 1, 'fastPhonics:fresh'), LATER)
+    const fresh = freshRef(confirmed.model, 'fastPhonics:fresh')
+    expect(fresh.promoted).toBe(true)
+    expect(fresh.baselineState).toBe('frontier')
+    expect(confirmed.model.conceptStates[CVC].state).toBe('forming')
+    expect(confirmed.model.conceptStates[CVC].completionReviewNeeded).toBe(true)
+    expect(effectiveConceptState(confirmed.model.conceptStates[CVC])).toBe('forming')
+
+    const withdrawn = withdrawCompletionCoverage(confirmed.model, 'fastPhonics:fresh', LATER, 'notComplete')
+    const after = withdrawn.model.conceptStates[CVC]
+    expect(withdrawn.revertedConceptIds).toContain(CVC)
+    expect(after.state).toBe('frontier')
+    expect(after.completionReviewNeeded).toBe(true)
+    expect(effectiveConceptState(after)).toBe('frontier')
+    expect(completionReviewSupported(after)).toBe(false)
+  })
+
+  it('still lets a direct observation close the review on release', () => {
+    // The one thing that DOES settle it: a direct read of the child made after
+    // the confirmation's own observation. Unchanged by this repair, pinned here
+    // so the narrowing above cannot quietly become "nothing ever clears it".
+    const confirmed = applyCompletionCoverage(flagged('frontier'), write([direct(CVC)], 1, 'fastPhonics:fresh'), LATER).model
+    confirmed.conceptStates[CVC].evidence.push({
+      kind: 'eval', sourceId: 'eval-later', readState: 'frontier', observedAt: LATER, note: 'Direct read',
+    })
+    const withdrawn = withdrawCompletionCoverage(confirmed, 'fastPhonics:fresh', LATER, 'notComplete')
+    expect(withdrawn.directlyGovernedConceptIds).toContain(CVC)
+    expect(withdrawn.model.conceptStates[CVC].state).toBe('frontier')
+    expect(withdrawn.model.conceptStates[CVC].completionReviewNeeded).toBe(false)
   })
 })

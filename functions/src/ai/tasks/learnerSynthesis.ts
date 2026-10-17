@@ -25,6 +25,7 @@ import { sanitizeAndParseJson } from "../../shared/sanitizeJson.js";
 import {
   activeEvidence,
   completionReviewNeeded,
+  completionReviewSupported,
   effectiveConceptState,
 } from "../../shared/foundations/completionCoverage.js";
 import {
@@ -54,14 +55,30 @@ export interface StoredEvidenceRef {
   coverageQualifier?: string;
   /** True only when this ref actually moved the concept's state. */
   promoted?: boolean;
+  // The server now DERIVES what a live claim supports on an entry still under
+  // completion review (`completionReviewCeiling`), so the fields that decision
+  // reads are declared here too: a projection that omitted them would still
+  // work at runtime — the stored document carries them — while hiding from the
+  // server's own types which fields its prompt output depends on.
+  /** What the ref itself asserted, where its writer stamped it. */
+  readState?: string;
+  /** The highest state THIS coverage claim asserts it can support. */
+  coverageCeiling?: string;
+  /** True when the owning confirmation currently holds the promotion. */
+  ownsPromotion?: boolean;
+  /** Why a coverage claim moved nothing, where its writer stamped one. */
+  withheldReason?: string;
+  /** True on the workbook position sync's own writes. */
+  positionSync?: boolean;
 }
 export interface StoredConceptState {
   state: "solid" | "forming" | "frontier" | "not-yet";
   evidence?: StoredEvidenceRef[];
   /**
    * FEAT-242 — a withdrawn completion left no reconstructable earlier reading,
-   * so this concept is read conservatively (`effectiveConceptState`) until a
-   * parent or a diagnostic settles it.
+   * so this concept is read conservatively (`effectiveConceptState`) for as
+   * long as nothing live supports its stored state, and the flag itself stands
+   * until a parent or a diagnostic settles it.
    */
   completionReviewNeeded?: boolean;
 }
@@ -224,7 +241,16 @@ function evidenceNotes(cs: StoredConceptState | undefined): string[] {
     .map((e) => (e.note ? sanitizeTerrainText(e.note) : e.kind))
     .filter(Boolean) as string[];
   if (completionReviewNeeded(cs)) {
-    notes.push("needs a fresh look — the finished-program record this rested on was withdrawn");
+    // Two different facts, so two different notes: an entry nothing live
+    // supports is being read down to the working edge, while one carried by a
+    // claim that landed after the withdrawal is read as stored with only its
+    // basis unsettled. Saying the first about the second would tell the model
+    // this read is being discounted when it is not.
+    notes.push(
+      completionReviewSupported(cs)
+        ? "not settled — the finished-program record this rested on was withdrawn, and something current supports this reading"
+        : "needs a fresh look — the finished-program record this rested on was withdrawn",
+    );
   }
   return notes;
 }
@@ -251,8 +277,9 @@ export function buildSynthesisInput(
     for (const n of nodes) {
       const cs = states[n.id];
       // The EFFECTIVE state (FEAT-242) — see `effectiveConceptState`. This is a
-      // ranker for parent-facing advice, so an entry under completion review is
-      // read at the working edge rather than as partial mastery.
+      // ranker for parent-facing advice, so an entry under completion review
+      // with nothing live behind it is read at the working edge rather than as
+      // partial mastery.
       const st = effectiveConceptState(cs);
       if (st === "frontier") {
         frontier.push({ conceptId: n.id, kidName: n.kidName, description: n.parentDescription, evidence: evidenceNotes(cs) });

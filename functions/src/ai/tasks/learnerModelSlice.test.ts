@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildLearnerModelSlice } from "./learnerModelSlice.js";
-import type { StoredLearnerModel } from "./learnerSynthesis.js";
+import type { StoredEvidenceRef, StoredLearnerModel } from "./learnerSynthesis.js";
 
 const MODEL: StoredLearnerModel = {
   childId: "lincoln",
@@ -64,5 +64,64 @@ describe("buildLearnerModelSlice", () => {
     expect(buildLearnerModelSlice(null)).toBe("");
     expect(buildLearnerModelSlice({ status: "no-data", conceptStates: {} })).toBe("");
     expect(buildLearnerModelSlice({ status: "seeded", conceptStates: {} })).toBe("");
+  });
+});
+
+/**
+ * The SERVER half of the derived review ceiling (finding 4304724649).
+ *
+ * `completionReviewCeiling` is read by this prompt builder and by the synthesis
+ * beat, so the shared helper has to work on the server's stored projection —
+ * `StoredConceptState` / `StoredEvidenceRef`, not the client's types — which is
+ * the whole reason it lives in `functions/src/shared/`. These cases pin both
+ * halves of the behaviour as the prompt actually renders it.
+ */
+describe("an entry under completion review in the prompt slice", () => {
+  const DIGRAPHS = "reading.phonics.digraphs";
+  const underReview = (evidence: StoredEvidenceRef[]): string =>
+    buildLearnerModelSlice({
+      ...MODEL,
+      conceptStates: {
+        [DIGRAPHS]: { state: "forming", completionReviewNeeded: true, evidence },
+      },
+    });
+
+  it("reads at the working edge, and says so, while nothing live supports it", () => {
+    const slice = underReview([
+      {
+        kind: "programCompletionCoverage",
+        note: "withdrawn claim",
+        status: "superseded",
+        completionId: "fastPhonics:old",
+        promoted: true,
+      },
+    ]);
+    // Listed under the working edge, not as partial mastery...
+    expect(slice).toMatch(/Working edge[^\n]*Two letters, one sound/);
+    expect(slice).toContain("[needs a fresh look — the record it rested on was withdrawn]");
+  });
+
+  it("reads at the stored state once a fresh completion covers it, and says THAT", () => {
+    const slice = underReview([
+      {
+        kind: "programCompletionCoverage",
+        note: "withdrawn claim",
+        status: "superseded",
+        completionId: "fastPhonics:old",
+        promoted: true,
+      },
+      {
+        kind: "programCompletionCoverage",
+        note: "Fast Phonics finished",
+        status: "active",
+        completionId: "fastPhonics:fresh",
+        coverageQualifier: "direct",
+        withheldReason: "already-at-or-above",
+      },
+    ]);
+    expect(slice).toMatch(/Forming[^\n]*Two letters, one sound/);
+    // Unverified, but NOT described as being discounted — it is not.
+    expect(slice).toContain("[not settled —");
+    expect(slice).not.toContain("needs a fresh look");
   });
 });

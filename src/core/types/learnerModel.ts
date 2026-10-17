@@ -241,8 +241,11 @@ export interface ConceptStateEntry {
    *
    * The state is left exactly as it is (history is not rewritten) and this flag
    * makes it read conservatively instead: every advice consumer reads the
-   * concept through `effectiveConceptState`, which caps a flagged entry at the
-   * working edge until a parent's word or a diagnostic settles it.
+   * concept through `effectiveConceptState`, which caps a flagged entry at
+   * `completionReviewCeiling` — the working edge, or whatever a LIVE claim on
+   * the entry actually supports, so a confirmation landing after the withdrawal
+   * is read at the strength it asserted and its own withdrawal puts the cap
+   * back. Only a parent's word or a diagnostic clears the flag itself.
    *
    * **Deliberately not `needsReconcile`.** That flag means one other specific
    * thing — an evaluation disagreeing with a parent's attestation — and is

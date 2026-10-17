@@ -150,7 +150,15 @@ projects:
 5. an entry whose withdrawn basis cannot be reconstructed keeps its stored state
    and is flagged `completionReviewNeeded` — a flag distinct from
    `needsReconcile` — and **every advice consumer** reads it through
-   `effectiveConceptState`, which caps it at the working edge.
+   `effectiveConceptState`, which caps it at `completionReviewCeiling`: the
+   working edge, **or whatever a live claim on the entry actually supports**.
+   The ceiling is derived, not stored, so a claim that lands *after* the
+   withdrawal — a newly confirmed completion covering the same concept `direct`,
+   a workbook position — lifts the read to exactly the strength it asserted
+   (never past the cap, and never over a live direct read), and superseding that
+   claim restores the uncertainty in the same breath. Only a parent's word or a
+   diagnostic clears the flag itself, so no baseline, `readState` or provenance
+   is ever invented to make an ambiguous `forming` read as settled.
 
 No prerequisite traversal, no quest queued, no attestation created, and
 `needsReconcile` is never read or written by this path.
@@ -300,6 +308,9 @@ asynchronously through the existing stale mark; nothing re-plans inline.
    closed, which can refuse a save that a transient read error made unverifiable;
    the parent retries.
 4. **A `completionReviewNeeded` entry is conservative, not resolved.** It clears
-   when a parent's word or a diagnostic lands on the concept.
+   when a parent's word or a diagnostic lands on the concept. A fresh coverage
+   claim does **not** clear it — it only raises what the entry is read at while
+   that claim stands (§5 rule 5), so the Foundations drawer and the prompt say
+   which of the two is true rather than promising caution that is not happening.
 5. **A stranded outcome does not survive unmount** — the recovery panel is
    component state, as in FEAT-241 §10.6.

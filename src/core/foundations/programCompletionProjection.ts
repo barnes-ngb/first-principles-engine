@@ -40,7 +40,12 @@
 //   3. otherwise — no provenance, which only a pre-FEAT-242 or hand-edited ref
 //      can be — the state is KEPT and the entry is flagged
 //      `completionReviewNeeded`, which makes every advice consumer read it
-//      conservatively until a parent or a diagnostic settles it.
+//      conservatively until a parent or a diagnostic settles it. That read is
+//      `effectiveConceptState`, whose ceiling is DERIVED from the live refs
+//      (`completionReviewCeiling`), so a confirmation applied later to the same
+//      concept is read at the strength it claimed without this module storing
+//      anything new — and its own withdrawal restores the uncertainty, because
+//      superseding its refs is what removes the support.
 
 // The flat node lookup is imported from the SHARED graph module rather than from
 // the `./index` barrel (which re-exports this file) — the same cycle-avoidance
@@ -138,6 +143,12 @@ export interface WithdrawnCompletionCoverage {
  *      no provenance — the state is KEPT and the entry flagged
  *      `completionReviewNeeded`, which every advice consumer reads
  *      conservatively.
+ *
+ * An ALREADY flagged entry keeps its flag through (2) and (3): only (1) — a
+ * direct observation of the child — answers the question the flag asks, and a
+ * release that recomputes a state from a claim or a baseline has not measured
+ * anybody. The read loses nothing by it, because `effectiveConceptState` takes
+ * its ceiling from what is live rather than from the flag alone.
  */
 function releaseCompletionOnConcept(
   prev: ConceptStateEntry,
@@ -217,9 +228,18 @@ function releaseCompletionOnConcept(
     entry: {
       ...released,
       state: to,
-      // Settled by surviving evidence or by recorded provenance — nothing is
-      // left under review here.
-      ...(prev.completionReviewNeeded ? { completionReviewNeeded: false } : {}),
+      // `completionReviewNeeded` is NOT cleared here, and the spread above keeps
+      // whatever it was. Only the branch above clears it, because only a direct
+      // observation of the child settles the question the flag asks — the same
+      // rule `evalModelSync`, `questTargeting` and an `attest` action already
+      // follow. A surviving coverage claim and a recorded baseline are enough to
+      // RECOMPUTE a state; neither tells us what the unreconstructable basis
+      // was, and where this release reverts a flagged entry to the baseline it
+      // raised the concept FROM, that baseline is the very state the flag is
+      // open about. Clearing it there dropped the uncertainty silently — and
+      // keeping it costs the read nothing, because `effectiveConceptState`
+      // derives its ceiling from what is live (`completionReviewCeiling`) and a
+      // state returned to its own baseline is at or under that ceiling already.
     },
     outcome: claimDecides ? 'supported' : 'reverted',
     from,

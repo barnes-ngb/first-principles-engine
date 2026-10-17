@@ -18,6 +18,7 @@ import {
   PROGRAM_COMPLETION_COVERAGE,
   activeEvidence,
   completionReviewNeeded,
+  completionReviewSupported,
   effectiveConceptState,
 } from "../../shared/foundations/completionCoverage.js";
 import { sanitizeTerrainText, type StoredConceptState, type StoredLearnerModel } from "./learnerSynthesis.js";
@@ -65,8 +66,14 @@ function conceptLine(nodeId: string, cs: StoredConceptState | undefined): string
   const ev = evidenceLine(cs);
   // An entry whose completion basis was withdrawn without a reconstructable
   // earlier reading says so in the one place the model reads (FEAT-242), so the
-  // prompt cannot present it as settled.
-  const caveat = completionReviewNeeded(cs) ? " [needs a fresh look — the record it rested on was withdrawn]" : "";
+  // prompt cannot present it as settled — and says WHICH of the two it is,
+  // because a claim that landed after the withdrawal carries the reading at its
+  // stored state (`completionReviewSupported`) while leaving the basis unsettled.
+  const caveat = completionReviewNeeded(cs)
+    ? completionReviewSupported(cs)
+      ? " [not settled — the record it rested on was withdrawn; something current supports this reading]"
+      : " [needs a fresh look — the record it rested on was withdrawn]"
+    : "";
   return ev ? `"${name}" — ${ev}${caveat}` : `"${name}"${caveat}`;
 }
 
@@ -92,8 +99,9 @@ export function buildLearnerModelSlice(model: StoredLearnerModel | null | undefi
     for (const n of nodes) {
       const cs = states[n.id];
       // The EFFECTIVE state (FEAT-242): identical to the stored one except on an
-      // entry under completion review, which is capped at the working edge so the
-      // prompt never presents an unsupported `forming` as partial mastery.
+      // entry under completion review whose stored state nothing live supports,
+      // which is capped at the working edge so the prompt never presents an
+      // unsupported `forming` as partial mastery.
       const st = effectiveConceptState(cs);
       if (st === "frontier") frontier.push(conceptLine(n.id, cs));
       else if (st === "forming") forming.push(conceptLine(n.id, cs));

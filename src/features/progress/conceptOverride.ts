@@ -56,6 +56,22 @@ export const RECONCILE_CHIP_TITLE = 'The model has a new take on this'
 export const COMPLETION_REVIEW_NOTICE =
   'A finished-program record this rested on was withdrawn, and there was no earlier reading to go back to. Nothing was changed here, and it is treated cautiously in plans and advice until you record what you have seen or an evaluation covers it.'
 
+/**
+ * The same concept once something CURRENT stands behind the reading again — a
+ * newly confirmed finished program, or a workbook position (FEAT-242,
+ * `completionReviewSupported`).
+ *
+ * The flag is still set, because a covered program is a statement about
+ * material and only a parent's word or an evaluation settles the basis. But the
+ * reading is no longer being held down, so this must not repeat
+ * {@link COMPLETION_REVIEW_NOTICE}'s "treated cautiously in plans and advice":
+ * that would describe a cap that is not being applied. Every clause here is true
+ * whenever that predicate holds — something supports it, advice uses it as it
+ * stands, and the withdrawn basis is still unsettled.
+ */
+export const COMPLETION_REVIEW_SUPPORTED_NOTICE =
+  'A finished-program record this rested on was withdrawn, and there was no earlier reading to go back to. Something current supports this reading again, so plans and advice use it as it stands — and the withdrawn basis stays unsettled until you record what you have seen or an evaluation covers it.'
+
 /** The three states a parent may attest, in strongest-first order (§ReviewProposedState). */
 export const PARENT_STATE_CHOICES: readonly ReviewProposedState[] = [
   'solid',

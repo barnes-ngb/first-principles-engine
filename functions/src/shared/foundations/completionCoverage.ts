@@ -45,6 +45,16 @@
  *    concept through {@link effectiveConceptState}, which caps it at the working
  *    edge until a parent or a diagnostic settles it. **This is the only honest
  *    way to keep the record and stop serving an unsupported `forming`.**
+ *    The cap is "what nothing currently supports", not "what the flag says": the
+ *    flag records that the BASIS is still unreconstructed, and
+ *    {@link completionReviewCeiling} asks the live evidence what it supports
+ *    today, so a claim that lands AFTER the withdrawal — a fresh confirmed
+ *    completion, a workbook position — raises the read to exactly the strength
+ *    it asserted, and withdrawing that claim drops it straight back to the edge.
+ *    Deriving the ceiling is what keeps both halves honest: the flag is never
+ *    cleared by a statement about material (only a parent's word or a diagnostic
+ *    does that), and no baseline, provenance or `readState` is ever invented to
+ *    make an ambiguous `forming` look proven.
  *
  * Pure, dependency-free and structurally typed on purpose: the client's
  * `ConceptStateEntry` / `EvidenceRef` and the server's `StoredConceptState` /
@@ -102,7 +112,9 @@ export const COVERAGE_STATE_RANK: Record<CoverageState, number> = {
 export const COVERAGE_CAP: CoverageState = "forming";
 
 /**
- * The ceiling an entry whose completion basis is under review reads at (rule 5).
+ * The ceiling an entry whose completion basis is under review reads at when
+ * nothing live supports more — the floor of {@link completionReviewCeiling},
+ * and the whole of it until a claim lands (rule 5).
  *
  * `frontier` — "the edge we're working at" — because that is what an unverified
  * concept honestly is, and because it is the one word in the vocabulary that
@@ -329,9 +341,48 @@ export function completionReviewNeeded(
 }
 
 /**
+ * The ceiling an entry under completion review reads at — the working edge, or
+ * higher where something LIVE actually supports more (rule 5).
+ *
+ * The flag says one thing only: the basis a withdrawal could not reconstruct is
+ * still unreconstructed. It does not say that nothing supports the stored state,
+ * and after the withdrawal something may well come to: a freshly confirmed
+ * completion whose reviewed mapping covers this concept `direct`, or a workbook
+ * position. Such a claim is withheld by {@link coveragePromotion} — the stored
+ * state is already at the cap, so there is nothing to promote and no baseline or
+ * `readState` is written — which is why the flag alone could not see it and the
+ * concept went on being served at `frontier` while a current, independent,
+ * cap-strength claim stood on the entry (finding 4304724649).
+ *
+ * So the ceiling is DERIVED from the live refs rather than stored, and nothing
+ * about the record changes to raise it:
+ *
+ *   • the strength is {@link survivingSupportedState}'s — each claim is worth
+ *     what it asserted, a `partial` claim is worth nothing, coverage can never
+ *     exceed {@link COVERAGE_CAP}, and a direct observation of the child decides
+ *     over any coverage claim;
+ *   • it only ever RAISES the floor above {@link COVERAGE_REVIEW_CEILING}; the
+ *     stored state remains the upper bound in {@link effectiveConceptState}, so
+ *     coverage cannot make an uncertain `solid` read as `solid`;
+ *   • and because it is derived, superseding that claim restores the cap in the
+ *     same breath — the uncertainty comes back by itself, with no second flag to
+ *     set and no history to rewrite.
+ */
+export function completionReviewCeiling(
+  entry: CoverageEntryLike | undefined,
+): CoverageState {
+  const supported = survivingSupportedState(entry);
+  return supported !== undefined &&
+    COVERAGE_STATE_RANK[supported] > COVERAGE_STATE_RANK[COVERAGE_REVIEW_CEILING]
+    ? supported
+    : COVERAGE_REVIEW_CEILING;
+}
+
+/**
  * The state every ADVICE consumer must read — ranking, prompting, prioritising
  * (rule 5). Identical to the stored state except on an entry under completion
- * review, where it is capped at the working edge.
+ * review whose stored state nothing live supports, where it is capped at
+ * {@link completionReviewCeiling}.
  *
  * Writers do NOT use this: a writer acts on what is stored, because its job is
  * to change it. Readers that form a judgment do, so a concept whose basis was
@@ -343,10 +394,35 @@ export function effectiveConceptState(
 ): CoverageState {
   if (!entry) return "not-yet";
   if (!entry.completionReviewNeeded) return entry.state;
-  return COVERAGE_STATE_RANK[entry.state] >
-    COVERAGE_STATE_RANK[COVERAGE_REVIEW_CEILING]
-    ? COVERAGE_REVIEW_CEILING
+  const ceiling = completionReviewCeiling(entry);
+  return COVERAGE_STATE_RANK[entry.state] > COVERAGE_STATE_RANK[ceiling]
+    ? ceiling
     : entry.state;
+}
+
+/**
+ * True when an entry under completion review is read at its STORED state
+ * because something live actually supports it.
+ *
+ * The one question a parent-facing or prompt-facing caveat has to ask, because
+ * the two cases need different words: an entry nothing supports is being read
+ * cautiously *now*, while an entry carried by a live claim is being read as it
+ * stands with only its basis unsettled. Saying "treated cautiously in plans and
+ * advice" about the second would describe behaviour that no longer happens.
+ *
+ * Deliberately NOT "is the cap biting?": an entry reverted to a `frontier`
+ * baseline is at the ceiling already, so the cap changes nothing there and no
+ * claim is holding it up either — which is the cautious case, not this one.
+ */
+export function completionReviewSupported(
+  entry: CoverageEntryLike | undefined,
+): boolean {
+  if (!completionReviewNeeded(entry)) return false;
+  const supported = survivingSupportedState(entry);
+  return (
+    supported !== undefined &&
+    COVERAGE_STATE_RANK[supported] >= COVERAGE_STATE_RANK[entry!.state]
+  );
 }
 
 /** The same projection over a whole `conceptStates` map. */
@@ -477,13 +553,24 @@ export function coverageSupportedState(
  * to support — and must not hold it above that either. The strongest surviving
  * claim wins; they are concurrent claims, not a history
  * ({@link coverageSupportedState} decides each one).
+ *
+ * `releasedCompletionId` is optional: omitted, nothing is released and the
+ * answer is simply what the entry's live evidence supports right now — which is
+ * the question {@link completionReviewCeiling} asks of an entry whose basis is
+ * still under review. One definition, so a release and a read can never disagree
+ * about what a claim is worth.
  */
 export function survivingSupportedState<T extends CoverageEvidenceLike>(
   entry: { evidence?: T[] } | undefined,
-  releasedCompletionId: string,
+  releasedCompletionId?: string,
 ): CoverageState | undefined {
   const live = activeEvidence(entry?.evidence).filter(
-    (ref) => !(isCompletionCoverageRef(ref) && ref.completionId === releasedCompletionId),
+    (ref) =>
+      !(
+        releasedCompletionId !== undefined &&
+        isCompletionCoverageRef(ref) &&
+        ref.completionId === releasedCompletionId
+      ),
   );
 
   let latestDirect: T | undefined;
