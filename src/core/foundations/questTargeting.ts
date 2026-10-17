@@ -211,12 +211,14 @@ export function applyQuestResultsToModel(
     const prev: ConceptStateEntry | undefined = conceptStates[result.conceptId]
     const fromState: ConceptStateKind = prev?.state ?? 'not-yet'
     const toState = upgradedQuestState(fromState, result)
+    const establishesState = result.total >= MIN_QUESTIONS_TO_UPGRADE && result.correct === result.total
 
     const evidence: EvidenceRef = {
       kind: 'quest',
       sourceId: sessionId,
       note: questEvidenceNote(result, dateSlice),
       observedAt: nowIso,
+      ...(establishesState ? { readState: toState } : {}),
     }
     conceptStates[result.conceptId] = {
       // Spread first (FEAT-242): `needsReconcile` and any later field survive a
@@ -225,10 +227,9 @@ export function applyQuestResultsToModel(
       state: toState,
       evidence: [...(prev?.evidence ?? []), evidence],
       seededAt: prev?.seededAt ?? nowIso,
-      // A Mine round is a direct look at the child, so it settles an entry that
-      // was being read cautiously only because a withdrawn completion left no
-      // reconstructable basis (FEAT-242) — whether the round went well or not.
-      ...(prev?.completionReviewNeeded ? { completionReviewNeeded: false } : {}),
+      // A failed/short round leaves state unchanged by design; it cannot settle
+      // the unsupported state retained after an ambiguous completion withdrawal.
+      ...(establishesState && prev?.completionReviewNeeded ? { completionReviewNeeded: false } : {}),
     }
 
     if (toState !== fromState) {

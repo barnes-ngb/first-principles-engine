@@ -494,9 +494,11 @@ export function survivingSupportedState<T extends CoverageEvidenceLike>(
     }
   }
   if (latestDirect) {
-    // A direct ref with no recorded read cannot justify a state — the caller
-    // falls through to its review-needed path rather than inventing one.
-    return asCoverageState(latestDirect.readState);
+    const directState = asCoverageState(latestDirect.readState);
+    if (directState) return directState;
+    // A failed/insufficient quest records an observation, not a state read.
+    // Do not resurrect an older direct read, or hide independent coverage that
+    // still stands. The caller can then use this support or its owned baseline.
   }
 
   let supported: CoverageState | undefined;

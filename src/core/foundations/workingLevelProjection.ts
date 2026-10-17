@@ -49,7 +49,7 @@ import {
   currentDrivingLevels,
   WORKING_LEVEL_DRIVER_KEYS,
 } from './seedLearnerModel'
-import { FOUNDATION_NODE_MAP } from './index'
+import { activeEvidence, FOUNDATION_NODE_MAP } from './index'
 import type { ConceptGraph } from './types'
 import type {
   ConceptStateEntry,
@@ -138,8 +138,10 @@ export function applyWorkingLevelProjection(
   for (const [conceptId, projected] of Object.entries(banded)) {
     const prev: ConceptStateEntry | undefined = conceptStates[conceptId]
 
-    // Rule 1 — a witnessed concept is never moved by a projection.
-    if (prev && carriesNonDerivableEvidence(prev)) continue
+    // Only active witnesses govern state. Keep the seeder's history-preservation
+    // predicate unchanged: unlike this append-only projection, reseeding would
+    // otherwise erase superseded refs when replacing an entire entry.
+    if (prev && carriesNonDerivableEvidence({ ...prev, evidence: activeEvidence(prev.evidence) })) continue
 
     const fromState: ConceptStateKind = prev?.state ?? 'not-yet'
     // Rule 2 — upgrade-only.

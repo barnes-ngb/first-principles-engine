@@ -370,3 +370,32 @@ describe('applyWorkingLevelProjection — the four rules', () => {
     }
   })
 })
+
+describe('withdrawn evidence is history, not a projection guard (PR1900 round3)', () => {
+  it('allows level movement past a superseded completion while preserving that ref', () => {
+    const current = storedAt(5)
+    const id = 'reading.phonics.longVowels'
+    const history = { kind: 'programCompletionCoverage' as const, sourceId: 'retired', completionId: 'retired', status: 'superseded' as const, note: 'Withdrawn', observedAt: SEEDED_AT }
+    current.conceptStates[id] = { ...current.conceptStates[id], state: 'frontier', evidence: [history] }
+    const before = structuredClone(current)
+    const projected = applyWorkingLevelProjection(current, foundationGraphs, 'c1', snapshot(7), NOW)
+    expect(projected.model.conceptStates[id].state).toBe('solid')
+    expect(projected.model.conceptStates[id].evidence).toContainEqual(history)
+    expect(projected.changedConceptIds).toContain(id)
+    expect(current).toEqual(before)
+  })
+
+  it('still protects an active direct observation beside withdrawn history', () => {
+    const current = storedAt(5)
+    const id = 'reading.phonics.longVowels'
+    current.conceptStates[id] = {
+      ...current.conceptStates[id], state: 'frontier', evidence: [
+        { kind: 'programCompletionCoverage', sourceId: 'retired', completionId: 'retired', status: 'superseded', note: 'Withdrawn', observedAt: SEEDED_AT },
+        { kind: 'eval', sourceId: 'eval-current', readState: 'frontier', note: 'Current direct read', observedAt: NOW },
+      ],
+    }
+    const projected = applyWorkingLevelProjection(current, foundationGraphs, 'c1', snapshot(7), NOW)
+    expect(projected.model.conceptStates[id]).toEqual(current.conceptStates[id])
+    expect(projected.changedConceptIds).not.toContain(id)
+  })
+})

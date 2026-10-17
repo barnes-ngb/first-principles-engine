@@ -9,6 +9,7 @@ import {
 } from './programCompletionProjection'
 import { applyBridgeCoverageToModel } from './workbookBridge'
 import { applyEvalFindingsToModel } from './evalModelSync'
+import { applyQuestResultsToModel } from './questTargeting'
 import { applyReviewActionToModel } from '../../features/foundations-review/foundationsReviewActions'
 import {
   coverageSupportedState,
@@ -535,5 +536,54 @@ describe('withdrawal rests only on support that was actually asserted', () => {
     // What the confirmation claimed in October stays readable afterwards.
     expect(ours.baselineState).toBe('frontier')
     expect(ours.readState).toBe('forming')
+  })
+})
+
+describe('withdrawal after a quest (PR1900 round3)', () => {
+  it.each([{ correct: 1, total: 2 }, { correct: 1, total: 1 }])('does not retain completion promotion for an insufficient result: %j', (score) => {
+    const confirmed = applyCompletionCoverage(model(), write([direct(CVC)]), NOW).model
+    const quest = applyQuestResultsToModel(confirmed, [{ conceptId: CVC, ...score }], 'quest-test', LATER).model
+    expect(quest.conceptStates[CVC].state).toBe('forming')
+    expect(quest.conceptStates[CVC].evidence.at(-1)!.readState).toBeUndefined()
+    const withdrawn = withdrawCompletionCoverage(quest, 'fastPhonics:draft-1', LATER, 'mistake')
+    expect(withdrawn.model.conceptStates[CVC].state).toBe('not-yet')
+    expect(withdrawn.directlyGovernedConceptIds).not.toContain(CVC)
+    expect(withdrawn.model.conceptStates[CVC].evidence.at(-1)).toEqual(quest.conceptStates[CVC].evidence.at(-1))
+  })
+
+  it('retains a successful quest state independently of completion', () => {
+    const confirmed = applyCompletionCoverage(model(), write([direct(CVC)]), NOW).model
+    const quest = applyQuestResultsToModel(confirmed, [{ conceptId: CVC, correct: 2, total: 2 }], 'quest-pass', LATER).model
+    expect(quest.conceptStates[CVC].evidence.at(-1)!.readState).toBe('solid')
+    const withdrawn = withdrawCompletionCoverage(quest, 'fastPhonics:draft-1', LATER, 'mistake')
+    expect(withdrawn.model.conceptStates[CVC].state).toBe('solid')
+    expect(withdrawn.directlyGovernedConceptIds).toContain(CVC)
+  })
+
+  it('keeps ambiguity after a failed quest and settles it only with a qualifying result', () => {
+    const uncertain = model({ [CVC]: { state: 'forming', evidence: [], completionReviewNeeded: true, seededAt: NOW } })
+    const failed = applyQuestResultsToModel(uncertain, [{ conceptId: CVC, correct: 0, total: 2 }], 'quest-fail', LATER).model
+    expect(failed.conceptStates[CVC].completionReviewNeeded).toBe(true)
+    const passed = applyQuestResultsToModel(failed, [{ conceptId: CVC, correct: 2, total: 2 }], 'quest-pass', LATER).model
+    expect(passed.conceptStates[CVC].completionReviewNeeded).toBe(false)
+  })
+
+  it('does not hide surviving independent coverage behind an unvalued quest', () => {
+    const first = applyCompletionCoverage(model(), write([direct(CVC)]), NOW).model
+    const second = applyCompletionCoverage(first, write([direct(CVC)], 1, 'independent'), NOW).model
+    const quest = applyQuestResultsToModel(second, [{ conceptId: CVC, correct: 0, total: 2 }], 'quest-fail', LATER).model
+    const withdrawn = withdrawCompletionCoverage(quest, 'fastPhonics:draft-1', LATER, 'mistake')
+    expect(withdrawn.model.conceptStates[CVC].state).toBe('forming')
+    expect(withdrawn.supportedConceptIds).toContain(CVC)
+    expect(withdrawn.directlyGovernedConceptIds).not.toContain(CVC)
+  })
+
+  it('uses a later recorded lower direct read rather than a stale stored state', () => {
+    const confirmed = applyCompletionCoverage(model(), write([direct(CVC)]), NOW).model
+    confirmed.conceptStates[CVC].evidence.push({ kind: 'eval', sourceId: 'eval-later', readState: 'frontier', observedAt: LATER, note: 'Direct read' })
+    const withdrawn = withdrawCompletionCoverage(confirmed, 'fastPhonics:draft-1', LATER, 'mistake')
+    expect(withdrawn.model.conceptStates[CVC].state).toBe('frontier')
+    expect(withdrawn.model.changeFeed.at(-1)).toMatchObject({ from: 'forming', to: 'frontier' })
+    expect(withdrawn.directlyGovernedConceptIds).toContain(CVC)
   })
 })

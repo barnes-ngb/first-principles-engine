@@ -174,8 +174,13 @@ function releaseCompletionOnConcept(
   }
 
   const governing = governingDirectEvidence(released, holder.observedAt)
-  if (governing) {
-    return { entry: released, outcome: 'governed', from, to: from }
+  const directState = asCoverageState(governing?.readState)
+  if (directState) {
+    const to = COVERAGE_STATE_RANK[directState] < COVERAGE_STATE_RANK[from] ? directState : from
+    return {
+      entry: { ...released, state: to, ...(prev.completionReviewNeeded ? { completionReviewNeeded: false } : {}) },
+      outcome: 'governed', from, to,
+    }
   }
 
   const supported = survivingSupportedState(released, completionId)
@@ -427,7 +432,6 @@ export function withdrawCompletionCoverage(
     const kidName = FOUNDATION_NODE_MAP[conceptId]?.kidName ?? conceptId
     if (released.outcome === 'governed') {
       directlyGovernedConceptIds.push(conceptId)
-      continue
     }
     if (released.outcome === 'review-needed') {
       reviewNeededConceptIds.push(conceptId)
@@ -448,7 +452,9 @@ export function withdrawCompletionCoverage(
         from: released.from,
         to: released.to,
         cause:
-          released.outcome === 'supported'
+          released.outcome === 'governed'
+            ? `completion withdrawn — "${kidName}" follows the later direct observation`
+            : released.outcome === 'supported'
             ? `completion withdrawn — "${kidName}" still rests on what else we have`
             : `completion withdrawn — "${kidName}" is back to what it was before that confirmation`,
         at: nowIso,
