@@ -2,10 +2,52 @@
 // second write path can't quietly grow a different payload.
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
-const setDocMock = vi.fn(async () => {})
+/** The spy's signature, declared rather than written as unused parameters. */
+type SetDocFn = (ref?: unknown, data?: unknown, opts?: unknown) => Promise<void>
+const setDocImpl: SetDocFn = async () => {}
+const setDocMock = vi.fn(setDocImpl)
 vi.mock('firebase/firestore', () => ({
-  setDoc: (...args: unknown[]) => setDocMock(...(args as [])),
+  setDoc: (ref?: unknown, data?: unknown, opts?: unknown) => setDocMock(ref, data, opts),
+  // FEAT-242 — `applyAndWriteReviewAction` re-applies inside a transaction. The
+  // fake routes `tx.set` to the same `setDoc` spy these tests assert on, and
+  // `tx.get` to a per-test stored document so the "recompute from the CURRENT
+  // model" behaviour is what is being measured.
+  runTransaction: async (
+    _db: unknown,
+    fn: (tx: {
+      get: (ref: unknown) => Promise<{ exists: () => boolean; data: () => unknown }>
+      set: (ref: unknown, data: unknown, opts?: unknown) => void
+    }) => unknown,
+  ) => {
+    // The writes are collected and awaited after the callback, so a rejecting
+    // `setDoc` still fails the transaction — the real `tx.set` is synchronous and
+    // the commit is what can fail, and the "does not swallow a failed write"
+    // expectation below has to keep meaning something.
+    const writes: Promise<unknown>[] = []
+    const out = await fn({
+      get: async () => ({
+        exists: () => stored.model !== null,
+        data: () => stored.model,
+      }),
+      set: (ref: unknown, data: unknown, opts?: unknown) => {
+        writes.push(Promise.resolve(setDocMock(ref, data, opts)))
+      },
+    })
+    await Promise.all(writes)
+    return out
+  },
 }))
+vi.mock('../../core/firebase/firestore', () => ({ db: {} }))
+
+/**
+ * What the transaction's `tx.get` returns — the document as STORED.
+ *
+ * `null` is the "no document yet" case the writer falls back to its caller's
+ * base for; a test that cares about the stale-cache behaviour sets
+ * `stored.model` to a model the caller has never seen. A mutable holder rather
+ * than a reassigned binding, so the mock closure reads the current value.
+ */
+const stored: { model: unknown } = { model: null }
 
 import { applyReviewActionToModel } from './foundationsReviewActions'
 import type { FoundationsReviewAction } from './foundationsReviewActions'

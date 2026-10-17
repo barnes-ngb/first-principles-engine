@@ -46,7 +46,15 @@ import type {
 } from '../../core/types/learnerModel'
 import type { HoursRequirement } from '../../core/compliance/stateCompliance'
 import { FOUNDATION_NODE_MAP } from '../../core/foundations'
+import {
+  activeEvidence,
+  effectiveConceptState,
+} from '../../../functions/src/shared/foundations/completionCoverage'
 import { projectedThroughSummary } from '../../core/foundations/projectedThroughSummary'
+import type {
+  ProgramCompletionEvent,
+  ProgramCompletionState,
+} from '../../core/types/programCompletion'
 import {
   isPositionAddressable,
   matchWorkbookBridge,
@@ -147,6 +155,20 @@ export interface DataReviewEvaluationSession extends EvaluationSession {
   diamondsEarned?: number
 }
 
+/**
+ * The finished-program record as this export read it (FEAT-242).
+ *
+ * `readFailed` is the honesty field: a failed read is NOT an empty record, and
+ * the section says which it was.
+ */
+export interface DataReviewCompletion {
+  state: ProgramCompletionState | null
+  events: ProgramCompletionEvent[]
+  readFailed: boolean
+  /** True when the event cap was reached and the history shown is partial. */
+  truncated: boolean
+}
+
 export interface DataReviewExportInput {
   /** Browser build identifier; absent for older callers or offline fixtures. */
   appBuild?: string
@@ -165,6 +187,15 @@ export interface DataReviewExportInput {
   /** Legacy `workbookConfigs` — surfaced so the dual-system debt is visible. */
   workbookConfigs: WorkbookConfig[]
   learnerModel: LearnerModel | null
+  /**
+   * Parent-confirmed whole-program completions (FEAT-242) — the immutable event
+   * history and the mutable active projection, read for THIS child only.
+   *
+   * Optional so an older caller or an offline fixture can omit it; the section
+   * then says it was not loaded rather than reporting "none recorded", which
+   * would be a claim this export did not check.
+   */
+  completion?: DataReviewCompletion
   skillSnapshot: SkillSnapshot | null
   sightWords: SightWordProgress[]
   dayLogs: DayLog[]
@@ -499,12 +530,19 @@ const artifactHasLink = (a: Artifact, linkage: LabLinkage): boolean =>
   Boolean(a.dayLogId || a.labSessionId || a.projectId || a.weekKey) ||
   linkage.isReportOwned(a.id)
 
-/** The most recent `observedAt` across every evidence ref in the model. */
+/**
+ * The most recent `observedAt` across every ACTIVE evidence ref in the model.
+ *
+ * Active only (FEAT-242): this figure answers "is the model behind the
+ * snapshot?", and a withdrawn completion contribution is not something the model
+ * currently rests on — counting it would report a model as freshly evidenced on
+ * the strength of a claim the parent has retracted.
+ */
 const lastModelEvidenceAt = (model: LearnerModel | null): string | null => {
   if (!model) return null
   let latest: string | null = null
   for (const entry of Object.values(model.conceptStates ?? {})) {
-    for (const ref of entry.evidence ?? []) {
+    for (const ref of activeEvidence(entry.evidence)) {
       if (!ref.observedAt) continue
       if (latest == null || ref.observedAt > latest) latest = ref.observedAt
     }
@@ -965,22 +1003,45 @@ const buildLearnerModelSection = (input: DataReviewExportInput): string[] => {
     lines.push(`**${state}** — ${pluralItems(list.length)}`, '')
     lines.push(
       ...table(
-        ['Concept id', 'Kid name', 'Band', 'Evidence count', 'Evidence kinds', 'Most recent evidence', 'needsReconcile'],
+        [
+          'Concept id',
+          'Kid name',
+          'Band',
+          'Evidence count',
+          'Withdrawn refs',
+          'Evidence kinds',
+          'Most recent evidence',
+          'needsReconcile',
+          // FEAT-242 — the stored state and the state advice actually reads can
+          // differ by exactly one rule, and this is where a reviewer sees it.
+          'Effective state',
+          'completionReviewNeeded',
+        ],
         list.map(([nodeId, entry]) => {
           const node = FOUNDATION_NODE_MAP[nodeId]
           const evidence = entry.evidence ?? []
-          const kinds = Array.from(new Set(evidence.map((e) => e.kind)))
-          const latest = [...evidence].sort((a, b) =>
+          // Counted and reported SEPARATELY (FEAT-242): a withdrawn ref is kept
+          // as history and supports nothing, so folding it into the live counts
+          // would overstate what the state rests on — while hiding it would lose
+          // the audit trail this export exists for.
+          const live = activeEvidence(evidence)
+          const withdrawn = evidence.length - live.length
+          const kinds = Array.from(new Set(live.map((e) => e.kind)))
+          const latest = [...live].sort((a, b) =>
             (b.observedAt ?? '').localeCompare(a.observedAt ?? ''),
           )[0]
+          const effective = effectiveConceptState(entry)
           return [
             `\`${nodeId}\``,
             cell(node?.kidName),
             node?.band == null ? MISSING : String(node.band),
-            String(evidence.length),
+            String(live.length),
+            withdrawn > 0 ? `**${withdrawn}**` : '0',
             kinds.length ? kinds.join(', ') : DASH,
             latest ? cell(evidenceLine(latest)) : DASH,
             entry.needsReconcile ? '**yes**' : 'no',
+            effective === entry.state ? effective : `**${effective}** (stored ${entry.state})`,
+            entry.completionReviewNeeded ? '**yes**' : 'no',
           ]
         }),
         `No concepts in state \`${state}\`.`,
@@ -1080,6 +1141,130 @@ const buildLearnerModelSection = (input: DataReviewExportInput): string[] => {
     '---',
   )
 
+  return lines
+}
+
+/**
+ * §2b — the parent-confirmed finished-program record (FEAT-242).
+ *
+ * The raw learner model already carries the coverage refs; this section is the
+ * PARENT-SIDE record behind them, which no other section loads: what she
+ * asserted, on what day, from what source, whether help was reported, which
+ * entry (if any) she cited, which reviewed map version was applied, and every
+ * correction since. All of it for this child only.
+ */
+const buildCompletionSection = (input: DataReviewExportInput): string[] => {
+  const lines: string[] = ['## 2b. Finished programs (parent-confirmed)', '']
+  const c = input.completion
+  if (!c) {
+    return [
+      ...lines,
+      '_Not loaded by this export run._',
+      '',
+      '---',
+    ]
+  }
+  if (c.readFailed) {
+    return [
+      ...lines,
+      '**The finished-program record could not be read.** This is a failed read, NOT an empty record — anything recorded is still stored.',
+      '',
+      '---',
+    ]
+  }
+  // Read, and genuinely empty — said as a sentence rather than rendered as a
+  // table of em-dashes. The reader of this file (an AI auditing the data) cannot
+  // tell empty fields from fields that failed to arrive, and keeping "nothing
+  // recorded" apart from "we could not find out" is this section's whole job.
+  if (!c.state && c.events.length === 0) {
+    return [
+      ...lines,
+      '_No finished-program record for this child._ Nothing has been confirmed as finished, and no act has been recorded or corrected — this read answered.',
+      '',
+      '---',
+    ]
+  }
+
+  const state = c.state
+  const assertion = state?.activeAssertion ?? null
+  lines.push(
+    ...table(
+      ['Field', 'Value'],
+      [
+        ['program', cell(state?.program)],
+        ['active confirmation', state?.activeEntryKey ? `\`${state.activeEntryKey}\`` : DASH],
+        ['observed finished on', cell(assertion?.observedOn)],
+        ['reported source (asserted, unchecked)', cell(assertion?.source)],
+        ['assistance as reported', cell(assertion?.assistance)],
+        ['program version as reported', cell(assertion?.reportedProgramVersion)],
+        [
+          'cited entry',
+          assertion?.reportObservationId
+            ? `\`${assertion.reportObservationId}\` (${orDash(assertion.reportObservedOn)}, number ${orDash(
+                assertion.reportNativeNumber == null
+                  ? undefined
+                  : String(assertion.reportNativeNumber),
+              )})`
+            : 'none — confirmed directly',
+        ],
+        ['note', cell(assertion?.note)],
+        ['projection status', cell(state?.projection.status)],
+        [
+          'applied map version',
+          state?.projection.appliedMappingVersion == null
+            ? DASH
+            : String(state.projection.appliedMappingVersion),
+        ],
+        [
+          'concepts marked',
+          state?.projection.conceptIds?.length
+            ? String(state.projection.conceptIds.length)
+            : DASH,
+        ],
+        ['projection detail', cell(state?.projection.detail)],
+        [
+          'last withdrawal',
+          state?.lastWithdraw
+            ? `${state.lastWithdraw.reason} · ${day(state.lastWithdraw.at)}`
+            : DASH,
+        ],
+        ['source-correction conflict', cell(state?.sourceConflict?.detail)],
+        ['recorded acts', String(state?.eventCount ?? 0)],
+      ],
+      'No finished-program record for this child.',
+    ),
+    '',
+    '**History (immutable — one row per act)**',
+    '',
+  )
+  if (c.truncated) {
+    lines.push(
+      // Honest about WHICH acts these are: the read is capped at the Firestore
+      // query, which returns documents in document-id order — not newest-first.
+      // Claiming recency would need an ordered index this export does not add.
+      '_History limited by this export\'s read cap. The acts listed are the first by document id, **not** the most recent; the rest are still stored._',
+      '',
+    )
+  }
+  lines.push(
+    ...table(
+      ['Recorded', 'Act', 'Entry key', 'Withdraws', 'Reason', 'Map v', 'Detail'],
+      [...c.events]
+        .sort((a, b) => (a.recordedAt < b.recordedAt ? 1 : -1))
+        .map((e) => [
+          cell(day(e.recordedAt)),
+          cell(e.kind),
+          `\`${e.entryKey}\``,
+          e.withdrawsEntryKey ? `\`${e.withdrawsEntryKey}\`` : DASH,
+          cell(e.withdrawReason),
+          String(e.mappingVersion),
+          cell(e.detail ?? e.assertion?.observedOn),
+        ]),
+      'No recorded acts.',
+    ),
+    '',
+    '---',
+  )
   return lines
 }
 
@@ -1190,7 +1375,10 @@ const buildSightWordSection = (input: DataReviewExportInput): string[] => {
   const externalRefs: EvidenceRef[] = []
   const seen = new Set<string>()
   for (const entry of Object.values(input.learnerModel?.conceptStates ?? {})) {
-    for (const ref of entry.evidence ?? []) {
+    // Active refs only (FEAT-242) — a withdrawn claim is not a standing source,
+    // and this section is a "who says what about this child right now" table.
+    // The per-concept table in §2a is where withdrawn refs are accounted for.
+    for (const ref of activeEvidence(entry.evidence)) {
       if (ref.kind !== 'curriculumPosition') continue
       const key = `${ref.source}|${ref.unit}|${ref.detail}|${ref.note}`
       if (seen.has(key)) continue
@@ -1744,6 +1932,8 @@ export const buildDataReviewExport = (input: DataReviewExportInput): string =>
     ...buildWorkbookSection(input),
     '',
     ...buildLearnerModelSection(input),
+    '',
+    ...buildCompletionSection(input),
     '',
     ...buildSkillSnapshotSection(input),
     '',

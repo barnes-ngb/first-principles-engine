@@ -12,16 +12,16 @@
 // Fire-and-forget by design: it NEVER blocks or fails the snapshot apply. The
 // `skillSnapshots` write path is untouched and runs first, in `handleSaveAndApply`.
 
-import { doc, getDoc, setDoc } from 'firebase/firestore'
+import { doc } from 'firebase/firestore'
 
 import { learnerModelsCollection } from '../../core/firebase/firestore'
+import { updateLearnerModelInTransaction } from '../../core/firebase/modelTransaction'
 import { promotedModelStatus } from '../../core/foundations/modelStatus'
 import {
   applyEvalFindingsToModel,
   computeEvalRead,
 } from '../../core/foundations/evalModelSync'
 import type { EvaluationFinding } from '../../core/types/evaluation'
-import type { LearnerModel } from '../../core/types/learnerModel'
 
 /**
  * Project a completed guided evaluation onto the child's learner model. No-ops
@@ -47,25 +47,31 @@ export async function syncEvalFindingsToModel(
     if (evalRead.length === 0) return // nothing the graph recognizes — no write
 
     const modelRef = doc(learnerModelsCollection(familyId), childId)
-    const modelSnap = await getDoc(modelRef)
-    if (!modelSnap.exists()) return // no seeded model yet — Review Chat feeds it first
 
-    const model = modelSnap.data() as LearnerModel
-    const { model: next } = applyEvalFindingsToModel(model, evalRead, sessionId, nowIso)
+    // One transaction, the findings projected INSIDE it (FEAT-242). Like the
+    // quest write-back, this writer sends the whole model, so the read-then-write
+    // gap could revert every concept — including, in the case this run cares
+    // about, a program completion confirmed on another device while the parent
+    // was applying an evaluation. The eval still wins on the concepts it
+    // assessed (it is the calibrated signal); what it may no longer do is undo
+    // writes it never read.
+    await updateLearnerModelInTransaction<void>(modelRef, (model) => {
+      if (!model) return { result: undefined } // no seeded model — Review Chat feeds it first
 
-    // A guided eval always writes evidence and may move state; mark the LLM
-    // synthesis stale (FEAT-57, D4) so the next beat regenerates whatMattersNext.
-    next.synthesisStaleAt = nowIso
+      const { model: next } = applyEvalFindingsToModel(model, evalRead, sessionId, nowIso)
 
-    // UX-322 — a guided eval's read is real evidence, so a model seeded before
-    // the child had any signal stops being stamped `no-data` (which five readers
-    // treat as "no model at all"). Shared rule; never demotes.
-    const promoted = promotedModelStatus(next)
-    if (promoted) next.status = promoted
+      // A guided eval always writes evidence and may move state; mark the LLM
+      // synthesis stale (FEAT-57, D4) so the next beat regenerates whatMattersNext.
+      next.synthesisStaleAt = nowIso
 
-    // Merge-only, JSON-scrubbed to drop any `undefined` (Firestore rejects them),
-    // exactly like the diag seeder and the other model writers.
-    await setDoc(modelRef, JSON.parse(JSON.stringify(next)), { merge: true })
+      // UX-322 — a guided eval's read is real evidence, so a model seeded before
+      // the child had any signal stops being stamped `no-data` (which five readers
+      // treat as "no model at all"). Shared rule; never demotes.
+      const promoted = promotedModelStatus(next)
+      if (promoted) next.status = promoted
+
+      return { merge: next, result: undefined }
+    })
   } catch (err) {
     // Never let a model write-back break the snapshot apply — it is additive.
     console.warn('[eval] Failed to write eval findings back to learner model', err)

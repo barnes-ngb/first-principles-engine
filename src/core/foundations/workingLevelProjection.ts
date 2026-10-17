@@ -41,6 +41,14 @@
 //      compared per field — see `shouldReprojectWorkingLevels`, and
 //      `LearnerModel.projectedThrough` for the timestamp answers it replaced.
 //
+// One consequence of the four rather than a fifth rule: where this pass is
+// permitted to write (1) and actually raises a state (2), it retires a
+// `completionReviewNeeded` flag the entry was carrying (FEAT-242). The flag is a
+// question about the state the pass has just replaced, and leaving it on made
+// every advice surface read a freshly established `solid` as the working edge.
+// The fold says why that is a flag retirement rather than a new kind of support
+// in the shared reader.
+//
 // Pure. The write is `bootstrapLearnerModel`'s `'reproject'` mode.
 
 import {
@@ -49,7 +57,7 @@ import {
   currentDrivingLevels,
   WORKING_LEVEL_DRIVER_KEYS,
 } from './seedLearnerModel'
-import { FOUNDATION_NODE_MAP } from './index'
+import { activeEvidence, FOUNDATION_NODE_MAP } from './index'
 import type { ConceptGraph } from './types'
 import type {
   ConceptStateEntry,
@@ -138,8 +146,10 @@ export function applyWorkingLevelProjection(
   for (const [conceptId, projected] of Object.entries(banded)) {
     const prev: ConceptStateEntry | undefined = conceptStates[conceptId]
 
-    // Rule 1 — a witnessed concept is never moved by a projection.
-    if (prev && carriesNonDerivableEvidence(prev)) continue
+    // Only active witnesses govern state. Keep the seeder's history-preservation
+    // predicate unchanged: unlike this append-only projection, reseeding would
+    // otherwise erase superseded refs when replacing an entire entry.
+    if (prev && carriesNonDerivableEvidence({ ...prev, evidence: activeEvidence(prev.evidence) })) continue
 
     const fromState: ConceptStateKind = prev?.state ?? 'not-yet'
     // Rule 2 — upgrade-only.
@@ -158,6 +168,42 @@ export function applyWorkingLevelProjection(
       // "Below phonics working level 5" stays as the record of what was true then.
       evidence: [...(prev?.evidence ?? []), ref],
       seededAt: prev?.seededAt ?? projected.seededAt,
+      // ── Rule 5 (FEAT-242): a state this pass ESTABLISHES is not a state under
+      // completion review. ────────────────────────────────────────────────────
+      //
+      // `completionReviewNeeded` asks one question: *what did the stored state
+      // rest on, before a completion that has since been withdrawn raised it?*
+      // The line above replaces that stored state with a freshly derived one and
+      // appends the `workingLevel` ref it rests on, so the question is about a
+      // state this document no longer holds. Spreading the flag through to the
+      // new state left `effectiveConceptState` capping a reading this projection
+      // had just established at the working edge — and nothing could ever lift
+      // it, because the shared support reader values coverage and direct
+      // observations, not a band-derived ref (round 2, 4304817073).
+      //
+      // It is narrow on purpose, in three ways:
+      //   • only on a concept this pass actually RAISES — the upgrade-only and
+      //     "a raised state carries evidence" guards above both run first;
+      //   • only where rule 1 let the pass write at all, so an ACTIVE
+      //     `attestation` / `curriculumPosition` / `eval` / `quest` / `scan` /
+      //     `programCompletionCoverage` ref blocks the concept outright and the
+      //     flag stands untouched. A withdrawal's own refs are superseded, which
+      //     is exactly the case where nothing live can answer the question and a
+      //     fresh level is the only thing that does;
+      //   • and it retires a flag rather than teaching the shared reader a new
+      //     kind of support. `survivingSupportedState` is also the WITHDRAWAL's
+      //     reader, so honouring `workingLevel` refs there would change what
+      //     props a concept up when a completion is released — a mastery-policy
+      //     change this finding does not call for. Retiring the flag on a fresh
+      //     established state is the move `evalModelSync`, `questTargeting` and
+      //     an `attest` action already make.
+      //
+      // Written as an explicit `false`, never omitted: the writer merges this
+      // entry into Firestore (and JSON-scrubs `undefined`), where an absent key
+      // would leave the stored `true` in place. Entries that never carried the
+      // flag do not gain the key — nothing else about this pass changes, and
+      // rule 4 still holds, because a pass that raises nothing writes nothing.
+      ...(prev?.completionReviewNeeded ? { completionReviewNeeded: false } : {}),
     }
     changedConceptIds.push(conceptId)
     // Rule 3 — every move leaves a line.

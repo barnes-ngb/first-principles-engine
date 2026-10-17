@@ -14,6 +14,13 @@
  * (`sanitizeTerrainText`); source units like "Fast Phonics Peak 13" survive.
  */
 import { FOUNDATION_SUMMARY_MAP, summaryNodesForDomain } from "../data/foundationsGraphSummary.js";
+import {
+  PROGRAM_COMPLETION_COVERAGE,
+  activeEvidence,
+  completionReviewNeeded,
+  completionReviewSupported,
+  effectiveConceptState,
+} from "../../shared/foundations/completionCoverage.js";
 import { sanitizeTerrainText, type StoredConceptState, type StoredLearnerModel } from "./learnerSynthesis.js";
 
 const DOMAINS = [
@@ -21,16 +28,31 @@ const DOMAINS = [
   { key: "math", label: "MATH" },
 ] as const;
 
-/** The best evidence one-liner for a concept, source-first, §14-scrubbed. */
+/**
+ * The best evidence one-liner for a concept, source-first, §14-scrubbed.
+ *
+ * Reads ACTIVE refs only (FEAT-242): a withdrawn completion contribution is kept
+ * on the record and must never be quoted to a parent as a live reason.
+ */
 function evidenceLine(cs: StoredConceptState | undefined): string {
-  const ev = cs?.evidence ?? [];
+  const ev = activeEvidence(cs?.evidence);
   if (ev.length === 0) return "";
-  // Prefer a curriculumPosition (names an external source) or attestation.
+  // Prefer a completion (the strongest coverage statement a parent can make), then
+  // a curriculumPosition (names an external source), then an attestation.
   const preferred =
+    ev.find((e) => e.kind === PROGRAM_COMPLETION_COVERAGE) ??
     ev.find((e) => e.kind === "curriculumPosition") ??
     ev.find((e) => e.kind === "attestation") ??
     ev[ev.length - 1];
   const note = preferred.note ? sanitizeTerrainText(preferred.note) : "";
+  if (preferred.kind === PROGRAM_COMPLETION_COVERAGE) {
+    // Named for exactly what it is: a finished program, confirmed by the parent,
+    // covering material — not a verified skill, and not a score.
+    const src = preferred.source
+      ? ` (${preferred.source} confirmed finished — material covered, not verified)`
+      : " (program confirmed finished — material covered, not verified)";
+    return note ? `${note}${src}` : src.trim();
+  }
   if (preferred.kind === "curriculumPosition") {
     const src = preferred.source ? ` (covered in ${preferred.source}, not yet verified)` : " (covered, not yet verified)";
     return note ? `${note}${src}` : src.trim();
@@ -42,7 +64,17 @@ function conceptLine(nodeId: string, cs: StoredConceptState | undefined): string
   const node = FOUNDATION_SUMMARY_MAP[nodeId];
   const name = node?.kidName ?? nodeId;
   const ev = evidenceLine(cs);
-  return ev ? `"${name}" — ${ev}` : `"${name}"`;
+  // An entry whose completion basis was withdrawn without a reconstructable
+  // earlier reading says so in the one place the model reads (FEAT-242), so the
+  // prompt cannot present it as settled — and says WHICH of the two it is,
+  // because a claim that landed after the withdrawal carries the reading at its
+  // stored state (`completionReviewSupported`) while leaving the basis unsettled.
+  const caveat = completionReviewNeeded(cs)
+    ? completionReviewSupported(cs)
+      ? " [not settled — the record it rested on was withdrawn; something current supports this reading]"
+      : " [needs a fresh look — the record it rested on was withdrawn]"
+    : "";
+  return ev ? `"${name}" — ${ev}${caveat}` : `"${name}"${caveat}`;
 }
 
 /**
@@ -66,12 +98,16 @@ export function buildLearnerModelSlice(model: StoredLearnerModel | null | undefi
     const solid: string[] = [];
     for (const n of nodes) {
       const cs = states[n.id];
-      const st = cs?.state ?? "not-yet";
+      // The EFFECTIVE state (FEAT-242): identical to the stored one except on an
+      // entry under completion review whose stored state nothing live supports,
+      // which is capped at the working edge so the prompt never presents an
+      // unsupported `forming` as partial mastery.
+      const st = effectiveConceptState(cs);
       if (st === "frontier") frontier.push(conceptLine(n.id, cs));
       else if (st === "forming") forming.push(conceptLine(n.id, cs));
       else if (st === "solid") {
         const node = FOUNDATION_SUMMARY_MAP[n.id];
-        const kinds = Array.from(new Set((cs?.evidence ?? []).map((e) => e.kind)));
+        const kinds = Array.from(new Set(activeEvidence(cs?.evidence).map((e) => e.kind)));
         solid.push(`"${node?.kidName ?? n.id}"${kinds.length ? ` (${kinds.join(", ")})` : ""}`);
       }
     }

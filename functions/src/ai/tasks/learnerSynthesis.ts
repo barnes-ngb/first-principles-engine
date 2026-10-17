@@ -23,6 +23,12 @@
 import { CHARTER_PREAMBLE } from "../contextSlices.js";
 import { sanitizeAndParseJson } from "../../shared/sanitizeJson.js";
 import {
+  activeEvidence,
+  completionReviewNeeded,
+  completionReviewSupported,
+  effectiveConceptState,
+} from "../../shared/foundations/completionCoverage.js";
+import {
   FOUNDATION_SUMMARY_MAP,
   FOUNDATION_SUMMARY_NODES,
   summaryNodesForDomain,
@@ -38,10 +44,43 @@ export interface StoredEvidenceRef {
   note?: string;
   observedAt?: string;
   source?: string;
+  // ── FEAT-242: the fields the server must be able to SEE ──
+  /** `'superseded'` ⇒ history, read by nothing that forms a judgment. */
+  status?: string;
+  /** Which completion confirmation owns this ref. */
+  completionId?: string;
+  /** The reviewed mapping version behind it. */
+  mappingVersion?: number;
+  /** `direct` / `partial` — how much of the concept it speaks to. */
+  coverageQualifier?: string;
+  /** True only when this ref actually moved the concept's state. */
+  promoted?: boolean;
+  // The server now DERIVES what a live claim supports on an entry still under
+  // completion review (`completionReviewCeiling`), so the fields that decision
+  // reads are declared here too: a projection that omitted them would still
+  // work at runtime — the stored document carries them — while hiding from the
+  // server's own types which fields its prompt output depends on.
+  /** What the ref itself asserted, where its writer stamped it. */
+  readState?: string;
+  /** The highest state THIS coverage claim asserts it can support. */
+  coverageCeiling?: string;
+  /** True when the owning confirmation currently holds the promotion. */
+  ownsPromotion?: boolean;
+  /** Why a coverage claim moved nothing, where its writer stamped one. */
+  withheldReason?: string;
+  /** True on the workbook position sync's own writes. */
+  positionSync?: boolean;
 }
 export interface StoredConceptState {
   state: "solid" | "forming" | "frontier" | "not-yet";
   evidence?: StoredEvidenceRef[];
+  /**
+   * FEAT-242 — a withdrawn completion left no reconstructable earlier reading,
+   * so this concept is read conservatively (`effectiveConceptState`) for as
+   * long as nothing live supports its stored state, and the flag itself stands
+   * until a parent or a diagnostic settles it.
+   */
+  completionReviewNeeded?: boolean;
 }
 export interface StoredModalityEntry {
   level?: number;
@@ -130,7 +169,9 @@ export function orderMoveCandidates(
   states: Record<string, StoredConceptState>,
 ): FoundationSummaryNode[] {
   const fanOut = computeFanOut(nodes);
-  const stateOf = (id: string): string => states[id]?.state ?? "not-yet";
+  // The EFFECTIVE state (FEAT-242): this IS the move ranker, so a concept whose
+  // completion basis was withdrawn is ranked as the working edge it honestly is.
+  const stateOf = (id: string): string => effectiveConceptState(states[id]);
   return nodes
     .filter((n) => stateOf(n.id) !== "solid")
     .filter((n) => stateOf(n.id) in STATE_TIER)
@@ -187,10 +228,31 @@ function sanitizeMaybe(text: string | undefined): string | undefined {
   return text ? sanitizeTerrainText(text) : undefined;
 }
 
+/**
+ * The evidence notes handed to the model — ACTIVE refs only (FEAT-242).
+ *
+ * A withdrawn completion contribution stays on the record and must not be cited
+ * as a live reason; an entry whose basis could not be reconstructed says so
+ * instead, so the synthesis cannot write "two sources agree" about a claim one
+ * of whose sources has been retracted.
+ */
 function evidenceNotes(cs: StoredConceptState | undefined): string[] {
-  return (cs?.evidence ?? [])
+  const notes = activeEvidence(cs?.evidence)
     .map((e) => (e.note ? sanitizeTerrainText(e.note) : e.kind))
     .filter(Boolean) as string[];
+  if (completionReviewNeeded(cs)) {
+    // Two different facts, so two different notes: an entry nothing live
+    // supports is being read down to the working edge, while one carried by a
+    // claim that landed after the withdrawal is read as stored with only its
+    // basis unsettled. Saying the first about the second would tell the model
+    // this read is being discounted when it is not.
+    notes.push(
+      completionReviewSupported(cs)
+        ? "not settled — the finished-program record this rested on was withdrawn, and something current supports this reading"
+        : "needs a fresh look — the finished-program record this rested on was withdrawn",
+    );
+  }
+  return notes;
 }
 
 /**
@@ -214,7 +276,11 @@ export function buildSynthesisInput(
     const recentSolid: DomainSynthesisView["recentSolid"] = [];
     for (const n of nodes) {
       const cs = states[n.id];
-      const st = cs?.state ?? "not-yet";
+      // The EFFECTIVE state (FEAT-242) — see `effectiveConceptState`. This is a
+      // ranker for parent-facing advice, so an entry under completion review
+      // with nothing live behind it is read at the working edge rather than as
+      // partial mastery.
+      const st = effectiveConceptState(cs);
       if (st === "frontier") {
         frontier.push({ conceptId: n.id, kidName: n.kidName, description: n.parentDescription, evidence: evidenceNotes(cs) });
       } else if (st === "forming") {
@@ -223,7 +289,7 @@ export function buildSynthesisInput(
         recentSolid.push({
           conceptId: n.id,
           kidName: n.kidName,
-          evidenceKinds: Array.from(new Set((cs?.evidence ?? []).map((e) => e.kind))),
+          evidenceKinds: Array.from(new Set(activeEvidence(cs?.evidence).map((e) => e.kind))),
         });
       }
     }
@@ -233,7 +299,7 @@ export function buildSynthesisInput(
         conceptId: n.id,
         kidName: n.kidName,
         description: n.parentDescription,
-        state: states[n.id]?.state ?? "not-yet",
+        state: effectiveConceptState(states[n.id]),
       }));
     return { domain, frontier, forming, recentSolid, moveCandidates };
   });

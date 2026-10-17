@@ -80,7 +80,31 @@ export function prettySource(source: string | undefined): string | undefined {
 export function evidenceSourceLine(ref: EvidenceRef): string {
   const date = ref.observedAt ? ref.observedAt.slice(0, 10) : ''
   const suffix = date ? ` · ${date}` : ''
+  // A withdrawn ref is still SHOWN — what a parent confirmed in October is a
+  // fact about October — and it is shown as withdrawn (FEAT-242), so a trail
+  // that no longer supports anything cannot read as though it does.
+  if (ref.status === 'superseded') {
+    return `${evidenceSourceBody(ref, suffix)} — withdrawn${
+      ref.supersededAt ? ` · ${ref.supersededAt.slice(0, 10)}` : ''
+    }`
+  }
+  return evidenceSourceBody(ref, suffix)
+}
+
+function evidenceSourceBody(ref: EvidenceRef, suffix: string): string {
   switch (ref.kind) {
+    case 'programCompletionCoverage': {
+      const src = prettySource(ref.source) ?? 'a program'
+      const reach =
+        ref.coverageQualifier === 'partial'
+          ? 'part of this is covered'
+          : 'this is covered'
+      const unit = ref.unit ? ` (${ref.unit})` : ''
+      // Names what it is: the parent's confirmation that a program is finished,
+      // covering material. Never "mastered", never a score, and the partial
+      // reach is said out loud rather than implied.
+      return `You confirmed ${src} is finished — ${reach}${unit}${suffix}`
+    }
     case 'attestation':
       return `You confirmed this${suffix}`
     case 'curriculumPosition': {

@@ -90,6 +90,9 @@ vi.mock('firebase/firestore', () => ({
 vi.mock('../../core/firebase/firestore', () => ({
   scansCollection: vi.fn(() => ({})),
   nativeProgressObservationsCollection: vi.fn(() => ({})),
+  // FEAT-242: the tab also renders `ProgramCompletionPanel` (own tests).
+  programCompletionStateCollection: vi.fn(() => ({})),
+  programCompletionEventsCollection: vi.fn(() => ({})),
 }))
 
 import CurriculumTab from './CurriculumTab'

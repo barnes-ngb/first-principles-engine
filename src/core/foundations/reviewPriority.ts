@@ -22,6 +22,7 @@
  * graph import beyond the nodes passed in.
  */
 
+import { effectiveConceptState } from '../../../functions/src/shared/foundations/completionCoverage'
 import type { ConceptStateEntry, ConceptStateKind } from '../types/learnerModel'
 import type { Band, ConceptNode } from './types'
 
@@ -84,8 +85,14 @@ export function computeReviewPriority(
 ): string[] {
   const fanOut = computeFanOut(nodes)
 
+  // The EFFECTIVE state, not the stored one (FEAT-242). This ranker decides what
+  // the Review Chat walks, which makes it an advice consumer: a concept whose
+  // completion basis was withdrawn without a reconstructable prior reading is
+  // capped at the working edge here — unless something live supports it again —
+  // so it is offered for review rather than skipped as settled on a `forming`
+  // nothing currently supports.
   const stateOf = (id: string): ConceptStateKind =>
-    conceptStates[id]?.state ?? 'not-yet'
+    effectiveConceptState(conceptStates[id])
 
   return nodes
     .filter((n) => stateOf(n.id) !== 'solid')

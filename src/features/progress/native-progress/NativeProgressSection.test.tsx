@@ -1507,6 +1507,79 @@ describe('the history', () => {
     })
   })
 
+  it('warns about a linked finished-program record BEFORE the correction is saved', async () => {
+    // FEAT-242 review item 4. A correction can withdraw a confirmed
+    // finished-program record in the same transaction, so the blanket "this does
+    // not update plans, hours or skills" is false while one is open — and the
+    // warning belongs before the second tap, not in the receipt.
+    const user = userEvent.setup()
+    observations = [row({ id: 'lincoln__e1', nativeNumber: 42 })]
+    render(<NativeProgressSection />)
+    expect(
+      screen.getByText('Saved for reference. This does not update plans, hours or skills.'),
+    ).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Correct this entry' }))
+    expect(screen.getByText(/with one exception/)).toBeInTheDocument()
+    expect(
+      screen.queryByText('Saved for reference. This does not update plans, hours or skills.'),
+    ).not.toBeInTheDocument()
+
+    const field = screen.getByLabelText('Lesson number')
+    await user.clear(field)
+    await user.type(field, '41')
+    await user.click(screen.getByRole('button', { name: 'Check this entry' }))
+    // The warning is on the confirm step, with nothing written yet.
+    expect(
+      await screen.findByText(/withdraws that record and takes back what it had marked as covered/),
+    ).toBeInTheDocument()
+    expect(saveMock).not.toHaveBeenCalled()
+  })
+
+  it('a correction that withdrew a completion does NOT say nothing else changed', async () => {
+    const user = userEvent.setup()
+    observations = [row({ id: 'lincoln__e1', nativeNumber: 42 })]
+    saveMock.mockResolvedValue({
+      ...savedOk({ nativeNumber: 41 }),
+      completionRevoked: { status: 'revoked' as const },
+    })
+    render(<NativeProgressSection />)
+
+    await user.click(screen.getByRole('button', { name: 'Correct this entry' }))
+    const field = screen.getByLabelText('Lesson number')
+    await user.clear(field)
+    await user.type(field, '41')
+    await user.click(screen.getByRole('button', { name: 'Check this entry' }))
+    await user.click(await screen.findByRole('button', { name: 'Save this record' }))
+
+    expect(
+      await screen.findByText(/has been withdrawn, and what it had marked as covered has been taken back/),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/Nothing else changed\./)).not.toBeInTheDocument()
+  })
+
+  it('reports a withdrawal the learning picture could not take as PENDING', async () => {
+    const user = userEvent.setup()
+    observations = [row({ id: 'lincoln__e1', nativeNumber: 42 })]
+    saveMock.mockResolvedValue({
+      ...savedOk({ nativeNumber: 41 }),
+      completionRevoked: { status: 'pending' as const },
+    })
+    render(<NativeProgressSection />)
+
+    await user.click(screen.getByRole('button', { name: 'Correct this entry' }))
+    const field = screen.getByLabelText('Lesson number')
+    await user.clear(field)
+    await user.type(field, '41')
+    await user.click(screen.getByRole('button', { name: 'Check this entry' }))
+    await user.click(await screen.findByRole('button', { name: 'Save this record' }))
+
+    expect(
+      await screen.findByText(/the learning picture could not be updated/),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/Nothing else changed\./)).not.toBeInTheDocument()
+  })
+
   it('a failed read is never shown as an empty record', () => {
     readError = 'permission-denied'
     render(<NativeProgressSection />)
