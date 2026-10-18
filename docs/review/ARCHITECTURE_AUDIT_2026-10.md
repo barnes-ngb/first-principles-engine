@@ -5,8 +5,8 @@
 > **Branch:** `claude/brave-feynman-k8uu1j` · **Prompt:** `docs/review/prompts/PROMPT_ARCH_AUDIT.md`
 > **Rule:** inspect / validate / propose only — no structural fixes applied; mechanical doc/ledger corrections only.
 > **Prior audit:** `ARCHITECTURE_AUDIT_2026-10-04.md` (window end `12ad312`, 2026-09-27).
-> **Window covered:** `12ad312` → `16d52b4` (`origin/main` when this run started) — **129 commits, 176 files,
-> +38,596 / −1,066** (`git log --oneline 12ad312..origin/main | wc -l`; `git diff --shortstat 12ad312..origin/main`).
+> **Window covered:** `12ad312` → `16d52b4` (`origin/main` when this run started) — **242 commits, 176 files,
+> +38,596 / −1,066** (`git log --oneline 12ad312..16d52b4 | wc -l`; `git diff --shortstat 12ad312..16d52b4`). The commit count is only valid on a full-history clone: a shallow clone returned 129 for the same range (Codex round 1 caught it; `git fetch --unshallow` gives 242),.
 > Headline: a **feature-heavy window** — native-progress capture (`FEAT-241`), Fast Phonics whole-program
 > completion (`FEAT-242`), the before-work page check (`pageCheck` task), Arcade sticker art, plus capture-save
 > hardening. No new break in the learning loop, compliance or ethos; the debt finding is that several of the new
@@ -147,7 +147,13 @@ before-work page check is prospective by design and writes only an AI-usage row 
 cannot create orphan state. **No dead end found.** Caveat inherited: new `pageCheck` fails closed against an old
 dispatcher (client says unavailable) until `functions` is deployed.
 
-Known weak links from `PROCESS_OVERVIEW.md` (iii) were not re-walked this window and carry their existing rows.
+**Known weak links from `PROCESS_OVERVIEW.md` (iii), re-checked against this window's diff (`git diff --stat 12ad312..16d52b4`):**
+
+- **Sparse-upload days** — *still live, not worsened.* The window's capture changes (`ea0a818`, `1aa2834`) stop overlapping saves and protect newer drafts, and native-progress reports (`FEAT-241`) are an extra signal path but are isolated by design and feed nothing (`nativeProgressWrites.ts` header). Nothing makes a thin day fail loudly; the prior window's weekly-review failure visibility remains the only loud edge.
+- **Knowledge Mine ~weekly cadence** — *unchanged.* `src/features/quest/` moved by two files only (`questModelSync.ts` +44/−17 and its test, commit `53dc3c6`, "preserve actual assessments across no-read quest observations"): it protects real assessments from being overwritten, with no change to cadence or targeting.
+- **Learning-map under-reporting (RESOLVED, regression watch)** — *no regression.* `src/core/curriculum/`, `src/features/progress/learning-map/` and the re-derivation inputs have no diff in the window, and neither `programCompletionWrites.ts` nor `nativeProgressWrites.ts` writes `childSkillMaps` or `skillSnapshots` (their only matches are header disclaimers, line 37 and the equivalent), so the new rails cannot disturb the map.
+- **Knowledge Mine needs more levels** — *unchanged.* No quest ceiling or level file changed (`git diff --stat` over `src/features/quest/` shows only the two files above); `FEAT-08`/`FEAT-10` remain the open content gaps.
+- **State-labeling MO-only** — *unchanged;* see `DATA-13` (4.3).
 
 ### 2.3 Shelly's path / no-shame
 
