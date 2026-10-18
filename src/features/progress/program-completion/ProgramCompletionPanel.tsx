@@ -56,6 +56,8 @@ import {
   completionStrandedRefusedNotice,
   completionStrandedRefusedTitle,
   completionStrandedTitle,
+  completionUnresolvedHoldLine,
+  completionUnresolvedHoldReason,
   coverageSummary,
   coverageSummaryHeadline,
   eligibleCitations,
@@ -109,6 +111,19 @@ import {
  * Mutations are blocked until the record is authoritative: a loading or failed
  * read never presents as "nothing recorded yet", because that sentence invites a
  * confirmation that could duplicate one already stored.
+ *
+ * They are blocked a second time while an earlier confirmation or correction is
+ * still UNANSWERED (review item 4305125380): there is one retry slot, it holds
+ * the only copy of that request — its idempotency key included — and a second
+ * indeterminate failure writing over it would take the key with it, leaving an
+ * entry that may be on the record with no way to check. So the earlier entry is
+ * settled first, by name, and the retry that settles it is always available.
+ *
+ * The hold is CONTINUOUS, which is the whole of it: a gate is taken before the
+ * write is sent, handed to a ref at the instant the unanswered request is
+ * recorded, and released only after the outcome has been handled. There is no
+ * moment in between in which a second indeterminate write could start, so no
+ * two unanswered requests can exist and none is ever preferred over another.
  */
 
 /**
@@ -169,6 +184,40 @@ function sameStrandedRequest(
   )
 }
 
+/**
+ * Is this request still WAITING for an answer?
+ *
+ * `failed` and `retrying` are the phases in which the slot holds the only copy
+ * of a request nothing is known about. `saved` and `refused` are ANSWERS — the
+ * entry is settled either way — so they hold nothing back: a safeguard that
+ * outlived the uncertainty it protects would lock the surface for good, which
+ * is why the two terminal phases are named here rather than inverted from
+ * `failed`.
+ */
+function strandedIsUnresolved(
+  write: StrandedCompletionWrite | null,
+): write is StrandedCompletionWrite {
+  return write != null && (write.phase === 'failed' || write.phase === 'retrying')
+}
+
+/**
+ * The one string that names a write: what it is, whose it is, and when.
+ *
+ * The gate below holds this, not a boolean, so releasing it can be conditional
+ * on still holding the SAME write. The visit is part of the name: an answer
+ * belonging to a sign-in that has ended must not be able to unlock a gate the
+ * next sign-in has taken, which a boolean could not express.
+ */
+function writeToken(
+  kind: 'confirm' | 'withdraw' | 'apply',
+  familyId: string,
+  childId: string,
+  entryKey: string,
+  visit: number,
+): string {
+  return `${kind}|${familyId}|${childId}|${entryKey}|${visit}`
+}
+
 export default function ProgramCompletionPanel() {
   const familyId = useFamilyId()
   const { activeChildId, activeChild, children, isChildProfile } = useActiveChild()
@@ -208,6 +257,63 @@ export default function ProgramCompletionPanel() {
   const [showDetail, setShowDetail] = useState(false)
 
   const childName = activeChild?.name ?? 'this child'
+  // Named before the handlers that quote it: the hold they explain is about the
+  // child the stranded entry belongs to, which is not always the one on screen,
+  // and the handlers read it off the REQUEST rather than off the rendered panel.
+  const nameOfChild = (id: string) =>
+    children.find((c) => c.id === id)?.name ?? 'that child'
+  const strandedChildName = stranded ? nameOfChild(stranded.childId) : 'that child'
+
+  /**
+   * ── The gate: the write this panel has in the air, named and synchronous ──
+   *
+   * Taken BEFORE the request is sent and released only after its outcome has
+   * been fully handled — the release is in a `finally` around the outcome, not
+   * attached to the promise, because a release that fires when the promise
+   * settles leaves exactly the window it was meant to close: the answer is in,
+   * the gate is open, and the only copy of the request is still in a closure
+   * that has not reached `setStranded`. A second tap in that window started a
+   * second write, and one of the two keys was then lost.
+   *
+   * A ref and not `saving`: state is a render behind, so a disabled attribute
+   * and a handler closure from the previous render both still say "idle" while
+   * a write is in the air. Released only if the gate still names THIS write, so
+   * an answer from an ended sign-in cannot unlock the next one's gate.
+   */
+  const gate = useRef<string | null>(null)
+
+  /**
+   * ...and the unanswered request itself, mirrored out of state.
+   *
+   * `stranded` drives what is on screen; this ref is what the HANDLERS test,
+   * for the same commit-lag reason: between recording an unanswered request and
+   * React committing it, a tap would read `stranded` as null and send a second
+   * write. Writing both in the same breath is what lets the gate be released at
+   * all — the hold passes from the gate to this ref without a gap, so there is
+   * never an instant in which a second indeterminate write can start.
+   *
+   * Cleared only by an ANSWER (saved, or refused on stored data) and by an
+   * account change, in the layout effect below. Never written during render.
+   */
+  const unresolvedWrite = useRef<StrandedCompletionWrite | null>(null)
+
+  /** The hold, as the handlers see it: the ref first, the rendered panel after. */
+  const heldUnresolved = (): StrandedCompletionWrite | null =>
+    unresolvedWrite.current ?? (strandedIsUnresolved(stranded) ? stranded : null)
+
+  /** Refuse a save, in the words of the entry that is still waiting. */
+  const refuseForUnresolved = (held: StrandedCompletionWrite) => {
+    setFailure(
+      completionNotSentNotice(
+        completionUnresolvedHoldReason(nameOfChild(held.childId), held.kind),
+      ),
+    )
+  }
+
+  /** Give the gate back, but only if this write is still the one holding it. */
+  const releaseGate = (token: string) => {
+    if (gate.current === token) gate.current = null
+  }
 
   // ── The scope, as STATE, compared during render ──
   //
@@ -265,6 +371,15 @@ export default function ProgramCompletionPanel() {
   useLayoutEffect(() => {
     signedInFamily.current = familyId ?? ''
     familyVisit.current += 1
+    // The same end the render guard gives the panel, given to the refs behind
+    // it — in the effect, because a ref written during render is not part of
+    // the commit. An account change ends both: the unanswered request belongs
+    // to a sign-in that is over (its retry is refused by the visit check, and
+    // the panel is gone), so it must not hold the new sign-in back, and its
+    // gate must not keep the new one from saving. A write still in the air for
+    // the old family is answered into the visit checks and discarded.
+    unresolvedWrite.current = null
+    gate.current = null
   }, [familyId])
 
   const citations = useMemo(
@@ -290,6 +405,14 @@ export default function ProgramCompletionPanel() {
     observationsScope.childId === activeChildId &&
     !observationsError
   const canMutate = Boolean(familyId) && Boolean(activeChildId) && authoritative && !saving
+  // ── The second gate: one UNANSWERED request at a time ──
+  //
+  // Only the two acts that can occupy the retry slot are held — a confirmation
+  // and a correction. Applying the reviewed map occupies nothing, so it stays
+  // available: an entry that did land must still be able to reach the learning
+  // picture while an older one is being settled.
+  const canSave = canMutate && !strandedIsUnresolved(stranded)
+
 
   // ── The handlers are plain functions ──
   //
@@ -335,6 +458,24 @@ export default function ProgramCompletionPanel() {
       return
     }
     if (!pending) return
+    // ── The earlier unanswered entry comes first (review item 4305125380) ──
+    //
+    // Read off the REF, not off the rendered panel: the button's disabled state
+    // and this closure's `stranded` are both a render old, and a draft edit
+    // between the strand and this tap has already minted a new entry key — so
+    // this save would send a second indeterminate write whose answer would have
+    // nowhere to live. Nothing is cleared to make room: her draft, her key and
+    // the stranded request all stay exactly as they are.
+    const held = heldUnresolved()
+    if (held) {
+      refuseForUnresolved(held)
+      return
+    }
+    // ...and no second write while one is in the air, answered or not.
+    if (gate.current !== null) {
+      setFailure(COMPLETION_SAVE_IN_FLIGHT)
+      return
+    }
     const request: ConfirmCompletionRequest = {
       familyId,
       childId: activeChildId,
@@ -342,54 +483,66 @@ export default function ProgramCompletionPanel() {
       reviewed: pending,
     }
     const visit = familyVisit.current
-    const outcome = await confirm(request)
-    // ── The INDETERMINATE failure is answered first, and is NOT gated on
-    // `current` ──
-    //
-    // The write may have landed with its answer lost on the way home, and the
-    // render reset has already cleared the draft. If the parent has switched
-    // child in the meantime, dropping the outcome here would leave the switch
-    // notice implying the other record settled the entry while the only copy of
-    // the request was in this closure. So it is kept as its own retry panel,
-    // bound to the family, child and entry key it was confirmed under — and
-    // nothing below this line touches the form, which may now belong to another
-    // child. A family change still discards it (the render guard clears the
-    // panel, and the visit check in `retryStranded` refuses a late answer).
-    if (!outcome.ok && !outcome.refused) {
-      // The account as COMMITTED **and** its visit: an A → B → A sign-in makes
-      // the id equal again, and keeping only the id test would raise a retry
-      // panel for a visit that has ended.
-      if (signedInFamily.current !== request.familyId) return
-      if (familyVisit.current !== visit) return
-      setStranded({
-        kind: 'confirm',
-        confirmRequest: request,
-        familyId: request.familyId,
-        childId: request.childId,
-        entryKey: request.entryKey,
-        visit,
-        phase: 'failed',
-      })
-      return
+    const token = writeToken('confirm', familyId, activeChildId, entryKey, visit)
+    gate.current = token
+    try {
+      const outcome = await confirm(request)
+      // ── The INDETERMINATE failure is answered first, and is NOT gated on
+      // `current` ──
+      //
+      // The write may have landed with its answer lost on the way home, and the
+      // render reset has already cleared the draft. If the parent has switched
+      // child in the meantime, dropping the outcome here would leave the switch
+      // notice implying the other record settled the entry while the only copy
+      // of the request was in this closure. So it is kept as its own retry
+      // panel, bound to the family, child and entry key it was confirmed under
+      // — and nothing below this line touches the form, which may now belong to
+      // another child. A family change still discards it (the render guard
+      // clears the panel, the layout effect clears the refs, and the visit check
+      // in `retryStranded` refuses a late answer).
+      if (!outcome.ok && !outcome.refused) {
+        // The account as COMMITTED **and** its visit: an A → B → A sign-in makes
+        // the id equal again, and keeping only the id test would raise a retry
+        // panel for a visit that has ended.
+        if (signedInFamily.current !== request.familyId) return
+        if (familyVisit.current !== visit) return
+        const landed: StrandedCompletionWrite = {
+          kind: 'confirm',
+          confirmRequest: request,
+          familyId: request.familyId,
+          childId: request.childId,
+          entryKey: request.entryKey,
+          visit,
+          phase: 'failed',
+        }
+        // The ref first, then the panel, both before the gate is given back in
+        // the `finally`: the hold is continuous, so this assignment can never
+        // be writing over another unanswered request — there cannot be one.
+        unresolvedWrite.current = landed
+        setStranded(landed)
+        return
+      }
+      // Every REMAINING branch is gated, including a determinate refusal: a
+      // refusal shown after the header moved would be a sentence about another
+      // child's record.
+      if (!outcome.current) return
+      if (!outcome.ok) {
+        setFailure(outcome.message)
+        return
+      }
+      setNotice(
+        outcome.result.alreadyRecorded
+          ? completionAlreadyRecordedNotice(childName)
+          : completionSavedNotice(pending, childName, outcome.result.applied),
+      )
+      setPending(null)
+      setFormOpen(false)
+      setDraft(emptyCompletionDraft(todayKey))
+      setSeededDate(todayKey)
+      setEntryKey(newCompletionEntryKey())
+    } finally {
+      releaseGate(token)
     }
-    // Every REMAINING branch is gated, including a determinate refusal: a
-    // refusal shown after the header moved would be a sentence about another
-    // child's record.
-    if (!outcome.current) return
-    if (!outcome.ok) {
-      setFailure(outcome.message)
-      return
-    }
-    setNotice(
-      outcome.result.alreadyRecorded
-        ? completionAlreadyRecordedNotice(childName)
-        : completionSavedNotice(pending, childName, outcome.result.applied),
-    )
-    setPending(null)
-    setFormOpen(false)
-    setDraft(emptyCompletionDraft(todayKey))
-    setSeededDate(todayKey)
-    setEntryKey(newCompletionEntryKey())
   }
 
   const handleWithdraw = async () => {
@@ -400,6 +553,19 @@ export default function ProgramCompletionPanel() {
       return
     }
     if (!state?.activeEntryKey || !withdrawReason) return
+    // The same hold as a confirmation, from the same ref and for the same
+    // reason: a correction that stranded under its own key is not worth more
+    // than the confirmation waiting above it, and either one written over is
+    // lost. Symmetrical in both directions — neither kind may follow the other.
+    const held = heldUnresolved()
+    if (held) {
+      refuseForUnresolved(held)
+      return
+    }
+    if (gate.current !== null) {
+      setFailure(COMPLETION_SAVE_IN_FLIGHT)
+      return
+    }
     // The SAME key for a repeat tap, so an indeterminate withdrawal retried is a
     // retry of that act and not a second one.
     const request: WithdrawCompletionRequest = {
@@ -411,74 +577,106 @@ export default function ProgramCompletionPanel() {
       reason: withdrawReason,
     }
     const visit = familyVisit.current
-    const outcome = await withdraw(request)
-    // The same rule as a confirmation: an unconfirmed correction is kept as a
-    // retry bound to the child it was made for, whatever the header now says.
-    if (!outcome.ok && !outcome.refused) {
-      // Same two tests as a confirmation: the id, and the visit it belongs to.
-      if (signedInFamily.current !== request.familyId) return
-      if (familyVisit.current !== visit) return
-      setStranded({
-        kind: 'withdraw',
-        withdrawRequest: request,
-        familyId: request.familyId,
-        childId: request.childId,
-        entryKey: request.entryKey,
-        visit,
-        phase: 'failed',
-      })
-      return
+    const token = writeToken('withdraw', familyId, activeChildId, withdrawKey, visit)
+    gate.current = token
+    try {
+      const outcome = await withdraw(request)
+      // The same rule as a confirmation: an unconfirmed correction is kept as a
+      // retry bound to the child it was made for, whatever the header now says.
+      if (!outcome.ok && !outcome.refused) {
+        // Same two tests as a confirmation: the id, and the visit it belongs to.
+        if (signedInFamily.current !== request.familyId) return
+        if (familyVisit.current !== visit) return
+        const landed: StrandedCompletionWrite = {
+          kind: 'withdraw',
+          withdrawRequest: request,
+          familyId: request.familyId,
+          childId: request.childId,
+          entryKey: request.entryKey,
+          visit,
+          phase: 'failed',
+        }
+        // Ref, then panel, then the gate — the same continuous hold.
+        unresolvedWrite.current = landed
+        setStranded(landed)
+        return
+      }
+      if (!outcome.current) return
+      if (!outcome.ok) {
+        setFailure(outcome.message)
+        return
+      }
+      setWithdrawOpen(false)
+      setWithdrawReason('')
+      setWithdrawKey(newCompletionEntryKey())
+      setNotice(
+        outcome.result.applicationPending
+          ? 'Withdrawn. The learning picture still has to be updated — use the button below.'
+          : 'Withdrawn. What this had marked as covered has been taken back, and nothing else was touched.',
+      )
+    } finally {
+      releaseGate(token)
     }
-    if (!outcome.current) return
-    if (!outcome.ok) {
-      setFailure(outcome.message)
-      return
-    }
-    setWithdrawOpen(false)
-    setWithdrawReason('')
-    setWithdrawKey(newCompletionEntryKey())
-    setNotice(
-      outcome.result.applicationPending
-        ? 'Withdrawn. The learning picture still has to be updated — use the button below.'
-        : 'Withdrawn. What this had marked as covered has been taken back, and nothing else was touched.',
-    )
   }
 
   const handleApply = async () => {
     if (isChildProfile) return
     if (!familyId || !activeChildId) return
     if (!authoritative) return
-    const outcome = await applyProjection({
-      familyId,
-      childId: activeChildId,
-      program,
-      ...(state?.activeEntryKey ? { expectedEntryKey: state.activeEntryKey } : {}),
-    })
-    if (!outcome.current) return
-    if (!outcome.ok) {
-      setFailure(outcome.message)
+    // Not held by an unanswered entry — applying occupies no retry slot, and an
+    // entry that did land must still be able to reach the learning picture —
+    // but it takes the gate like any other write, so it can neither start
+    // inside another write's window nor leave one of its own.
+    if (gate.current !== null) {
+      setFailure(COMPLETION_SAVE_IN_FLIGHT)
       return
     }
-    // ── The receipt says which of three things happened ──
-    //
-    // `alreadyRecorded` alone was not enough: the writer returns
-    // `applied: false, applicationPending: true` when there is still no learner
-    // model to write to, and claiming "the learning picture has been updated"
-    // there was a receipt for something that had not happened.
-    const result = outcome.result
-    setNotice(
-      result.applicationPending
-        ? 'The learning picture has not been updated — there is nothing to update it on for this child yet. What you recorded is safe, and this button will finish it when there is.'
-        : result.alreadyRecorded
-          ? 'Already up to date — nothing needed changing.'
-          : result.applied
-            ? 'The learning picture has been updated.'
-            : 'Done. What that record had marked as covered has been taken back, and nothing else was touched.',
+    const expectedEntryKey = state?.activeEntryKey
+    const token = writeToken(
+      'apply',
+      familyId,
+      activeChildId,
+      expectedEntryKey ?? 'apply',
+      familyVisit.current,
     )
+    gate.current = token
+    try {
+      const outcome = await applyProjection({
+        familyId,
+        childId: activeChildId,
+        program,
+        ...(expectedEntryKey ? { expectedEntryKey } : {}),
+      })
+      if (!outcome.current) return
+      if (!outcome.ok) {
+        setFailure(outcome.message)
+        return
+      }
+      // ── The receipt says which of three things happened ──
+      //
+      // `alreadyRecorded` alone was not enough: the writer returns
+      // `applied: false, applicationPending: true` when there is still no
+      // learner model to write to, and claiming "the learning picture has been
+      // updated" there was a receipt for something that had not happened.
+      const result = outcome.result
+      setNotice(
+        result.applicationPending
+          ? 'The learning picture has not been updated — there is nothing to update it on for this child yet. What you recorded is safe, and this button will finish it when there is.'
+          : result.alreadyRecorded
+            ? 'Already up to date — nothing needed changing.'
+            : result.applied
+              ? 'The learning picture has been updated.'
+              : 'Done. What that record had marked as covered has been taken back, and nothing else was touched.',
+      )
+    } finally {
+      releaseGate(token)
+    }
   }
 
   const retryStranded = async () => {
-    const target = stranded
+    // The REF is the target where it has one: a rapid second tap on the retry
+    // button reads the phase this closure has not re-rendered with yet.
+    const target = unresolvedWrite.current ?? stranded
     if (!target) return
     if (isChildProfile) return
     const request = target.confirmRequest ?? target.withdrawRequest
@@ -486,44 +684,74 @@ export default function ProgramCompletionPanel() {
     // The account as COMMITTED, and the visit it was confirmed under.
     if (signedInFamily.current !== request.familyId) return
     if (familyVisit.current !== target.visit) return
+    // The retry is the act that SETTLES the hold, so it is never held by the
+    // unanswered request — only by the gate, which it takes like any other
+    // write so that two taps cannot send the same entry twice.
+    if (gate.current !== null) return
+    const token = writeToken(
+      target.kind,
+      target.familyId,
+      target.childId,
+      target.entryKey,
+      target.visit,
+    )
+    gate.current = token
+    // Still unanswered, now visibly trying: the ref keeps the hold through the
+    // retry, so nothing else can be sent while this one is out.
+    unresolvedWrite.current = { ...target, phase: 'retrying' }
     setStranded((prev) =>
       prev && sameStrandedRequest(prev, target) ? { ...prev, phase: 'retrying' } : prev,
     )
-    const outcome =
-      target.kind === 'confirm'
-        ? await confirm(target.confirmRequest!)
-        : await withdraw(target.withdrawRequest!)
-    if (signedInFamily.current !== request.familyId) return
-    if (familyVisit.current !== target.visit) return
-    // ── The answer to THIS try, in three kinds (review item 4305003267) ──
-    //
-    // Every `!ok` used to become `failed`, which offered the same button again
-    // for an answer that cannot change, and the writer's own sentence was
-    // thrown away. Now:
-    //
-    //   · a refusal on something STORED is terminal — its reason is shown and
-    //     the button goes, because the same request cannot answer differently;
-    //   · a refusal that asked to be retried keeps its reason AND the button,
-    //     and stays undismissable, because nothing about the entry is settled;
-    //   · no answer at all is still indeterminate, and clears any reason left
-    //     over from the try before it.
-    //
-    // None of the three claims anything about the attempt that stranded the
-    // entry: that is still unknown, and the wording says so.
-    const refusal = !outcome.ok && outcome.refused ? outcome.message : null
-    const terminal = refusal != null && !RETRYABLE_COMPLETION_REFUSALS.includes(refusal)
-    // Settled only if the panel still names THIS request (review item 6): a
-    // second stranded entry may have replaced it while this retry was out, and
-    // an older answer must not mark a newer entry saved, failed or refused.
-    setStranded((prev) =>
-      prev == null || !sameStrandedRequest(prev, target)
-        ? prev
-        : outcome.ok
-          ? { ...prev, phase: 'saved', reason: undefined }
-          : terminal
-            ? { ...prev, phase: 'refused', reason: refusal ?? undefined }
-            : { ...prev, phase: 'failed', reason: refusal ?? undefined },
-    )
+    try {
+      const outcome =
+        target.kind === 'confirm'
+          ? await confirm(target.confirmRequest!)
+          : await withdraw(target.withdrawRequest!)
+      if (signedInFamily.current !== request.familyId) return
+      if (familyVisit.current !== target.visit) return
+      // ── The answer to THIS try, in three kinds (review item 4305003267) ──
+      //
+      // Every `!ok` used to become `failed`, which offered the same button again
+      // for an answer that cannot change, and the writer's own sentence was
+      // thrown away. Now:
+      //
+      //   · a refusal on something STORED is terminal — its reason is shown and
+      //     the button goes, because the same request cannot answer differently;
+      //   · a refusal that asked to be retried keeps its reason AND the button,
+      //     and stays undismissable, because nothing about the entry is settled;
+      //   · no answer at all is still indeterminate, and clears any reason left
+      //     over from the try before it.
+      //
+      // None of the three claims anything about the attempt that stranded the
+      // entry: that is still unknown, and the wording says so.
+      const refusal = !outcome.ok && outcome.refused ? outcome.message : null
+      const terminal = refusal != null && !RETRYABLE_COMPLETION_REFUSALS.includes(refusal)
+      // The hold ends with the UNCERTAINTY, and only for this request: an answer
+      // is either a save or a refusal on stored data, and anything else leaves
+      // the entry unanswered and the panel held. Identity-checked both here and
+      // in the state update (review item 6) so a late answer cannot settle — or
+      // resurrect — a request the ref no longer names.
+      const stillOurs =
+        unresolvedWrite.current != null &&
+        sameStrandedRequest(unresolvedWrite.current, target)
+      if (stillOurs) {
+        unresolvedWrite.current =
+          outcome.ok || terminal
+            ? null
+            : { ...target, phase: 'failed', reason: refusal ?? undefined }
+      }
+      setStranded((prev) =>
+        prev == null || !sameStrandedRequest(prev, target)
+          ? prev
+          : outcome.ok
+            ? { ...prev, phase: 'saved', reason: undefined }
+            : terminal
+              ? { ...prev, phase: 'refused', reason: refusal ?? undefined }
+              : { ...prev, phase: 'failed', reason: refusal ?? undefined },
+      )
+    } finally {
+      releaseGate(token)
+    }
   }
 
   const activeSentence = activeCompletionSentence(state, childName)
@@ -532,8 +760,6 @@ export default function ProgramCompletionPanel() {
   const upgrade = mappingUpgradeLine(state, mapping)
   const withdrawnLine = lastWithdrawSentence(state)
   const history = sortEvents(events)
-  const strandedChildName =
-    children.find((c) => c.id === stranded?.childId)?.name ?? 'that child'
 
   if (isChildProfile) {
     return (
@@ -603,6 +829,14 @@ export default function ProgramCompletionPanel() {
                   stranded.kind,
                   stranded.reason,
                 )}
+              </Typography>
+            )}
+            {/* Why the rest of the panel has gone quiet, next to the entry it
+                is waiting on and named for the child it belongs to — a greyed
+                out *Confirm* with no explanation reads as a broken app. */}
+            {strandedIsUnresolved(stranded) && (
+              <Typography variant="body2" sx={{ mb: 1 }}>
+                {completionUnresolvedHoldLine(strandedChildName)}
               </Typography>
             )}
             {stranded.phase === 'saved' ? (
@@ -883,7 +1117,7 @@ export default function ProgramCompletionPanel() {
                   <Button
                     variant="contained"
                     onClick={handleConfirm}
-                    disabled={!canMutate}
+                    disabled={!canSave}
                     sx={{ textTransform: 'none' }}
                   >
                     Confirm it is finished
@@ -939,7 +1173,7 @@ export default function ProgramCompletionPanel() {
                   <Button
                     variant="contained"
                     onClick={handleWithdraw}
-                    disabled={!canMutate || !withdrawReason}
+                    disabled={!canSave || !withdrawReason}
                     sx={{ textTransform: 'none' }}
                   >
                     Withdraw it

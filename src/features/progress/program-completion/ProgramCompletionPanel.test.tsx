@@ -20,8 +20,12 @@ import { NativeProgressSource } from '../../../core/types/nativeProgress'
  *      not evaporate, and its notice is not attached to the new child's record;
  *   2. a change of ACCOUNT discards it instead, because nothing pinned to the
  *      previous sign-in may stay on screen or stay retryable;
- *   3. a retry's late answer settles only the request it belongs to, so a newer
- *      stranded entry is never marked saved by an older answer;
+ *   3. there is ONE unanswered request at a time and it is never written over:
+ *      while a confirmation or correction is waiting for an answer, a second one
+ *      is not sent — nor in the instant before the first one is recorded, which
+ *      is the window a promise-attached release left open — because the slot
+ *      holds the only copy of that request, its idempotency key included; and a
+ *      retry's late answer settles only the request it belongs to;
  *   4. a retry's refusal is shown in the writer's OWN words and with the scope
  *      it actually has — a refusal on stored data withdraws the button, a check
  *      the writer could not run keeps it (and cannot be dismissed), and neither
@@ -302,10 +306,16 @@ describe('a confirmed save whose answer never came back', () => {
     expect(screen.queryByText(/Not confirmed for/)).toBeNull()
   })
 
-  it('does not let an older retry answer settle a NEWER stranded entry', async () => {
-    // The identity check the review asked for, in the DOM: the first entry's
-    // retry is still out when a second entry strands, and its late success must
-    // not report the second one as saved.
+  it('cannot be written over by a second entry while a retry is still out', async () => {
+    // This test used to ASSERT the overwrite — a second entry taking the slot
+    // while the first retry was in the air, with the late answer then checked
+    // against the newer request's identity. The identity check still stands
+    // behind this (the A → B → A tests below reach it through the visit), but
+    // the overwrite itself was the review's finding 4305125380: the slot held
+    // the only copy of the first request, and losing it loses the key that
+    // makes trying again a retry rather than a second confirmation. So the
+    // second entry is not sent at all, and the first one's own answer settles
+    // the first one.
     confirmMock.mockResolvedValueOnce(UNCONFIRMED)
     render(<ProgramCompletionPanel />)
     confirmAnEntry()
@@ -316,19 +326,23 @@ describe('a confirmed save whose answer never came back', () => {
     confirmMock.mockReturnValueOnce(lateRetry.promise)
     fireEvent.click(screen.getByRole('button', { name: 'Try that entry again' }))
 
-    // A second entry — a different day, so a different draft key — strands too.
-    // The form is still open with the first entry's content: an unconfirmed save
-    // leaves it exactly as it was, and editing it mints a new key.
+    // A second entry — a different day, so a different draft key. The form is
+    // still open with the first entry's content: an unconfirmed save leaves it
+    // exactly as it was, and editing it mints a new key.
     fireEvent.change(
       screen.getByLabelText('When did you know it was finished?'),
       { target: { value: '2026-10-16' } },
     )
     fireEvent.click(screen.getByRole('button', { name: 'Check this' }))
-    confirmMock.mockResolvedValueOnce(UNCONFIRMED)
     fireEvent.click(screen.getByRole('button', { name: 'Confirm it is finished' }))
     await settle()
-    const second = confirmMock.mock.calls[2][0]
-    expect(second.entryKey).not.toBe(first.entryKey)
+    // It never left the panel: the door is shut and the handler behind it
+    // refuses as well, so no third request exists to take the slot.
+    expect(confirmMock).toHaveBeenCalledTimes(2)
+    expect(
+      (screen.getByRole('button', { name: 'Confirm it is finished' }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true)
 
     await act(async () => {
       lateRetry.resolve({
@@ -337,9 +351,367 @@ describe('a confirmed save whose answer never came back', () => {
         result: { alreadyRecorded: true, applied: true, applicationPending: false },
       })
     })
-    // The panel is showing the SECOND entry, which has not been saved.
-    expect(screen.queryByText('That entry is on the record now.')).toBeNull()
+    // The answer belongs to the entry that is still in the slot — the first one
+    // — and it is the first one that is reported on the record.
+    expect(screen.getByText('That entry is on the record now.')).toBeTruthy()
+    expect(confirmMock.mock.calls[1][0]).toEqual(first)
+    expect(screen.queryByRole('button', { name: 'Try that entry again' })).toBeNull()
+  })
+})
+
+describe('one unanswered request at a time', () => {
+  /** The form is open with a checked entry under a DIFFERENT key than before. */
+  function checkAnotherEntry(observedOn = '2026-10-16') {
+    fireEvent.change(screen.getByLabelText('When did you know it was finished?'), {
+      target: { value: observedOn },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Check this' }))
+  }
+
+  const confirmButton = () =>
+    screen.getByRole('button', { name: 'Confirm it is finished' }) as HTMLButtonElement
+
+  it('refuses a second confirmation while the first has no answer yet', async () => {
+    // The HANDLER's own guard, with nothing disabled: the hook is mocked as not
+    // saving, so every button is live and the refusal can only have come from
+    // the panel's synchronous gate. `saving` and every disabled attribute are a
+    // render behind the tap that matters.
+    const answer = deferred<typeof UNCONFIRMED>()
+    confirmMock.mockImplementationOnce(() => answer.promise)
+    render(<ProgramCompletionPanel />)
+    confirmAnEntry()
+    const first = confirmMock.mock.calls[0][0]
+
+    checkAnotherEntry()
+    expect(confirmButton().disabled).toBe(false)
+    fireEvent.click(confirmButton())
+    expect(confirmMock).toHaveBeenCalledTimes(1)
+    expect(screen.getByText(IN_FLIGHT)).toBeTruthy()
+
+    // ...and the first request is the one that strands, under its own key.
+    await act(async () => {
+      answer.resolve(UNCONFIRMED)
+    })
+    confirmMock.mockResolvedValueOnce(refused(PROGRAM_COMPLETION_RECORD_CHECK_FAILED))
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Try that entry again' }))
+    })
+    expect(confirmMock.mock.calls[1][0]).toEqual(first)
+  })
+
+  it('holds a second confirmation while an earlier one is unanswered, by name', async () => {
+    confirmMock.mockResolvedValueOnce(UNCONFIRMED)
+    render(<ProgramCompletionPanel />)
+    confirmAnEntry()
+    await settle()
+    const first = confirmMock.mock.calls[0][0]
+
+    // The hold is explained where the entry is, not left to a grey button.
+    expect(
+      screen.getByText(saying("holding on to Alice's entry is what lets trying again")),
+    ).toBeTruthy()
+
+    checkAnotherEntry()
+    expect(confirmButton().disabled).toBe(true)
+    fireEvent.click(confirmButton())
+    expect(confirmMock).toHaveBeenCalledTimes(1)
+    // The draft she filled in is untouched — nothing is erased to unblock.
+    expect(
+      (screen.getByLabelText('When did you know it was finished?') as HTMLInputElement)
+        .value,
+    ).toBe('2026-10-16')
+
+    // A retry that lands settles the entry and lifts the hold, and the retry
+    // sent the FIRST request exactly as confirmed, key included.
+    confirmMock.mockResolvedValueOnce({
+      ok: true,
+      current: true,
+      result: { alreadyRecorded: true, applied: true, applicationPending: false },
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Try that entry again' }))
+    })
+    expect(confirmMock.mock.calls[1][0]).toEqual(first)
+    expect(screen.queryByText(saying('holding on to Alice'))).toBeNull()
+
+    confirmMock.mockResolvedValueOnce({
+      ok: true,
+      current: true,
+      result: { alreadyRecorded: false, applied: true, applicationPending: false },
+    })
+    expect(confirmButton().disabled).toBe(false)
+    await act(async () => {
+      fireEvent.click(confirmButton())
+    })
+    expect(confirmMock).toHaveBeenCalledTimes(3)
+    expect(confirmMock.mock.calls[2][0].entryKey).not.toBe(first.entryKey)
+  })
+
+  it('holds a confirmation for ANOTHER child, and still says whose entry waits', async () => {
+    confirmMock.mockResolvedValueOnce(UNCONFIRMED)
+    const view = render(<ProgramCompletionPanel />)
+    confirmAnEntry()
+    await settle()
+    const first = confirmMock.mock.calls[0][0]
+    expect(first.childId).toBe('alice')
+
+    // Bob is on screen now. The slot is shared, so Bob's confirmation waits —
+    // and the panel says it is ALICE's entry it is waiting on.
+    activeChildId = 'bob'
+    view.rerender(<ProgramCompletionPanel />)
+    expect(screen.getByText(saying("holding on to Alice's entry"))).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'This program is finished' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Check this' }))
+    expect(confirmButton().disabled).toBe(true)
+    fireEvent.click(confirmButton())
+    expect(confirmMock).toHaveBeenCalledTimes(1)
+
+    // Alice's request is still the one in the slot, unchanged.
+    confirmMock.mockResolvedValueOnce(refused(PROGRAM_COMPLETION_SOURCE_CHECK_FAILED))
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Try that entry again' }))
+    })
+    expect(confirmMock.mock.calls[1][0]).toEqual(first)
+    expect(confirmMock.mock.calls[1][0].childId).toBe('alice')
+  })
+
+  it('will not let a correction be sent over an unanswered confirmation', async () => {
+    confirmMock.mockResolvedValueOnce(UNCONFIRMED)
+    const view = render(<ProgramCompletionPanel />)
+    confirmAnEntry()
+    await settle()
+    const first = confirmMock.mock.calls[0][0]
+
+    // The record now shows an entry — so the correction door is open, and it is
+    // exactly the act that would have taken the slot with its own key.
+    state = activeState(CompletionProjectionStatus.Applied)
+    view.rerender(<ProgramCompletionPanel />)
+    fireEvent.click(screen.getByRole('button', { name: 'Correct this — it isn’t finished' }))
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'What was wrong with it?' }))
+    fireEvent.click(screen.getByRole('option', { name: "He hasn't finished it after all" }))
+    const withdrawButton = screen.getByRole('button', {
+      name: 'Withdraw it',
+    }) as HTMLButtonElement
+    expect(withdrawButton.disabled).toBe(true)
+    fireEvent.click(withdrawButton)
+    expect(withdrawMock).not.toHaveBeenCalled()
+
+    expect(screen.getByText(/Not confirmed for Alice/)).toBeTruthy()
+    confirmMock.mockResolvedValueOnce(refused(PROGRAM_COMPLETION_RECORD_CHECK_FAILED))
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Try that entry again' }))
+    })
+    expect(confirmMock.mock.calls[1][0]).toEqual(first)
+  })
+
+  it('will not let a confirmation be sent over an unanswered correction', async () => {
+    state = activeState(CompletionProjectionStatus.Applied)
+    withdrawMock.mockResolvedValueOnce(UNCONFIRMED)
+    const view = render(<ProgramCompletionPanel />)
+    withdrawTheEntry()
+    await settle()
+    const sent = withdrawMock.mock.calls[0][0]
+
+    // The read now says nothing is recorded, which is what the unanswered
+    // correction may well have done. It is still unanswered, so a confirmation
+    // on top of it waits.
+    state = null
+    view.rerender(<ProgramCompletionPanel />)
+    fireEvent.click(screen.getByRole('button', { name: 'This program is finished' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Check this' }))
+    expect(confirmButton().disabled).toBe(true)
+    fireEvent.click(confirmButton())
+    expect(confirmMock).not.toHaveBeenCalled()
+
+    withdrawMock.mockResolvedValueOnce(refused(PROGRAM_COMPLETION_RECORD_CHECK_FAILED))
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Try that entry again' }))
+    })
+    expect(withdrawMock.mock.calls[1][0]).toEqual(sent)
+    expect(withdrawMock.mock.calls[1][0].entryKey).toBe(sent.entryKey)
+  })
+
+  it('keeps holding while a retry is refused by a check that could not run', async () => {
+    confirmMock.mockResolvedValueOnce(UNCONFIRMED)
+    render(<ProgramCompletionPanel />)
+    confirmAnEntry()
+    await settle()
+
+    confirmMock.mockResolvedValueOnce(refused(PROGRAM_COMPLETION_SOURCE_CHECK_FAILED))
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Try that entry again' }))
+    })
+    // A refusal that asked to be tried again settles nothing, so the hold and
+    // the writer's own reason both stay.
+    expect(screen.getByText(saying(PROGRAM_COMPLETION_SOURCE_CHECK_FAILED))).toBeTruthy()
+    expect(screen.getByText(saying("holding on to Alice's entry"))).toBeTruthy()
+    checkAnotherEntry()
+    expect(confirmButton().disabled).toBe(true)
+    fireEvent.click(confirmButton())
+    expect(confirmMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('lets the next entry be recorded once a retry is refused for good', async () => {
+    // The hold must not outlive the uncertainty: a terminally refused entry has
+    // its answer, so the surface is not locked for the rest of the session.
+    confirmMock.mockResolvedValueOnce(UNCONFIRMED)
+    render(<ProgramCompletionPanel />)
+    confirmAnEntry()
+    await settle()
+    const first = confirmMock.mock.calls[0][0]
+
+    confirmMock.mockResolvedValueOnce(refused(PROGRAM_COMPLETION_CITATION_CHANGED))
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Try that entry again' }))
+    })
+    expect(screen.getByText('Trying again was refused for Alice')).toBeTruthy()
+    expect(screen.queryByText(saying('holding on to Alice'))).toBeNull()
+
+    checkAnotherEntry()
+    confirmMock.mockResolvedValueOnce({
+      ok: true,
+      current: true,
+      result: { alreadyRecorded: false, applied: true, applicationPending: false },
+    })
+    expect(confirmButton().disabled).toBe(false)
+    await act(async () => {
+      fireEvent.click(confirmButton())
+    })
+    expect(confirmMock).toHaveBeenCalledTimes(3)
+    expect(confirmMock.mock.calls[2][0].entryKey).not.toBe(first.entryKey)
+  })
+
+  it('never sends a second write in the gap before the first is recorded', async () => {
+    // ── The window itself, in the DOM ──
+    //
+    // The first answer is in hand and the panel has not recorded it yet: the
+    // write's own `setStranded` is queued, nothing on screen has changed, and a
+    // tap here reads `stranded` as null and the button as enabled. An earlier
+    // attempt released its latch when the promise settled, so this tap started
+    // a SECOND indeterminate write and one of the two keys was then lost
+    // whichever way the collision was resolved. The gate is now released only
+    // after the outcome has been handled, so there is no second call to resolve.
+    const answer = deferred<typeof UNCONFIRMED>()
+    confirmMock.mockImplementationOnce(() => answer.promise)
+    render(<ProgramCompletionPanel />)
+    confirmAnEntry()
+    const first = confirmMock.mock.calls[0][0]
+
+    // A second entry is readied while the first is still out — a different day,
+    // so a different key, which is the entry that used to take the slot. Readied
+    // BEFORE the window, because a tap inside it gets no re-render to look at.
+    checkAnotherEntry()
+    const button = confirmButton()
+    expect(button.disabled).toBe(false)
+
+    await act(async () => {
+      answer.resolve(UNCONFIRMED)
+      // One microtask: the hook has answered and the panel has dealt with it,
+      // but nothing is painted — `button` is the element React rendered before
+      // any of this, still enabled, and the handler behind it still closes over
+      // `stranded` as null. That is the stale-closure tap.
+      await Promise.resolve()
+      fireEvent.click(button)
+    })
+    expect(confirmMock).toHaveBeenCalledTimes(1)
+
+    // The first request is intact, under its original key, and it is what a
+    // retry sends. Nothing was dropped, because nothing second was ever sent.
+    expect(screen.getByText(/Not confirmed for Alice/)).toBeTruthy()
+    confirmMock.mockResolvedValueOnce(refused(PROGRAM_COMPLETION_RECORD_CHECK_FAILED))
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Try that entry again' }))
+    })
+    expect(confirmMock.mock.calls[1][0]).toEqual(first)
+    expect(confirmMock.mock.calls[1][0].entryKey).toBe(first.entryKey)
+  })
+
+  it('sends one write for two taps in the same tick', async () => {
+    // Rapid taps, with the hook mocked as idle so nothing is disabled: `saving`
+    // and every disabled attribute are a render behind both taps, so only the
+    // synchronous gate can refuse the second.
+    const answer = deferred<typeof UNCONFIRMED>()
+    confirmMock.mockImplementationOnce(() => answer.promise)
+    render(<ProgramCompletionPanel />)
+    fireEvent.click(screen.getByRole('button', { name: 'This program is finished' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Check this' }))
+    const button = confirmButton()
+    expect(button.disabled).toBe(false)
+    fireEvent.click(button)
+    fireEvent.click(button)
+    fireEvent.click(button)
+    expect(confirmMock).toHaveBeenCalledTimes(1)
+    expect(screen.getByText(IN_FLIGHT)).toBeTruthy()
+
+    // ...and the one write that went out is the one that strands, under the key
+    // it was sent with.
+    await act(async () => {
+      answer.resolve(UNCONFIRMED)
+    })
+    confirmMock.mockResolvedValueOnce(refused(PROGRAM_COMPLETION_RECORD_CHECK_FAILED))
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Try that entry again' }))
+    })
+    expect(confirmMock.mock.calls[1][0]).toEqual(confirmMock.mock.calls[0][0])
+  })
+
+  it('sends one retry for two taps on the retry button', async () => {
+    confirmMock.mockResolvedValueOnce(UNCONFIRMED)
+    render(<ProgramCompletionPanel />)
+    confirmAnEntry()
+    await settle()
+
+    const retry = deferred<typeof UNCONFIRMED>()
+    confirmMock.mockImplementationOnce(() => retry.promise)
+    const button = screen.getByRole('button', { name: 'Try that entry again' })
+    fireEvent.click(button)
+    fireEvent.click(button)
+    expect(confirmMock).toHaveBeenCalledTimes(2)
+    await act(async () => {
+      retry.resolve(UNCONFIRMED)
+    })
+    // Still the same single entry, still retryable, still its own key.
     expect(screen.getByRole('button', { name: 'Try that entry again' })).toBeTruthy()
+    expect(confirmMock.mock.calls[1][0]).toEqual(confirmMock.mock.calls[0][0])
+  })
+
+  it('does not let a write from an ENDED sign-in hold the next one back', async () => {
+    // A → B → A: the first family's confirmation never answered, so its gate and
+    // its unanswered request both belong to a visit that is over. Neither may
+    // block the household now signed in, and neither may come back when the
+    // first family returns.
+    const answer = deferred<typeof UNCONFIRMED>()
+    confirmMock.mockImplementationOnce(() => answer.promise)
+    const view = render(<ProgramCompletionPanel />)
+    confirmAnEntry()
+    expect(confirmMock).toHaveBeenCalledTimes(1)
+
+    familyId = 'fam-2'
+    childrenById = { alice: { id: 'alice', name: 'Annie' } }
+    view.rerender(<ProgramCompletionPanel />)
+    familyId = 'fam-1'
+    childrenById = CHILDREN
+    view.rerender(<ProgramCompletionPanel />)
+    await act(async () => {
+      answer.resolve(UNCONFIRMED)
+    })
+    // The ended visit's answer raises no panel...
+    expect(screen.queryByRole('button', { name: 'Try that entry again' })).toBeNull()
+    expect(screen.queryByText(/Not confirmed for/)).toBeNull()
+
+    // ...and the surface saves again, which is what a released gate means.
+    confirmMock.mockResolvedValueOnce({
+      ok: true,
+      current: true,
+      result: { alreadyRecorded: false, applied: true, applicationPending: false },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'This program is finished' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Check this' }))
+    await act(async () => {
+      fireEvent.click(confirmButton())
+    })
+    expect(confirmMock).toHaveBeenCalledTimes(2)
+    expect(screen.queryByText(IN_FLIGHT)).toBeNull()
   })
 })
 

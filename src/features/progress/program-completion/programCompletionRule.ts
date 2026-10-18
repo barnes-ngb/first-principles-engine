@@ -455,6 +455,35 @@ export function completionStrandedReasonLine(
   return `${why} That answer — including anything in it about nothing being saved — is about the try just now: whether the ${label} you sent before reached ${childName}'s record is still unknown.`
 }
 
+/**
+ * The line that says WHY nothing new can be sent while one entry is unanswered.
+ *
+ * The surface keeps one unanswered request, and that request is the only copy
+ * of its idempotency key: a second one would have to write over it, and the key
+ * is what makes trying again a retry of the same entry rather than a second
+ * entry. So the hold is explained where the entry is, by name, rather than
+ * leaving a greyed-out button to be guessed at.
+ */
+export function completionUnresolvedHoldLine(childName: string): string {
+  return `Until this is settled, nothing new can be recorded or corrected here: holding on to ${childName}'s entry is what lets trying again check that same entry instead of adding another.`
+}
+
+/**
+ * ...and the reason given to a parent who asks for a save anyway.
+ *
+ * Fed to `completionNotSentNotice`, so it ends by saying nothing was written
+ * and her entry is still here — the hold must never read as a failure of what
+ * she has just filled in, and it must point at the one act that settles the
+ * earlier entry.
+ */
+export function completionUnresolvedHoldReason(
+  childName: string,
+  kind: 'confirm' | 'withdraw',
+): string {
+  const label = strandedActLabel(kind)
+  return `the ${label} for ${childName} above is still waiting for an answer, and settling that one comes first: “Try that entry again” on it sends that same entry, so it cannot be recorded twice`
+}
+
 /** What the surface says when the child under it changed with a draft open. */
 export function completionChildSwitchNotice(
   previousChildName: string,
