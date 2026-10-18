@@ -397,6 +397,64 @@ export function completionStrandedNotice(childName: string): string {
   return `You confirmed this for ${childName}, and the app has no confirmation that it reached ${childName}'s record. Trying again checks that same entry rather than adding another, so it cannot be recorded twice — and if it did land, you will be told it was already recorded.`
 }
 
+/** What the act was, in the words the parent used for it. */
+function strandedActLabel(kind: 'confirm' | 'withdraw'): string {
+  return kind === 'confirm' ? 'confirmation' : 'correction'
+}
+
+/**
+ * The heading for a stranded entry whose retry was REFUSED for good.
+ *
+ * It is about the TRY, not about the record: the refusal answers the request
+ * just sent, and the attempt that stranded this entry in the first place is
+ * still unknown either way. A heading that said "not saved" would settle that
+ * unknown in the wrong direction — the writer checks the stored record and the
+ * cited entry BEFORE its idempotent branch, so a confirmation that did land can
+ * be refused on a retry (a corrected citation is exactly that case).
+ */
+export function completionStrandedRefusedTitle(childName: string): string {
+  return `Trying again was refused for ${childName}`
+}
+
+/**
+ * ...and its body: the writer's own reason, what the reason is NOT about, and
+ * the one next step that cannot make things worse — reading the record.
+ *
+ * Deliberately not "nothing left to retry": what the refusal rests on is
+ * stored data, and stored data changes. It says the same REQUEST will keep
+ * getting this answer, which is why the button is withdrawn, and sends her to
+ * the record rather than to a second confirmation.
+ */
+export function completionStrandedRefusedNotice(
+  childName: string,
+  kind: 'confirm' | 'withdraw',
+  reason: string,
+): string {
+  const label = strandedActLabel(kind)
+  const why = reason.trim() ? reason.trim() : 'It was refused, with no reason given.'
+  return `${why} That is the answer to the try just now: it does not say whether the ${label} you sent before reached ${childName}'s record, which is still unknown. Check what is recorded for ${childName} before sending anything again — the same ${label} will keep getting this answer until what is recorded changes.`
+}
+
+/**
+ * The extra line for a refusal that ASKED to be tried again.
+ *
+ * A lookup the writer could not complete is refused before it decided
+ * anything, and its sentence ends "nothing was saved. Try again in a moment."
+ * That "nothing was saved" is about the attempt just now; the earlier one is
+ * still unconfirmed either way, and a parent who reads the writer's words as a
+ * verdict on her record would either stop trying or confirm a second time. So
+ * the reason is shown with the scope it actually has, and the retry stays.
+ */
+export function completionStrandedReasonLine(
+  childName: string,
+  kind: 'confirm' | 'withdraw',
+  reason: string,
+): string {
+  const label = strandedActLabel(kind)
+  const why = reason.trim() ? reason.trim() : 'A check could not be completed just now.'
+  return `${why} That answer — including anything in it about nothing being saved — is about the try just now: whether the ${label} you sent before reached ${childName}'s record is still unknown.`
+}
+
 /** What the surface says when the child under it changed with a draft open. */
 export function completionChildSwitchNotice(
   previousChildName: string,
