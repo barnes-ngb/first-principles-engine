@@ -16,6 +16,10 @@ import Typography from '@mui/material/Typography'
 import { useFamilyId } from '../../../core/auth/useAuth'
 import { useActiveChild } from '../../../core/hooks/useActiveChild'
 import { useTodayKey } from '../../../core/hooks/useTodayKey'
+import {
+  PROGRAM_COMPLETION_RECORD_CHECK_FAILED,
+  PROGRAM_COMPLETION_SOURCE_CHECK_FAILED,
+} from '../../../core/firebase/programCompletionWrites'
 import { completionMappingFor } from '../../../core/foundations/fastPhonicsCompletion'
 import {
   CompletionAssistance,
@@ -48,6 +52,9 @@ import {
   completionPreview,
   completionSavedNotice,
   completionStrandedNotice,
+  completionStrandedReasonLine,
+  completionStrandedRefusedNotice,
+  completionStrandedRefusedTitle,
   completionStrandedTitle,
   coverageSummary,
   coverageSummaryHeadline,
@@ -67,6 +74,7 @@ import {
   type ReviewedCompletionDraft,
 } from './programCompletionRule'
 import {
+  COMPLETION_SAVE_IN_FLIGHT,
   useProgramCompletion,
   type ConfirmCompletionRequest,
   type WithdrawCompletionRequest,
@@ -94,6 +102,9 @@ import {
  * outcome — success, determinate refusal, or indeterminate failure — is gated on
  * the hook's `current` flag, which compares the committed VISIT and not just the
  * ids (so an A → B → A switch cannot show a first-visit answer in the third).
+ * The stranded retry panel is gated on its OWN identity instead, because it
+ * carries that identity and is named for the child it belongs to: its answer —
+ * saved, refused, or still unknown — is shown there and nowhere else.
  *
  * Mutations are blocked until the record is authoritative: a loading or failed
  * read never presents as "nothing recorded yet", because that sentence invites a
@@ -107,6 +118,12 @@ import {
  * visit it was confirmed under — because a retry's answer may come back after
  * the panel has moved on to a newer stranded request, and an older answer must
  * not settle a newer entry (review item 6).
+ *
+ * `refused` is the TERMINAL phase: the retry was refused on something stored,
+ * so re-sending the same request cannot answer differently and the button is
+ * withdrawn. A refusal that ASKED to be retried — a check the writer could not
+ * complete — stays `failed` and keeps both the request and the button; only its
+ * reason is carried, in `reason`.
  */
 interface StrandedCompletionWrite {
   kind: 'confirm' | 'withdraw'
@@ -117,8 +134,26 @@ interface StrandedCompletionWrite {
   entryKey: string
   /** The signed-in family's visit generation, so A → B → A cannot alias. */
   visit: number
-  phase: 'failed' | 'retrying' | 'saved'
+  phase: 'failed' | 'retrying' | 'saved' | 'refused'
+  /** The writer's own sentence for the LAST answer, terminal or temporary. */
+  reason?: string
 }
+
+/**
+ * The refusals that ask, in so many words, to be tried again.
+ *
+ * Both lookup failures are refused BEFORE the writer decided anything about the
+ * record, and the in-flight latch is about a different save altogether. None of
+ * them is an answer about this entry, so none of them may end its retry or let
+ * it be dismissed as settled. Pinned against the writer's own exported
+ * sentences — the strings, not a paraphrase — so a reworded refusal cannot
+ * quietly become a terminal one.
+ */
+const RETRYABLE_COMPLETION_REFUSALS: readonly string[] = [
+  COMPLETION_SAVE_IN_FLIGHT,
+  PROGRAM_COMPLETION_SOURCE_CHECK_FAILED,
+  PROGRAM_COMPLETION_RECORD_CHECK_FAILED,
+]
 
 /** Is this the very request that was sent, down to the visit it belongs to? */
 function sameStrandedRequest(
@@ -460,15 +495,34 @@ export default function ProgramCompletionPanel() {
         : await withdraw(target.withdrawRequest!)
     if (signedInFamily.current !== request.familyId) return
     if (familyVisit.current !== target.visit) return
+    // ── The answer to THIS try, in three kinds (review item 4305003267) ──
+    //
+    // Every `!ok` used to become `failed`, which offered the same button again
+    // for an answer that cannot change, and the writer's own sentence was
+    // thrown away. Now:
+    //
+    //   · a refusal on something STORED is terminal — its reason is shown and
+    //     the button goes, because the same request cannot answer differently;
+    //   · a refusal that asked to be retried keeps its reason AND the button,
+    //     and stays undismissable, because nothing about the entry is settled;
+    //   · no answer at all is still indeterminate, and clears any reason left
+    //     over from the try before it.
+    //
+    // None of the three claims anything about the attempt that stranded the
+    // entry: that is still unknown, and the wording says so.
+    const refusal = !outcome.ok && outcome.refused ? outcome.message : null
+    const terminal = refusal != null && !RETRYABLE_COMPLETION_REFUSALS.includes(refusal)
     // Settled only if the panel still names THIS request (review item 6): a
     // second stranded entry may have replaced it while this retry was out, and
-    // an older answer must not mark a newer entry saved or failed.
+    // an older answer must not mark a newer entry saved, failed or refused.
     setStranded((prev) =>
       prev == null || !sameStrandedRequest(prev, target)
         ? prev
         : outcome.ok
-          ? { ...prev, phase: 'saved' }
-          : { ...prev, phase: 'failed' },
+          ? { ...prev, phase: 'saved', reason: undefined }
+          : terminal
+            ? { ...prev, phase: 'refused', reason: refusal ?? undefined }
+            : { ...prev, phase: 'failed', reason: refusal ?? undefined },
     )
   }
 
@@ -516,14 +570,44 @@ export default function ProgramCompletionPanel() {
           <Alert
             severity={stranded.phase === 'saved' ? 'success' : 'warning'}
             sx={{ mb: 1.5 }}
+            // A TERMINALLY refused entry is the only one the parent can put
+            // away: the answer is in, and dismissing it touches nothing else —
+            // a draft still in the form below stays exactly where it is. An
+            // entry whose answer is still outstanding (no answer, or a check
+            // that could not be completed) has no close button at all, so an
+            // unresolved request cannot be thrown away by a tap.
+            {...(stranded.phase === 'refused'
+              ? { onClose: () => setStranded(null) }
+              : {})}
           >
-            <AlertTitle>{completionStrandedTitle(strandedChildName)}</AlertTitle>
+            <AlertTitle>
+              {stranded.phase === 'refused'
+                ? completionStrandedRefusedTitle(strandedChildName)
+                : completionStrandedTitle(strandedChildName)}
+            </AlertTitle>
             <Typography variant="body2" sx={{ mb: 1 }}>
-              {completionStrandedNotice(strandedChildName)}
+              {stranded.phase === 'refused'
+                ? completionStrandedRefusedNotice(
+                    strandedChildName,
+                    stranded.kind,
+                    stranded.reason ?? '',
+                  )
+                : completionStrandedNotice(strandedChildName)}
             </Typography>
+            {/* A temporary refusal: the writer's reason, scoped to the try it
+                belongs to, above the button it asked for. */}
+            {stranded.phase !== 'refused' && stranded.reason && (
+              <Typography variant="body2" sx={{ mb: 1 }}>
+                {completionStrandedReasonLine(
+                  strandedChildName,
+                  stranded.kind,
+                  stranded.reason,
+                )}
+              </Typography>
+            )}
             {stranded.phase === 'saved' ? (
               <Typography variant="body2">That entry is on the record now.</Typography>
-            ) : (
+            ) : stranded.phase === 'refused' ? null : (
               <Button
                 size="small"
                 variant="outlined"
