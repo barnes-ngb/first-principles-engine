@@ -217,6 +217,11 @@ export function applyEvalFindingsToModel(
         evidence: nextEvidence,
         needsReconcile: true,
         seededAt: prev?.seededAt ?? nowIso,
+        // A guided eval IS the direct look a withdrawn-completion entry was
+        // waiting for (FEAT-242), even on this frozen path where the parent's
+        // state stands: the concept has now been measured, so it no longer has
+        // to be read cautiously for want of a basis.
+        ...(prev?.completionReviewNeeded ? { completionReviewNeeded: false } : {}),
       }
       continue
     }
@@ -224,10 +229,14 @@ export function applyEvalFindingsToModel(
     // Calibrated — the eval read wins outright (up OR down). Clear any prior
     // reconcile flag now that the eval and the stored state agree.
     conceptStates[read.conceptId] = {
+      // Spread first (FEAT-242) so a standing field this write has no opinion
+      // about survives; the flags below are then set deliberately.
+      ...(prev ?? {}),
       state: read.state,
       evidence: nextEvidence,
       seededAt: prev?.seededAt ?? nowIso,
       ...(prev?.needsReconcile ? { needsReconcile: false } : {}),
+      ...(prev?.completionReviewNeeded ? { completionReviewNeeded: false } : {}),
     }
 
     if (read.state !== fromState) {

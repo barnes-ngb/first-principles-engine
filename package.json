@@ -13,6 +13,7 @@
     "preview": "vite preview",
     "test": "vitest",
     "test:watch": "vitest --watch",
+    "test:rules": "npx --yes firebase-tools@latest emulators:exec --only firestore,auth --project demo-fpe-rules --config firebase.emulator.json \"vitest run --config vitest.emulator.config.ts\"",
     "docs:check": "node scripts/check-docs-alignment.mjs",
     "docs:fix": "node scripts/check-docs-alignment.mjs --fix",
     "docs:ledger-sweep": "cross-env LEDGER_HISTORY_SWEEP=1 vitest run scripts/check-docs-alignment.test.mjs -t \"PROBE\"",
@@ -45,6 +46,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
+    "@firebase/rules-unit-testing": "^5.0.0",
     "@testing-library/jest-dom": "^6.8.0",
     "@testing-library/react": "^16.3.0",
     "@testing-library/user-event": "^14.6.1",

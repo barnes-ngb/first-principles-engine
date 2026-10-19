@@ -6,11 +6,151 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // The one identity question in this file: a family's documents belong to the
+    // UID whose id names the family. Declared first so every match below reads
+    // the same sentence.
+    function isFamily(familyId) {
+      return request.auth != null && request.auth.uid == familyId;
+    }
+
+    // ── Native-progress observations: the correction contract (FIX-265) ───────
+    //
+    // `nativeProgressObservations` is the row a parent read off Mathseeds or Fast
+    // Phonics (FEAT-241). It has been append-only by product policy since the day
+    // it shipped — one create-or-nothing transaction per confirmed save, never an
+    // update — and since FEAT-242 a CORRECTION of a row that a confirmed
+    // whole-program completion cited must also retract that completion. The
+    // current client does both in the correction's own transaction, which is the
+    // only way the two can never disagree.
+    //
+    // **An old tab cannot.** A tab left open across the FEAT-242 deploy carries
+    // FEAT-241's writer, which writes the correction row and nothing else — so it
+    // could correct a cited row and leave the completion's coverage standing on a
+    // record the parent had just corrected. The client cannot be asked to fix
+    // this, because the client in question is the old one; only the server can
+    // refuse the write.
+    //
+    // So the rule asks for the one thing only the current writer sends: the
+    // correction marker, at the corrected row's own id, in the SAME commit.
+    // `getAfter` reads the marker's post-commit state, so a transaction writing
+    // both passes and a write sending the row alone does not. The marker is
+    // exactly what the completion transactions read by id
+    // (`programCompletionWrites`), so requiring it is requiring the coordination
+    // rather than a token.
+    //
+    // **What it deliberately does not do.** It does not validate the reading: the
+    // number, the meaning, the observed day and the note are the parent's, checked
+    // by the writer that stores them (`nativeProgressWrites`), and a server-side
+    // copy of those bounds would be a second definition that drifts. An ordinary
+    // report — no `correctsObservationId` — is admitted exactly as before, so
+    // plain progress logging is untouched for every client, old or new.
+
+    /**
+     * The row this create says it corrects, or null when it corrects nothing.
+     *
+     * `ignoreUndefinedProperties` is on in the client and the converter strips
+     * `undefined`, so an ordinary report OMITS the field rather than storing an
+     * empty one; an explicit null reads the same way, which is what the writer
+     * means by "not a correction".
+     */
+    function declaredCorrectedId() {
+      return request.resource.data.get('correctsObservationId', null);
+    }
+
+    function declaresCorrection() {
+      return declaredCorrectedId() != null;
+    }
+
+    /**
+     * Checked BEFORE the marker path is interpolated from it. A path built from a
+     * non-string is an evaluation error rather than a denial with a reason, and a
+     * rule that can only fail by erroring is a rule nobody can read.
+     */
+    function correctedIdIsUsable() {
+      let correctedId = declaredCorrectedId();
+      return correctedId is string && correctedId.size() > 0;
+    }
+
+    /**
+     * What the marker named BEFORE this request, or '' when there was none.
+     *
+     * This half is what makes the check atomic rather than merely satisfied:
+     * `getAfter` alone accepts a marker that ALREADY named the incoming
+     * correction id — a marker nothing in this commit wrote — which is the one
+     * way an old client could be handed a pass by a document it did not write.
+     */
+    function markerCorrectionIdBefore(markerRef) {
+      return exists(markerRef)
+             ? get(markerRef).data.get('correctionObservationId', '')
+             : '';
+    }
+
+    /**
+     * The marker, at the corrected row's exact id, names THIS correction, for the
+     * same child and the same draft — and did not already name it.
+     */
+    function correctionIsCoordinated(familyId, observationId) {
+      let correctedId = declaredCorrectedId();
+      let markerRef = /databases/$(database)/documents/families/$(familyId)/nativeProgressCorrectionMarkers/$(correctedId);
+      let marker = getAfter(markerRef);
+      return marker != null
+             && request.resource.data.get('childId', '') != ''
+             && request.resource.data.get('entryKey', '') != ''
+             && marker.data.get('correctionObservationId', '') == observationId
+             && marker.data.get('childId', '') == request.resource.data.get('childId', '')
+             && marker.data.get('correctionEntryKey', '') == request.resource.data.get('entryKey', '')
+             && markerCorrectionIdBefore(markerRef) != observationId;
+    }
+
+    function observationCreateIsAdmissible(familyId, observationId) {
+      return !declaresCorrection()
+             || (correctedIdIsUsable()
+                 && correctionIsCoordinated(familyId, observationId));
+    }
+
     // Family data — only the owning user can read/write.
     // familyId == the authenticated user's UID.
-    match /families/{familyId}/{document=**} {
-      allow read, write: if request.auth != null
-                         && request.auth.uid == familyId;
+    //
+    // This was ONE `match /families/{familyId}/{document=**}` until FIX-265, and
+    // the split into four is the whole of that change. Overlapping grants combine
+    // with OR, so leaving the broad subtree write grant in place would
+    // re-authorize every write the observation match refuses — the exclusion has
+    // to live on the grant itself, not beside it. Nothing else about the boundary
+    // moved: the family root document, every other collection, every nested
+    // document and EVERY READ are granted exactly as they were.
+
+    // 1. The family root document itself. The old recursive wildcard matched it
+    //    with zero segments; this is that match, written out.
+    match /families/{familyId} {
+      allow read, write: if isFamily(familyId);
+    }
+
+    // 2. Every collection under the family EXCEPT the observations — the whole
+    //    subtree, to any depth, as before (`children/{id}/wordProgress`,
+    //    `shellyChatThreads/{id}/messages`, `settings`, and the rest).
+    match /families/{familyId}/{collectionId}/{document=**} {
+      allow read, write: if isFamily(familyId)
+                         && collectionId != 'nativeProgressObservations';
+    }
+
+    // 3. The observations themselves: read freely, create under the contract
+    //    above, and NEVER update or delete. The absent `update` / `delete` is the
+    //    append-only policy, enforced instead of described — no client route to
+    //    either exists today (`nativeProgressWrites` is the one writer and it
+    //    creates or returns the stored row; `ghostChildDocs` only probes this
+    //    collection read-only, and deletes nothing in it).
+    match /families/{familyId}/nativeProgressObservations/{observationId} {
+      allow read: if isFamily(familyId);
+      allow create: if isFamily(familyId)
+                    && observationCreateIsAdmissible(familyId, observationId);
+    }
+
+    // 4. Anything BELOW an observation document keeps the rights it had. The
+    //    mandatory `{subcollectionId}` segment is load-bearing: a recursive
+    //    wildcard directly under `{observationId}` matches zero segments too, and
+    //    would hand the observation document's own writes straight back.
+    match /families/{familyId}/nativeProgressObservations/{observationId}/{subcollectionId}/{nested=**} {
+      allow read, write: if isFamily(familyId);
     }
 
     // Chapter book library — global, shared across families.
@@ -22,9 +162,6 @@ service cloud.firestore {
     }
 
     // Shelly Chat threads + messages (explicit for subcollection clarity)
-    function isFamily(familyId) {
-      return request.auth != null && request.auth.uid == familyId;
-    }
     match /families/{familyId}/shellyChatThreads/{threadId} {
       allow read, write: if isFamily(familyId);
       match /messages/{messageId} {

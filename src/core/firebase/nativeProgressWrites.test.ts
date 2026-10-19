@@ -30,11 +30,52 @@ const collectionFor = vi.fn((familyId: string) => ({
 }))
 const docIdFor = vi.fn((childId: string, entryKey: string) => `${childId}__${entryKey}`)
 
+const markerCollectionFor = vi.fn((familyId: string) => ({
+  __col: 'nativeProgressCorrectionMarkers',
+  __family: familyId,
+}))
+
 vi.mock('./firestore', () => ({
   db: { __db: true },
   nativeProgressObservationsCollection: (familyId: string) => collectionFor(familyId),
   nativeProgressObservationDocId: (childId: string, entryKey: string) =>
     docIdFor(childId, entryKey),
+  // FEAT-242 — the one collection added to this boundary, and the ONLY one: a
+  // correction marker, so a completion transaction can learn by id that the row
+  // it is about to cite has been corrected. Still no `learnerModelsCollection`
+  // here; the authorized completion revocation goes through the coordinator
+  // mocked below, which is where that lane lives.
+  nativeProgressCorrectionMarkersCollection: (familyId: string) =>
+    markerCollectionFor(familyId),
+}))
+
+/**
+ * The authorized coordinator — mocked so its own transaction stays its own.
+ *
+ * Typed by its own plan shape rather than inferred from the first
+ * implementation, so a test can hand back `revoked` / `pending` without the
+ * mock's return type having narrowed to `'none'`.
+ */
+interface RevokePlanStub {
+  status: 'none' | 'revoked' | 'pending'
+  detail?: string
+  commit: (tx: unknown) => void
+}
+/** The coordinator's own signature, as this writer calls it: `(tx, args)`. */
+type PlanRevokeFn = (...args: unknown[]) => Promise<RevokePlanStub>
+const noRevoke: PlanRevokeFn = async () => ({ status: 'none', commit: () => {} })
+const planRevokeMock = vi.fn(noRevoke)
+/** The recovery read for a retry whose first attempt already revoked (item 5). */
+type RecordedRevokeFn = (
+  ...args: unknown[]
+) => Promise<{ status: 'revoked' | 'pending'; detail?: string } | null>
+const noRecordedRevoke: RecordedRevokeFn = async () => null
+const recordedRevokeMock = vi.fn(noRecordedRevoke)
+vi.mock('./programCompletionWrites', () => ({
+  planCompletionRevokeForCorrection: (...args: unknown[]) =>
+    planRevokeMock(...(args as [])),
+  readRecordedCorrectionRevocation: (...args: unknown[]) =>
+    recordedRevokeMock(...(args as [])),
 }))
 
 interface Ref {
@@ -42,7 +83,21 @@ interface Ref {
   __id: string
 }
 
-/** The documents the transaction can see, by id. */
+/**
+ * The key one document is stored under: its COLLECTION and its id.
+ *
+ * The collection is part of the key because two of this writer's documents
+ * share an id by design — the marker for a corrected row is written at that
+ * row's own id, in the markers collection. A store keyed by id alone made the
+ * corrected observation masquerade as its own marker, so a retry read a marker
+ * that was not there and skipped writing one.
+ */
+const keyOf = (ref: Ref): string =>
+  `${(ref.__col as { __col?: string })?.__col ?? 'unknown'}/${ref.__id}`
+/** The same key for a seeded observation row. */
+const obsKey = (id: string): string => `nativeProgressObservations/${id}`
+
+/** The documents the transaction can see, by collection and id. */
 let stored: Record<string, Record<string, unknown>> = {}
 /** Every `tx.set` this run performed. */
 let sets: Array<{ ref: Ref; data: Record<string, unknown> }> = []
@@ -61,12 +116,12 @@ vi.mock('firebase/firestore', () => ({
     if (transactionThrows) throw transactionThrows
     return fn({
       get: async (ref: Ref) => ({
-        exists: () => stored[ref.__id] !== undefined,
-        data: () => stored[ref.__id],
+        exists: () => stored[keyOf(ref)] !== undefined,
+        data: () => stored[keyOf(ref)],
       }),
       set: (ref: Ref, data: Record<string, unknown>) => {
         sets.push({ ref, data })
-        stored[ref.__id] = data
+        stored[keyOf(ref)] = data
       },
     })
   },
@@ -115,7 +170,254 @@ beforeEach(() => {
   transactionThrows = null
   collectionFor.mockClear()
   docIdFor.mockClear()
+  markerCollectionFor.mockClear()
+  planRevokeMock.mockClear()
+  planRevokeMock.mockImplementation(noRevoke)
+  recordedRevokeMock.mockClear()
+  recordedRevokeMock.mockImplementation(noRecordedRevoke)
   vi.spyOn(console, 'error').mockImplementation(() => {})
+})
+
+/** The writes that landed in the observations collection — the row itself. */
+const rowSets = () =>
+  sets.filter(
+    (s) => (s.ref.__col as { __col?: string })?.__col === 'nativeProgressObservations',
+  )
+/** ...and the ones that landed in the correction-marker collection. */
+const markerSets = () =>
+  sets.filter(
+    (s) =>
+      (s.ref.__col as { __col?: string })?.__col === 'nativeProgressCorrectionMarkers',
+  )
+
+// ── FEAT-242: the correction marker, and the one authorized integration ────
+describe('a correction also writes its marker', () => {
+  const ORIGINAL = 'lincoln__original'
+
+  /**
+   * The corrected row is a Fast Phonics peak — the row a completion can cite —
+   * so the correction is one too: a correction may not move an entry to another
+   * program, and a cross-program fixture would be refused before it ever
+   * reached the marker.
+   */
+  const correction = (overrides: Partial<SaveNativeProgressArgs> = {}) => {
+    const base = args(overrides)
+    return {
+      ...base,
+      observation: {
+        ...base.observation,
+        program: NativeProgressProgram.FastPhonics,
+        nativeNumber: 12,
+        meaning: NativeProgressMeaning.CompletedThrough,
+      },
+    }
+  }
+
+  beforeEach(() => {
+    stored[obsKey(ORIGINAL)] = {
+      id: ORIGINAL,
+      childId: 'lincoln',
+      program: 'fastPhonics',
+      nativeNumber: 20,
+      meaning: 'completedThrough',
+      observedOn: '2026-09-30',
+      source: 'programReport',
+      recordedAt: '2026-10-01T00:00:00.000Z',
+      entryKey: 'original-entry-key',
+    }
+  })
+
+  it('writes the marker for the corrected row, with no completion anywhere', async () => {
+    await saveNativeProgressObservation(correction({ correctsObservationId: ORIGINAL }))
+    const marker = markerSets()[0]
+    expect(marker).toBeDefined()
+    expect(marker!.ref.__id).toBe(ORIGINAL)
+    expect(marker!.data.childId).toBe('lincoln')
+    expect(marker!.data.correctionEntryKey).toBe(ENTRY_KEY)
+    // The coordinator was consulted and had nothing to do; the marker is not
+    // conditional on it.
+    expect(planRevokeMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('writes NO marker for an ordinary (non-correction) entry', async () => {
+    await saveNativeProgressObservation(args())
+    expect(markerSets()).toHaveLength(0)
+    expect(planRevokeMock).not.toHaveBeenCalled()
+  })
+
+  it('a retry of a landed correction still ensures the marker exists', async () => {
+    // The row is already on the record (first attempt landed, answer lost) and
+    // the marker is missing — the exact gap a silent early return would leave.
+    const docId = `lincoln__${ENTRY_KEY}`
+    stored[obsKey(docId)] = {
+      id: docId,
+      childId: 'lincoln',
+      program: 'fastPhonics',
+      nativeNumber: 12,
+      meaning: 'completedThrough',
+      observedOn: '2026-10-02',
+      source: 'parentReport',
+      recordedAt: '2026-10-02T00:00:00.000Z',
+      entryKey: ENTRY_KEY,
+      correctsObservationId: ORIGINAL,
+    }
+    const result = await saveNativeProgressObservation(
+      correction({ correctsObservationId: ORIGINAL }),
+    )
+    expect(result.alreadyRecorded).toBe(true)
+    const marker = markerSets()[0]
+    expect(marker).toBeDefined()
+    expect(marker!.ref.__id).toBe(ORIGINAL)
+    expect(marker!.data.correctionObservationId).toBe(docId)
+    // The stored row is still the record: the retry added no second row.
+    expect(rowSets()).toHaveLength(0)
+  })
+
+  it('commits the coordinator\'s revocation in the SAME transaction, after the row', async () => {
+    const commit = vi.fn()
+    planRevokeMock.mockImplementation(async () => ({ status: 'revoked' as const, commit }))
+    const result = await saveNativeProgressObservation(
+      correction({ correctsObservationId: ORIGINAL }),
+    )
+    expect(commit).toHaveBeenCalledTimes(1)
+    expect(result.completionRevoked).toEqual({ status: 'revoked' })
+  })
+
+  it('a retry of a landed correction asks the coordinator again and reports its answer', async () => {
+    // The first attempt's ANSWER was lost, so what it did to a completion
+    // citing the row is unknown. A retry that stayed silent would let the
+    // receipt claim nothing else changed while a record had been withdrawn.
+    const docId = `lincoln__${ENTRY_KEY}`
+    stored[obsKey(docId)] = {
+      id: docId,
+      childId: 'lincoln',
+      program: 'fastPhonics',
+      nativeNumber: 12,
+      meaning: 'completedThrough',
+      observedOn: '2026-10-02',
+      source: 'parentReport',
+      recordedAt: '2026-10-02T00:00:00.000Z',
+      entryKey: ENTRY_KEY,
+      correctsObservationId: ORIGINAL,
+    }
+    const commit = vi.fn()
+    planRevokeMock.mockImplementation(async () => ({ status: 'revoked' as const, commit }))
+    const result = await saveNativeProgressObservation(
+      correction({ correctsObservationId: ORIGINAL }),
+    )
+    expect(result.alreadyRecorded).toBe(true)
+    expect(result.completionRevoked).toEqual({ status: 'revoked' })
+    expect(commit).toHaveBeenCalledTimes(1)
+    // The program it was asked about is the STORED row's, not the payload's.
+    expect(planRevokeMock.mock.calls[0][1]).toMatchObject({
+      program: 'fastPhonics',
+      correctedObservationId: ORIGINAL,
+    })
+    // ...and the row is still untouched.
+    expect(rowSets()).toHaveLength(0)
+  })
+
+  it('recovers the revocation its OWN first attempt performed when the answer was lost', async () => {
+    // Review item 5. The first attempt committed and withdrew the linked
+    // coverage; its answer never came home. On the retry the completion is
+    // already gone, so the coordinator has nothing to plan — and a silent
+    // `none` would let the receipt say nothing else changed.
+    const docId = `lincoln__${ENTRY_KEY}`
+    stored[obsKey(docId)] = {
+      id: docId,
+      childId: 'lincoln',
+      program: 'fastPhonics',
+      nativeNumber: 12,
+      meaning: 'completedThrough',
+      observedOn: '2026-10-02',
+      source: 'parentReport',
+      recordedAt: '2026-10-02T00:00:00.000Z',
+      entryKey: ENTRY_KEY,
+      correctsObservationId: ORIGINAL,
+    }
+    recordedRevokeMock.mockImplementation(async () => ({
+      status: 'revoked' as const,
+      detail: 'Withdrawn because the entry it rested on was corrected.',
+    }))
+    const result = await saveNativeProgressObservation(
+      correction({ correctsObservationId: ORIGINAL }),
+    )
+    expect(result.alreadyRecorded).toBe(true)
+    expect(result.completionRevoked?.status).toBe('revoked')
+    // Asked about THIS correction's own recorded act — its row id and its
+    // stored draft key — never about whatever is active now.
+    expect(recordedRevokeMock.mock.calls[0][1]).toMatchObject({
+      correctionObservationId: docId,
+      correctionEntryKey: ENTRY_KEY,
+      program: 'fastPhonics',
+    })
+    // Nothing was re-written: the row and the history stay as they are.
+    expect(rowSets()).toHaveLength(0)
+  })
+
+  it('does not ask for a recorded revocation when the retry itself revoked one', async () => {
+    const docId = `lincoln__${ENTRY_KEY}`
+    stored[obsKey(docId)] = {
+      id: docId,
+      childId: 'lincoln',
+      program: 'fastPhonics',
+      nativeNumber: 12,
+      meaning: 'completedThrough',
+      observedOn: '2026-10-02',
+      source: 'parentReport',
+      recordedAt: '2026-10-02T00:00:00.000Z',
+      entryKey: ENTRY_KEY,
+      correctsObservationId: ORIGINAL,
+    }
+    planRevokeMock.mockImplementation(async () => ({
+      status: 'pending' as const,
+      commit: () => {},
+    }))
+    const result = await saveNativeProgressObservation(
+      correction({ correctsObservationId: ORIGINAL }),
+    )
+    expect(result.completionRevoked?.status).toBe('pending')
+    expect(recordedRevokeMock).not.toHaveBeenCalled()
+  })
+
+  it('claims nothing when this correction never revoked anything', async () => {
+    // A newer, unrelated confirmation may be active; the retry must not speak
+    // for it. `null` from the recovery read means exactly that.
+    const docId = `lincoln__${ENTRY_KEY}`
+    stored[obsKey(docId)] = {
+      id: docId,
+      childId: 'lincoln',
+      program: 'fastPhonics',
+      nativeNumber: 12,
+      meaning: 'completedThrough',
+      observedOn: '2026-10-02',
+      source: 'parentReport',
+      recordedAt: '2026-10-02T00:00:00.000Z',
+      entryKey: ENTRY_KEY,
+      correctsObservationId: ORIGINAL,
+    }
+    const result = await saveNativeProgressObservation(
+      correction({ correctsObservationId: ORIGINAL }),
+    )
+    expect(result.alreadyRecorded).toBe(true)
+    expect(result.completionRevoked).toBeUndefined()
+  })
+
+  it('reports a PENDING revocation as pending, not as revoked', async () => {
+    // There was no learner model to retract the coverage from. The receipt has
+    // to carry that difference: the surface offers the apply retry rather than
+    // claiming the learning picture was updated.
+    planRevokeMock.mockImplementation(async () => ({
+      status: 'pending' as const,
+      detail: 'Withdrawn here. The learning picture could not be updated.',
+      commit: () => {},
+    }))
+    const result = await saveNativeProgressObservation(
+      correction({ correctsObservationId: ORIGINAL }),
+    )
+    expect(result.completionRevoked?.status).toBe('pending')
+    expect(result.completionRevoked?.detail).toMatch(/could not be updated/)
+  })
 })
 
 describe('what it writes, and where', () => {
@@ -413,15 +715,20 @@ describe('corrections', () => {
   }
 
   it('links a correction to the original and leaves the original alone', async () => {
-    stored['lincoln__original'] = { ...original }
+    stored[obsKey('lincoln__original')] = { ...original }
     await saveNativeProgressObservation(
       args({ correctsObservationId: 'lincoln__original' }),
     )
-    expect(sets).toHaveLength(1)
-    expect(sets[0].data.correctsObservationId).toBe('lincoln__original')
-    // The corrected row is untouched: one set, and it is not that document.
-    expect(sets[0].ref.__id).not.toBe('lincoln__original')
-    expect(stored['lincoln__original']).toEqual(original)
+    // ONE row, plus the correction marker beside it (FEAT-242) — and nothing
+    // else. The marker is a new document in its own collection, never an edit.
+    expect(rowSets()).toHaveLength(1)
+    expect(markerSets()).toHaveLength(1)
+    expect(sets).toHaveLength(2)
+    expect(rowSets()[0].data.correctsObservationId).toBe('lincoln__original')
+    // The corrected row itself is untouched: no write addressed that document in
+    // the observations collection, and what is stored there is byte-identical.
+    expect(rowSets()[0].ref.__id).not.toBe('lincoln__original')
+    expect(stored[obsKey('lincoln__original')]).toEqual(original)
   })
 
   it('refuses a correction of a row that is gone', async () => {
@@ -432,7 +739,11 @@ describe('corrections', () => {
   })
 
   it("refuses a correction of another child's row", async () => {
-    stored['london__original'] = { ...original, id: 'london__original', childId: 'london' }
+    stored[obsKey('london__original')] = {
+      ...original,
+      id: 'london__original',
+      childId: 'london',
+    }
     await expect(
       saveNativeProgressObservation(args({ correctsObservationId: 'london__original' })),
     ).rejects.toThrow(NATIVE_PROGRESS_CORRECTION_OTHER_CHILD)
@@ -443,7 +754,7 @@ describe('corrections', () => {
     // Review item 7. The program decides the unit the number is read in, so a
     // cross-program "correction" would restate lesson 42 as peak 41 and leave
     // both rows reading as though both had been observed.
-    stored['lincoln__original'] = {
+    stored[obsKey('lincoln__original')] = {
       ...original,
       program: NativeProgressProgram.FastPhonics,
     }
@@ -454,14 +765,14 @@ describe('corrections', () => {
   })
 
   it('allows a correction within the same program', async () => {
-    stored['lincoln__original'] = { ...original }
+    stored[obsKey('lincoln__original')] = { ...original }
     const base = args({ correctsObservationId: 'lincoln__original' })
     await saveNativeProgressObservation({
       ...base,
       observation: { ...base.observation, nativeNumber: 41 },
     })
-    expect(sets).toHaveLength(1)
-    expect(sets[0].data).toMatchObject({
+    expect(rowSets()).toHaveLength(1)
+    expect(rowSets()[0].data).toMatchObject({
       program: NativeProgressProgram.Mathseeds,
       nativeNumber: 41,
       correctsObservationId: 'lincoln__original',

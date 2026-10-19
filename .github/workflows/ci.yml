@@ -33,6 +33,44 @@ jobs:
       - name: Run tests
         run: npx vitest run
 
+  # ── The firestore.rules gate (FIX-265) ──────────────────────────────────────
+  #
+  # Its own job, because it needs something the other jobs do not: a JVM, for the
+  # Firestore and Auth emulators that `npm run test:rules` starts. Keeping it
+  # separate means a rules regression names itself in the checks list instead of
+  # arriving as one more failure inside `test`, and it keeps the ordinary suite
+  # free of any emulator dependency.
+  #
+  # This job exists so that a future edit to `firestore.rules` cannot silently
+  # relax the correction contract or the append-only policy: the suite asserts
+  # both against the real emulator, and the negative control against a frozen
+  # copy of the pre-FIX-265 ruleset. **It should be a REQUIRED check on `main`**
+  # — that part is a branch-protection setting and cannot be declared here.
+  #
+  # Everything it touches is local: a `demo-` project id, synthetic identities,
+  # no credentials and no network beyond npm and the emulator download.
+  test-rules:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Firestore rules (emulator)
+        run: npm run test:rules
+
   docs-check:
     runs-on: ubuntu-latest
 

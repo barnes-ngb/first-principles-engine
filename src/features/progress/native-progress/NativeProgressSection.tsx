@@ -22,6 +22,7 @@ import {
   alreadyRecordedNotice,
   buildHistoryRows,
   childSwitchNotice,
+  CORRECTION_LINKED_COMPLETION_WARNING,
   correctionPreamble,
   draftIsEmpty,
   emptyNativeProgressDraft,
@@ -32,6 +33,7 @@ import {
   NATIVE_PROGRAM_LABEL,
   NATIVE_PROGRAM_UNIT,
   NATIVE_PROGRAMS,
+  NATIVE_PROGRESS_CORRECTION_PLANNING_NOTICE,
   NATIVE_PROGRESS_NO_PLANNING_NOTICE,
   NATIVE_PROGRESS_SOURCE_NOTICE,
   NATIVE_SOURCE_LABEL,
@@ -50,6 +52,7 @@ import {
   strandedSaveTitle,
   summarizeObservations,
   summarySentence,
+  type LinkedCompletionOutcome,
   type NativeProgressDraft,
   type NativeProgressDraftErrors,
   type ReviewedObservation,
@@ -84,9 +87,11 @@ interface StrandedSave {
   /** What came back instead of a confirmation. Held until a retry answers. */
   message: string
   phase: 'failed' | 'retrying' | 'saved'
-  /** Both set only once a retry has come back `ok` — never before. */
+  /** All three set only once a retry has come back `ok` — never before. */
   alreadyRecorded?: boolean
   recorded?: NativeProgressObservation
+  /** What the retry did to a finished-program record citing the corrected row. */
+  completionRevoked?: LinkedCompletionOutcome
 }
 
 /**
@@ -158,9 +163,11 @@ interface StrandedSave {
  * confirmed one and the stranded retry — the two-layer rule `CurriculumTab`'s
  * rename and set-lesson doors use. **This is a
  * UI capability gate, not server-side role separation**: `firestore.rules` grants
- * the whole family subtree to the owning UID and the kids share that sign-in, so a
+ * the family's documents to the owning UID and the kids share that sign-in, so a
  * kid profile is prevented from reaching the write *in the app*, which is what the
- * gate claims and all it claims.
+ * gate claims and all it claims. FIX-265's rule does not change that — it
+ * constrains the SHAPE of a correction (the marker must be in the same commit),
+ * which is a different question from who may make one.
  */
 export default function NativeProgressSection() {
   const familyId = useFamilyId()
@@ -504,10 +511,13 @@ export default function NativeProgressSection() {
       setSaveError(outcome.message)
       return
     }
+    // The receipt carries what this save did to a finished-program record that
+    // cited the corrected row — revoked, or withdrawn-but-not-yet-applied. An
+    // ordinary report has no such outcome and keeps its "nothing else changed".
     setReceipt(
       outcome.alreadyRecorded
-        ? alreadyRecordedNotice(outcome.observation, childName)
-        : savedNotice(outcome.observation, childName),
+        ? alreadyRecordedNotice(outcome.observation, childName, outcome.completionRevoked)
+        : savedNotice(outcome.observation, childName, outcome.completionRevoked),
     )
     resetDraft()
   }, [
@@ -567,6 +577,12 @@ export default function NativeProgressSection() {
             phase: 'saved',
             alreadyRecorded: outcome.alreadyRecorded,
             recorded: outcome.observation,
+            // Carried so the retry's receipt can say what happened to a linked
+            // finished-program record, which is the one thing a retry of a
+            // correction may have changed besides the row.
+            ...(outcome.completionRevoked
+              ? { completionRevoked: outcome.completionRevoked }
+              : {}),
           }
         }),
       )
@@ -628,8 +644,13 @@ export default function NativeProgressSection() {
       <Typography variant="body2">
         Recording for <strong>{childName}</strong>.
       </Typography>
+      {/* The blanket claim, and the one case where it would be false: a
+          correction can withdraw a finished-program record that was pointed at
+          the entry (FEAT-242). An ordinary report still changes nothing. */}
       <Alert severity="info" icon={false}>
-        {NATIVE_PROGRESS_NO_PLANNING_NOTICE}
+        {correcting
+          ? NATIVE_PROGRESS_CORRECTION_PLANNING_NOTICE
+          : NATIVE_PROGRESS_NO_PLANNING_NOTICE}
       </Alert>
 
       {switchNotice && (
@@ -659,8 +680,12 @@ export default function NativeProgressSection() {
                 onClose={() => dismissStrandedSave(stranded.request.entryKey)}
               >
                 {stranded.alreadyRecorded
-                  ? alreadyRecordedNotice(landed, strandedName)
-                  : savedNotice(landed, strandedName)}
+                  ? alreadyRecordedNotice(
+                      landed,
+                      strandedName,
+                      stranded.completionRevoked,
+                    )
+                  : savedNotice(landed, strandedName, stranded.completionRevoked)}
               </Alert>
             )
           }
@@ -856,6 +881,11 @@ export default function NativeProgressSection() {
                 <Typography variant="body2" color="text.secondary">
                   Note: {pending.note}
                 </Typography>
+              )}
+              {/* What the second tap can do beyond the row itself — said BEFORE
+                  it is taken, not in the receipt afterwards. */}
+              {correcting && (
+                <Alert severity="warning">{CORRECTION_LINKED_COMPLETION_WARNING}</Alert>
               )}
               <Typography variant="body2" color="text.secondary">
                 Nothing has been saved yet.

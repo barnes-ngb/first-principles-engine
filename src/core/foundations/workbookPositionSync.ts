@@ -13,9 +13,10 @@
 // the position write that triggered it. Writes ONLY `learnerModels` — no counting,
 // no hours, no other collection.
 
-import { doc, getDoc, setDoc } from 'firebase/firestore'
+import { doc } from 'firebase/firestore'
 
 import { learnerModelsCollection } from '../firebase/firestore'
+import { updateLearnerModelInTransaction } from '../firebase/modelTransaction'
 import { promotedModelStatus } from './modelStatus'
 import {
   applyBridgeCoverageToModel,
@@ -95,43 +96,56 @@ export async function syncWorkbookPositionToModel(
     const source = bridge.sourceId
 
     const modelRef = doc(learnerModelsCollection(familyId), childId)
-    const snap = await getDoc(modelRef)
-    if (!snap.exists()) return { status: 'no-model' } // seed the model first (diag/review)
 
-    const model = snap.data() as LearnerModel
-    // Resolve native position WITH the conflict rule (provisional divisor guesses cap
-    // against the model's directly-witnessed peaks). Deterministic bridges pass through.
-    const native = resolveSyncNativePosition(bridge, input.position, model)
-    if (native == null) return { status: 'pending-curation', source }
-    const coverage = bridgeCoveredConcepts(bridge, native)
-    if (coverage.length === 0) return { status: 'no-coverage', source }
-    const { model: next, changedConceptIds } = applyBridgeCoverageToModel(
-      model,
-      coverage,
-      source,
-      nowIso,
-      input.via ?? 'scan',
+    // One transaction, and the coverage is computed INSIDE it (FEAT-242). The
+    // read-then-write shape this replaced sent `conceptStates.<id>.evidence`,
+    // `openQuestions` and `changeFeed` — all arrays, which `{ merge: true }`
+    // REPLACES rather than merges — so an evidence ref written by a guided eval,
+    // a quest close or a confirmed program completion between the read and the
+    // write was silently dropped. Recomputing inside the callback is what makes
+    // the retry on contention correct rather than merely later.
+    return await updateLearnerModelInTransaction<WorkbookSyncOutcome>(
+      modelRef,
+      (model) => {
+        if (!model) return { result: { status: 'no-model' } } // seed first (diag/review)
+
+        // Resolve native position WITH the conflict rule (provisional divisor guesses
+        // cap against the model's directly-witnessed peaks). Deterministic bridges
+        // pass through. A confirmed completion is NOT a witnessed position — it is a
+        // different evidence kind and `maxWitnessedNativePosition` does not read it —
+        // so this cap behaves exactly as it did before completions existed.
+        const native = resolveSyncNativePosition(bridge, input.position, model)
+        if (native == null) return { result: { status: 'pending-curation', source } }
+        const coverage = bridgeCoveredConcepts(bridge, native)
+        if (coverage.length === 0) return { result: { status: 'no-coverage', source } }
+        const { model: next, changedConceptIds } = applyBridgeCoverageToModel(
+          model,
+          coverage,
+          source,
+          nowIso,
+          input.via ?? 'scan',
+        )
+        if (changedConceptIds.length === 0) {
+          return { result: { status: 'no-coverage', source } }
+        }
+
+        // UX-322 — a bridged position is `curriculumPosition` evidence; promote a
+        // model still stamped `no-data` through the shared rule (never demotes).
+        const promotedStatus = promotedModelStatus(next)
+
+        const merge: Partial<LearnerModel> = {
+          conceptStates: Object.fromEntries(
+            changedConceptIds.map((id) => [id, next.conceptStates[id]]),
+          ),
+          openQuestions: next.openQuestions,
+          changeFeed: next.changeFeed,
+          updatedAt: next.updatedAt,
+          synthesisStaleAt: next.updatedAt,
+          ...(promotedStatus ? { status: promotedStatus } : {}),
+        }
+        return { merge, result: { status: 'written', source, changedConceptIds } }
+      },
     )
-    if (changedConceptIds.length === 0) return { status: 'no-coverage', source }
-
-    // UX-322 — a bridged position is `curriculumPosition` evidence; promote a
-    // model still stamped `no-data` through the shared rule (never demotes).
-    const promotedStatus = promotedModelStatus(next)
-
-    // Merge-only, JSON-scrubbed to drop any `undefined` (Firestore rejects them) —
-    // the same convention the diag seeder and the other model writers use.
-    const merge: Partial<LearnerModel> = {
-      conceptStates: Object.fromEntries(
-        changedConceptIds.map((id) => [id, next.conceptStates[id]]),
-      ),
-      openQuestions: next.openQuestions,
-      changeFeed: next.changeFeed,
-      updatedAt: next.updatedAt,
-      synthesisStaleAt: next.updatedAt,
-      ...(promotedStatus ? { status: promotedStatus } : {}),
-    }
-    await setDoc(modelRef, JSON.parse(JSON.stringify(merge)), { merge: true })
-    return { status: 'written', source, changedConceptIds }
   } catch (err) {
     // Never let a model write-back break the position write that triggered it.
     console.warn('[workbookSync] Failed to sync position to learner model', err)

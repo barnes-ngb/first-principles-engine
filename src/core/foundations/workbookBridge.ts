@@ -22,6 +22,10 @@
 
 import { readingGraph } from './readingGraph'
 import { mathGraph } from './mathGraph'
+import {
+  COVERAGE_CAP,
+  coveragePromotion,
+} from '../../../functions/src/shared/foundations/completionCoverage'
 import { normalizeSourceName, fastPhonicsWorkbookBridge } from './fastPhonicsBridge'
 import { mathseedsBridge } from './mathseedsBridge'
 import { tgtbLa1Bridge } from './tgtbLa1Bridge'
@@ -368,24 +372,21 @@ export function resolveSyncNativePosition(
   return witnessed == null ? native : Math.min(native, witnessed)
 }
 
-// ── Apply layer — mirrors `foundationsReviewActions.ts` covered path (§13) ──
-
-/** Rank for the "never downgrade" guard: solid > forming > frontier > not-yet. */
-const STATE_RANK: Record<ConceptStateKind, number> = {
-  'not-yet': 0,
-  frontier: 1,
-  forming: 2,
-  solid: 3,
-}
-
-/**
- * The §13 clamp — `curriculumPosition` evidence alone caps at `forming`. Mirrors
- * `clampCoveredState` in the Review-Chat write layer (the single "covered ≠
- * mastered" rule, restated in core to avoid a features import).
- */
-function clampCovered(proposed: ConceptStateKind): ConceptStateKind {
-  return proposed === 'solid' ? 'forming' : proposed
-}
+// ── Apply layer — the SHARED coverage precedence (FEAT-242) ────────────────
+//
+// The §13 clamp and the never-downgrade rank table used to be restated here (and
+// again in `foundationsReviewActions.ts`, and a third time for completions).
+// They now live in ONE place — `coveragePromotion`, in
+// `functions/src/shared/foundations/completionCoverage.ts` — which also answers
+// the question none of the three copies did: a coverage claim appends its
+// evidence but does NOT move a concept that already carries a direct
+// observation of the child (an active `attestation` / `eval` / `quest` ref).
+//
+// **That is a deliberate narrowing of this writer** (FEAT-242, authorized): a
+// bridged position could previously raise a concept a guided evaluation had just
+// read lower, which is the calibrated-signal inversion FEAT-76 exists to
+// prevent. It never changes what is RECORDED — the ref is written either way —
+// and it can still never downgrade anything.
 
 /** Append an `openQuestion`, deduped by (conceptId, routedTo) against UNRESOLVED
  *  asks only — a resolved 2c ask no longer blocks a fresh re-queue. */
@@ -430,9 +431,8 @@ export function applyBridgeCoverageToModel(
     const prev: ConceptStateEntry | undefined = conceptStates[conceptId]
     const fromState: ConceptStateKind = prev?.state ?? 'not-yet'
 
-    const clamped = clampCovered('forming')
-    const toState: ConceptStateKind =
-      STATE_RANK[fromState] > STATE_RANK[clamped] ? fromState : clamped
+    const promotion = coveragePromotion(prev)
+    const toState: ConceptStateKind = promotion.state
 
     const evidence: EvidenceRef = {
       kind: 'curriculumPosition',
@@ -443,6 +443,12 @@ export function applyBridgeCoverageToModel(
       unit: unitLabel,
       via,
       positionSync: true, // marks this as the sync's OWN write, not a witness
+      // A bridged position claims the full coverage cap — this writer proposes
+      // nothing weaker (no parameter for it) — and says so on the ref, so a
+      // withdrawal above it knows the position still supports `forming` even
+      // when THIS write promoted nothing (`already-at-or-above`).
+      coverageCeiling: COVERAGE_CAP,
+      ...(promotion.withheldReason ? { withheldReason: promotion.withheldReason } : {}),
     }
     // Dedup by source, but ONLY our own prior sync writes (re-sync = update). A
     // Review-Chat witness carries the same canonical `source` (the prompt emits the
@@ -452,6 +458,12 @@ export function applyBridgeCoverageToModel(
       (e) => !(e.kind === 'curriculumPosition' && e.source === source && e.positionSync),
     )
     const nextEntry: ConceptStateEntry = {
+      // Spread first (FEAT-242): `needsReconcile`, `completionReviewNeeded` and
+      // any later field survive a coverage write. The merge write would have
+      // left the STORED flag alone either way, but the model this function
+      // returns is read in-memory by its callers, and a dropped flag there is a
+      // flag the surface stops showing.
+      ...(prev ?? {}),
       state: toState,
       evidence: [...priorEvidence, evidence],
       seededAt: prev?.seededAt ?? nowIso,
@@ -463,7 +475,9 @@ export function applyBridgeCoverageToModel(
       conceptId,
       from: fromState,
       to: toState,
-      cause: `workbookSync: covered in ${source} ${unitLabel} (capped at ${toState})`,
+      cause: promotion.promoted
+        ? `workbookSync: covered in ${source} ${unitLabel} (capped at ${toState})`
+        : `workbookSync: covered in ${source} ${unitLabel} — recorded as evidence; the state stands on what it stood on`,
       at: nowIso,
     })
     openQuestions = withOpenQuestion(openQuestions, {

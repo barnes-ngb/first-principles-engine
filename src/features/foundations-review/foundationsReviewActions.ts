@@ -21,6 +21,10 @@
 // claiming `solid` is written as `forming` regardless of what the LLM emitted.
 
 import { FOUNDATION_NODE_MAP } from '../../core/foundations'
+import {
+  CoverageQualifier,
+  coveragePromotion,
+} from '../../../functions/src/shared/foundations/completionCoverage'
 import { sanitizeAndParseJson } from '../../core/utils/sanitizeJson'
 import type {
   ConceptStateEntry,
@@ -190,13 +194,9 @@ export function parseFoundationsReviewActions(raw: string): ParsedReviewActions 
   return { actions, cleanText }
 }
 
-/** Rank for the "never downgrade" guard: solid > forming > frontier > not-yet. */
-const STATE_RANK: Record<ConceptStateKind, number> = {
-  'not-yet': 0,
-  frontier: 1,
-  forming: 2,
-  solid: 3,
-}
+// The "never downgrade" rank table used to be restated here. It now lives with
+// the rule that reads it (`COVERAGE_STATE_RANK`, shared module), so the three
+// coverage writers cannot drift apart on what outranks what.
 
 /**
  * Append an `openQuestion`, deduped by (conceptId, routedTo). A **resolved** entry
@@ -279,10 +279,25 @@ export function applyReviewActionToModel(
     }
     cause = attestCause(action.origin ?? 'reviewChat', kidName, toState)
   } else {
-    // covered — §13 clamp: curriculumPosition alone caps at `forming`.
-    const clamped = clampCoveredState(action.proposedState ?? 'forming')
-    // Never downgrade a stronger standing state on a mere coverage claim.
-    toState = STATE_RANK[fromState] > STATE_RANK[clamped] ? fromState : clamped
+    // covered — the SHARED coverage precedence (FEAT-242). §13's clamp is still
+    // here (it lives in `coveragePromotion` now, with one definition for the
+    // three coverage writers), and so is "never downgrade". What is new is that a
+    // coverage claim no longer moves a concept already carrying a direct
+    // observation of the child — an active `attestation` / `eval` / `quest` ref:
+    // the claim is recorded as evidence and the standing read stands. A parent
+    // naming a curriculum has told us about the MATERIAL, not about the child,
+    // and the previous behaviour let that raise a concept a guided evaluation had
+    // just read lower.
+    // What this claim asserts, §13-clamped — stamped on the ref below as
+    // `coverageCeiling`. It is NOT the same as `toState`: this claim may be
+    // withheld (a governing eval, a concept already higher), and then the state
+    // belongs to whatever else was speaking while the claim still covers exactly
+    // this much material. A withdrawal reading the ref later needs the claim,
+    // not the outcome — otherwise a `frontier` claim props up a `forming` nobody
+    // asserted.
+    const ceiling = clampCoveredState(action.proposedState ?? 'forming')
+    const promotion = coveragePromotion(prev, CoverageQualifier.Direct, ceiling)
+    toState = promotion.state
     const detailSuffix = action.detail ? ` — ${action.detail}` : ''
     const unitSuffix = action.unit ? ` ${action.unit}` : ''
     evidence = {
@@ -294,8 +309,12 @@ export function applyReviewActionToModel(
       ...(action.unit ? { unit: action.unit } : {}),
       ...(action.detail ? { detail: action.detail } : {}),
       via: 'manual',
+      coverageCeiling: ceiling,
+      ...(promotion.withheldReason ? { withheldReason: promotion.withheldReason } : {}),
     }
-    cause = `reviewChat: covered in ${action.source} (capped at ${toState})`
+    cause = promotion.promoted
+      ? `reviewChat: covered in ${action.source} (capped at ${toState})`
+      : `reviewChat: covered in ${action.source} — recorded as evidence; the state stands on what it stood on`
     // covered attaches a "verify with a quest?" openQuestion (§11.2 path 2).
     openQuestions = withOpenQuestion(model.openQuestions, {
       conceptId: action.conceptId,
@@ -306,9 +325,25 @@ export function applyReviewActionToModel(
   }
 
   const newEntry: ConceptStateEntry = {
+    // Spread first (FEAT-242) so any standing field survives a write that does
+    // not speak to it; the two flags below are then set deliberately.
+    ...(prev ?? {}),
     state: toState,
     evidence: [...(prev?.evidence ?? []), evidence],
     seededAt: prev?.seededAt ?? nowIso,
+    // An entry whose completion basis was unreconstructable reads conservatively
+    // until something direct settles it — and a parent's own word is exactly
+    // that. So an `attest` clears the flag (explicitly `false`, because this
+    // entry is merged into Firestore where an absent key leaves `true` behind);
+    // a `covered` claim, which is not direct evidence, leaves it standing. The
+    // claim is not therefore worthless to a reader: `completionReviewCeiling`
+    // asks the live refs what they support, so a `covered` action carries the
+    // concept at the strength its `coverageCeiling` asserts while the flag — the
+    // record that the withdrawn basis is still unsettled — stays exactly as it
+    // is. The raised read lasts only as long as the claim does.
+    ...(prev?.completionReviewNeeded
+      ? { completionReviewNeeded: action.kind !== 'attest' }
+      : {}),
     // A standing eval-vs-parent disagreement (FEAT-76 `needsReconcile`) is resolved
     // by exactly one thing: the parent giving their word again. An attestation
     // clears it — written as an explicit `false` because the writer merges this

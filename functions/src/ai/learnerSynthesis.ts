@@ -31,13 +31,66 @@ import {
   type StoredLearnerModel,
 } from "./tasks/learnerSynthesis.js";
 
+/**
+ * A comparable stamp for a revision field (FEAT-242).
+ *
+ * `synthesisStaleAt` and `updatedAt` are ISO strings today, but a Firestore
+ * document can hold a `Timestamp` or `null` in either, and a comparison that
+ * threw (or that compared two object identities) would silently decide "nothing
+ * moved". So both are reduced to a string, and absence to the empty string.
+ */
+function stampOf(value: unknown): string {
+  if (value == null) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "object" && value !== null && "toMillis" in value) {
+    const millis = (value as { toMillis: () => number }).toMillis();
+    return String(millis);
+  }
+  return String(value);
+}
+
+/**
+ * The document's own REVISION, as an exact token — or `null` when the snapshot
+ * does not carry one (FEAT-242 review item 1).
+ *
+ * The app's `updatedAt` / `synthesisStaleAt` strings are not enough: two
+ * distinct writes can leave both equal (a concept-state change that reuses the
+ * same ISO second, or a writer that touches neither field) while the evidence
+ * underneath has moved. Firestore's `updateTime` is the only value that
+ * changes on every commit, so it is compared EXACTLY — seconds *and*
+ * nanoseconds, never milliseconds alone, because two commits inside one
+ * millisecond would compare equal.
+ *
+ * Unknown ⇒ `null`, and the caller then fails closed rather than assuming
+ * nothing moved.
+ */
+function revisionOf(snap: unknown): string | null {
+  const value = (snap as { updateTime?: unknown } | null | undefined)?.updateTime;
+  if (value == null || typeof value !== "object") return null;
+  const ts = value as Record<string, unknown>;
+  // Seconds AND nanoseconds, or nothing. A `toMillis()` reading would collapse
+  // two commits inside one millisecond into one revision, and a lossy value
+  // must never license a write — the admin SDK's `Timestamp` always carries
+  // both fields (`_seconds` / `_nanoseconds` before serialization).
+  const seconds = typeof ts.seconds === "number" ? ts.seconds
+    : typeof ts._seconds === "number" ? ts._seconds : null;
+  const nanos = typeof ts.nanoseconds === "number" ? ts.nanoseconds
+    : typeof ts._nanoseconds === "number" ? ts._nanoseconds : null;
+  if (seconds === null || nanos === null) return null;
+  return `ts:${seconds}.${String(nanos).padStart(9, "0")}`;
+}
+
 /** A model needs synthesis when it has none yet OR a writer marked it stale. */
 export function isSynthesisStale(model: StoredLearnerModel & { synthesis?: unknown; synthesisStaleAt?: unknown }): boolean {
   return !model.synthesis || Boolean(model.synthesisStaleAt);
 }
 
 export interface SynthesisRunResult {
-  status: "written" | "skipped-no-model" | "skipped-no-data" | "failed";
+  /**
+   * `skipped-stale` (FEAT-242) — the model moved while the call was in flight,
+   * so this result was DISCARDED rather than stored over a newer one.
+   */
+  status: "written" | "skipped-no-model" | "skipped-no-data" | "skipped-stale" | "failed";
   /**
    * On `failed`, the underlying error class + message (or parse-failure reason).
    * Surfaced verbatim to the diag panel so a failure is never opaque (DOC-09).
@@ -66,8 +119,29 @@ export async function synthesizeLearnerModelForChild(
   const ref = db.doc(`families/${familyId}/learnerModels/${childId}`);
   const snap = await ref.get();
   if (!snap.exists) return { status: "skipped-no-model" };
-  const model = snap.data() as StoredLearnerModel & { status?: string };
+  const model = snap.data() as StoredLearnerModel & {
+    status?: string;
+    synthesisStaleAt?: unknown;
+    updatedAt?: unknown;
+  };
   if (model.status === "no-data") return { status: "skipped-no-data" };
+
+  // The REVISION this synthesis is about to be computed from (FEAT-242). A
+  // Sonnet call takes seconds and a learner-model write takes none, so a
+  // confirmed program completion (or an eval, or a quest close) can land while
+  // this one is in flight — and the write below used to clear
+  // `synthesisStaleAt` unconditionally, which marked the model fresh for prose
+  // generated before that evidence existed. The next weekly beat then skipped
+  // it, so the newer evidence stayed out of the parent's advice indefinitely.
+  //
+  // The document revision is the authority (`revisionOf`); the two app stamps
+  // are kept as a second, weaker check, because a mock or a legacy snapshot
+  // without `updateTime` would otherwise compare on nothing.
+  const sourceRevision = {
+    staleAt: stampOf(model.synthesisStaleAt),
+    updatedAt: stampOf(model.updatedAt),
+    revision: revisionOf(snap),
+  };
 
   const input = buildSynthesisInput(model, childName);
   const systemPrompt = buildSynthesisPrompt(input);
@@ -137,20 +211,120 @@ export async function synthesizeLearnerModelForChild(
     usage: { inputTokens: result.inputTokens, outputTokens: result.outputTokens },
   };
 
-  // Merge-only write; clear the stale mark so consumers read fresh.
-  await ref.set({ synthesis, synthesisStaleAt: null, updatedAt: generatedAt }, { merge: true });
+  // Merge-only write, inside a transaction that COMPARES the revision this
+  // synthesis was computed from (FEAT-242). On any movement — a different
+  // document revision, a moved app stamp, a deleted document, or a revision
+  // neither side can read exactly — the prose is **discarded**: it was computed
+  // from evidence that is no longer what is stored, and storing it would
+  // overwrite a newer run's advice while marking the model fresh. The stale mark
+  // the other writer set stands, so the next beat regenerates against the
+  // evidence this run could not have seen.
+  //
+  // The commit can also REJECT outright (contention, a permission error, a
+  // network failure). That is captured rather than thrown here, because the
+  // provider call above has already been paid for and the accounting below must
+  // still run; the original failure is re-thrown afterwards, unchanged.
+  let commit: "written" | "stale" | "unknown-revision" | "gone" | undefined;
+  let commitError: unknown;
+  let commitFailed = false;
+  try {
+    commit = await db.runTransaction<"written" | "stale" | "unknown-revision" | "gone">(
+      async (tx) => {
+        const current = await tx.get(ref);
+        // A model deleted during the AI call must not be RECREATED as a
+        // synthesis-only document.
+        if (!current.exists) return "gone";
+        const data = (current.data() ?? {}) as {
+          synthesisStaleAt?: unknown;
+          updatedAt?: unknown;
+        };
+        // ── The document revision, exactly ──
+        //
+        // A write this run could not have seen may leave both app stamps equal
+        // (same ISO second, or a writer that touched neither), and the prose
+        // would then be stored as though it had read that evidence. `updateTime`
+        // moves on every commit, so it decides — and a revision this code cannot
+        // read on either side fails CLOSED, because "we could not tell" must
+        // never resolve to "nothing moved".
+        const currentRevision = revisionOf(current);
+        if (sourceRevision.revision === null || currentRevision === null) {
+          return "unknown-revision";
+        }
+        if (currentRevision !== sourceRevision.revision) return "stale";
+        // Moved underneath us ⇒ write NOTHING. Storing this prose would overwrite
+        // a synthesis another run has already produced from newer evidence, and
+        // would do it while the model reads fresh. The stale mark the other
+        // writer set stands, so the next beat regenerates.
+        if (
+          stampOf(data.synthesisStaleAt) !== sourceRevision.staleAt ||
+          stampOf(data.updatedAt) !== sourceRevision.updatedAt
+        ) {
+          return "stale";
+        }
+        tx.set(ref, { synthesis, synthesisStaleAt: null, updatedAt: generatedAt }, { merge: true });
+        return "written";
+      },
+    );
+  } catch (err) {
+    commitFailed = true;
+    commitError = err;
+  }
 
-  await logAiUsage(db, familyId, {
-    childId,
-    taskType: "learnerSynthesis",
-    model: modelId,
-    inputTokens: result.inputTokens,
-    outputTokens: result.outputTokens,
-  });
+  // ── The call was PAID for, whatever happened to the prose ──
+  //
+  // Usage accounting is about money spent, not about whether a graph write
+  // landed: a run whose result is discarded as stale — or whose commit REJECTED
+  // entirely — still cost its tokens, and logging it only on success
+  // under-reported every one of those runs. Logged exactly once, here, before
+  // the outcome is branched on, and it is not a provider call, so nothing extra
+  // is sent anywhere.
+  try {
+    await logAiUsage(db, familyId, {
+      childId,
+      taskType: "learnerSynthesis",
+      model: modelId,
+      inputTokens: result.inputTokens,
+      outputTokens: result.outputTokens,
+    });
+  } catch (usageErr) {
+    // A failure to RECORD must never mask the failure to WRITE: when the commit
+    // already rejected, that error is the one the caller needs, so this one is
+    // logged and dropped. With a healthy commit the accounting error still
+    // propagates, exactly as it did before.
+    if (!commitFailed) throw usageErr;
+    const detail = usageErr instanceof Error ? `${usageErr.name}: ${usageErr.message}` : String(usageErr);
+    console.error(
+      `[learnerSynthesis] ${familyId}/${childId}: usage accounting failed after a failed commit (${detail}) — reporting the commit error.`,
+      usageErr,
+    );
+  }
+
+  if (commitFailed) {
+    // Nothing was stored and nothing is faked: the caller sees the original
+    // transaction error, with the usage of the paid call already recorded.
+    console.error(
+      `[learnerSynthesis] ${familyId}/${childId}: the synthesis write failed — nothing written, prior synthesis and stale mark left as they are. The call's usage is still recorded.`,
+      commitError,
+    );
+    throw commitError;
+  }
 
   console.log(
-    `[AI] taskType=learnerSynthesis child=${childId} inputTokens≈${result.inputTokens} outputTokens≈${result.outputTokens} moves=${parsed.whatMattersNext.length}`,
+    `[AI] taskType=learnerSynthesis child=${childId} inputTokens≈${result.inputTokens} outputTokens≈${result.outputTokens} moves=${parsed.whatMattersNext.length} commit=${commit}`,
   );
+
+  if (commit !== "written") {
+    const why =
+      commit === "gone"
+        ? "the model was deleted while synthesizing"
+        : commit === "unknown-revision"
+          ? "we could not read the model's exact revision, so it was treated as changed"
+          : "the model changed while synthesizing";
+    console.warn(
+      `[learnerSynthesis] ${familyId}/${childId}: ${why} — nothing written, prior synthesis and stale mark left as they are. The call's usage is still recorded.`,
+    );
+    return { status: commit === "gone" ? "skipped-no-model" : "skipped-stale", detail: why };
+  }
 
   return { status: "written", synthesis: { whatMattersNext: parsed.whatMattersNext, narrative: parsed.narrative, openQuestionsSummary: parsed.openQuestionsSummary, generatedAt } };
 }

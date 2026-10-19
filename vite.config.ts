@@ -39,7 +39,23 @@ export default defineConfig({
     // Spreading `defaultExclude` is load-bearing — assigning `exclude` REPLACES
     // the defaults rather than adding to them, so dropping the spread would let
     // `node_modules` back into the run.
-    exclude: [...defaultExclude, '**/functions/lib/**', '**/.firebase/**'],
+    //
+    // ── FIX-265: `src/test/rules/**` needs an emulator, so it is NOT in here ──
+    //
+    // Those suites assert `firestore.rules` against a real Firestore emulator
+    // (plus the Auth emulator for the writer-compatibility file). That is a Java
+    // process, so they run as their own vitest project —
+    // `vitest.emulator.config.ts`, launched by `npm run test:rules` inside
+    // `firebase emulators:exec` — and the ordinary run stays something that needs
+    // nothing but npm packages. The exclusion and that config are a pair: here
+    // they would fail on connect, and nowhere they would not be run at all.
+    // `src/test/firestoreRulesGate.invariant.test.ts` asserts both halves.
+    exclude: [
+      ...defaultExclude,
+      '**/functions/lib/**',
+      '**/.firebase/**',
+      '**/src/test/rules/**',
+    ],
     alias: {
       '@anthropic-ai/sdk': fileURLToPath(
         new URL('./functions/src/ai/providers/__stubs__/anthropic.ts', import.meta.url),

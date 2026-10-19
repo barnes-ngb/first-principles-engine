@@ -145,6 +145,12 @@ The app uses Firebase Authentication:
 
 - Only authenticated users can read/write
 - Users can only access `families/{uid}/*` where `uid` matches their auth UID
+- **One exception, which is a narrowing (FIX-265):** `nativeProgressObservations` is create-only —
+  no client update or delete — and a correction create must carry its
+  `nativeProgressCorrectionMarkers` document in the same commit. Everything else under the family,
+  including every read, is unchanged. Test it with `npm run test:rules` (Firestore emulator; needs
+  Java 21+), and deploy rules **before** hosting — `deploy.yml` does that, with a ten-minute
+  propagation barrier in between
 - See `firestore.rules` and `storage.rules`
 
 ---

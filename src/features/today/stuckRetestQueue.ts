@@ -21,9 +21,10 @@
 // write in `TodayChecklist.handleMasteryChip` is untouched — the two targeting
 // systems coexist, deliberately not unified (see `questTargeting.ts:16-19`).
 
-import { doc, getDoc, setDoc } from 'firebase/firestore'
+import { doc } from 'firebase/firestore'
 
 import { learnerModelsCollection } from '../../core/firebase/firestore'
+import { updateLearnerModelInTransaction } from '../../core/firebase/modelTransaction'
 import { resolveStuckConcepts } from '../../core/foundations/dailySignalTargeting'
 import type {
   StuckSignalConfig,
@@ -100,36 +101,42 @@ export async function enqueueStuckRetests(
   if (resolveStuckConcepts(item, config).length === 0) return
   try {
     const modelRef = doc(learnerModelsCollection(familyId), childId)
-    const snap = await getDoc(modelRef)
-    if (!snap.exists()) return // seed the model first (diag / review chat)
 
-    let model = snap.data() as LearnerModel
-    // Re-resolve WITH the model so the provisional-position conflict cap applies.
-    const concepts = resolveStuckConcepts(item, config, model)
-    if (concepts.length === 0) return
-    for (const conceptId of concepts) {
-      // Reuse the Review-Chat queueTest semantics verbatim — same dedup, same
-      // openQuestion shape. `changedConceptId` is undefined for queueTest (no state
-      // change), so only openQuestions / changeFeed move.
-      const { model: next } = applyReviewActionToModel(
-        model,
-        { kind: 'queueTest', childId, conceptId, reason },
-        nowIso,
-      )
-      model = next
-    }
+    // One transaction, the asks folded INSIDE it (FEAT-242). The payload is two
+    // whole ARRAYS — `openQuestions` and `changeFeed` — and `{ merge: true }`
+    // replaces an array rather than merging it, so a read-then-write here
+    // dropped every ask and every change line another writer appended in the
+    // gap. Two chips tapped in the same minute were enough.
+    await updateLearnerModelInTransaction<void>(modelRef, (stored) => {
+      if (!stored) return { result: undefined } // seed the model first (diag / review chat)
 
-    // Merge-only, JSON-scrubbed to drop any `undefined` (Firestore rejects them) —
-    // the same convention `workbookPositionSync` and the other model writers use.
-    // `synthesisStaleAt` touched exactly like the other learner-model writers so the
-    // LLM synthesis knows a routed ask changed (FEAT-57, D4).
-    const merge: Partial<LearnerModel> = {
-      openQuestions: model.openQuestions,
-      changeFeed: model.changeFeed,
-      updatedAt: model.updatedAt,
-      synthesisStaleAt: model.updatedAt,
-    }
-    await setDoc(modelRef, JSON.parse(JSON.stringify(merge)), { merge: true })
+      // Re-resolve WITH the model so the provisional-position conflict cap applies.
+      const concepts = resolveStuckConcepts(item, config, stored)
+      if (concepts.length === 0) return { result: undefined }
+
+      let model: LearnerModel = stored
+      for (const conceptId of concepts) {
+        // Reuse the Review-Chat queueTest semantics verbatim — same dedup, same
+        // openQuestion shape. `changedConceptId` is undefined for queueTest (no
+        // state change), so only openQuestions / changeFeed move.
+        const { model: next } = applyReviewActionToModel(
+          model,
+          { kind: 'queueTest', childId, conceptId, reason },
+          nowIso,
+        )
+        model = next
+      }
+
+      // `synthesisStaleAt` touched exactly like the other learner-model writers so
+      // the LLM synthesis knows a routed ask changed (FEAT-57, D4).
+      const merge: Partial<LearnerModel> = {
+        openQuestions: model.openQuestions,
+        changeFeed: model.changeFeed,
+        updatedAt: model.updatedAt,
+        synthesisStaleAt: model.updatedAt,
+      }
+      return { merge, result: undefined }
+    })
   } catch (err) {
     // Never let the model write-back break the chip tap that triggered it.
     console.warn('[stuckRetest] Failed to enqueue re-test on learner model', err)
