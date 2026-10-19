@@ -38,6 +38,15 @@
 // A row once written is never updated. A correction is a NEW row carrying
 // `correctsObservationId`, and the row it corrects stays exactly as it was.
 //
+// **Both halves are now server-enforced (FIX-265).** `firestore.rules` gives this
+// collection a create-only match, and admits a create carrying
+// `correctsObservationId` only when the correction marker for the corrected row
+// is written in the SAME commit, naming this row, this child and this draft. So
+// the ordering below is not a style choice: moving the marker write out of this
+// transaction, or writing the row before the marker is decided, would be refused
+// by the rules rather than quietly drifting. See
+// `docs/DESIGN_FAST_PHONICS_COMPLETION.md` §6.2.
+//
 // ── Why it re-validates what the form already checked ───────────────────────
 //
 // The form's rule module is the same rule, and this is still not a duplicate: the
@@ -410,7 +419,9 @@ export async function saveNativeProgressObservation(
     if (correctsObservationId) {
       // The marker is written for the correction itself, independent of any
       // completion. Overwritten on purpose when a row is corrected twice: the
-      // marker answers "has this been corrected, and by what most recently".
+      // marker answers "has this been corrected, and by what most recently" —
+      // and that overwrite is also what the rule's pre-state check reads, since
+      // the marker it replaces names the EARLIER correction (FIX-265).
       tx.set(doc(markers, correctionMarkerId(correctsObservationId)), markerFor(correctsObservationId))
     }
     revoke?.commit(tx)

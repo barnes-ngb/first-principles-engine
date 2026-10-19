@@ -59,6 +59,24 @@ jobs:
       - name: Run tests
         run: npx vitest run
 
+      # ── The rules gate, before anything is deployed (FIX-265) ────
+      # `firestore.rules` is deployed by this workflow, so the suite that proves
+      # what it admits runs here as well as on the PR: a push straight to
+      # `deploy` would otherwise publish a ruleset nothing in this run checked.
+      # It needs a JVM (the Firestore emulator is a Java process) and nothing
+      # else — `npm run test:rules` runs against the `demo-fpe-rules` project,
+      # which firebase-tools serves entirely locally and which can never resolve
+      # to barneshome-3dfbb, so the service-account credentials in this job are
+      # not used by it.
+      - name: Set up Java (Firestore emulator)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Run Firestore rules suite (emulator)
+        run: npm run test:rules
+
       - name: Build
         env:
           VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}
@@ -69,7 +87,45 @@ jobs:
           VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
         run: npm run build
 
-      # ── Deploy hosting + rules (always) ──────────────────────────
+      # ── Deploy rules FIRST, then hosting (always) ────────────────
+      #
+      # RULES BEFORE APP (FIX-265). `firestore.rules` now carries the admission
+      # contract the FEAT-242 client satisfies and the pre-FEAT-242 client does
+      # not, so the two deploys have a direction: the rules must be live before a
+      # bundle that relies on them is served. These steps used to run AFTER both
+      # hosting deploys, and for THIS change that order is not a tidiness
+      # complaint — publishing the completion-enabled app while the old rules were
+      # still in force would leave the window this repair exists to close open:
+      # old writers admitted, a correction able to land with no marker and a
+      # confirmed completion left resting on it.
+      #
+      # A step failure stops the job, so a rules deploy that fails means NO app
+      # deploy: production keeps serving the previous bundle under the previous
+      # rules, which is a consistent pair. That dependency is the point of the
+      # ordering and is pinned by
+      # `src/test/firestoreRulesGate.invariant.test.ts`; do not add
+      # `continue-on-error` or an `if:` that lets hosting run regardless.
+      - name: Deploy Firestore rules + indexes
+        run: npx firebase-tools@latest deploy --only firestore --project barneshome-3dfbb --non-interactive --force
+
+      - name: Deploy Storage rules
+        run: npx firebase-tools@latest deploy --only storage --project barneshome-3dfbb --non-interactive --force
+
+      # Firestore publishes a ruleset to its serving edges asynchronously: the
+      # deploy returning success means the ruleset is COMMITTED, not that every
+      # edge is evaluating it. Firebase documents propagation to active listeners
+      # as taking UP TO TEN MINUTES, so this waits the full documented window —
+      # a conservative allowance rather than an optimistic average — before the
+      # app that depends on the new rules is published. It costs ten minutes of a
+      # deploy that happens a few times a week. The number lives in one place so
+      # it can be tuned (or, with owner approval, removed) in one edit.
+      - name: Wait for Firestore rules propagation
+        env:
+          RULES_PROPAGATION_SECONDS: '600'
+        run: |
+          echo "Rules deployed. Waiting ${RULES_PROPAGATION_SECONDS}s for propagation before publishing the app."
+          sleep "${RULES_PROPAGATION_SECONDS}"
+
       # Two hosting targets (FEAT-86): `app` = the main SPA (first-principles-engine),
       # `shop` = the dedicated barnesbro.web.app catalog redirect. The action's
       # `target` input deploys ONE target per step, so the app deploy stays
@@ -100,12 +156,6 @@ jobs:
           channelId: live
           projectId: barneshome-3dfbb
           target: app
-
-      - name: Deploy Firestore rules + indexes
-        run: npx firebase-tools@latest deploy --only firestore --project barneshome-3dfbb --non-interactive --force
-
-      - name: Deploy Storage rules
-        run: npx firebase-tools@latest deploy --only storage --project barneshome-3dfbb --non-interactive --force
 
       - name: Configure Storage CORS
         run: |

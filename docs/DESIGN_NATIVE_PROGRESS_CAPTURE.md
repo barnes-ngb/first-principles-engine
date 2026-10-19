@@ -81,9 +81,17 @@ turns a backdated record into a claim about today.
 **No new index.** Rows are read with one equality filter on `childId` and sorted in
 memory, so `firestore.indexes.json` is untouched.
 
-**No rules change.** `firestore.rules` already grants the whole
-`families/{familyId}/**` subtree to the owning UID, which this collection sits
-inside. Nothing about the parent-only UI is server-enforced — see §8.
+**One rules change, added later (FIX-265).** FEAT-241 shipped with no rules
+change: `firestore.rules` granted the whole `families/{familyId}/**` subtree to
+the owning UID, and this collection sat inside it. Since FIX-265 the collection
+has its own match — **create-only** (the append-only policy above, enforced
+instead of described) and, for a CORRECTION, an atomic marker required at the
+corrected row's id. The reason is FEAT-242: a correction of a cited row must also
+retract the completion resting on it, which the current writer does in one
+transaction and a tab left open from before FEAT-242 cannot. See
+`docs/DESIGN_FAST_PHONICS_COMPLETION.md` § *The correction contract in
+`firestore.rules`*. Plain reports are admitted exactly as they always were, and
+nothing about the parent-only UI is server-enforced — see §8.
 
 ## 4. The write path
 
@@ -287,7 +295,9 @@ two-layer rule `CurriculumTab`'s rename and set-lesson doors use.
 **This is a UI capability gate, not server-side role separation.** `firestore.rules`
 grants the family subtree to the owning UID and the kids share that sign-in, so what
 the gate claims — and all it claims — is that a kid profile cannot reach this write
-*in the app*.
+*in the app*. FIX-265's rule does not change that: it constrains the SHAPE of a
+correction, which is a different question from who is allowed to make one, and a
+family's single identity still cannot be split by any rule.
 
 ## 9. What this run deliberately did not do
 
@@ -295,7 +305,9 @@ the gate claims — and all it claims — is that a kid profile cannot reach thi
   `setActivityConfigPosition`), `learnerModels`, `childSkillMaps`, `skillSnapshots`,
   `hours`, `hoursAdjustments`, `days`, `xpLedger` or `artifacts`;
 - no inferred prior completion, no automatic N−1 normalisation, no derived position;
-- no `firestore.rules`, `firestore.indexes.json` or Cloud Function change;
+- no `firestore.rules`, `firestore.indexes.json` or Cloud Function change **in
+  this run** — the rules change that later enforced the append-only policy and
+  the correction contract is FIX-265, two features on (§3);
 - no photo requirement, no media upload, no model call;
 - no merge of this record into planning, compliance or the Learning Map. Reading
   these rows into any of those is a **separate proposal**, and the isolation above is

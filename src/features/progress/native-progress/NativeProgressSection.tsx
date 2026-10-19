@@ -163,9 +163,11 @@ interface StrandedSave {
  * confirmed one and the stranded retry — the two-layer rule `CurriculumTab`'s
  * rename and set-lesson doors use. **This is a
  * UI capability gate, not server-side role separation**: `firestore.rules` grants
- * the whole family subtree to the owning UID and the kids share that sign-in, so a
+ * the family's documents to the owning UID and the kids share that sign-in, so a
  * kid profile is prevented from reaching the write *in the app*, which is what the
- * gate claims and all it claims.
+ * gate claims and all it claims. FIX-265's rule does not change that — it
+ * constrains the SHAPE of a correction (the marker must be in the same commit),
+ * which is a different question from who may make one.
  */
 export default function NativeProgressSection() {
   const familyId = useFamilyId()
