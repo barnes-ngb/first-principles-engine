@@ -11,13 +11,16 @@ import { applyBridgeCoverageToModel } from './workbookBridge'
 import { applyEvalFindingsToModel } from './evalModelSync'
 import { applyQuestResultsToModel } from './questTargeting'
 import { applyReviewActionToModel } from '../../features/foundations-review/foundationsReviewActions'
+import { buildOverrideAction } from '../../features/progress/conceptOverride'
 import {
+  acceptedDirectRead,
   completionReviewCeiling,
   completionReviewSupported,
   coverageSupportedState,
   effectiveConceptState,
   governingDirectEvidence,
   governingDirectRead,
+  pendingAttestationFreeze,
   survivingSupportedState,
 } from '../../../functions/src/shared/foundations/completionCoverage'
 import type { CompletionCoverageTarget } from './fastPhonicsCompletion'
@@ -1028,5 +1031,311 @@ describe('a later observation that read nothing (finding 4304869773)', () => {
         OBSERVED,
       ),
     ).toBeUndefined()
+  })
+})
+
+/**
+ * A release may not act on the eval the attestation freeze refused
+ * (finding 4305276208).
+ *
+ * The reported sequence, every step through its real writer: a confirmed program
+ * raises a concept to `forming` → the parent attests `solid` from the
+ * Foundations tab → a later guided eval reads lower, and `applyEvalFindingsToModel`
+ * does NOT apply it (FEAT-76 guardrail 2: the parent's word stands, the `eval`
+ * ref is appended, `needsReconcile` is flagged) → the parent is asked and has not
+ * answered → the program is withdrawn. The release then recomputed the state
+ * from "the latest direct read", found the eval ref sitting there, and lowered a
+ * `solid` the eval had been explicitly forbidden to move. The freeze held at the
+ * front door and the back door was open: a correction about whether a PROGRAM was
+ * finished silently applied a disagreement about the CHILD.
+ *
+ * The repair is one shared question — {@link acceptedDirectRead} rather than
+ * `governingDirectRead` — and it is narrow in five ways, each pinned below:
+ * it needs the open flag AND a live attestation, so a concept merely carrying an
+ * attestation in its history is governed by the latest read exactly as before; it
+ * sets aside the `eval` kind only, so a later quest that read a state still
+ * decides; it neither writes nor clears `needsReconcile`, so the parent still
+ * owes the same answer afterwards; it settles no OTHER open question either, so
+ * an entry also carrying `completionReviewNeeded` keeps that flag and goes on
+ * being read conservatively (the two are distinct but not exclusive — a
+ * preserved, imported or legacy record carries both); and the moment the parent
+ * answers — keeping their word or going with the model's read — the new
+ * attestation IS the latest read and ordinary precedence resumes, at whatever
+ * state they chose.
+ *
+ * All three shared release paths are covered twice over, because they are one
+ * function: a withdrawal, a reviewed mapping that stops claiming the concept, and
+ * one that downgrades it to `partial` — each on the plain frozen entry and again
+ * on the frozen entry that also carries `completionReviewNeeded`.
+ *
+ * **Negative controls for a reviewer:** restore the release's read to
+ * `governingDirectRead(released, holder.observedAt)` (the pre-repair line) and
+ * the seven frozen cases fail, each reading `frontier` where the parent's `solid`
+ * should stand. Drop the `&& !frozenAttestation` guard on the flag — the first
+ * draft's bug — and the three `preserves …` cases fail: the flag reads `false`
+ * and `effectiveConceptState` quotes an unsettled `solid` to every advice
+ * consumer. Delete the `pendingAttestationFreeze` keep-branch and the legacy case
+ * fails with `frontier` reported as `supported`. The behavioural positive
+ * controls must stay green through every one of those reversions: `still clears
+ * the flag where no parent word was frozen`, `follows the parent once they
+ * answer`, and `still follows a later eval where no parent word was frozen`.
+ */
+describe('a frozen eval is not a read a release may follow (finding 4305276208)', () => {
+  const ATTESTED = '2026-10-17T18:00:00.000Z'
+  const EVALUATED = '2026-10-18T18:00:00.000Z'
+  const RESOLVED = '2026-10-19T09:00:00.000Z'
+  const WITHDRAWN_AT = '2026-10-19T12:00:00.000Z'
+
+  const attest = (state: 'solid' | 'forming' | 'frontier', origin: 'foundationsTab' | 'reconcileKeep' | 'reconcileTake') =>
+    buildOverrideAction({ childId: 'c1', conceptId: CVC, state, origin })
+
+  /** The reported sequence, through the real writers, up to the release. */
+  function attestedThenDisagreed(): LearnerModel {
+    const confirmed = applyCompletionCoverage(model(), write([direct(CVC)]), NOW).model
+    expect(confirmed.conceptStates[CVC].state).toBe('forming')
+
+    const attested = applyReviewActionToModel(confirmed, attest('solid', 'foundationsTab'), ATTESTED).model
+    expect(attested.conceptStates[CVC].state).toBe('solid')
+
+    const evaluated = applyEvalFindingsToModel(
+      attested,
+      [{ conceptId: CVC, state: 'frontier', note: 'Guided eval — sounding these out again' }],
+      'sess-eval',
+      EVALUATED,
+    ).model
+    // The freeze, asserted here so the fixture cannot drift into some other case:
+    // the parent's state stands, the eval's read is recorded beside it, and the
+    // question is open.
+    expect(evaluated.conceptStates[CVC].state).toBe('solid')
+    expect(evaluated.conceptStates[CVC].needsReconcile).toBe(true)
+    expect(refsOn(evaluated, CVC).at(-1)).toMatchObject({ kind: 'eval', readState: 'frontier' })
+    return evaluated
+  }
+
+  it('keeps the attested state when the completion is withdrawn', () => {
+    const evaluated = attestedThenDisagreed()
+    const before = refsOn(evaluated, CVC).filter((r) => r.kind !== 'programCompletionCoverage')
+    const feedBefore = evaluated.changeFeed.length
+
+    const withdrawn = withdrawCompletionCoverage(evaluated, 'fastPhonics:draft-1', WITHDRAWN_AT, 'notComplete')
+    const entry = withdrawn.model.conceptStates[CVC]
+    expect(entry.state).toBe('solid')
+    expect(withdrawn.directlyGovernedConceptIds).toContain(CVC)
+    expect(withdrawn.revertedConceptIds).not.toContain(CVC)
+    expect(withdrawn.supportedConceptIds).not.toContain(CVC)
+    expect(withdrawn.reviewNeededConceptIds).not.toContain(CVC)
+    // The disagreement is still the parent's to settle — the release neither
+    // answered it nor cleared it.
+    expect(entry.needsReconcile).toBe(true)
+    expect(entry.completionReviewNeeded).toBeFalsy()
+    // What every advice consumer and the server slice read is the parent's word.
+    expect(effectiveConceptState(entry)).toBe('solid')
+    // Nothing moved, so nothing is announced; history is untouched apart from
+    // this confirmation's own ref.
+    expect(withdrawn.model.changeFeed).toHaveLength(feedBefore)
+    expect(refsOn(withdrawn.model, CVC).filter((r) => r.kind !== 'programCompletionCoverage')).toEqual(before)
+    expect(refsOn(withdrawn.model, CVC).find((r) => r.kind === 'programCompletionCoverage')!.status).toBe('superseded')
+  })
+
+  it('keeps it when a reviewed mapping stops claiming the concept', () => {
+    const evaluated = attestedThenDisagreed()
+    const revised = applyCompletionCoverage(evaluated, write([direct(BLENDS, 14)], 2), WITHDRAWN_AT)
+    expect(revised.releasedConceptIds).toContain(CVC)
+    const entry = revised.model.conceptStates[CVC]
+    expect(entry.state).toBe('solid')
+    expect(entry.needsReconcile).toBe(true)
+    // The other concept in v2 is claimed normally — the release is scoped.
+    expect(revised.model.conceptStates[BLENDS].state).toBe('forming')
+  })
+
+  it('keeps it when a reviewed mapping downgrades the concept to partial', () => {
+    const evaluated = attestedThenDisagreed()
+    const revised = applyCompletionCoverage(evaluated, write([partial(CVC)], 2), WITHDRAWN_AT)
+    expect(revised.releasedConceptIds).toContain(CVC)
+    const entry = revised.model.conceptStates[CVC]
+    expect(entry.state).toBe('solid')
+    expect(entry.needsReconcile).toBe(true)
+    expect(refsOn(revised.model, CVC).at(-1)).toMatchObject({
+      coverageQualifier: 'partial',
+      promoted: false,
+    })
+  })
+
+  /**
+   * The same sequence on an entry that ALSO carries `completionReviewNeeded`.
+   *
+   * The freezing eval clears that flag as it writes, so the pair cannot be built
+   * by the writers in one run — but a release that preserves it, an imported
+   * record and a legacy one all produce it, which is why nothing may assume the
+   * two flags are exclusive. Persisting it here is the honest fixture for that
+   * state, and the claim under test is that a release settles NEITHER question by
+   * acting on the other.
+   */
+  const flaggedAndFrozen = (): LearnerModel => {
+    const evaluated = attestedThenDisagreed()
+    return model({
+      [CVC]: { ...evaluated.conceptStates[CVC], completionReviewNeeded: true },
+    })
+  }
+
+  /** What every advice consumer must still read on such an entry. */
+  function expectStillUncertain(entry: ConceptStateEntry): void {
+    // Both questions are still open, and neither was answered by the other.
+    expect(entry.needsReconcile).toBe(true)
+    expect(entry.completionReviewNeeded).toBe(true)
+    // The parent's word is what is STORED — a release did not lower it...
+    expect(entry.state).toBe('solid')
+    // ...and the shared advice read is still the conservative one, because an
+    // unreconstructed basis reads at the working edge until somebody settles it.
+    expect(effectiveConceptState(entry)).toBe('frontier')
+  }
+
+  it('preserves an unrelated completion-review flag on withdrawal', () => {
+    const withdrawn = withdrawCompletionCoverage(flaggedAndFrozen(), 'fastPhonics:draft-1', WITHDRAWN_AT, 'notComplete')
+    expectStillUncertain(withdrawn.model.conceptStates[CVC])
+    expect(withdrawn.directlyGovernedConceptIds).toContain(CVC)
+    expect(withdrawn.revertedConceptIds).not.toContain(CVC)
+  })
+
+  it('preserves it when a reviewed mapping stops claiming the concept', () => {
+    const revised = applyCompletionCoverage(flaggedAndFrozen(), write([direct(BLENDS, 14)], 2), WITHDRAWN_AT)
+    expect(revised.releasedConceptIds).toContain(CVC)
+    expectStillUncertain(revised.model.conceptStates[CVC])
+  })
+
+  it('preserves it when a reviewed mapping downgrades the concept to partial', () => {
+    const revised = applyCompletionCoverage(flaggedAndFrozen(), write([partial(CVC)], 2), WITHDRAWN_AT)
+    expect(revised.releasedConceptIds).toContain(CVC)
+    expectStillUncertain(revised.model.conceptStates[CVC])
+    // The partial claim is recorded as evidence and supports nothing, so it
+    // cannot lift the conservative read either.
+    expect(refsOn(revised.model, CVC).at(-1)).toMatchObject({ coverageQualifier: 'partial', promoted: false })
+  })
+
+  it('still clears the flag where no parent word was frozen', () => {
+    // The other half of the rule, so "preserve it" cannot quietly become "never
+    // clear it": with nothing frozen, a direct read made since the confirmation
+    // is exactly what the flag was waiting for, and it closes the review.
+    const confirmed = applyCompletionCoverage(model(), write([direct(CVC)]), NOW).model
+    const evaluated = applyEvalFindingsToModel(
+      confirmed,
+      [{ conceptId: CVC, state: 'frontier', note: 'Guided eval — at the working edge' }],
+      'sess-eval',
+      EVALUATED,
+    ).model
+    const persisted = model({
+      [CVC]: { ...evaluated.conceptStates[CVC], completionReviewNeeded: true },
+    })
+
+    const withdrawn = withdrawCompletionCoverage(persisted, 'fastPhonics:draft-1', WITHDRAWN_AT, 'notComplete')
+    const entry = withdrawn.model.conceptStates[CVC]
+    expect(entry.completionReviewNeeded).toBe(false)
+    expect(entry.needsReconcile).toBeFalsy()
+    expect(entry.state).toBe('frontier')
+    expect(effectiveConceptState(entry)).toBe('frontier')
+  })
+
+  it('keeps the state when the frozen word recorded no read of its own', () => {
+    // A pre-FEAT-66 attestation ref stamped no `readState`, so nothing can say
+    // what the parent's word was — but it can still say that they gave one and
+    // are being asked again. The release keeps the state rather than handing the
+    // decision to the frozen eval through `survivingSupportedState`.
+    const confirmed = applyCompletionCoverage(model(), write([direct(CVC)]), NOW).model
+    const legacy = model({
+      [CVC]: {
+        ...confirmed.conceptStates[CVC],
+        needsReconcile: true,
+        evidence: [
+          ...refsOn(confirmed, CVC),
+          { kind: 'attestation', sourceId: 'reviewChat', note: 'I have seen this', observedAt: ATTESTED },
+          { kind: 'eval', sourceId: 'sess-eval', note: 'lower read', observedAt: EVALUATED, readState: 'frontier' },
+        ],
+      },
+    })
+
+    const withdrawn = withdrawCompletionCoverage(legacy, 'fastPhonics:draft-1', WITHDRAWN_AT, 'notComplete')
+    const entry = withdrawn.model.conceptStates[CVC]
+    expect(entry.state).toBe('forming')
+    expect(withdrawn.directlyGovernedConceptIds).toContain(CVC)
+    expect(withdrawn.supportedConceptIds).not.toContain(CVC)
+    expect(withdrawn.revertedConceptIds).not.toContain(CVC)
+    expect(entry.needsReconcile).toBe(true)
+  })
+
+  it('follows the parent once they answer — either way they answer', () => {
+    const evaluated = attestedThenDisagreed()
+
+    // Kept their word: the new attestation reads `solid` and is the latest read.
+    const kept = applyReviewActionToModel(evaluated, attest('solid', 'reconcileKeep'), RESOLVED).model
+    expect(kept.conceptStates[CVC].needsReconcile).toBe(false)
+    const afterKeep = withdrawCompletionCoverage(kept, 'fastPhonics:draft-1', WITHDRAWN_AT, 'notComplete')
+    expect(afterKeep.model.conceptStates[CVC].state).toBe('solid')
+    expect(afterKeep.directlyGovernedConceptIds).toContain(CVC)
+
+    // Went with the model's read: the concept lands at `frontier` — the state the
+    // parent chose, NOT the `solid` they had recorded before and not the
+    // confirmation's `not-yet` baseline either. This is also the proof that the
+    // repair is not a blanket freeze: the entry carries two attestations and a
+    // lower eval read, and the release still follows the latest word.
+    const took = applyReviewActionToModel(evaluated, attest('frontier', 'reconcileTake'), RESOLVED).model
+    expect(took.conceptStates[CVC].state).toBe('frontier')
+    expect(took.conceptStates[CVC].needsReconcile).toBe(false)
+    const afterTake = withdrawCompletionCoverage(took, 'fastPhonics:draft-1', WITHDRAWN_AT, 'notComplete')
+    expect(afterTake.model.conceptStates[CVC].state).toBe('frontier')
+    expect(afterTake.directlyGovernedConceptIds).toContain(CVC)
+  })
+
+  it('still follows a later eval where no parent word was frozen', () => {
+    // Ordinary precedence, untouched: with nothing attested the eval applies at
+    // the time it lands, no question is opened, and the release follows the read.
+    const confirmed = applyCompletionCoverage(model(), write([direct(CVC)]), NOW).model
+    const evaluated = applyEvalFindingsToModel(
+      confirmed,
+      [{ conceptId: CVC, state: 'frontier', note: 'Guided eval — at the working edge' }],
+      'sess-eval',
+      EVALUATED,
+    ).model
+    expect(evaluated.conceptStates[CVC].state).toBe('frontier')
+    expect(evaluated.conceptStates[CVC].needsReconcile).toBeFalsy()
+
+    const withdrawn = withdrawCompletionCoverage(evaluated, 'fastPhonics:draft-1', WITHDRAWN_AT, 'notComplete')
+    expect(withdrawn.model.conceptStates[CVC].state).toBe('frontier')
+    expect(withdrawn.directlyGovernedConceptIds).toContain(CVC)
+  })
+
+  it('asks for an OPEN question and a LIVE word, and sets aside the eval alone', () => {
+    const attestation = { kind: 'attestation', sourceId: 'reviewChat', note: 'seen', observedAt: ATTESTED, readState: 'solid' }
+    const lowerEval = { kind: 'eval', sourceId: 'sess-eval', note: 'read', observedAt: EVALUATED, readState: 'frontier' }
+
+    // The open question: the two readers disagree, which is the whole repair.
+    const open = { evidence: [attestation, lowerEval], needsReconcile: true }
+    expect(governingDirectRead(open)).toBe(lowerEval)
+    expect(acceptedDirectRead(open)).toBe(attestation)
+    expect(pendingAttestationFreeze(open)).toBe(attestation)
+
+    // No open question ⇒ no freeze. An attestation in the history never silences
+    // a later eval, which is how the repair stays narrow.
+    const settled = { evidence: [attestation, lowerEval] }
+    expect(pendingAttestationFreeze(settled)).toBeUndefined()
+    expect(acceptedDirectRead(settled)).toBe(lowerEval)
+
+    // A superseded word is not a word in force.
+    const retired = {
+      evidence: [{ ...attestation, status: 'superseded' }, lowerEval],
+      needsReconcile: true,
+    }
+    expect(pendingAttestationFreeze(retired)).toBeUndefined()
+    expect(acceptedDirectRead(retired)).toBe(lowerEval)
+
+    // Only the `eval` kind is set aside: a later quest that READ a state decides,
+    // and one that read nothing still decides nothing.
+    const quest = { kind: 'quest', sourceId: 'q1', note: 'mine', observedAt: RESOLVED, readState: 'forming' }
+    const failed = { kind: 'quest', sourceId: 'q2', note: 'mine', observedAt: RESOLVED }
+    expect(acceptedDirectRead({ evidence: [attestation, lowerEval, quest], needsReconcile: true })).toBe(quest)
+    expect(acceptedDirectRead({ evidence: [attestation, lowerEval, failed], needsReconcile: true })).toBe(attestation)
+
+    // `sinceIso` still means strictly later — the frozen path is no exception.
+    expect(acceptedDirectRead(open, EVALUATED)).toBeUndefined()
+    expect(acceptedDirectRead(open, OBSERVED)).toBe(attestation)
   })
 })

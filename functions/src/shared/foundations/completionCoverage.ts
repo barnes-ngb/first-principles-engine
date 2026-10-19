@@ -63,6 +63,25 @@
  *    of the one under review (the UX-291 working-level projection, whose
  *    band-derived ref is deliberately not support this reader values: a fresh
  *    reading of the child replaces the state rather than propping it up).
+ * 6. **An unresolved parent-attestation disagreement is not a read.** When a
+ *    guided eval disagrees with a concept a parent has attested,
+ *    `applyEvalFindingsToModel` does not apply it: the `eval` ref is appended,
+ *    the parent's state stands and the entry is flagged `needsReconcile` (the
+ *    FEAT-76 attestation freeze). That ref therefore records a read nobody has
+ *    accepted — the parent has been asked and has not answered — so while the
+ *    flag stands it is not the governing read of the child either, and
+ *    {@link acceptedDirectRead} answers with the parent's own word instead.
+ *    Every other direct ref still speaks (a later quest that read a state
+ *    decides exactly as before), nothing here writes or clears the flag, and
+ *    the moment the parent resolves the disagreement — by giving their word
+ *    again, the one act that clears it — the eval ref is an ordinary read and
+ *    the latest read decides again. The two flags are distinct but **not
+ *    exclusive**: an entry may carry `completionReviewNeeded` as well, and a
+ *    release that follows the parent's frozen word leaves that uncertainty
+ *    exactly where it was, so {@link effectiveConceptState} goes on reading the
+ *    concept conservatively (rule 5) until somebody settles it. Without this, withdrawing a completion from
+ *    under an attested concept recomputed the state from the frozen eval and
+ *    lowered a state every writer had been honouring (finding 4305276208).
  *
  * Pure, dependency-free and structurally typed on purpose: the client's
  * `ConceptStateEntry` / `EvidenceRef` and the server's `StoredConceptState` /
@@ -130,12 +149,26 @@ export const COVERAGE_CAP: CoverageState = "forming";
  */
 export const COVERAGE_REVIEW_CEILING: CoverageState = "frontier";
 
+/** The evidence kind a parent's own word writes (FEAT-66). */
+export const ATTESTATION_EVIDENCE = "attestation";
+
+/** The evidence kind a guided evaluation writes (FEAT-76). */
+export const EVAL_EVIDENCE = "eval";
+
 /** The evidence kinds that are a direct observation of the child (rule 2). */
 export const GOVERNING_DIRECT_KINDS: readonly string[] = [
-  "attestation",
-  "eval",
+  ATTESTATION_EVIDENCE,
+  EVAL_EVIDENCE,
   "quest",
 ];
+
+/**
+ * The direct kinds that still speak while a parent's attestation is frozen
+ * against an unresolved eval (rule 6) — every one of them except the `eval`
+ * whose read is the thing waiting to be answered.
+ */
+const ACCEPTED_DIRECT_KINDS_WHILE_FROZEN: readonly string[] =
+  GOVERNING_DIRECT_KINDS.filter((kind) => kind !== EVAL_EVIDENCE);
 
 /** The subset of an evidence ref this module reads. */
 export interface CoverageEvidenceLike {
@@ -218,6 +251,17 @@ export interface CoverageEntryLike {
    * Foundations tab offer "keep my word" for a question nobody was asked.
    */
   completionReviewNeeded?: boolean;
+  /**
+   * Set (FEAT-76) while a guided eval disagrees with a parent `attestation` on
+   * this concept and the parent has not answered yet.
+   *
+   * Read here for ONE question (rule 6): is the latest `eval` ref a read the
+   * writers accepted, or the read that is still waiting for an answer? Nothing
+   * in this module writes it or clears it — that belongs to the parent's next
+   * word — and it stays a different flag from `completionReviewNeeded` above,
+   * meaning a different thing and resolved by a different act.
+   */
+  needsReconcile?: boolean;
 }
 
 /** True unless the ref has been explicitly superseded (rule 4). */
@@ -260,15 +304,21 @@ export function isGoverningDirectKind(kind: string | undefined): boolean {
  * only on a qualifying result — so it is a direct observation that establishes
  * nothing. One question wants every observation, the other only the ones that
  * actually read a state.
+ *
+ * `kinds` narrows which direct kinds may answer at all. It defaults to all of
+ * them, and the one caller that narrows it is rule 6's: an `eval` the
+ * attestation freeze held back is a ref the writers did not act on, so a writer
+ * recomputing a state from direct evidence must not act on it either.
  */
 function latestDirectRef<T extends CoverageEvidenceLike>(
   entry: { evidence?: T[] } | undefined,
   sinceIso: string | undefined,
   requireRead: boolean,
+  kinds: readonly string[] = GOVERNING_DIRECT_KINDS,
 ): T | undefined {
   let best: T | undefined;
   for (const ref of activeEvidence(entry?.evidence)) {
-    if (!isGoverningDirectKind(ref.kind)) continue;
+    if (!ref.kind || !kinds.includes(ref.kind)) continue;
     if (requireRead && !asCoverageState(ref.readState)) continue;
     if (sinceIso) {
       if (!ref.observedAt || ref.observedAt <= sinceIso) continue;
@@ -324,6 +374,65 @@ export function governingDirectRead<T extends CoverageEvidenceLike>(
   sinceIso?: string,
 ): T | undefined {
   return latestDirectRef(entry, sinceIso, true);
+}
+
+/**
+ * The parent `attestation` an unresolved eval-vs-parent disagreement is holding
+ * in force on this entry — or undefined when no disagreement is standing
+ * (rule 6).
+ *
+ * BOTH halves are required, and the conjunction is the whole narrowness of the
+ * rule. `needsReconcile` says the question is OPEN — the parent has been shown
+ * two reads and has not chosen, and their word again is the one act that closes
+ * it — and an ACTIVE `attestation` ref is the word that is standing. So a
+ * concept that merely carries an attestation somewhere in its history is **not**
+ * frozen: the ordinary "latest read decides" rule governs it, including a later
+ * eval that read lower, which is exactly what should happen once the parent has
+ * answered. And a flag left standing over a superseded attestation freezes
+ * nothing either, because there is no live word left to keep.
+ */
+export function pendingAttestationFreeze<T extends CoverageEvidenceLike>(
+  entry: { evidence?: T[]; needsReconcile?: boolean } | undefined,
+): T | undefined {
+  if (!entry?.needsReconcile) return undefined;
+  return latestDirectRef(entry, undefined, false, [ATTESTATION_EVIDENCE]);
+}
+
+/**
+ * The latest direct read the writers have ACCEPTED — {@link governingDirectRead}
+ * in every case except one: on an entry whose parent attestation is frozen
+ * against an unresolved eval (rule 6), the frozen `eval` reads do not count and
+ * the answer is the parent's own word, or any later observation of a different
+ * kind that read a state.
+ *
+ * This is the question a WRITER has to ask before it recomputes a state from
+ * direct evidence, because acting on the frozen eval's read IS applying the eval
+ * the freeze refused — one step later and through another door. Reading that
+ * ref is still perfectly correct for a reader whose question is *what did the
+ * evaluation see?* (the reconcile view's second line, which must show the parent
+ * precisely the read nobody has accepted); such a reader goes to the ref and not
+ * through here.
+ *
+ * The `eval` kind is excluded as a class while the flag stands, rather than only
+ * the refs observed after the attestation, because for an earlier one the two
+ * rules agree: an eval observed BEFORE the parent's word was already spoken over
+ * by it, and the attestation — being the later read — wins the ordinary contest
+ * anyway. So the exclusion changes the answer for exactly the ref the parent is
+ * being asked about.
+ */
+export function acceptedDirectRead<T extends CoverageEvidenceLike>(
+  entry: { evidence?: T[]; needsReconcile?: boolean } | undefined,
+  sinceIso?: string,
+): T | undefined {
+  if (!pendingAttestationFreeze(entry)) {
+    return governingDirectRead(entry, sinceIso);
+  }
+  return latestDirectRef(
+    entry,
+    sinceIso,
+    true,
+    ACCEPTED_DIRECT_KINDS_WHILE_FROZEN,
+  );
 }
 
 /** Why a coverage claim did not move a concept. */
@@ -628,6 +737,26 @@ export function coverageSupportedState(
  * the question {@link completionReviewCeiling} asks of an entry whose basis is
  * still under review. One definition, so a release and a read can never disagree
  * about what a claim is worth.
+ *
+ * Rule 6 is deliberately NOT applied here, and the two cases are different.
+ *
+ * The RELEASE never reaches this function while a parent's word is frozen: it
+ * answers the frozen case in full first — through {@link acceptedDirectRead},
+ * and then by KEEPING the state when the frozen word recorded no read of its own
+ * — precisely so the fall-through cannot hand the decision back to the eval the
+ * freeze refused.
+ *
+ * {@link completionReviewCeiling} CAN reach it on an entry carrying both flags:
+ * the freezing eval clears `completionReviewNeeded` as it writes, but a release
+ * that preserves it, an imported record and a legacy one all put the two
+ * together, so nothing may be built on the assumption that they are exclusive.
+ * Rule 6 is still not applied, for the reason the flag exists: it would RAISE the
+ * ceiling from the disputed read to the parent's higher word, on the one entry
+ * whose basis is by definition unsettled. The flag's whole job is to make such a
+ * concept read DOWN until somebody settles it, and this is the reader the SERVER
+ * prompt slices share. Narrowing what a release may act on is one question;
+ * making an unsettled concept read as stronger is another, and nothing has asked
+ * for it.
  */
 export function survivingSupportedState<T extends CoverageEvidenceLike>(
   entry: { evidence?: T[] } | undefined,
