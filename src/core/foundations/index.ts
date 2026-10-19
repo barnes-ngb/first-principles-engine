@@ -86,14 +86,17 @@ export type {
  * them through the barrel like everything else.
  */
 export {
+  ATTESTATION_EVIDENCE,
   COVERAGE_CAP,
   COVERAGE_REVIEW_CEILING,
   COVERAGE_STATE_RANK,
   CoverageQualifier,
   CoverageWithheldReason,
+  EVAL_EVIDENCE,
   EvidenceRefStatus,
   GOVERNING_DIRECT_KINDS,
   PROGRAM_COMPLETION_COVERAGE,
+  acceptedDirectRead,
   activeCompletionRefsFor,
   activeEvidence,
   completionReviewCeiling,
@@ -107,6 +110,7 @@ export {
   isActiveEvidence,
   isCompletionCoverageRef,
   isGoverningDirectKind,
+  pendingAttestationFreeze,
 } from '../../../functions/src/shared/foundations/completionCoverage'
 export type {
   CoverageEntryLike,

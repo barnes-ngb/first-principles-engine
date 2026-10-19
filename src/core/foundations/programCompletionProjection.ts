@@ -18,8 +18,13 @@
 //     quest queue" rail.
 //   • no `attestation` is created. The parent confirmed a PROGRAM is finished,
 //     which is not her word that the child can do each concept.
-//   • no `needsReconcile` is read or written. A completion has no opinion about
-//     an eval-vs-parent disagreement.
+//   • no `needsReconcile` is ever WRITTEN or cleared. A completion has no
+//     opinion about an eval-vs-parent disagreement: it cannot create one, it
+//     cannot settle one, and a parent who owes an answer still owes it
+//     afterwards. A RELEASE does read the flag, for the one question a release
+//     has to ask — "which direct read of this child may I recompute from?" —
+//     because an eval the freeze held back is a read nobody accepted (rule 6 of
+//     the shared module, finding 4305276208).
 //   • nothing is deleted. A withdrawal supersedes this confirmation's own refs
 //     and leaves every other ref, and every other field, exactly as it was.
 //
@@ -32,9 +37,12 @@
 // order of precedence on withdrawal is:
 //
 //   1. a direct observation made AFTER the completion's own observation that
-//      READ a state controls outright — the state stays where that evidence put
-//      it. A later look that established nothing (a failed quest) is not that
-//      observation and does not displace the last one that was;
+//      READ a state, and that the writers ACCEPTED, controls outright — the
+//      state stays where that evidence put it. A later look that established
+//      nothing (a failed quest) is not that observation and does not displace
+//      the last one that was; neither is an eval the parent-attestation freeze
+//      held back while the parent has yet to answer it, because no writer has
+//      acted on that read and a release may not be the first to;
 //   2. otherwise the higher of (a) what any surviving independent coverage claim
 //      actually asserted — `coverageCeiling`, not the cap by assumption — and
 //      (b) the recorded `priorState` is restored (clamped so it can only ever
@@ -54,15 +62,17 @@
 // `workbookBridge.ts` documents for its own node map.
 import { FOUNDATION_NODE_MAP } from '../../../functions/src/shared/foundations/graph'
 import {
+  ATTESTATION_EVIDENCE,
   COVERAGE_STATE_RANK,
   CoverageQualifier,
   EvidenceRefStatus,
   PROGRAM_COMPLETION_COVERAGE,
+  acceptedDirectRead,
   activeCompletionRefsFor,
   asCoverageState,
   completionRefsFor,
   coveragePromotion,
-  governingDirectRead,
+  pendingAttestationFreeze,
   survivingSupportedState,
 } from '../../../functions/src/shared/foundations/completionCoverage'
 import type { CompletionCoverageTarget } from './fastPhonicsCompletion'
@@ -134,7 +144,13 @@ export interface WithdrawnCompletionCoverage {
  *      observation controls outright, whatever it READ and however often this is
  *      replayed — but it has to have read something: a failed or short quest
  *      observed later measured nothing, and a release cannot follow an
- *      observation that established no state;
+ *      observation that established no state. It also has to be a read the
+ *      writers ACCEPTED: an eval frozen against a parent's attestation and
+ *      still awaiting their answer (`needsReconcile`) is not one, so the
+ *      parent's standing word decides and this release leaves the state and the
+ *      open question alone (rule 6, finding 4305276208). Once the parent
+ *      answers, their new word IS the latest read and ordinary precedence
+ *      resumes — including when they went with the model's read;
  *   2. otherwise, whatever SURVIVING evidence justifies — the latest direct
  *      read, or, when an independent coverage claim (a workbook position,
  *      another program's completion) still stands, the state THAT CLAIM
@@ -148,11 +164,21 @@ export interface WithdrawnCompletionCoverage {
  *      `completionReviewNeeded`, which every advice consumer reads
  *      conservatively.
  *
- * An ALREADY flagged entry keeps its flag through (2) and (3): only (1) — a
- * direct observation of the child — answers the question the flag asks, and a
- * release that recomputes a state from a claim or a baseline has not measured
- * anybody. The read loses nothing by it, because `effectiveConceptState` takes
- * its ceiling from what is live rather than from the flag alone.
+ * An ALREADY flagged entry keeps its flag through (2) and (3): only a direct
+ * observation of the child answers the question the flag asks, and a release
+ * that recomputes a state from a claim or a baseline has not measured anybody.
+ * The read loses nothing by it, because `effectiveConceptState` takes its
+ * ceiling from what is live rather than from the flag alone.
+ *
+ * It keeps it through (1) in the one place where the read that decided is not a
+ * fresh look at the child: a pending reconciliation whose accepted read is the
+ * parent's standing word, the very word the frozen eval disputes.
+ * `completionReviewNeeded` and `needsReconcile` therefore CAN stand together on
+ * one entry — an imported or legacy record may carry both, and this release will
+ * not resolve either by acting on the other. A freeze alone is not that case
+ * though: where the accepted read is a later QUEST, a fresh look did establish a
+ * basis and the flag clears while `needsReconcile` stands untouched. Everywhere
+ * else (1) clears the flag exactly as it always has.
  */
 function releaseCompletionOnConcept(
   prev: ConceptStateEntry,
@@ -197,14 +223,75 @@ function releaseCompletionOnConcept(
   // confirmation has read a state, this is undefined and the release falls
   // through to surviving support and the recorded baseline exactly as before,
   // which is why a failed quest alone cannot keep a completion-only promotion.
-  const governing = governingDirectRead(released, holder.observedAt)
+  //
+  // `acceptedDirectRead`, not `governingDirectRead` (rule 6, finding
+  // 4305276208): where the entry carries an eval the FEAT-76 attestation freeze
+  // held back — the parent's `solid` standing, the eval's lower read appended
+  // beside it, `needsReconcile` open and unanswered — that ref is the one read
+  // no writer has acted on. Recomputing the state from it here would apply the
+  // very eval the freeze refused and lower a parent's word through the back
+  // door, on a release whose own reason is that a PROGRAM was not finished. The
+  // parent's word answers instead, which on this path means the state does not
+  // move, and `needsReconcile` is left exactly as it is, because the
+  // disagreement is still standing and is still theirs to settle.
+  const frozenAttestation = pendingAttestationFreeze(released)
+  const governing = acceptedDirectRead(released, holder.observedAt)
+  // WHICH accepted read is deciding, when a freeze is standing? The helper can
+  // answer with either the parent's own word or a later qualifying quest, and the
+  // two differ for `completionReviewNeeded` only: the parent's word is the basis
+  // the flag is open about, while a quest IS the fresh look the flag was waiting
+  // for (finding 4310061221). Identity first — the frozen attestation itself —
+  // then the kind, for the orderings where the freeze's pick and the accepted
+  // read's pick are two different attestation refs (an unread later word, or two
+  // sharing a stamp): both are a parent's word, neither is a look at the child.
+  const governedByFrozenParent =
+    frozenAttestation != null &&
+    (governing === frozenAttestation || governing?.kind === ATTESTATION_EVIDENCE)
   const directState = asCoverageState(governing?.readState)
   if (directState) {
     const to = COVERAGE_STATE_RANK[directState] < COVERAGE_STATE_RANK[from] ? directState : from
     return {
-      entry: { ...released, state: to, ...(prev.completionReviewNeeded ? { completionReviewNeeded: false } : {}) },
+      entry: {
+        ...released,
+        state: to,
+        // `completionReviewNeeded` is cleared only where a read SETTLED the
+        // concept, which is the ordinary case: a direct observation of the child
+        // made since the confirmation is exactly the thing the flag was waiting
+        // for. Where the deciding read is the frozen parent's word instead it is
+        // not that — on a legacy or imported entry that word may be the very
+        // state the flag is open about — so both flags stand together and this
+        // release preserves BOTH, answering "which read may I recompute from?"
+        // without claiming anybody's basis has been established. Advice
+        // consumers go on reading the concept conservatively through
+        // `effectiveConceptState` until a parent or a diagnostic settles it.
+        // `needsReconcile` is not touched either way: clearing the fresh-look
+        // uncertainty does not settle the parent's open question.
+        ...(prev.completionReviewNeeded && !governedByFrozenParent
+          ? { completionReviewNeeded: false }
+          : {}),
+      },
       outcome: 'governed', from, to,
     }
+  }
+  if (frozenAttestation) {
+    // The parent's word is in force and postdates nothing we can read: a
+    // pre-FEAT-66 attestation ref stamped no `readState` (and only a hand-edited
+    // or very old record can be in this shape, since `readState` predates
+    // completion coverage entirely). What we DO know is that a parent spoke
+    // about this concept and is being asked to speak again, so the state is KEPT
+    // rather than recomputed from a baseline their word has already stood over.
+    // Falling through here is the defect in its quietest form, and through a
+    // third door: `survivingSupportedState` asks the live refs what they justify
+    // and would find the frozen eval's read waiting there, so the concept would
+    // land on the very read no writer accepted — this time reported as
+    // `supported`. Naming the case stops it at the step that understands it.
+    //
+    // `completionReviewNeeded` is untouched here for the same reason the branch
+    // above leaves it standing when the frozen word is what decided, and with
+    // one more: this branch kept the stored state on the strength of a word it
+    // cannot even read, so there is nothing here that could have settled
+    // anything.
+    return { entry: released, outcome: 'governed', from, to: from }
   }
 
   const supported = survivingSupportedState(released, completionId)

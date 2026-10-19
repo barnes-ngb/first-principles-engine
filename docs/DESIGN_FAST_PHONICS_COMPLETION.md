@@ -162,8 +162,26 @@ projects:
    place of the one under review — so no baseline, `readState` or provenance is
    ever invented to make an ambiguous `forming` read as settled.
 
+6. an `eval` that the FEAT-76 **attestation freeze** held back is not a read any
+   writer accepted, so while `needsReconcile` stands over a **live** attestation
+   the parent's own word is the governing read (`acceptedDirectRead`). It needs
+   both halves — the open flag and a live attestation — so a concept that merely
+   carries an attestation in its history is governed by the latest read exactly
+   as before; only the `eval` kind is set aside, so a later quest that read a
+   state still decides; and the moment the parent answers, their new word *is*
+   the latest read. Without it, withdrawing a completion applied the very eval
+   the freeze refused and lowered an attested state through the back door. The
+   two flags are distinct but **not exclusive** — an imported or legacy entry can
+   carry `completionReviewNeeded` as well — so a release that follows the frozen
+   **word** preserves that flag instead of clearing it, and the concept goes on
+   reading conservatively (rule 5) until a parent or a diagnostic settles it. A
+   freeze alone is not that case: where the accepted read is a later **quest**, a
+   fresh look did establish a basis, so the review flag clears and only
+   `needsReconcile` — the parent's own question — stands (finding 4310061221).
+
 No prerequisite traversal, no quest queued, no attestation created, and
-`needsReconcile` is never read or written by this path.
+`needsReconcile` is never **written** or cleared by this path — a release reads
+it, for rule 6's question alone.
 
 ## 6. Correction contract
 
@@ -176,7 +194,7 @@ Releasing a concept (withdrawal, or a revision that drops/downgrades a target)
 recomputes it in this order:
 
 1. a direct observation made **after** the completion's own observation controls
-   outright when it establishes a valid state, however often the write is replayed. A later observation with no state read does not erase the latest actual assessment;
+   outright when it establishes a valid state, however often the write is replayed. A later observation with no state read does not erase the latest actual assessment; neither does an eval frozen against a standing attestation (rule 6) — there the parent's word decides, and where that word recorded no state of its own the release **keeps** the state rather than falling through to (2), which would hand the decision back to the frozen read;
 2. otherwise whatever **surviving** evidence justifies — the *latest* direct read,
    or, when an independent coverage claim (a workbook position, another
    confirmation) still stands, **the state that claim asserted**
