@@ -1339,3 +1339,177 @@ describe('a frozen eval is not a read a release may follow (finding 4305276208)'
     expect(acceptedDirectRead(open, OBSERVED)).toBe(attestation)
   })
 })
+
+/**
+ * A quest is not the frozen parent's word (finding 4310061221).
+ *
+ * The preceding repair preserved `completionReviewNeeded` whenever a freeze was
+ * standing. But while the freeze stands `acceptedDirectRead` can answer with
+ * EITHER the parent's word or a LATER QUEST that read a state — and only the
+ * first is the word the flag is open about. A quest is the fresh look the flag
+ * was waiting for (the quest writer clears the flag itself on a qualifying
+ * round), so on a dual-flagged persisted or imported entry the completion-review
+ * uncertainty must close while `needsReconcile` — a different question, still the
+ * parent's — stands untouched.
+ *
+ * The distinction is drawn once, on `governedByFrozenParent`: by identity with
+ * the frozen attestation, or failing that by its kind, for the orderings where
+ * the freeze's pick and the accepted read's pick are two different attestation
+ * refs. Nothing else about the release changes, and the clear is not a blanket
+ * one — the `keeps …` and no-read cases below are the paired controls.
+ *
+ * **Negative control for a reviewer:** restore the guard to `!frozenAttestation`
+ * and the three `clears` cases fail with `completionReviewNeeded` still `true`;
+ * weaken it to `!frozenAttestation ? … : {}` dropped entirely (a blanket clear)
+ * and the three `keeps`/no-read cases fail with the flag `false` while the
+ * parent's basis is still unsettled.
+ */
+describe('an accepted later quest settles the completion review (finding 4310061221)', () => {
+  const ATTESTED = '2026-10-17T18:00:00.000Z'
+  const EVALUATED = '2026-10-18T18:00:00.000Z'
+  const QUESTED = '2026-10-19T09:00:00.000Z'
+  const WITHDRAWN_AT = '2026-10-19T12:00:00.000Z'
+
+  /** The frozen, dual-flagged entry, through the real writers up to the release. */
+  function frozen(): LearnerModel {
+    const confirmed = applyCompletionCoverage(model(), write([direct(CVC)]), NOW).model
+    const attested = applyReviewActionToModel(
+      confirmed,
+      buildOverrideAction({ childId: 'c1', conceptId: CVC, state: 'solid', origin: 'foundationsTab' }),
+      ATTESTED,
+    ).model
+    const evaluated = applyEvalFindingsToModel(
+      attested,
+      [{ conceptId: CVC, state: 'frontier', note: 'Guided eval — sounding these out again' }],
+      'sess-eval',
+      EVALUATED,
+    ).model
+    expect(evaluated.conceptStates[CVC].state).toBe('solid')
+    expect(evaluated.conceptStates[CVC].needsReconcile).toBe(true)
+    return evaluated
+  }
+
+  /**
+   * The same entry with a later quest ref appended, and `completionReviewNeeded`
+   * persisted beside the open reconcile flag.
+   *
+   * A qualifying quest run through its own writer would clear the flag as it
+   * wrote, so the pair cannot be built in one pass — but a preserved, imported or
+   * legacy record carries exactly this shape, which is the state the finding is
+   * about.
+   */
+  const flaggedWithLaterQuest = (quest: Partial<EvidenceRef> = {}): LearnerModel => {
+    const evaluated = frozen()
+    return model({
+      [CVC]: {
+        ...evaluated.conceptStates[CVC],
+        completionReviewNeeded: true,
+        evidence: [
+          ...refsOn(evaluated, CVC),
+          {
+            kind: 'quest',
+            sourceId: 'q-later',
+            note: 'mine',
+            observedAt: QUESTED,
+            readState: 'forming',
+            ...quest,
+          } as EvidenceRef,
+        ],
+      },
+    })
+  }
+
+  /** The dual-flagged entry with NO later look — the frozen parent alone. */
+  const flaggedParentOnly = (): LearnerModel => {
+    const evaluated = frozen()
+    return model({
+      [CVC]: { ...evaluated.conceptStates[CVC], completionReviewNeeded: true },
+    })
+  }
+
+  /** What the release must leave once a quest has looked: one flag down, one up. */
+  function expectQuestSettled(entry: ConceptStateEntry): void {
+    expect(entry.completionReviewNeeded).toBe(false)
+    // The parent's open question is NOT answered by somebody else's look.
+    expect(entry.needsReconcile).toBe(true)
+    // The quest's own read decides the state, and the conservative ceiling lifts
+    // with the flag that imposed it.
+    expect(entry.state).toBe('forming')
+    expect(effectiveConceptState(entry)).toBe('forming')
+  }
+
+  it('clears only the completion review on withdrawal', () => {
+    const withdrawn = withdrawCompletionCoverage(flaggedWithLaterQuest(), 'fastPhonics:draft-1', WITHDRAWN_AT, 'notComplete')
+    expectQuestSettled(withdrawn.model.conceptStates[CVC])
+    expect(withdrawn.directlyGovernedConceptIds).toContain(CVC)
+    expect(withdrawn.reviewNeededConceptIds).not.toContain(CVC)
+  })
+
+  it('clears it when a reviewed mapping stops claiming the concept', () => {
+    const revised = applyCompletionCoverage(flaggedWithLaterQuest(), write([direct(BLENDS, 14)], 2), WITHDRAWN_AT)
+    expect(revised.releasedConceptIds).toContain(CVC)
+    expectQuestSettled(revised.model.conceptStates[CVC])
+  })
+
+  it('clears it when a reviewed mapping downgrades the concept to partial', () => {
+    const revised = applyCompletionCoverage(flaggedWithLaterQuest(), write([partial(CVC)], 2), WITHDRAWN_AT)
+    expect(revised.releasedConceptIds).toContain(CVC)
+    expectQuestSettled(revised.model.conceptStates[CVC])
+  })
+
+  it('keeps it where the frozen parent word is the only accepted read', () => {
+    // The paired control on all three paths: no later look, so the read the
+    // release followed is the very word the flag is open about.
+    const withdrawn = withdrawCompletionCoverage(flaggedParentOnly(), 'fastPhonics:draft-1', WITHDRAWN_AT, 'notComplete')
+    const dropped = applyCompletionCoverage(flaggedParentOnly(), write([direct(BLENDS, 14)], 2), WITHDRAWN_AT)
+    const downgraded = applyCompletionCoverage(flaggedParentOnly(), write([partial(CVC)], 2), WITHDRAWN_AT)
+    for (const entry of [
+      withdrawn.model.conceptStates[CVC],
+      dropped.model.conceptStates[CVC],
+      downgraded.model.conceptStates[CVC],
+    ]) {
+      expect(entry.completionReviewNeeded).toBe(true)
+      expect(entry.needsReconcile).toBe(true)
+      expect(entry.state).toBe('solid')
+      expect(effectiveConceptState(entry)).toBe('frontier')
+    }
+  })
+
+  it('keeps it where the latest quest read nothing', () => {
+    // A failed or short round is not a look that established anything, so the
+    // release falls to the frozen word — unchanged semantics, both flags stand.
+    const failed = flaggedWithLaterQuest({ readState: undefined })
+    const withdrawn = withdrawCompletionCoverage(failed, 'fastPhonics:draft-1', WITHDRAWN_AT, 'notComplete')
+    const entry = withdrawn.model.conceptStates[CVC]
+    expect(entry.state).toBe('solid')
+    expect(entry.completionReviewNeeded).toBe(true)
+    expect(entry.needsReconcile).toBe(true)
+    expect(withdrawn.directlyGovernedConceptIds).toContain(CVC)
+  })
+
+  it('keeps it where the freeze and the accepted read are two different words', () => {
+    // The ordering the identity check alone would miss: a later parent word that
+    // stamped no `readState` is what the freeze names, while the read the release
+    // can act on is their earlier one. Both are the parent's word; neither is a
+    // look at the child, so the flag stands.
+    const evaluated = frozen()
+    const twoWords = model({
+      [CVC]: {
+        ...evaluated.conceptStates[CVC],
+        completionReviewNeeded: true,
+        evidence: [
+          ...refsOn(evaluated, CVC),
+          { kind: 'attestation', sourceId: 'reviewChat', note: 'seen again', observedAt: QUESTED } as EvidenceRef,
+        ],
+      },
+    })
+    expect(pendingAttestationFreeze(twoWords.conceptStates[CVC])!.observedAt).toBe(QUESTED)
+    expect(acceptedDirectRead(twoWords.conceptStates[CVC], OBSERVED)!.observedAt).toBe(ATTESTED)
+
+    const withdrawn = withdrawCompletionCoverage(twoWords, 'fastPhonics:draft-1', WITHDRAWN_AT, 'notComplete')
+    const entry = withdrawn.model.conceptStates[CVC]
+    expect(entry.state).toBe('solid')
+    expect(entry.completionReviewNeeded).toBe(true)
+    expect(entry.needsReconcile).toBe(true)
+  })
+})

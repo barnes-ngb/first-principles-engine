@@ -172,9 +172,12 @@ projects:
    the latest read. Without it, withdrawing a completion applied the very eval
    the freeze refused and lowered an attested state through the back door. The
    two flags are distinct but **not exclusive** — an imported or legacy entry can
-   carry `completionReviewNeeded` as well — so a release that follows a frozen
-   word **preserves** that flag instead of clearing it, and the concept goes on
-   reading conservatively (rule 5) until a parent or a diagnostic settles it.
+   carry `completionReviewNeeded` as well — so a release that follows the frozen
+   **word** preserves that flag instead of clearing it, and the concept goes on
+   reading conservatively (rule 5) until a parent or a diagnostic settles it. A
+   freeze alone is not that case: where the accepted read is a later **quest**, a
+   fresh look did establish a basis, so the review flag clears and only
+   `needsReconcile` — the parent's own question — stands (finding 4310061221).
 
 No prerequisite traversal, no quest queued, no attestation created, and
 `needsReconcile` is never **written** or cleared by this path — a release reads

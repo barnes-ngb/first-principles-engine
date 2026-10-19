@@ -62,6 +62,7 @@
 // `workbookBridge.ts` documents for its own node map.
 import { FOUNDATION_NODE_MAP } from '../../../functions/src/shared/foundations/graph'
 import {
+  ATTESTATION_EVIDENCE,
   COVERAGE_STATE_RANK,
   CoverageQualifier,
   EvidenceRefStatus,
@@ -169,14 +170,15 @@ export interface WithdrawnCompletionCoverage {
  * The read loses nothing by it, because `effectiveConceptState` takes its
  * ceiling from what is live rather than from the flag alone.
  *
- * It keeps it through (1) as well **while a reconciliation is pending**, which
- * is the one place in (1) where the read that decided is not a fresh look at the
- * child: it is the parent's standing word, the very word the frozen eval
- * disputes. `completionReviewNeeded` and `needsReconcile` therefore CAN stand
- * together on one entry — an imported or legacy record may carry both, and this
- * release will not resolve either by acting on the other — and the entry goes on
- * being read conservatively until a parent or a diagnostic settles it. Where no
- * freeze is standing, (1) clears the flag exactly as it always has.
+ * It keeps it through (1) in the one place where the read that decided is not a
+ * fresh look at the child: a pending reconciliation whose accepted read is the
+ * parent's standing word, the very word the frozen eval disputes.
+ * `completionReviewNeeded` and `needsReconcile` therefore CAN stand together on
+ * one entry — an imported or legacy record may carry both, and this release will
+ * not resolve either by acting on the other. A freeze alone is not that case
+ * though: where the accepted read is a later QUEST, a fresh look did establish a
+ * basis and the flag clears while `needsReconcile` stands untouched. Everywhere
+ * else (1) clears the flag exactly as it always has.
  */
 function releaseCompletionOnConcept(
   prev: ConceptStateEntry,
@@ -230,10 +232,21 @@ function releaseCompletionOnConcept(
   // very eval the freeze refused and lower a parent's word through the back
   // door, on a release whose own reason is that a PROGRAM was not finished. The
   // parent's word answers instead, which on this path means the state does not
-  // move; and BOTH standing flags are left exactly as they are, because the
+  // move, and `needsReconcile` is left exactly as it is, because the
   // disagreement is still standing and is still theirs to settle.
   const frozenAttestation = pendingAttestationFreeze(released)
   const governing = acceptedDirectRead(released, holder.observedAt)
+  // WHICH accepted read is deciding, when a freeze is standing? The helper can
+  // answer with either the parent's own word or a later qualifying quest, and the
+  // two differ for `completionReviewNeeded` only: the parent's word is the basis
+  // the flag is open about, while a quest IS the fresh look the flag was waiting
+  // for (finding 4310061221). Identity first — the frozen attestation itself —
+  // then the kind, for the orderings where the freeze's pick and the accepted
+  // read's pick are two different attestation refs (an unread later word, or two
+  // sharing a stamp): both are a parent's word, neither is a look at the child.
+  const governedByFrozenParent =
+    frozenAttestation != null &&
+    (governing === frozenAttestation || governing?.kind === ATTESTATION_EVIDENCE)
   const directState = asCoverageState(governing?.readState)
   if (directState) {
     const to = COVERAGE_STATE_RANK[directState] < COVERAGE_STATE_RANK[from] ? directState : from
@@ -244,17 +257,16 @@ function releaseCompletionOnConcept(
         // `completionReviewNeeded` is cleared only where a read SETTLED the
         // concept, which is the ordinary case: a direct observation of the child
         // made since the confirmation is exactly the thing the flag was waiting
-        // for. While a reconciliation is PENDING it is not that: the read this
-        // branch just followed is the parent's standing word, the same word the
-        // eval is disputing and the parent has been asked about — and on a
-        // legacy or imported entry it may be the very state the flag is open
-        // about. So the two flags can and do stand together, and this release
-        // preserves BOTH: it answers "which read may I recompute from?" without
-        // claiming anybody's basis has been established. Advice consumers go on
-        // reading the concept conservatively through `effectiveConceptState`
-        // until a parent or a diagnostic settles it — which is the direction an
-        // unsettled basis must be read in, and one a release may not shortcut.
-        ...(prev.completionReviewNeeded && !frozenAttestation
+        // for. Where the deciding read is the frozen parent's word instead it is
+        // not that — on a legacy or imported entry that word may be the very
+        // state the flag is open about — so both flags stand together and this
+        // release preserves BOTH, answering "which read may I recompute from?"
+        // without claiming anybody's basis has been established. Advice
+        // consumers go on reading the concept conservatively through
+        // `effectiveConceptState` until a parent or a diagnostic settles it.
+        // `needsReconcile` is not touched either way: clearing the fresh-look
+        // uncertainty does not settle the parent's open question.
+        ...(prev.completionReviewNeeded && !governedByFrozenParent
           ? { completionReviewNeeded: false }
           : {}),
       },
@@ -275,8 +287,8 @@ function releaseCompletionOnConcept(
     // `supported`. Naming the case stops it at the step that understands it.
     //
     // `completionReviewNeeded` is untouched here for the same reason the branch
-    // above leaves it standing while a reconciliation is pending, and with one
-    // more: this branch kept the stored state on the strength of a word it
+    // above leaves it standing when the frozen word is what decided, and with
+    // one more: this branch kept the stored state on the strength of a word it
     // cannot even read, so there is nothing here that could have settled
     // anything.
     return { entry: released, outcome: 'governed', from, to: from }
