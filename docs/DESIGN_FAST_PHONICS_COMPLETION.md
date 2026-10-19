@@ -266,6 +266,67 @@ can check:
 | the apply button | three answers, never one: *updated*, *already up to date*, or **recorded but not applied** (there is no learner model yet). `alreadyRecorded === false` is not evidence that anything was applied |
 | a confirmation or withdrawal with **no answer** | kept as a retry panel bound to the family, child, entry key and account visit it was made under, named for that child, and discarded on an account change. A late retry settles only the request it names, so an older answer cannot mark a newer stranded entry saved or failed |
 
+### 6.2 The correction contract in `firestore.rules` (FIX-265)
+
+**The hole the three checks above cannot close is an OLD CLIENT.** Every one of
+them lives in code the client is running: a tab left open from before FEAT-242
+carries FEAT-241's writer, which writes a correction row and nothing else — no
+marker, no withdrawal — so it can correct a cited row and leave a confirmed
+completion's coverage resting on a record the parent has just corrected. There is
+no client-side answer, because the client in question is the old one. Only the
+server can refuse the write.
+
+So `firestore.rules` gives `nativeProgressObservations` its own match, and it
+asks for exactly one thing: **a correction create must carry its marker, at the
+corrected row's own id, in the same commit.**
+
+| | |
+|---|---|
+| no `correctsObservationId` | admitted unchanged. A plain report is the common case and is not touched for any client |
+| `correctsObservationId` set | the final state of `nativeProgressCorrectionMarkers/{correctedId}` must name THIS row (`correctionObservationId`), the same `childId` and the same `correctionEntryKey` |
+| the marker's state **before** the commit | must be absent, or name a DIFFERENT correction. `getAfter` alone would accept a marker that already named this row — a document nothing in the commit wrote — so "atomic" would have been a claim rather than a check |
+| update, delete | refused outright. The append-only policy of FEAT-241 §3, enforced instead of described; no client route to either exists |
+| everything else | unchanged — every read, the family root, every other collection and every nested document, including anything below an observation |
+
+What it deliberately is **not**: a validation of the reading (the number, the
+meaning, the day and the note are the parent's, checked by the writer that stores
+them — a server copy of those bounds would be a second definition that drifts),
+and not a new authorization boundary. A family has one identity; the rule
+constrains the shape of a write, never who may make one. The marker collection's
+own permissions are **unchanged** on purpose: nothing deletes a marker today, and
+an owner with direct console access could still forge or remove one. That is a
+pre-existing limitation of a single-identity app, named rather than quietly
+inherited, and closing it is not this repair.
+
+**Compatibility, proved against a real emulator** (`src/test/rules/`, run by
+`npm run test:rules` and gated in CI): the current writer's atomic correction,
+its idempotent retry, a re-correction, a correction of a correction, the
+marker-only retry backfill, and the full correction-plus-revocation transaction
+driven through `saveNativeProgressObservation` and `confirmProgramCompletion`
+themselves — which is also what proves the rule's `get` / `getAfter` / `exists`
+calls stay inside Firestore's per-request budget in a real multi-document commit.
+Three of those writes are replayed against a frozen copy of the pre-change
+ruleset, where each must SUCCEED: the markerless correction, an update to a
+stored row, and a delete of one. That makes those refusals attributable to this
+change rather than to a malformed fixture. The mismatch controls — wrong marker
+path, wrong correction id, wrong child, wrong draft, stale marker, a preexisting
+marker already naming the correction, a non-string corrected id — have no such
+replay, because the old rules admitted the whole collection and would accept
+every one of them for the same single reason the markerless control already
+demonstrates.
+
+**The cost, stated plainly.** Until an old tab is reloaded, a correction save on
+it fails with an error; ordinary reports keep working. No family data is read,
+rewritten or migrated by any of this, and nothing about a record already stored
+changes.
+
+**Release ordering** is therefore part of the change: `.github/workflows/deploy.yml`
+deploys the rules, waits ten conservative minutes for propagation, and only then
+publishes hosting (shop first, as FEAT-86 requires). A failed rules deploy stops
+the app deploy, so production never serves a bundle under rules that do not admit
+what it sends. `src/test/firestoreRulesGate.invariant.test.ts` pins that order,
+the barrier and the absence of an escape hatch.
+
 ## 7. Transactions
 
 `updateLearnerModelInTransaction` is the one way a model write-back is computed.
@@ -314,8 +375,10 @@ nothing checked.
 ## 8. What this deliberately does not do
 
 No `hours`, `hoursAdjustments`, `days`, `xpLedger`, `skillSnapshots`,
-`childSkillMaps`, `activityConfigs` (no `currentPosition`), `firestore.rules` or
-index change. No forced quests or open questions. No attestation. No claim that
+`childSkillMaps`, `activityConfigs` (no `currentPosition`) or index change. No
+forced quests or open questions. **`firestore.rules` was untouched by FEAT-242
+itself** and was changed afterwards, once, by the owner-approved FIX-265 — the
+correction contract of §6.2 and nothing else. No attestation. No claim that
 the basics are behind him or that comprehension is next. Advice refreshes
 asynchronously through the existing stale mark; nothing re-plans inline.
 
@@ -337,3 +400,12 @@ asynchronously through the existing stale mark; nothing re-plans inline.
    which of the two is true rather than promising caution that is not happening.
 5. **A stranded outcome does not survive unmount** — the recovery panel is
    component state, as in FEAT-241 §10.6.
+6. **An old tab's correction fails until it is reloaded** (§6.2). Deliberate and
+   temporary: the alternative is a correction that leaves a completion standing.
+   The app shows the writer's error; it does not say *"reload"*, because the rule
+   returns permission-denied and the client cannot tell that apart from any other
+   refusal without asking the server a second question.
+7. **The marker collection keeps its ordinary owner permissions** (§6.2). The
+   rule requires a marker to exist with the right contents at commit time; it
+   cannot stop a parent with console access from writing one by hand. This repair
+   targets a stale client, not an adversary who already owns the data.
