@@ -1,3 +1,34 @@
+# Code Health Report — 2026-10-19
+
+> Scheduled audit of 2026-10-19 (revision `065efde`). The pinned 2026-09-28 census below is preserved unchanged; `docs/MASTER_OUTLINE.md`'s scale block is a script-derived historical snapshot and was deliberately not overwritten.
+
+## Metrics (this run, working-tree counts)
+- **TypeScript lines (src + functions, incl. tests):** 418,948 (the pinned census counts differently — see its scope note; not comparable)
+- **Test source files:** 776 (census method: 724 at 2026-09-28)
+- **Commits:** not reliable — this clone is shallow (750 reachable); the pinned count of 3783 stands
+- **Collection helpers in firestore.ts:** 51 · **Routes (`path:`):** 39 · **Chat task types:** 22 · **Exports matched in `functions/src/index.ts`:** 22 (grep heuristic)
+
+## Build Status
+- Build: PASS · Lint: PASS (0 errors, 4 warnings, `react-hooks/exhaustive-deps`)
+- Tests: **INCOMPLETE** — the full `vitest run` hit the 540s timeout; 405 test files had passed, 0 failed, before cut-off. No pass/fail verdict for the remainder.
+- `node scripts/check-docs-alignment.mjs`: HARD checks passed, 11 SOFT warnings.
+- `npm audit --omit=dev`: 6 vulnerabilities (1 low, 1 moderate, 4 high). Not auto-fixed.
+
+## Issues Found
+### Auto-Fixed
+- Task registry has 22 entries; docs said 21. Added undocumented `pageCheck` to `docs/SYSTEM_PROMPTS.md` model table and set the count to 22 in two `docs/MASTER_OUTLINE.md` places.
+
+### Needs Human Attention
+- `CLAUDE.md` still says "21 task types" in two places (not touched: audit rules forbid editing CLAUDE.md).
+- `pageCheck` has no entry in `functions/src/ai/models.ts`; its model is unverified (SYSTEM_PROMPTS row says so).
+- 4 high npm vulnerabilities in production deps; `npm audit fix` was not run (needs review; may require `--force`).
+- Features with 0 test files: `auth`, `login`, `not-found`, `planner`, `ui-preview`.
+- Files over 2,000 lines (non-test): `PlannerChatPage.tsx` 3942, `chat.ts` 3129, `BookEditorPage.tsx` 2433, `useQuestSession.ts` 2275, `evaluate.ts` 2106.
+- Phases not run: dead-export scan (4b), referenced-file existence (3b), stale-doc scan (3h), charter check (4c) — time budget spent on the test timeout; shallow history also makes 3h unreliable.
+- Bundle: main chunk still >500 kB warning; route-level splitting is an architectural decision.
+
+---
+
 # Code Health Report — 2026-09-28
 
 ## Reproducible historical snapshot

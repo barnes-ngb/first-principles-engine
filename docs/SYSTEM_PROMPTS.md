@@ -111,6 +111,7 @@ Since FEAT-58 the model strings live in one table — `functions/src/ai/models.t
 | `quest` | `claude-sonnet-5` | Interactive Knowledge Mine quests |
 | `generateStory` | `claude-sonnet-5` | Sight word story generation |
 | `revisePage` | `claude-sonnet-5` | Per-Page Review single-page revision (V2 PR-B) |
+| `pageCheck` | _no `models.ts` entry — verify_ | Before-work page check (prospective, nothing persisted; fails closed on release skew) — see `review/BEFORE_WORK_PAGE_CHECK.md` |
 | `workshop` | `claude-sonnet-5` | Story Game Workshop |
 | `analyzeWorkbook` | `claude-sonnet-5` | Workbook page analysis |
 | `disposition` | `claude-sonnet-5` | Learning disposition narrative |
