@@ -29,6 +29,25 @@ interface AudioRecorderProps {
    * changes, and go through `onCapture` alone.
    */
   onDraftChange?: () => void
+  /**
+   * **Direct staging (FIX-267, opt-in).** A finished take goes straight to
+   * `onCapture` and this component returns to idle, so the host holds the only
+   * copy of it and renders the only preview.
+   *
+   * Without it there are two drafts: a take sitting in this component's
+   * *recorded* state is visible to the parent but absent from the host's own
+   * draft, so the host's Save wrote the log without the recording on screen.
+   * Every existing caller leaves this `false` and keeps the preview, the
+   * *Use Recording* / *Discard* pair and the commit-on-confirm behaviour.
+   */
+  stageDirect?: boolean
+  /**
+   * Whether a recording is in progress (FIX-267, opt-in).
+   *
+   * A host that saves on its own button must not write while the microphone is
+   * still running, or the log is filed without the take being recorded for it.
+   */
+  onBusyChange?: (busy: boolean) => void
 }
 
 export default function AudioRecorder({
@@ -36,6 +55,8 @@ export default function AudioRecorder({
   uploading,
   allowUpload,
   onDraftChange,
+  stageDirect,
+  onBusyChange,
 }: AudioRecorderProps) {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
@@ -47,6 +68,15 @@ export default function AudioRecorder({
   const [audioUrl, setAudioUrl] = useState<string | null>(null)
   const [elapsed, setElapsed] = useState(0)
   const [error, setError] = useState<string | null>(null)
+  /**
+   * The microphone has been asked for and has not answered.
+   *
+   * Busy begins HERE rather than when `getUserMedia` resolves: a host that
+   * saves on its own button would otherwise save during the permission prompt,
+   * and a prompt answered after the surface was replaced would acquire a live
+   * stream nobody can stop.
+   */
+  const [awaitingPermission, setAwaitingPermission] = useState(false)
 
   // Clean up object URLs on unmount
   useEffect(() => {
@@ -56,15 +86,78 @@ export default function AudioRecorder({
     }
   }, [audioUrl])
 
+  // Anything this recorder is still holding is a draft the host has not got.
+  useEffect(() => {
+    onBusyChange?.(awaitingPermission || state === 'recording')
+  }, [awaitingPermission, state, onBusyChange])
+
+  /**
+   * Liveness, per mount AND per request.
+   *
+   * `MediaRecorder.onstop` and a pending permission prompt both resolve after
+   * the unmount that cancelled them, and such a take belongs to a scope that is
+   * no longer on screen. Two things decide that:
+   *
+   *   • `liveRef`, which the effect SETS TRUE on setup — StrictMode runs
+   *     setup → cleanup → setup, so a flag only the cleanup wrote stayed false
+   *     for the real mount and every recording after it was refused;
+   *   • `generationRef`, bumped by every cleanup, which an async step compares
+   *     itself against so a request from the previous mount cannot pass as this
+   *     one's.
+   */
+  const liveRef = useRef(true)
+  const generationRef = useRef(0)
+  /** The latest `onBusyChange`, for the cleanup, which cannot read props. */
+  const busyReportRef = useRef(onBusyChange)
+  // Assigned in an effect, never during render (`react-hooks/refs`).
+  useEffect(() => {
+    busyReportRef.current = onBusyChange
+  }, [onBusyChange])
+
+  const releaseRecorder = useCallback(() => {
+    const recorder = mediaRecorderRef.current
+    mediaRecorderRef.current = null
+    if (!recorder) return
+    recorder.stream.getTracks().forEach((track) => track.stop())
+    if (recorder.state !== 'inactive') recorder.stop()
+  }, [])
+
+  useEffect(() => {
+    liveRef.current = true
+    return () => {
+      liveRef.current = false
+      generationRef.current += 1
+      busyReportRef.current?.(false)
+      if (timerRef.current) {
+        clearInterval(timerRef.current)
+        timerRef.current = null
+      }
+      releaseRecorder()
+    }
+  }, [releaseRecorder])
+
   const startRecording = useCallback(async () => {
+    // One request at a time: a second tap during the prompt would acquire a
+    // second stream and leave the first with no Stop.
+    if (awaitingPermission || state === 'recording') return
     setError(null)
     // Before the permission prompt is awaited: tapping record is already a new
     // draft, whatever the microphone then says.
     onDraftChange?.()
+    setAwaitingPermission(true)
+    const generation = generationRef.current
+    const stillMine = () => liveRef.current && generationRef.current === generation
+    let started = false
+    let stream: MediaStream | null = null
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      if (!stillMine()) {
+        // The prompt was answered after this surface was replaced. Release the
+        // stream immediately rather than starting a recording nobody can see.
+        stream.getTracks().forEach((track) => track.stop())
+        return
+      }
       const recorder = new MediaRecorder(stream)
-      mediaRecorderRef.current = recorder
       chunksRef.current = []
 
       recorder.ondataavailable = (event) => {
@@ -75,30 +168,52 @@ export default function AudioRecorder({
 
       recorder.onstop = () => {
         const blob = new Blob(chunksRef.current, { type: 'audio/webm' })
-        const url = URL.createObjectURL(blob)
-        // A take now exists where none did: a draft change, not a submission.
-        onDraftChange?.()
-        setAudioBlob(blob)
-        setAudioUrl(url)
-        setState('recorded')
-        // Stop all tracks so browser releases the mic
-        stream.getTracks().forEach((track) => track.stop())
+        // Stop all tracks so browser releases the mic — first, and whatever
+        // else this handler then decides to do.
+        recorder.stream.getTracks().forEach((track) => track.stop())
         if (timerRef.current) {
           clearInterval(timerRef.current)
           timerRef.current = null
         }
+        // Gone: this take belongs to a scope that is no longer on screen.
+        if (!stillMine()) return
+        // A take now exists where none did: a draft change, not a submission.
+        onDraftChange?.()
+        if (stageDirect) {
+          // The host holds the take and renders the only preview, so there is
+          // no second copy here for its Save to miss.
+          onCapture(blob)
+          setState('idle')
+          setElapsed(0)
+          return
+        }
+        const url = URL.createObjectURL(blob)
+        setAudioBlob(blob)
+        setAudioUrl(url)
+        setState('recorded')
       }
 
       recorder.start()
-      setState('recording')
+      mediaRecorderRef.current = recorder
+      started = true
       setElapsed(0)
+      // Both in one batch, so busy never blinks false between them.
+      setAwaitingPermission(false)
+      setState('recording')
       timerRef.current = setInterval(() => {
         setElapsed((prev) => prev + 1)
       }, 1000)
     } catch {
-      setError('Could not access microphone. Check browser permissions.')
+      // A refusal, a cancel, or a recorder that could not be constructed or
+      // started after the stream was acquired: release the microphone either
+      // way, and never leave the host waiting on a request that is over.
+      stream?.getTracks().forEach((track) => track.stop())
+      mediaRecorderRef.current = null
+      if (stillMine()) setError('Could not access microphone. Check browser permissions.')
+    } finally {
+      if (!started) setAwaitingPermission(false)
     }
-  }, [onDraftChange])
+  }, [awaitingPermission, state, onDraftChange, onCapture, stageDirect])
 
   const stopRecording = useCallback(() => {
     mediaRecorderRef.current?.stop()
@@ -150,10 +265,16 @@ export default function AudioRecorder({
             variant="outlined"
             startIcon={<MicIcon />}
             onClick={startRecording}
+            disabled={awaitingPermission}
             sx={{ height: 56 }}
           >
-            Start Recording
+            {awaitingPermission ? 'Waiting for the microphone…' : 'Start Recording'}
           </Button>
+          {awaitingPermission && (
+            <Typography variant="caption" color="text.secondary" role="status">
+              Allow the microphone to start recording.
+            </Typography>
+          )}
           {allowUpload && (
             <>
               <input

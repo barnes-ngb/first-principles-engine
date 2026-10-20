@@ -37,7 +37,18 @@ vi.mock('firebase/firestore', () => ({
     writes.push({ collection, data })
     return pendingWrite?.promise ?? Promise.resolve({ id: `saved-${writes.length}` })
   }),
-  doc: (...args: unknown[]) => args,
+  // The parent form writes at a client-generated id (FIX-267), so the ref
+  // carries the collection it belongs to and the id it was given.
+  // The generated id uses the same `saved-N` shape this file's `addDoc` lane
+  // returns, so the rows a save publishes read the same either way.
+  doc: (collection: string, id?: string) => ({
+    collection,
+    id: id ?? `saved-${writes.length + 1}`,
+  }),
+  setDoc: vi.fn((ref: { collection: string }, data: Record<string, unknown>) => {
+    writes.push({ collection: ref.collection, data })
+    return pendingWrite?.promise ?? Promise.resolve()
+  }),
   updateDoc: vi.fn(() => Promise.resolve()),
 }))
 vi.mock('../../core/firebase/firestore', () => ({
@@ -58,13 +69,16 @@ vi.mock('../../core/hooks/useScanToActivityConfig', () => ({
 }))
 vi.mock('./dayChecklistRowWrite', () => ({ writeChecklistRow: async () => ({ status: 'done' }), captureRowWriteNotice: () => null }))
 vi.mock('../../core/utils/downscaleImage', () => ({ downscaleImage: async (file: File) => file }))
+// Both surfaces hand their selection straight to the parent draft (FIX-267);
+// the parent's own Save work is what writes. `onCaptureBatch` is kept for the
+// kid card's lane, which this file does not drive.
 vi.mock('../../components/PhotoCapture', () => ({
-  default: ({ onCaptureBatch }: { onCaptureBatch: (files: File[]) => void }) =>
-    <button onClick={() => onCaptureBatch([new File(['photo'], 'photo.jpg')])}>Commit photo</button>,
+  default: ({ onStageFiles }: { onStageFiles: (files: File[]) => void }) =>
+    <button onClick={() => onStageFiles([new File(['photo'], 'photo.jpg')])}>Choose photo</button>,
 }))
 vi.mock('../../components/AudioRecorder', () => ({
   default: ({ onCapture }: { onCapture: (file: File) => void }) =>
-    <button onClick={() => onCapture(new File(['audio'], 'audio.webm'))}>Commit audio</button>,
+    <button onClick={() => onCapture(new File(['audio'], 'audio.webm'))}>Choose audio</button>,
 }))
 
 type Scope = { familyId: string; selectedChildId: string; today: string }
@@ -136,20 +150,42 @@ function Host(scope: Scope) {
 async function settle(read: Read, rows: Artifact[] = []) {
   await act(async () => read.resolve({ docs: rows.map(a => ({ data: () => a })) }))
 }
-beforeEach(() => { reads.length = 0; writes.length = 0; pendingWrite = undefined; vi.clearAllMocks() })
-afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks() })
+/**
+ * JSDOM has no `URL.createObjectURL`, and the one tray previews staged media
+ * with it. Stubbed per test with the originals restored afterwards, so this
+ * stays a test-only preview seam and the app keeps no workaround.
+ */
+const realCreateObjectURL = URL.createObjectURL
+const realRevokeObjectURL = URL.revokeObjectURL
+let objectUrlSeq = 0
 
+beforeEach(() => {
+  reads.length = 0; writes.length = 0; pendingWrite = undefined; vi.clearAllMocks()
+  objectUrlSeq = 0
+  URL.createObjectURL = vi.fn(() => `blob:synthetic-${++objectUrlSeq}`)
+  URL.revokeObjectURL = vi.fn()
+})
+afterEach(() => {
+  cleanup(); vi.useRealTimers(); vi.restoreAllMocks()
+  URL.createObjectURL = realCreateObjectURL
+  URL.revokeObjectURL = realRevokeObjectURL
+})
+
+/**
+ * Fills the draft for one mode and taps the ONE save (FIX-267): a photo or a
+ * recording is staged first and written by *Save work*, not by its selection.
+ */
 async function saveCard(mode: 'note' | 'photo' | 'audio') {
   if (mode === 'note') {
     fireEvent.change(screen.getByLabelText(/^note \(optional\)$/i), { target: { value: 'Synthetic note' } })
-    await act(async () => fireEvent.click(screen.getByRole('button', { name: /save capture/i })))
   } else if (mode === 'photo') {
     fireEvent.click(screen.getByRole('button', { name: '📷 Photo' }))
-    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Commit photo' })))
+    fireEvent.click(screen.getByRole('button', { name: 'Choose photo' }))
   } else {
-    fireEvent.click(screen.getByRole('button', { name: /audio/i }))
-    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Commit audio' })))
+    fireEvent.click(screen.getByRole('button', { name: '🎤 Audio' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Choose audio' }))
   }
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: /^save work$/i })))
 }
 
 describe('UX-367: actual Today evidence readers and save callbacks', () => {
@@ -217,7 +253,7 @@ describe('UX-367: actual Today evidence readers and save callbacks', () => {
     fireEvent.click(await screen.findByRole('option', { name: 'Child B' }))
     fireEvent.change(screen.getByLabelText(/^note \(optional\)$/i), { target: { value: 'Synthetic note' } })
     fireEvent.change(screen.getByLabelText(/duration in minutes/i), { target: { value: '27.9' } })
-    await act(async () => fireEvent.click(screen.getByRole('button', { name: /save capture/i })))
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: /^save work$/i })))
     expect(writes[0]).toMatchObject({ collection: 'family-a/artifacts', data: { childId: 'child-b', dayLogId: initial.today, content: 'Synthetic note', type: 'Note' } })
     expect(writes[1]).toEqual({ collection: 'family-a/hours', data: {
       childId: 'child-b', date: initial.today, minutes: 27, subjectBucket: 'Other', location: 'Home',
