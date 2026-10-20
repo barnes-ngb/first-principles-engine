@@ -24,6 +24,15 @@ This note is the behaviour contract; the code comments carry the reasons.
   `UnifiedCaptureCard.draftProtectionMedia.test`; every legacy caller was not
   re-verified one by one, and no browser or device verification is claimed here.
 - Selecting a file writes nothing. *Save work* is the only write.
+- **An attached recording is replaced only by removing it (FIX-268).** The audio
+  slot holds one take. While it is filled, the recorder and the *Upload audio
+  file* control are unmounted and the card says to remove the recording first,
+  so a second take or a second file cannot take the first one's place unasked.
+  *Remove recording* is the parent's intentional discard and brings the recorder
+  back empty. `stageAudio` enforces the same rule functionally: a duplicate or
+  late `onCapture` from the live instance is refused, and the held blob and its
+  object URL are left untouched. A staged photo is unaffected — photos add to a
+  batch rather than replace each other, and each has its own remove.
 - While a surface is working — compressing, waiting for microphone permission, or
   recording — the save waits and says so. A photo that cannot be processed is named
   on screen with a *Choose again* / *Leave it out* choice; the note and any other

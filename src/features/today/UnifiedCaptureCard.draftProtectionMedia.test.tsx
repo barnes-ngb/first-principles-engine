@@ -601,6 +601,87 @@ describe('Log work + real AudioRecorder — a stopped take is in the draft', () 
     expect(await screen.findByText('Recording attached — not saved yet.')).toBeInTheDocument()
   })
 
+  /**
+   * FIX-268 — a second take has nowhere to land while one is attached.
+   *
+   * The recorder and the *Upload audio file* control are the two doors that
+   * used to overwrite the staged blob and revoke the URL its preview was
+   * playing, with nothing asked. Neither is mounted while audio is attached.
+   */
+  const audioFileInput = (container: HTMLElement) =>
+    container.querySelector('input[accept="audio/*"]') as HTMLInputElement | null
+
+  it('takes the recorder and the upload control away while a take is attached', async () => {
+    const { container } = renderCard()
+    fireEvent.click(screen.getByRole('button', { name: '🎤 Audio' }))
+    await startRecording()
+    stopRecording()
+
+    expect(await screen.findByText('Recording attached — not saved yet.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /start recording/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /upload audio file/i })).toBeNull()
+    expect(audioFileInput(container)).toBeNull()
+    expect(
+      screen.getByText('Remove this recording first to record or upload another.'),
+    ).toBeInTheDocument()
+  })
+
+  it('does the same for a chosen audio file, and saves the blob that was staged', async () => {
+    const { container } = renderCard()
+    fireEvent.click(screen.getByRole('button', { name: '🎤 Audio' }))
+    fireEvent.change(audioFileInput(container) as HTMLInputElement, {
+      target: { files: [new File(['a'], 'lesson.mp3', { type: 'audio/mpeg' })] },
+    })
+
+    expect(await screen.findByText('Recording attached — not saved yet.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /start recording/i })).toBeNull()
+    expect(audioFileInput(container)).toBeNull()
+
+    fireEvent.click(saveButton())
+    // The chosen file itself, uploaded once.
+    await waitFor(() => expect(uploads).toEqual(['0-stamp.mp3']))
+    expect(artifactWrites()).toHaveLength(1)
+  })
+
+  it('removing the take is the way back to the recorder, and the next take stages', async () => {
+    renderCard()
+    fireEvent.click(screen.getByRole('button', { name: '🎤 Audio' }))
+    await startRecording()
+    stopRecording()
+    fireEvent.click(await screen.findByRole('button', { name: /remove recording/i }))
+
+    // An explicit discard, so the recorder is back with nothing in it.
+    expect(screen.getByRole('button', { name: /start recording/i })).toBeInTheDocument()
+    await startRecording()
+    stopRecording()
+    expect(await screen.findByText('Recording attached — not saved yet.')).toBeInTheDocument()
+
+    fireEvent.click(saveButton())
+    await waitFor(() => expect(uploads).toEqual(['0-stamp.webm']))
+  })
+
+  it('releases the attached take when the day changes, and stages nothing after', async () => {
+    const { container, rerenderWith } = renderCard()
+    fireEvent.click(screen.getByRole('button', { name: '🎤 Audio' }))
+    await startRecording()
+    stopRecording()
+    const staged = (await screen.findByText('Recording attached — not saved yet.'))
+      .parentElement?.querySelector('audio')
+      ?.getAttribute('src') as string
+
+    rerenderWith({ today: '2026-10-21' })
+
+    await waitFor(() =>
+      expect(screen.queryByText('Recording attached — not saved yet.')).toBeNull(),
+    )
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith(staged)
+    expect(
+      screen.getByText(/the media attached here was removed — nothing was saved/i),
+    ).toBeInTheDocument()
+    expect(audioFileInput(container)).toBeNull()
+    expect(writes).toHaveLength(0)
+  })
+
   it('a staged take can be removed, and the save then has nothing to upload', async () => {
     renderCard()
     fireEvent.change(minutesField(), { target: { value: '20' } })
