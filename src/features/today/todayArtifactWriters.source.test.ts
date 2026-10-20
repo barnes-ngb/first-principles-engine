@@ -40,8 +40,24 @@ import { describe, expect, it } from 'vitest'
  */
 const TODAY_DIR = join(import.meta.dirname)
 
-/** A Firestore write into the artifacts collection, as this repo spells one. */
-const ARTIFACT_ADD = /addDoc\(\s*artifactsCollection\(/g
+/**
+ * A Firestore write into the artifacts collection, as this repo spells one.
+ *
+ * **Two spellings, since FIX-267.** `addDoc(artifactsCollection(f), …)` lets
+ * the server name the document, which is the right default and the wrong one
+ * for a write that may have to be retried: an ambiguous failure leaves the
+ * caller with no id, so the only retry available is a second `addDoc` and a
+ * second record. *Log work* therefore generates the id first and writes
+ * `setDoc(doc(artifactsCollection(f), id), …)`, which is the same create at a
+ * known address.
+ *
+ * It is in this pattern because of what would otherwise happen: a guard that
+ * knows one spelling reports PASS over a file full of writes in the other —
+ * the `[ledger-shape]` failure mode this file's header is about, arriving
+ * through a change to the production code rather than to the guard.
+ */
+const ARTIFACT_ADD =
+  /addDoc\(\s*artifactsCollection\(|setDoc\(\s*doc\(\s*artifactsCollection\(/g
 
 /**
  * Comments stripped, so the scan reads CODE.
@@ -134,9 +150,11 @@ export function artifactWrites(source: string): ArtifactWrite[] {
   ARTIFACT_ADD.lastIndex = 0
   let match: RegExpExecArray | null
   while ((match = ARTIFACT_ADD.exec(code)) !== null) {
-    // Past `artifactsCollection(` to its own closing paren, then the comma.
+    // Past `artifactsCollection(` to its own closing paren, then the comma —
+    // and for the `setDoc(doc(…, id), …)` spelling, past `doc(`'s closing
+    // paren too, so the argument we read is the PAYLOAD and not the id.
     let i = match.index + match[0].length
-    let depth = 1
+    let depth = match[0].includes('setDoc') ? 2 : 1
     while (i < code.length && depth > 0) {
       if (code[i] === '(') depth += 1
       else if (code[i] === ')') depth -= 1
@@ -356,5 +374,77 @@ describe('the resolver handles this repo’s three write shapes', () => {
     )
     expect(found).toHaveLength(1)
     expect(found[0].body).toBeNull()
+  })
+})
+
+/**
+ * The `setDoc`-at-a-known-id spelling (FIX-267).
+ *
+ * *Log work* decides the document id before its first write so a retry
+ * addresses the same record instead of creating a second one. That is a
+ * different call shape, and a guard that only knew `addDoc` would have read
+ * `logWorkSave.ts` as a file with no artifact writes in it — PASS, over the
+ * newest writer in the directory.
+ */
+describe('the scan reads a write addressed to a known id', () => {
+  const INLINE = `
+    await setDoc(doc(artifactsCollection(familyId), artifactId), {
+      childId,
+      dayLogId: submission.day,
+      tags: { domain: '' },
+    }, { merge: true })
+  `
+
+  it('finds it, and reads the PAYLOAD rather than the id argument', () => {
+    const found = artifactWrites(INLINE)
+    expect(found).toHaveLength(1)
+    expect(found[0].argument).toBe('{…}')
+    expect(stampsDayLogId(found[0].body ?? '')).toBe(true)
+  })
+
+  it('CATCHES the same write with no day stamp', () => {
+    const found = artifactWrites(`
+      await setDoc(doc(artifactsCollection(familyId), artifactId), {
+        childId,
+        title: 'Work',
+      }, { merge: true })
+    `)
+    expect(found).toHaveLength(1)
+    expect(found[0].body).not.toBeNull()
+    expect(stampsDayLogId(found[0].body ?? '')).toBe(false)
+  })
+
+  it('resolves the named-variable form — `logWorkSave`’s own shape', () => {
+    const found = artifactWrites(`
+      const stored = buildLogWorkArtifact(submission)
+      const artifact = { ...stored, dayLogId: submission.day }
+      await setDoc(doc(artifactsCollection(familyId), artifactId), artifact, { merge: true })
+    `)
+    expect(found).toHaveLength(1)
+    expect(found[0].argument).toBe('artifact')
+    expect(stampsDayLogId(found[0].body ?? '')).toBe(true)
+  })
+
+  it('still catches that shape when the restated stamp is dropped', () => {
+    // The positive control for the line `logWorkSave` carries: the builder's
+    // own stamp is behind a CALL, so without the restatement at the write the
+    // scan can see no stamp at all — and must fail rather than assume one.
+    const found = artifactWrites(`
+      const stored = buildLogWorkArtifact(submission)
+      const artifact = { ...stored }
+      await setDoc(doc(artifactsCollection(familyId), artifactId), artifact, { merge: true })
+    `)
+    expect(found).toHaveLength(1)
+    expect(stampsDayLogId(found[0].body ?? '')).toBe(false)
+  })
+
+  it('does not mistake an `updateDoc` that links media for a create', () => {
+    // The media link is an update to a document this scan has already judged;
+    // counting it as a second create would demand a day stamp in a patch.
+    expect(
+      artifactWrites(
+        'await updateDoc(doc(artifactsCollection(f), id), { uri, mediaUrls })',
+      ),
+    ).toHaveLength(0)
   })
 })
