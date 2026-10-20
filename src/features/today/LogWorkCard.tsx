@@ -61,6 +61,17 @@
  * values, so a note typed away and back is the parent's new note and stays —
  * and says on screen what it took. Nothing stored is deleted or rolled back.
  *
+ * **A staged recording is replaced only by removing it (FIX-268).** The audio
+ * slot holds one take, and the second one had nowhere else to go: recording
+ * again, or choosing a file again, overwrote the attached blob and revoked its
+ * URL with nothing asked, so the preview the parent was listening to became a
+ * different recording. While audio is attached the recorder and the *Upload
+ * audio file* control are UNMOUNTED and the card says to remove the recording
+ * first; `stageAudio` enforces the same rule functionally, so a duplicate or
+ * late `onCapture` from the live instance is refused rather than swapped in.
+ * *Remove recording* is the one intentional discard, and it brings the
+ * recorder back.
+ *
  * **Child switch (`UX-329` registry): RESET for the attachment, BIND for the
  * unfinished save.** A staged photo is dropped when the child or day changes,
  * with the loss made visible, because carrying it would file one boy's work
@@ -685,19 +696,33 @@ export default function LogWorkCard({
     [markDraftEdited, bumpMediaGeneration],
   )
 
+  /**
+   * A finished take or a chosen file, staged — never over the top of one.
+   *
+   * The slot holds one recording, and the only thing that empties it is the
+   * parent's own *Remove recording*: while something is attached the recorder
+   * and the upload control are not on screen at all, so there is no second
+   * take to replace the first with. This is that rule said again
+   * FUNCTIONALLY, for the deliveries no screen state can prevent — a duplicate
+   * `onCapture`, or an `onstop` that lands after this instance's take was
+   * already staged. The held blob and its URL are left exactly as they are:
+   * nothing is revoked, and no second URL is made for a blob that is refused.
+   */
   const stageAudio = useCallback(
     (blob: Blob, token: MediaToken) => {
       if (!ownsMedia(token)) return
+      // From the ref, which moves with the staging itself — two deliveries in
+      // one tick would both pass a test made against rendered state.
+      if (audioRef.current) return
       markDraftEdited()
       setMediaNotice(null)
-      setAudio((prev) => {
-        if (prev) URL.revokeObjectURL(prev.url)
-        return {
-          blob,
-          url: URL.createObjectURL(blob),
-          label: blob instanceof File ? blob.name : 'Recording',
-        }
-      })
+      const staged: StagedAudio = {
+        blob,
+        url: URL.createObjectURL(blob),
+        label: blob instanceof File ? blob.name : 'Recording',
+      }
+      audioRef.current = staged
+      setAudio((prev) => prev ?? staged)
     },
     [ownsMedia, markDraftEdited],
   )
@@ -1346,7 +1371,11 @@ export default function LogWorkCard({
                 uploading={savePending}
               />
             )}
-            {mediaKind === 'audio' && (
+            {/* While a recording is attached the recorder and the upload
+                control are GONE, not merely ignored: a second take or a second
+                file would otherwise take the first one's place with nothing
+                asked. Removing is the parent's, below. */}
+            {mediaKind === 'audio' && !audio && (
               <AudioRecorder
                 key={`audio-${mediaInstanceKey}`}
                 stageDirect
@@ -1410,6 +1439,13 @@ export default function LogWorkCard({
                   Recording attached — not saved yet.
                 </Typography>
                 <Box component="audio" controls src={audio.url} sx={{ width: '100%', mt: 1 }} />
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{ display: 'block', mt: 0.5 }}
+                >
+                  Remove this recording first to record or upload another.
+                </Typography>
                 <Button
                   variant="text"
                   size="small"

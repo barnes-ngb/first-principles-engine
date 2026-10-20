@@ -83,10 +83,14 @@ vi.mock('../../core/firebase/firestore', () => ({
   activityConfigsCollection: vi.fn(() => ({ __key: 'activityConfigs' })),
 }))
 
+/** Upload names in here throw, so a save can be stopped mid-flight. */
+let failingUploads = new Set<string>()
+
 vi.mock('../../core/firebase/upload', () => ({
   generateFilename: vi.fn((ext: string) => `stamp.${ext}`),
   uploadArtifactFile: vi.fn(
     async (_fam: string, _id: string, _file: unknown, filename: string) => {
+      if (failingUploads.has(filename)) throw new Error('synthetic upload failure')
       uploads.push(filename)
       return { downloadUrl: `https://x/${filename}` }
     },
@@ -147,6 +151,13 @@ vi.mock('../../components/PhotoCapture', () => ({
   ),
 }))
 
+/**
+ * The live instance's own `onCapture`, kept so a test can deliver through it
+ * AFTER the surface has gone — the duplicate `onCapture` and the `onstop` that
+ * lands late, which no screen state can prevent.
+ */
+let latestAudioCapture: ((blob: Blob) => void) | null = null
+
 vi.mock('../../components/AudioRecorder', () => ({
   default: ({
     onCapture,
@@ -160,30 +171,33 @@ vi.mock('../../components/AudioRecorder', () => ({
     uploading?: boolean
     stageDirect?: boolean
     allowUpload?: boolean
-  }) => (
-    <div
-      data-testid="audio-recorder"
-      data-uploading={uploading ? 'yes' : 'no'}
-      data-stage-direct={stageDirect ? 'yes' : 'no'}
-      data-allow-upload={allowUpload ? 'yes' : 'no'}
-    >
-      <button
-        data-testid="stage-recording"
-        onClick={() => onCapture(new Blob(['x'], { type: 'audio/webm' }))}
+  }) => {
+    latestAudioCapture = onCapture
+    return (
+      <div
+        data-testid="audio-recorder"
+        data-uploading={uploading ? 'yes' : 'no'}
+        data-stage-direct={stageDirect ? 'yes' : 'no'}
+        data-allow-upload={allowUpload ? 'yes' : 'no'}
       >
-        finish a take
-      </button>
-      <button
-        data-testid="stage-audio-file"
-        onClick={() => onCapture(new File(['x'], 'lesson.mp3', { type: 'audio/mpeg' }))}
-      >
-        choose a file
-      </button>
-      <button data-testid="audio-busy" onClick={() => onBusyChange?.(true)}>
-        start recording
-      </button>
-    </div>
-  ),
+        <button
+          data-testid="stage-recording"
+          onClick={() => onCapture(new Blob(['x'], { type: 'audio/webm' }))}
+        >
+          finish a take
+        </button>
+        <button
+          data-testid="stage-audio-file"
+          onClick={() => onCapture(new File(['x'], 'lesson.mp3', { type: 'audio/mpeg' }))}
+        >
+          choose a file
+        </button>
+        <button data-testid="audio-busy" onClick={() => onBusyChange?.(true)}>
+          start recording
+        </button>
+      </div>
+    )
+  },
 }))
 
 const children: Child[] = [
@@ -236,6 +250,8 @@ beforeEach(() => {
   generated = 0
   gate = null
   openGate = null
+  failingUploads = new Set()
+  latestAudioCapture = null
   let seq = 0
   Object.assign(URL, {
     createObjectURL: vi.fn(() => `blob:mock-${(seq += 1)}`),
@@ -515,6 +531,81 @@ describe('LogWorkCard — media is staged, never committed on selection', () => 
     expect((noteField() as HTMLTextAreaElement).value).toBe('')
     expect(screen.queryByAltText('Attached photo 1')).not.toBeInTheDocument()
     expect(saveButton()).toBeDisabled()
+  })
+
+  /**
+   * FIX-268 — the attached recording is replaced only by removing it.
+   *
+   * A second take or a second file used to overwrite the staged blob and
+   * revoke its URL with nothing asked, so the preview the parent was listening
+   * to became a different recording.
+   */
+  it('offers no second take while one is attached, and Remove brings the recorder back', () => {
+    renderCard()
+    fireEvent.click(screen.getByRole('button', { name: '🎤 Audio' }))
+    fireEvent.click(screen.getByTestId('stage-recording'))
+
+    // No recorder and no upload control over the top of the take — and the
+    // card says what to do instead.
+    expect(screen.queryByTestId('audio-recorder')).not.toBeInTheDocument()
+    expect(
+      screen.getByText('Remove this recording first to record or upload another.'),
+    ).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /remove recording/i }))
+    expect(screen.getByTestId('audio-recorder')).toBeInTheDocument()
+    expect(screen.queryByText('Recording attached — not saved yet.')).toBeNull()
+
+    // The removal is an intentional discard, so the slot it freed takes a new
+    // one straight away.
+    fireEvent.click(screen.getByTestId('stage-audio-file'))
+    expect(screen.getByText('Recording attached — not saved yet.')).toBeInTheDocument()
+  })
+
+  it('refuses a duplicate or late delivery from the live instance', async () => {
+    renderCard()
+    fireEvent.click(screen.getByRole('button', { name: '🎤 Audio' }))
+    fireEvent.click(screen.getByTestId('stage-audio-file'))
+    const staged = (screen.getByText('Recording attached — not saved yet.')
+      .parentElement as HTMLElement).querySelector('audio')?.getAttribute('src')
+    expect(staged).toBeTruthy()
+
+    // Same visit, same generation — a second `onCapture`, or an `onstop` that
+    // landed after this instance's take was already staged.
+    act(() => {
+      latestAudioCapture?.(new Blob(['late'], { type: 'audio/webm' }))
+    })
+
+    // The first blob and the first URL, untouched.
+    expect(
+      (screen.getByText('Recording attached — not saved yet.')
+        .parentElement as HTMLElement).querySelector('audio'),
+    ).toHaveAttribute('src', staged as string)
+    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(staged as string)
+
+    fireEvent.click(saveButton())
+    await waitFor(() => expect(updates).toHaveLength(1))
+    // The `.mp3` that was staged, once — not the late `.webm`.
+    expect(uploads).toEqual(['0-stamp.mp3'])
+  })
+
+  it('keeps the staged recording when the save fails, and the retry uploads it once', async () => {
+    failingUploads = new Set(['0-stamp.webm'])
+    renderCard()
+    fireEvent.click(screen.getByRole('button', { name: '🎤 Audio' }))
+    fireEvent.click(screen.getByTestId('stage-recording'))
+    fireEvent.click(saveButton())
+    await screen.findByTestId('log-work-unfinished')
+
+    // The take a retry needs is still here, and still unreplaceable.
+    expect(screen.getByText('Recording attached — not saved yet.')).toBeInTheDocument()
+    expect(screen.queryByTestId('audio-recorder')).not.toBeInTheDocument()
+    expect(uploads).toHaveLength(0)
+
+    failingUploads = new Set()
+    fireEvent.click(screen.getByRole('button', { name: /finish uploading/i }))
+    await waitFor(() => expect(uploads).toEqual(['0-stamp.webm']))
+    expect(artifactWrites()).toHaveLength(1)
   })
 
   it('asks before replacing one kind of attachment with the other', async () => {
