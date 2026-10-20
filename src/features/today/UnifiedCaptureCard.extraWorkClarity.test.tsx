@@ -1,6 +1,5 @@
 /**
- * `FIX-266` — the parent capture form is recognisable, and says only true
- * things.
+ * `FIX-266` — the parent form is recognisable, and says only true things.
  *
  * Reported (2026-10-20): logging extra work is unclear and there is no History
  * category to pick. Three things, asserted against the real card:
@@ -16,21 +15,19 @@
  *     the `hours` row on `minutes > 0`. The positive preview is unchanged and
  *     still names the bucket's own shared label.
  *   • **The hint is the PARENT's.** The kid card is chip-first by design and
- *     keeps its own copy, so neither the new sentence nor the category picker
- *     may appear there.
+ *     keeps its own copy, so neither the parent's guidance nor the category
+ *     picker may appear there.
  *
- * The writes themselves are pinned, because a copy change that quietly moved a
- * payload is the risk: a note with minutes writes one artifact and one `hours`
- * row under the stored bucket, and a note with NO minutes writes the artifact
- * and no `hours` row — the sentence's own claim, made good.
+ * ── Carried into FIX-267 ───────────────────────────────────────────────────
  *
- * Regression sensitivity: against the card before this run, the category and
- * guidance tests fail on the strings; the payload and no-hours assertions pass
- * then and now, which is the point of carrying them.
- *
- * Synthetic services only, inherited from `UnifiedCaptureCard.pendingSave.test`
- * — the Firestore writers, the uploader and the two media surfaces are local
- * stubs. The card is imported normally.
+ * The surface these were written against is now the *Log work* form, so the
+ * strings they read moved with it: *Save Capture* is *Save work*, the
+ * explanatory line is the form's own, and the quick logs are a folded-away
+ * *Quick fill*. Every PROPERTY is the one FIX-266 fixed — the category's
+ * display-only label, the honest zero-minutes line, the kid card untouched —
+ * and the payload assertions are unchanged, which is the half that matters:
+ * the stored bucket is still the enum member and the picker's words still reach
+ * no record.
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
@@ -40,20 +37,30 @@ import UnifiedCaptureCard from './UnifiedCaptureCard'
 import type { Child } from '../../core/types'
 import { SubjectBucket } from '../../core/types/enums'
 
-type AddDocCall = { collectionKey: string; data: Record<string, unknown> }
-const addDocCalls: AddDocCall[] = []
+interface WriteCall {
+  collectionKey: string
+  data: Record<string, unknown>
+}
+const writes: WriteCall[] = []
+let generated = 0
 
 vi.mock('firebase/firestore', () => ({
   addDoc: vi.fn(async (col: { __key: string }, data: Record<string, unknown>) => {
-    addDocCalls.push({ collectionKey: col.__key, data })
-    return { id: `mock-${addDocCalls.length}` }
+    writes.push({ collectionKey: col.__key, data })
+    return { id: `mock-${writes.length}` }
   }),
-  doc: vi.fn(() => ({})),
+  doc: vi.fn((col: { __key: string }, id?: string) => ({
+    __key: col.__key,
+    id: id ?? `generated-${(generated += 1)}`,
+  })),
+  setDoc: vi.fn(async (ref: { __key: string }, data: Record<string, unknown>) => {
+    writes.push({ collectionKey: ref.__key, data })
+  }),
   updateDoc: vi.fn(async () => {}),
   query: vi.fn(() => ({ __key: 'activityConfigs' })),
   where: vi.fn(() => ({})),
   // No family has a flagged quick-log config here, so the built-in chips are
-  // what the tests see — the same shape the pending-save suite runs under.
+  // what the tests see.
   onSnapshot: vi.fn((_q: unknown, next: (snap: unknown) => void) => {
     next({ docs: [] })
     return () => {}
@@ -107,11 +114,11 @@ function renderCard(variant: 'parent' | 'kid' = 'parent') {
   return { onSnackMessage }
 }
 
-const saveButton = () => screen.getByRole('button', { name: /save capture/i })
+const saveButton = () => screen.getByRole('button', { name: /^save work$/i })
 const noteField = () => screen.getByLabelText(/^note \(optional\)$/i)
 const minutesField = () => screen.getByLabelText('Duration in minutes')
-const artifactWrites = () => addDocCalls.filter((c) => c.collectionKey === 'artifacts')
-const hoursWrites = () => addDocCalls.filter((c) => c.collectionKey === 'hours')
+const artifactWrites = () => writes.filter((c) => c.collectionKey === 'artifacts')
+const hoursWrites = () => writes.filter((c) => c.collectionKey === 'hours')
 
 /** Opens the Category picker and taps an option by its displayed words. */
 function pickCategory(optionName: string | RegExp) {
@@ -120,7 +127,8 @@ function pickCategory(optionName: string | RegExp) {
 }
 
 beforeEach(() => {
-  addDocCalls.length = 0
+  writes.length = 0
+  generated = 0
 })
 
 describe('UnifiedCaptureCard — filing ordinary extra work (FIX-266)', () => {
@@ -149,7 +157,7 @@ describe('UnifiedCaptureCard — filing ordinary extra work (FIX-266)', () => {
     })
     // The display words reach no record — asserted over everything written, so
     // a future field cannot carry them in quietly.
-    expect(JSON.stringify(addDocCalls)).not.toContain('including History')
+    expect(JSON.stringify(writes)).not.toContain('including History')
   })
 
   it('names no second category — one option per stored bucket, no more', () => {
@@ -201,22 +209,25 @@ describe('UnifiedCaptureCard — filing ordinary extra work (FIX-266)', () => {
 
     await waitFor(() => expect(artifactWrites()).toHaveLength(1))
     expect(hoursWrites()).toHaveLength(0)
-    expect(addDocCalls.map((c) => c.collectionKey)).toEqual(['artifacts'])
+    expect(writes.map((c) => c.collectionKey)).toEqual(['artifacts'])
   })
 
-  it('tells a parent what the card is, and the quick logs are shortcuts', () => {
+  it('tells a parent what the form is, and that the quick fill is a shortcut', () => {
     renderCard()
 
-    expect(screen.getByText(/photos are optional/i)).toBeInTheDocument()
-    expect(screen.getByText(/shortcuts that fill/i)).toBeInTheDocument()
+    expect(screen.getByText(/One form for anything extra/i)).toBeInTheDocument()
+    expect(screen.getByText(/Nothing is saved until you tap/i)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /quick fill/i }))
+    expect(screen.getByText(/never save anything on their own/i)).toBeInTheDocument()
   })
 
-  it('leaves a kid’s card alone — neither the hint nor the picker', () => {
+  it('leaves a kid’s card alone — neither the guidance nor the picker', () => {
     renderCard('kid')
 
-    expect(screen.queryByText(/photos are optional/i)).toBeNull()
-    expect(screen.queryByText(/shortcuts that fill/i)).toBeNull()
+    expect(screen.queryByText(/One form for anything extra/i)).toBeNull()
+    expect(screen.queryByText(/never save anything on their own/i)).toBeNull()
     expect(screen.queryByRole('combobox', { name: 'Category' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^save work$/i })).toBeNull()
     // Positive control: the kid card did render — its minutes stepper is here.
     expect(screen.getByTestId('kid-duration-display')).toBeInTheDocument()
   })

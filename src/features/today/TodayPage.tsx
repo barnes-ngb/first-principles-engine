@@ -91,6 +91,8 @@ import {
 } from './liveDayEdit'
 import MoveToDayDialog from './MoveToDayDialog'
 import UnifiedCaptureCard from './UnifiedCaptureCard'
+import { LOG_WORK_TITLE } from './logWorkDraft'
+import { focusLogWork } from './logWorkJump'
 import { useDailyPlan } from './useDailyPlan'
 import {
   dailyPlanGateNote,
@@ -223,7 +225,6 @@ export default function TodayPage() {
     activeChild,
     isChildProfile: isKidProfile,
   } = useActiveChild()
-  const artifactSectionRef = useRef<HTMLDivElement>(null)
 
   // FEAT-62 (legacy-item fallback): scannable workbook configs let unstamped items
   // resolve their workbook by name/subject match for routed capture + backfill.
@@ -1343,8 +1344,16 @@ export default function TodayPage() {
 
   // --- Loading state ---
 
-  const scrollToArtifacts = useCallback(() => {
-    artifactSectionRef.current?.scrollIntoView({ behavior: 'smooth' })
+  /**
+   * The bar's jump to the *Log work* form (FIX-267).
+   *
+   * It used to scroll a bare marker `<div>` smoothly into view and leave the
+   * keyboard focus at the top of the page, so for anyone not using a thumb the
+   * button did nothing. `focusLogWork` scrolls to the form's own element, puts
+   * the focus in it, and honours `prefers-reduced-motion`.
+   */
+  const jumpToLogWork = useCallback(() => {
+    focusLogWork()
   }, [])
 
   const handleSnackMessage = useCallback(
@@ -1458,13 +1467,15 @@ export default function TodayPage() {
     <Page>
       {/* FIX-266: parent Today opts in to words for the capture jump. Kid
           profiles return `KidTodayView` above, and the `!dayLog` bar passes no
-          capture callback, so this is the only bar carrying a label. */}
+          capture callback, so this is the only bar carrying a label.
+          FIX-267: the words are the form's own heading, so the button and the
+          place it lands on say the same thing. */}
       <ContextBar
         page="today"
         activeChild={activeChild}
         dateKey={today}
-        onCaptureArtifact={scrollToArtifacts}
-        captureActionLabel="Log extra work"
+        onCaptureArtifact={jumpToLogWork}
+        captureActionLabel={LOG_WORK_TITLE}
       />
 
       {/* ── UX-362 / UX-425 / UX-426: which boy, before anything about him ──
@@ -1832,8 +1843,7 @@ export default function TodayPage() {
         <WorkshopGameCards familyId={familyId} children={children} />
       )}
 
-      {/* --- Unified Capture (artifact + hours + category, single surface) --- */}
-      <div ref={artifactSectionRef} />
+      {/* --- Log work (one draft: evidence + hours + category, one Save) --- */}
       <SectionErrorBoundary section="unified capture">
         <UnifiedCaptureCard
           familyId={familyId}
