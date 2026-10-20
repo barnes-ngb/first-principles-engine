@@ -138,11 +138,23 @@ function getActivityNameInput(): HTMLInputElement {
 function getDurationInput(): HTMLInputElement {
   return screen.getByLabelText(/duration in minutes/i) as HTMLInputElement
 }
+/**
+ * The Child selector's displayed value. The zero-minute caption used to name
+ * the child and no longer does (FIX-266), so WHICH child the form is for is
+ * read from the control that still says it.
+ */
+function getChildSelectorValue(): string {
+  return screen.getByRole('combobox', { name: /^child$/i }).textContent ?? ''
+}
+/** The zero-minute caption, which promises nothing (FIX-266). */
+const NO_MINUTES_CAPTION = 'Add minutes if you want to log time.'
 
 describe('UnifiedCaptureCard (parent variant)', () => {
   it('renders preset chips, free-form fields, and media tabs', () => {
     renderCard()
-    expect(screen.getByText(/Quick logs/i)).toBeInTheDocument()
+    // Anchored: the card's explanatory line also mentions the quick logs, so an
+    // unanchored match is ambiguous. This asserts the HEADING.
+    expect(screen.getByText(/^Quick logs$/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Lego build/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Zoo \/ museum trip/i })).toBeInTheDocument()
     expect(getActivityNameInput()).toBeInTheDocument()
@@ -170,18 +182,17 @@ describe('UnifiedCaptureCard (parent variant)', () => {
     expect(screen.getByRole('button', { name: /Zoo \/ museum trip/i })).toBeInTheDocument()
   })
 
-  it('helper text uses the active child name with no duration', () => {
+  it('asks for minutes with no duration, and is for the active child', () => {
     renderCard()
-    expect(
-      screen.getByText(/Counts toward Lincoln's school hours/i),
-    ).toBeInTheDocument()
+    expect(screen.getByText(NO_MINUTES_CAPTION)).toBeInTheDocument()
+    expect(screen.queryByText(/counts toward/i)).toBeNull()
+    expect(getChildSelectorValue()).toBe('Lincoln')
   })
 
-  it("substitutes London's name when London is the active child", () => {
+  it('seeds the Child selector with London when London is the active child', () => {
     renderCard({ selectedChildId: 'london' })
-    expect(
-      screen.getByText(/Counts toward London's school hours/i),
-    ).toBeInTheDocument()
+    expect(getChildSelectorValue()).toBe('London')
+    expect(screen.getByText(NO_MINUTES_CAPTION)).toBeInTheDocument()
   })
 
   it('tapping a preset pre-fills activity name, category, and duration', () => {
@@ -199,9 +210,9 @@ describe('UnifiedCaptureCard (parent variant)', () => {
     fireEvent.click(lego)
     expect(getActivityNameInput().value).toBe('')
     expect(getDurationInput().value).toBe('')
-    expect(
-      screen.getByText(/Counts toward Lincoln's school hours/i),
-    ).toBeInTheDocument()
+    // Cleared back to no minutes, so the caption goes back to asking.
+    expect(screen.getByText(NO_MINUTES_CAPTION)).toBeInTheDocument()
+    expect(getChildSelectorValue()).toBe('Lincoln')
   })
 
   it('Zoo trip preset suggests 120 minutes', () => {
@@ -304,9 +315,9 @@ describe('UnifiedCaptureCard (parent variant)', () => {
     expect(noteBtn.getAttribute('aria-pressed')).toBe('true')
   })
 
-  it('switching child updates helper text', () => {
+  it('switching child updates the Child selector', () => {
     const { rerender } = renderCard()
-    expect(screen.getByText(/Counts toward Lincoln's school hours/i)).toBeInTheDocument()
+    expect(getChildSelectorValue()).toBe('Lincoln')
     rerender(
       <MemoryRouter>
         <UnifiedCaptureCard
@@ -321,7 +332,8 @@ describe('UnifiedCaptureCard (parent variant)', () => {
         />
       </MemoryRouter>,
     )
-    expect(screen.getByText(/Counts toward London's school hours/i)).toBeInTheDocument()
+    expect(getChildSelectorValue()).toBe('London')
+    expect(screen.getByText(NO_MINUTES_CAPTION)).toBeInTheDocument()
   })
 
   it('renders the artifacts section with empty state', () => {
