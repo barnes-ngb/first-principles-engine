@@ -1456,11 +1456,15 @@ export default function TodayPage() {
 
   return (
     <Page>
+      {/* FIX-266: parent Today opts in to words for the capture jump. Kid
+          profiles return `KidTodayView` above, and the `!dayLog` bar passes no
+          capture callback, so this is the only bar carrying a label. */}
       <ContextBar
         page="today"
         activeChild={activeChild}
         dateKey={today}
         onCaptureArtifact={scrollToArtifacts}
+        captureActionLabel="Log extra work"
       />
 
       {/* ── UX-362 / UX-425 / UX-426: which boy, before anything about him ──

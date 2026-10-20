@@ -14,9 +14,14 @@
  * chooses one, and it is what makes the strip read as *this* boy's day. The
  * `activeChild` prop stays with it, and still decides whether that block
  * renders at all.
+ *
+ * **The capture jump can be asked for in words (`FIX-266`).** In source it is a
+ * camera `IconButton` named only by its tooltip; `captureActionLabel` is the
+ * opt-in that renders it as a labelled button instead. See the prop.
  */
 import { useNavigate } from 'react-router-dom'
 import Box from '@mui/material/Box'
+import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
 import IconButton from '@mui/material/IconButton'
 import Stack from '@mui/material/Stack'
@@ -42,6 +47,14 @@ interface ContextBarProps {
   weekStart?: string
   /** Callback when "Capture Artifact" is tapped (optional, shown only when provided) */
   onCaptureArtifact?: () => void
+  /**
+   * Opt-in words for that same jump (FIX-266). A caller that passes a label
+   * gets a labelled, full-width button in place of the camera icon — one
+   * control either way, the same callback, the same scroll target. Opt-in so
+   * the other `page` values ('week', 'artifacts') and any other caller keep the
+   * icon-only control unchanged.
+   */
+  captureActionLabel?: string
 }
 
 export default function ContextBar({
@@ -50,6 +63,7 @@ export default function ContextBar({
   dateKey,
   weekStart,
   onCaptureArtifact,
+  captureActionLabel,
 }: ContextBarProps) {
   const navigate = useNavigate()
   const { familyId } = useAuth()
@@ -138,7 +152,7 @@ export default function ContextBar({
             <ScienceIcon fontSize="small" />
           </IconButton>
         </Tooltip>
-        {onCaptureArtifact && (
+        {onCaptureArtifact && !captureActionLabel && (
           <Tooltip title="Capture Artifact">
             <IconButton
               size="small"
@@ -149,6 +163,25 @@ export default function ContextBar({
           </Tooltip>
         )}
       </Stack>
+
+      {/* FIX-266 — the same jump, in words: a full-width line of its own rather
+          than a fifth item in the icon row, since the label needs room the row
+          does not have to spare. `whiteSpace: 'normal'` lets enlarged text wrap
+          rather than clip; `minHeight: 44` matches the bar's tap target. */}
+      {onCaptureArtifact && captureActionLabel && (
+        <Box sx={{ flexBasis: '100%' }}>
+          <Button
+            fullWidth
+            variant="outlined"
+            size="small"
+            startIcon={<CameraAltIcon />}
+            onClick={onCaptureArtifact}
+            sx={{ minHeight: 44, textTransform: 'none', whiteSpace: 'normal' }}
+          >
+            {captureActionLabel}
+          </Button>
+        </Box>
+      )}
     </Box>
   )
 }
