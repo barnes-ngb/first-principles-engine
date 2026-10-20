@@ -62,6 +62,9 @@ import {
   type CaptureDraftClaim,
   type CaptureDraftVerdict,
 } from './captureDraftOwnership'
+// FIX-266: the parent picker's word for a bucket. Display only — the option
+// values are still the stored `SubjectBucket` members.
+import { captureCategoryLabel } from './captureCategoryLabels'
 import TodayEvidenceList from './TodayEvidenceList'
 import { EvidenceAudience, evidenceCopy } from './todayEvidence'
 
@@ -735,6 +738,17 @@ export default function UnifiedCaptureCard({
     <>
       <SectionCard title="Capture">
         <Stack spacing={2}>
+          {/* FIX-266 — what this card is, before its first control: the panel
+              leads with a photo button and quick-log chips, and nothing said a
+              note or minutes alone is enough. Parent only; the kid card is
+              chip-first by design and keeps its own copy. */}
+          {!isKid && (
+            <Typography variant="body2" color="text.secondary">
+              Log anything extra here — a note or some minutes is enough, and
+              photos are optional. The quick logs below are shortcuts that fill
+              in this form for you.
+            </Typography>
+          )}
           {!isKid && (
             <Button
               variant="outlined"
@@ -821,6 +835,8 @@ export default function UnifiedCaptureCard({
             />
           )}
 
+          {/* FIX-266: the VALUE is the stored bucket; only the WORD is the
+              parent form's own, so History has a category to pick. */}
           {!isKid && (
             <TextField
               label="Category"
@@ -833,7 +849,7 @@ export default function UnifiedCaptureCard({
             >
               {Object.values(SubjectBucket).map((bucket) => (
                 <MenuItem key={bucket} value={bucket}>
-                  {SubjectBucketLabel[bucket]}
+                  {captureCategoryLabel(bucket)}
                 </MenuItem>
               ))}
             </TextField>
@@ -939,6 +955,10 @@ export default function UnifiedCaptureCard({
                 }}
                 fullWidth
               />
+              {/* FIX-266 — an empty field promises nothing: every pathway gates
+                  the `hours` row on `minutes > 0`, so a draft with no minutes
+                  writes none. The positive preview is unchanged and still names
+                  the bucket's own shared label. */}
               <Typography
                 variant="caption"
                 color="text.secondary"
@@ -947,7 +967,7 @@ export default function UnifiedCaptureCard({
               >
                 {parsedDuration > 0
                   ? `Will log ${parsedDuration} minutes to ${SubjectBucketLabel[subjectBucket]}`
-                  : `Counts toward ${activeChildName}'s school hours`}
+                  : 'Add minutes if you want to log time.'}
               </Typography>
             </Box>
           )}
