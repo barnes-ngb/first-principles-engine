@@ -48,6 +48,19 @@
  *   • `logWorkSave` owns the writes, the document identity and the resume, so
  *     a partial save can be finished rather than repeated.
  *
+ * **A finished submission is retired from the draft, part by part.** The three
+ * endings — a save that completed, a retry that completed, a *Stop waiting* the
+ * parent confirmed — all leave records that may exist and a form that can be
+ * tapped again, and `captureDraftOwnership` answers only *"is this still the
+ * same draft?"*: for a draft the parent has edited since, it said **leave all
+ * of it alone**, including the fields that draft had merely INHERITED. So an
+ * unchanged 27 minutes and the submitted photo sat in the form under a newly
+ * typed note, and the next *Save work* wrote a second `hours` row and
+ * re-uploaded the same file. `retireSubmission` takes out exactly the parts the
+ * submission still owns — judged by a per-field EDIT EPOCH, never by comparing
+ * values, so a note typed away and back is the parent's new note and stays —
+ * and says on screen what it took. Nothing stored is deleted or rolled back.
+ *
  * **Child switch (`UX-329` registry): RESET for the attachment, BIND for the
  * unfinished save.** A staged photo is dropped when the child or day changes,
  * with the loss made visible, because carrying it would file one boy's work
@@ -113,6 +126,8 @@ import {
   logWorkBlockedReason,
   logWorkDayLabel,
   logWorkReceiptBase,
+  logWorkRetiredNotice,
+  logWorkRetirement,
   logWorkSaveable,
   logWorkSummary,
   mediaReplaceQuestion,
@@ -121,6 +136,7 @@ import {
   selectedDayNotice,
   stopPendingQuestion,
   type LogWorkDraft,
+  type LogWorkFieldEpochs,
   type LogWorkMediaKind,
   type PresetField,
 } from './logWorkDraft'
@@ -131,6 +147,7 @@ import {
   logWorkFilenames,
   logWorkPartialBase,
   logWorkRetryReceipt,
+  logWorkSubmittedParts,
   newLogWorkIds,
   type LogWorkOutcome,
   type LogWorkPartialReport,
@@ -185,6 +202,12 @@ interface PendingSave {
   progress: LogWorkProgress
   report: LogWorkPartialReport
   claim: CaptureDraftClaim
+  /**
+   * The note and duration epochs this submission froze, so whichever way it
+   * ends — finished, or stopped — it can tell a field it still owns from one
+   * the parent has moved since.
+   */
+  tokens: LogWorkFieldEpochs
 }
 
 export interface LogWorkCardProps {
@@ -234,6 +257,11 @@ export default function LogWorkCard({
   const [audio, setAudio] = useState<StagedAudio | null>(null)
   const [mediaNotice, setMediaNotice] = useState<string | null>(null)
   const [presetNotice, setPresetNotice] = useState<string | null>(null)
+  /**
+   * What a finished — or abandoned — save took back out of this draft. A field
+   * cannot empty itself under a parent's hands unaccounted for.
+   */
+  const [retireNotice, setRetireNotice] = useState<string | null>(null)
   /**
    * The media surface is still working — compressing a photo, or recording.
    * The draft is incomplete while it is true, so *Save work* waits: saving
@@ -324,6 +352,43 @@ export default function LogWorkCard({
     [markDraftEdited],
   )
 
+  /**
+   * ── Per-field epochs: which fields has this draft MOVED since a submission?
+   *
+   * `revision` answers *"has the draft changed at all?"* — one counter for the
+   * whole form, which is the right question for *"may a completion clear it?"*
+   * and the wrong one for *"which of these fields are still the submitted
+   * ones?"*. A parent who edits only the note leaves the minutes and the photo
+   * exactly as submitted, and those are the parts that must not stay in the
+   * draft for the next tap to file again.
+   *
+   * One counter per retirable field, bumped by every path that WRITES that
+   * field — by hand, by a quick fill, by a de-select, by a reset — so the test
+   * is identity and never value equality. Refs, not state: nothing renders
+   * them, they are read only inside callbacks, and a save in flight needs the
+   * CURRENT value at the moment it lands rather than the one its closure was
+   * created with.
+   */
+  const noteEpochRef = useRef(0)
+  const durationEpochRef = useRef(0)
+  /** The only writer of `noteText`, so the epoch cannot be forgotten. */
+  const writeNote = useCallback((value: string) => {
+    noteEpochRef.current += 1
+    setNoteText(value)
+  }, [])
+  /** The only writer of `durationInput`, for the same reason. */
+  const writeDuration = useCallback((value: string) => {
+    durationEpochRef.current += 1
+    setDurationInput(value)
+  }, [])
+  const currentEpochs = useCallback(
+    (): LogWorkFieldEpochs => ({
+      note: noteEpochRef.current,
+      duration: durationEpochRef.current,
+    }),
+    [],
+  )
+
   const parsedDuration = useMemo(() => {
     if (durationInput.trim() === '') return 0
     const n = Math.floor(Number(durationInput))
@@ -405,6 +470,9 @@ export default function LogWorkCard({
     const hadMedia = photosRef.current.length > 0 || audioRef.current !== null
     dropAllMedia()
     setMediaKind(null)
+    // A notice about what an earlier child's save took out of its draft is not
+    // about this screen.
+    setRetireNotice(null)
     if (hadMedia) {
       setMediaNotice(MEDIA_CLEARED_ON_SCOPE_CHANGE)
       markDraftEdited()
@@ -425,9 +493,9 @@ export default function LogWorkCard({
     setSelectedPresetId(null)
     setActivityName('')
     setSubjectBucket(DEFAULT_LOG_WORK_BUCKET)
-    setDurationInput('')
+    writeDuration('')
     setEditedFields(new Set())
-  }, [childId, selectedPresetId])
+  }, [childId, selectedPresetId, writeDuration])
 
   const draft: LogWorkDraft = {
     childName: activeChildName,
@@ -447,30 +515,52 @@ export default function LogWorkCard({
     setSelectedPresetId(null)
     setActivityName('')
     setSubjectBucket(DEFAULT_LOG_WORK_BUCKET)
-    setDurationInput('')
-    setNoteText('')
+    writeDuration('')
+    writeNote('')
     setEditedFields(new Set())
     setMediaKind(null)
     setMediaNotice(null)
     setPresetNotice(null)
+    setRetireNotice(null)
     dropAllMedia()
-  }, [dropAllMedia])
+  }, [dropAllMedia, writeNote, writeDuration])
 
-  /** Takes the files a save has written out of the tray — and only those. */
-  const dropSavedMedia = useCallback((submission: LogWorkSubmission) => {
-    const saved = new Set(submission.files.map((f) => f.file))
-    if (saved.size === 0) return
-    setPhotos((prev) => {
-      const keep = prev.filter((p) => !saved.has(p.file))
-      prev.filter((p) => saved.has(p.file)).forEach((p) => URL.revokeObjectURL(p.url))
-      return keep.length === prev.length ? prev : keep
-    })
-    setAudio((prev) => {
-      if (!prev || !saved.has(prev.blob)) return prev
-      URL.revokeObjectURL(prev.url)
-      return null
-    })
-  }, [])
+  /**
+   * Takes the files a save may already hold out of the tray — and only those.
+   *
+   * **Object identity, not a filename or a count**, so a photo staged SINCE the
+   * submission is untouched even if it is the same picture. `count` is how many
+   * of the submission's files (from the first) may be stored: on a complete save
+   * that is all of them, and on an abandoned partial one it is only the uploads
+   * that were reached, so a file the uploader never got to stays attached and
+   * savable. Returns what it actually removed, for the notice — the parent may
+   * have taken the photo out by hand already.
+   */
+  const dropSavedMedia = useCallback(
+    (submission: LogWorkSubmission, count: number) => {
+      const saved = new Set(submission.files.slice(0, count).map((f) => f.file))
+      if (saved.size === 0) return { photos: 0, audio: false }
+      // Counted from the refs, which are the current tray; the removal itself
+      // goes through the functional setters so a late save cannot write back a
+      // list it captured before the parent's newest photo.
+      const removed = {
+        photos: photosRef.current.filter((p) => saved.has(p.file)).length,
+        audio: audioRef.current !== null && saved.has(audioRef.current.blob),
+      }
+      setPhotos((prev) => {
+        const keep = prev.filter((p) => !saved.has(p.file))
+        prev.filter((p) => saved.has(p.file)).forEach((p) => URL.revokeObjectURL(p.url))
+        return keep.length === prev.length ? prev : keep
+      })
+      setAudio((prev) => {
+        if (!prev || !saved.has(prev.blob)) return prev
+        URL.revokeObjectURL(prev.url)
+        return null
+      })
+      return removed
+    },
+    [],
+  )
 
   /** One place for the optimistic append, so a row cannot be added twice. */
   const publishArtifact = useCallback(
@@ -492,12 +582,14 @@ export default function LogWorkCard({
       setSelectedPresetId(preset.id)
       setActivityName(preset.label)
       setSubjectBucket(preset.subjectBucket)
-      setDurationInput(String(preset.suggestedMinutes))
+      // Through the epoch writer: a quick fill putting 45 where a submitted 45
+      // stood is a NEW 45, and a completion landing after it may not take it.
+      writeDuration(String(preset.suggestedMinutes))
       // The three fields are the preset's again, so later edits are edits.
       setEditedFields(new Set())
       setPresetNotice(null)
     },
-    [markDraftEdited],
+    [markDraftEdited, writeDuration],
   )
 
   const handlePresetTap = useCallback(
@@ -509,7 +601,7 @@ export default function LogWorkCard({
         setSelectedPresetId(null)
         if (!editedFields.has('name')) setActivityName('')
         if (!editedFields.has('category')) setSubjectBucket(DEFAULT_LOG_WORK_BUCKET)
-        if (!editedFields.has('minutes')) setDurationInput('')
+        if (!editedFields.has('minutes')) writeDuration('')
         setPresetNotice(
           editedFields.size > 0
             ? 'Quick fill cleared. What you typed yourself is still here.'
@@ -524,7 +616,7 @@ export default function LogWorkCard({
       }
       applyPreset(preset)
     },
-    [selectedPresetId, editedFields, applyPreset, markDraftEdited],
+    [selectedPresetId, editedFields, applyPreset, markDraftEdited, writeDuration],
   )
 
   // ── The attachment ────────────────────────────────────────────────────────
@@ -724,10 +816,78 @@ export default function LogWorkCard({
     mediaKind,
   ])
 
+  /**
+   * **Retire what the submission owns, and nothing else.**
+   *
+   * The one reconciliation every terminal transition runs — a save that
+   * finished, a retry that finished, and a *Stop waiting* the parent confirmed
+   * — because all three end with records that may exist and a form that can be
+   * tapped again. Without it the submitted parts the parent did not happen to
+   * edit sat in the draft looking unsaved, and the obvious next tap filed a
+   * second `hours` row and re-uploaded the same photo under a new artifact.
+   *
+   * Three verdicts, three different answers:
+   *
+   *   • `owned` — the whole draft is the submitted one and `resetForm` clears
+   *     it, which is a superset of this; only the tray is handled here;
+   *   • `draft-changed` — same visit, edited since: the parts still on their
+   *     submitted epoch go, every newer edit and every newly staged file stays;
+   *   • `scope-changed` — the person is somewhere else and what is on screen is
+   *     not theirs to touch. The scope change already emptied the tray, so
+   *     nothing of this submission can be in it.
+   *
+   * Epochs are read from the refs HERE, at completion, not from the closure
+   * this callback was created in — the whole point is to compare against what
+   * the parent has done since.
+   */
+  const retireSubmission = useCallback(
+    (
+      held: {
+        submission: LogWorkSubmission
+        progress: LogWorkProgress
+        tokens: LogWorkFieldEpochs
+      },
+      verdict: CaptureDraftVerdict,
+    ) => {
+      const { submission, progress, tokens } = held
+      const stored = logWorkSubmittedParts(submission, progress)
+      // Whatever the verdict: a file that may be stored is both a lie about its
+      // state in the tray and an invitation to upload it twice.
+      const removed = dropSavedMedia(submission, stored.files)
+      if (verdict !== 'draft-changed') return
+      const retire = logWorkRetirement(
+        { note: submission.note, minutes: submission.minutes, epochs: tokens },
+        currentEpochs(),
+        { note: stored.note, minutes: stored.minutes },
+      )
+      if (retire.note) writeNote('')
+      if (retire.minutes) {
+        writeDuration('')
+        // The field is no longer the parent's, so a quick fill must not ask
+        // about replacing minutes she typed — there are none left to replace.
+        setEditedFields((prev) => {
+          if (!prev.has('minutes')) return prev
+          const next = new Set(prev)
+          next.delete('minutes')
+          return next
+        })
+      }
+      const notice = logWorkRetiredNotice({
+        note: retire.note,
+        minutes: retire.minutes ? submission.minutes : 0,
+        photoCount: removed.photos,
+        audio: removed.audio,
+      })
+      if (notice) setRetireNotice(notice)
+    },
+    [dropSavedMedia, currentEpochs, writeNote, writeDuration],
+  )
+
   const settle = useCallback(
     (
       submission: LogWorkSubmission,
       claim: CaptureDraftClaim,
+      tokens: LogWorkFieldEpochs,
       outcome: LogWorkOutcome,
     ) => {
       const verdict = verdictFor(claim)
@@ -749,17 +909,18 @@ export default function LogWorkCard({
           severity: 'success',
         })
         setPending(null)
-        // What saved is no longer staged — whatever the verdict, because a file
-        // left in the tray is both a lie about its state and an invitation to
-        // upload it twice. Anything staged SINCE is untouched.
-        dropSavedMedia(submission)
+        // The submitted parts leave the draft — the note and the minutes this
+        // submission still owns, and the files it may have stored. Anything
+        // edited or staged SINCE is untouched.
+        retireSubmission({ submission, progress: outcome.progress, tokens }, verdict)
         if (verdict === 'owned') resetForm()
         return
       }
       const report = describeLogWorkPartial(submission, outcome)
-      // The ORIGINAL claim travels with the pending save, so the retry asks the
-      // ownership question this attempt asked rather than a fresh one.
-      setPending({ submission, progress: outcome.progress, report, claim })
+      // The ORIGINAL claim and the epochs this tap froze travel with the
+      // pending save, so whichever way it ends it asks the questions THIS
+      // attempt asked rather than fresh ones.
+      setPending({ submission, progress: outcome.progress, report, claim, tokens })
       onSnackMessage({
         text: captureErrorText(logWorkPartialBase(report), verdict, claim),
         severity: 'error',
@@ -767,7 +928,7 @@ export default function LogWorkCard({
       // Nothing is cleared: the draft and the staged files are what a retry
       // needs, and the records that DID land are named on the card below.
     },
-    [verdictFor, onSnackMessage, publishArtifact, dropSavedMedia, resetForm],
+    [verdictFor, onSnackMessage, publishArtifact, retireSubmission, resetForm],
   )
 
   const handleSaveWork = useCallback(
@@ -778,13 +939,27 @@ export default function LogWorkCard({
       if (!beginSave()) return
       try {
         const submission = freezeSubmission()
+        // Frozen with the submission, from the refs rather than from a render:
+        // these are the two epochs the completion will be judged against.
+        const tokens = currentEpochs()
+        // A notice about the LAST save's retirement is not about this one.
+        setRetireNotice(null)
         const outcome = await executeLogWorkSave(submission, NO_LOG_WORK_PROGRESS)
-        settle(submission, claim, outcome)
+        settle(submission, claim, tokens, outcome)
       } finally {
         endSave()
       }
     },
-    [saveable, pending, mediaWorking, beginSave, endSave, freezeSubmission, settle],
+    [
+      saveable,
+      pending,
+      mediaWorking,
+      beginSave,
+      endSave,
+      freezeSubmission,
+      currentEpochs,
+      settle,
+    ],
   )
 
   /**
@@ -798,12 +973,14 @@ export default function LogWorkCard({
    * still the draft on screen** — the pending save's original claim, judged
    * now. That is the fix for the shape where a successful retry left the saved
    * words in the form with *Save work* live, and the next tap filed them again
-   * under new ids.
+   * under new ids. Where the draft has MOVED since, the same question is asked
+   * field by field (`retireSubmission`), because *"leave the newer draft
+   * alone"* was being applied to fields that newer draft had only inherited.
    */
   const handleRetry = useCallback(async () => {
     if (!pending) return
     if (!beginSave()) return
-    const { submission, progress, claim } = pending
+    const { submission, progress, claim, tokens } = pending
     try {
       const outcome = await executeLogWorkSave(submission, progress)
       publishArtifact(outcome.artifact)
@@ -819,12 +996,12 @@ export default function LogWorkCard({
           severity: 'success',
         })
         setPending(null)
-        dropSavedMedia(submission)
+        retireSubmission({ submission, progress: outcome.progress, tokens }, verdictFor(claim))
         if (verdictFor(claim) === 'owned') resetForm()
         return
       }
       const report = describeLogWorkPartial(submission, outcome)
-      setPending({ submission, progress: outcome.progress, report, claim })
+      setPending({ submission, progress: outcome.progress, report, claim, tokens })
       onSnackMessage({
         text: logWorkRetryReceipt(submission, logWorkPartialBase(report)),
         severity: 'error',
@@ -838,7 +1015,7 @@ export default function LogWorkCard({
     endSave,
     onSnackMessage,
     publishArtifact,
-    dropSavedMedia,
+    retireSubmission,
     resetForm,
     verdictFor,
   ])
@@ -853,19 +1030,28 @@ export default function LogWorkCard({
    * new ids. Nothing stored is deleted or rolled back — what saved is the
    * family's evidence, and *Today's evidence* above shows it.
    *
-   * A draft the parent has edited since is hers, so it stays; only the card
-   * goes, and the receipt already said which child and day it belonged to. The
-   * confirmation says which of the two will happen before it happens.
+   * A draft the parent has edited since is hers, so her EDITS stay — but the
+   * parts of it she never touched are the submission's, and stopping is the
+   * most ambiguous of the three endings: a write whose acknowledgement was lost
+   * may well have committed. So the submitted parts that may be stored are
+   * taken out of the draft too (`retireSubmission`), which is what stops the
+   * next tap writing a second `hours` row for the same 27 minutes. The
+   * confirmation says so before it happens, and nothing stored is deleted,
+   * rolled back or retried.
    */
   const pendingOwnsDraft = pending ? verdictFor(pending.claim) === 'owned' : false
 
   const handleStopPending = useCallback(() => {
     if (!pending) return
-    const owned = verdictFor(pending.claim) === 'owned'
+    const verdict = verdictFor(pending.claim)
     setStopConfirm(false)
     setPending(null)
-    if (owned) resetForm()
-  }, [pending, verdictFor, resetForm])
+    retireSubmission(
+      { submission: pending.submission, progress: pending.progress, tokens: pending.tokens },
+      verdict,
+    )
+    if (verdict === 'owned') resetForm()
+  }, [pending, verdictFor, retireSubmission, resetForm])
 
   const dirty =
     saveable ||
@@ -967,14 +1153,14 @@ export default function LogWorkCard({
                   const raw = event.target.value
                   if (raw === '') {
                     markFieldEdited('minutes')
-                    setDurationInput('')
+                    writeDuration('')
                     return
                   }
                   const n = Math.floor(Number(raw))
                   // A rejected keystroke changes nothing, so it is not an edit.
                   if (!Number.isFinite(n) || n < 0) return
                   markFieldEdited('minutes')
-                  setDurationInput(String(Math.min(n, MAX_DURATION_MINUTES)))
+                  writeDuration(String(Math.min(n, MAX_DURATION_MINUTES)))
                 }}
                 inputProps={{
                   min: 0,
@@ -1080,7 +1266,7 @@ export default function LogWorkCard({
               value={noteText}
               onChange={(event) => {
                 markDraftEdited()
-                setNoteText(event.target.value)
+                writeNote(event.target.value)
               }}
               helperText="Saved with the photo or recording, not instead of it."
             />
@@ -1114,6 +1300,20 @@ export default function LogWorkCard({
             {mediaNotice && (
               <Alert severity="info" role="status" onClose={() => setMediaNotice(null)}>
                 {mediaNotice}
+              </Alert>
+            )}
+
+            {/* What a finished or abandoned save took back out of this draft.
+                Announced rather than silent: the parent is looking at this form
+                when a field she did not clear empties itself. */}
+            {retireNotice && (
+              <Alert
+                severity="info"
+                role="status"
+                data-testid="log-work-retired"
+                onClose={() => setRetireNotice(null)}
+              >
+                {retireNotice}
               </Alert>
             )}
 
@@ -1407,6 +1607,14 @@ export default function LogWorkCard({
       <Dialog open={stopConfirm && pending !== null} onClose={() => setStopConfirm(false)}>
         <DialogTitle>Stop waiting on this save?</DialogTitle>
         <DialogContent>
+          {/* WHOSE log is being finished, from the submission rather than from
+              the page: the parent may have moved on, and the dialog must not
+              re-address the decision to whoever is on screen now. */}
+          {pending && (
+            <DialogContentText sx={{ fontWeight: 600, mb: 1 }}>
+              {pending.submission.childName} · {logWorkDayLabel(pending.submission.day)}
+            </DialogContentText>
+          )}
           <DialogContentText>{stopPendingQuestion(pendingOwnsDraft)}</DialogContentText>
         </DialogContent>
         <DialogActions>

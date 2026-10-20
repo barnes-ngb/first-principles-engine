@@ -35,6 +35,12 @@
  * records that are real evidence; the outcome names them and the retry
  * finishes the rest.
  *
+ * **What a submission may already have stored, the draft may not keep.** The
+ * other half of idempotence is the FORM: an id makes a retry safe, and
+ * `logWorkSubmittedParts` is the matching answer for the parts a submission
+ * owns in the draft it came from, so the next *Save work* cannot file them a
+ * second time under new ids. It decides nothing about records.
+ *
  * ── What it does not change ────────────────────────────────────────────────
  *
  * The payloads. The artifact keeps its existing fields (`FEAT-238`'s
@@ -128,16 +134,82 @@ export interface LogWorkOutcome {
   artifact: Artifact | null
 }
 
-/** Is every part of this submission accounted for? */
-export function logWorkComplete(
+/**
+ * Is the evidence half — the artifact, its files, and the document's link to
+ * them — accounted for?
+ *
+ * Exported because it answers a second question the card needs: the `hours` row
+ * is written LAST and only once this is true, so this is also *"was the hours
+ * write attempted?"*, and an attempted write may have committed even when its
+ * acknowledgement never arrived.
+ */
+export function logWorkEvidenceSettled(
   submission: LogWorkSubmission,
   progress: LogWorkProgress,
 ): boolean {
   if (submission.artifactId && !progress.artifactWritten) return false
   if (progress.uploadedUrls.length < submission.files.length) return false
   if (submission.files.length > 0 && !progress.mediaLinked) return false
+  return true
+}
+
+/** Is every part of this submission accounted for? */
+export function logWorkComplete(
+  submission: LogWorkSubmission,
+  progress: LogWorkProgress,
+): boolean {
+  if (!logWorkEvidenceSettled(submission, progress)) return false
   if (submission.hoursId && !progress.hoursWritten) return false
   return true
+}
+
+/**
+ * Which parts of a submission **may already be stored** — the parts a draft
+ * must not be able to file a second time.
+ *
+ * Said in the draft's own words rather than the record's, because the caller's
+ * question is which fields to take back out of the form: `note` is the artifact
+ * (which carries the parent's typed words in `content`), `files` is how many of
+ * the staged files, from the front, and `minutes` is the one `hours` row.
+ *
+ * **A write that was attempted counts, not only one that was acknowledged.** A
+ * dropped acknowledgement is the common case on a phone, so the honest answer
+ * to *"did that commit?"* is *"it may have"* — and a draft that keeps an
+ * unanswered 27 minutes is the duplicate `hours` row this exists to prevent.
+ * The line is drawn at ATTEMPTED and no further: a file the loop never reached
+ * and a row the function returned before writing certainly are not stored, so
+ * they stay in the draft where the parent can still save them. Nothing here
+ * deletes or rolls back a record; it only decides what the FORM keeps.
+ */
+export interface LogWorkSubmittedParts {
+  /** The artifact document, which carries the note. */
+  note: boolean
+  /** How many of the submission's files, counting from the first. */
+  files: number
+  /** The `hours` row. */
+  minutes: boolean
+}
+
+export function logWorkSubmittedParts(
+  submission: LogWorkSubmission,
+  progress: LogWorkProgress,
+): LogWorkSubmittedParts {
+  return {
+    // The evidence write is the FIRST stage, so it was always attempted.
+    note: submission.artifactId !== null,
+    files:
+      !submission.artifactId || submission.files.length === 0 || !progress.artifactWritten
+        ? // No upload is attempted until the artifact document answers.
+          0
+        : progress.mediaLinked
+          ? submission.files.length
+          : // The uploads that landed, plus the one that was in flight when the
+            // loop stopped — the files after it were never touched.
+            Math.min(progress.uploadedUrls.length + 1, submission.files.length),
+    minutes:
+      submission.hoursId !== null &&
+      (progress.hoursWritten || logWorkEvidenceSettled(submission, progress)),
+  }
 }
 
 /**

@@ -19,6 +19,8 @@ import {
   logWorkBlockedReason,
   logWorkDayLabel,
   logWorkReceiptBase,
+  logWorkRetiredNotice,
+  logWorkRetirement,
   logWorkSaveable,
   logWorkSummary,
   mediaReplaceQuestion,
@@ -133,10 +135,120 @@ describe('logWorkDraft — stopping an unfinished save explains itself', () => {
     expect(owned).toContain('clears this draft, so the same work can’t be filed twice')
   })
 
-  it('promises to KEEP a newer draft rather than implying it goes', () => {
+  /**
+   * The old assertion here required the sentence *"The draft you have typed
+   * since is kept as it is."* and is deliberately replaced rather than deleted:
+   * the promise was false for the fields that draft had INHERITED, which is the
+   * duplicate `hours` row PR #1909 round 1 reported. What the safeguard was
+   * protecting — that a confirmation may not imply the parent's own typing is
+   * about to be cleared — is kept, and now stated as what actually happens.
+   */
+  it('keeps a newer draft’s own edits, and does not promise more than that', () => {
     const newer = stopPendingQuestion(false)
-    expect(newer).toContain('The draft you have typed since is kept as it is.')
+    expect(newer).toContain('Whatever already saved stays saved — nothing is deleted.')
+    expect(newer).toContain(
+      'The parts you already submitted are taken out of this draft, because they may be saved already — what you have changed or attached since is kept.',
+    )
     expect(newer).not.toContain('clears this draft')
+    // It may not promise every inherited field survives.
+    expect(newer).not.toContain('kept as it is')
+  })
+})
+
+describe('logWorkDraft — which submitted fields a finished save still owns', () => {
+  const epochs = (note: number, duration: number) => ({ note, duration })
+  const stored = { note: true, minutes: true }
+
+  it('retires a note and minutes the parent has not touched since', () => {
+    expect(
+      logWorkRetirement(
+        { note: 'Built a tower', minutes: 27, epochs: epochs(3, 4) },
+        epochs(3, 4),
+        stored,
+      ),
+    ).toEqual({ note: true, minutes: true })
+  })
+
+  it('keeps whichever field has moved, field by field', () => {
+    // The reported case: only the note was edited, so only the note stays.
+    expect(
+      logWorkRetirement(
+        { note: 'Built a tower', minutes: 27, epochs: epochs(3, 4) },
+        epochs(4, 4),
+        stored,
+      ),
+    ).toEqual({ note: false, minutes: true })
+    expect(
+      logWorkRetirement(
+        { note: 'Built a tower', minutes: 27, epochs: epochs(3, 4) },
+        epochs(3, 9),
+        stored,
+      ),
+    ).toEqual({ note: true, minutes: false })
+  })
+
+  it('is identity, not value equality — away and back is a NEW value', () => {
+    // `captureDraftOwnership`'s `revision` treats typing a word away and back
+    // as a new draft on purpose. A field-level rule that compared the TEXT
+    // would quietly contradict it and take the parent's retyped note.
+    expect(
+      logWorkRetirement(
+        { note: 'Built a tower', minutes: 27, epochs: epochs(1, 1) },
+        // Same characters on screen, two edits later.
+        epochs(3, 3),
+        stored,
+      ),
+    ).toEqual({ note: false, minutes: false })
+  })
+
+  it('retires nothing the submission did not hold, or may not have stored', () => {
+    // An empty note and zero minutes were never part of any record.
+    expect(
+      logWorkRetirement({ note: '   ', minutes: 0, epochs: epochs(1, 1) }, epochs(1, 1), stored),
+    ).toEqual({ note: false, minutes: false })
+    // And a part no write may have reached stays in the draft, where the parent
+    // can still save it.
+    expect(
+      logWorkRetirement({ note: 'Built a tower', minutes: 27, epochs: epochs(1, 1) }, epochs(1, 1), {
+        note: false,
+        minutes: false,
+      }),
+    ).toEqual({ note: false, minutes: false })
+  })
+})
+
+describe('logWorkDraft — a field that empties itself says why', () => {
+  it('names every part it took, and what it did not take', () => {
+    expect(
+      logWorkRetiredNotice({ note: true, minutes: 27, photoCount: 1, audio: false }),
+    ).toBe(
+      'The note, 1 photo and 27 minutes you submitted have been taken out of this draft, so the same work can’t be filed twice. Nothing saved was deleted, and anything you changed or attached since is still here.',
+    )
+    expect(
+      logWorkRetiredNotice({ note: false, minutes: 0, photoCount: 3, audio: false }),
+    ).toContain('3 photos you submitted have been taken out')
+    expect(
+      logWorkRetiredNotice({ note: false, minutes: 0, photoCount: 0, audio: true }),
+    ).toContain('The recording you submitted has been taken out')
+  })
+
+  it('says nothing when nothing was taken', () => {
+    expect(
+      logWorkRetiredNotice({ note: false, minutes: 0, photoCount: 0, audio: false }),
+    ).toBeNull()
+  })
+
+  it('never claims a record was deleted', () => {
+    const notice = logWorkRetiredNotice({
+      note: true,
+      minutes: 27,
+      photoCount: 0,
+      audio: false,
+    })
+    // It is about the DRAFT. The only claim it makes about stored records is
+    // that none of them went anywhere.
+    expect(notice).toContain('Nothing saved was deleted')
+    expect(notice).not.toMatch(/rolled back|removed from (your|the) records|undone/i)
   })
 })
 

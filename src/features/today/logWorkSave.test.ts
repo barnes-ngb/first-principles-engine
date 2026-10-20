@@ -35,6 +35,7 @@ import {
   logWorkFilenames,
   logWorkPartialBase,
   logWorkRetryReceipt,
+  logWorkSubmittedParts,
   newLogWorkIds,
   type LogWorkProgress,
   type LogWorkSubmission,
@@ -451,5 +452,88 @@ describe('logWorkSave — a retry finishes what is left and nothing else', () =>
     expect(logWorkRetryReceipt(submission(), 'Saved your note — 45 min logged')).toBe(
       `Saved your note — 45 min logged — finished for Lincoln on ${DAY}`,
     )
+  })
+})
+
+/**
+ * Which parts a submission may already have stored — the question a terminal
+ * transition asks about the FORM, never about a record.
+ *
+ * The progress objects below are not hand-written where it matters: each comes
+ * back from a real `executeLogWorkSave` run against the stubs, so the mapping
+ * cannot drift from the order the stages actually run in.
+ */
+describe('logWorkSave — what a submission may already hold', () => {
+  it('claims every part of a complete save', async () => {
+    const sub = photoSubmission(2)
+    const outcome = await executeLogWorkSave(sub, NO_LOG_WORK_PROGRESS)
+    expect(logWorkSubmittedParts(sub, outcome.progress)).toEqual({
+      note: true,
+      files: 2,
+      minutes: true,
+    })
+  })
+
+  it('counts the UNANSWERED hours row, because it may well have committed', async () => {
+    failingWrites = new Set(['hours'])
+    const sub = submission()
+    const outcome = await executeLogWorkSave(sub, NO_LOG_WORK_PROGRESS)
+
+    expect(outcome.progress.hoursWritten).toBe(false)
+    // A dropped acknowledgement is the common case on a phone. Keeping those
+    // 45 minutes in the draft is how the next tap writes them a second time.
+    expect(logWorkSubmittedParts(sub, outcome.progress).minutes).toBe(true)
+  })
+
+  it('does not claim an hours row the save never reached', async () => {
+    failingWrites = new Set(['artifacts'])
+    const sub = submission()
+    const outcome = await executeLogWorkSave(sub, NO_LOG_WORK_PROGRESS)
+
+    expect(hoursWrites()).toHaveLength(0)
+    expect(logWorkSubmittedParts(sub, outcome.progress)).toEqual({
+      // The entry write is the first stage and was attempted, so the note may
+      // be stored; nothing after it ran.
+      note: true,
+      files: 0,
+      minutes: false,
+    })
+  })
+
+  it('claims the uploads that landed plus the one in flight, and no more', async () => {
+    failingUploads = new Set(['1-stamp.jpg'])
+    const sub = photoSubmission(3)
+    const outcome = await executeLogWorkSave(sub, NO_LOG_WORK_PROGRESS)
+
+    // One landed, one threw and may be in Storage, one was never touched — so
+    // the third photo stays attached and savable rather than vanishing.
+    expect(outcome.progress.uploadedUrls).toHaveLength(1)
+    expect(logWorkSubmittedParts(sub, outcome.progress)).toEqual({
+      note: true,
+      files: 2,
+      minutes: false,
+    })
+  })
+
+  it('claims every file when only the LINK is unconfirmed', async () => {
+    failLink = true
+    const sub = photoSubmission(2)
+    const outcome = await executeLogWorkSave(sub, NO_LOG_WORK_PROGRESS)
+    expect(logWorkSubmittedParts(sub, outcome.progress).files).toBe(2)
+  })
+
+  it('claims nothing a submission did not carry', async () => {
+    const timeOnly = submission({ artifactId: null, evidenceType: null, note: '' })
+    const outcome = await executeLogWorkSave(timeOnly, NO_LOG_WORK_PROGRESS)
+    expect(logWorkSubmittedParts(timeOnly, outcome.progress)).toEqual({
+      note: false,
+      files: 0,
+      minutes: true,
+    })
+
+    setDocCalls.length = 0
+    const noTime = submission({ hoursId: null, minutes: 0 })
+    const second = await executeLogWorkSave(noTime, NO_LOG_WORK_PROGRESS)
+    expect(logWorkSubmittedParts(noTime, second.progress).minutes).toBe(false)
   })
 })

@@ -14,8 +14,16 @@
  *   • a save whose draft is untouched still clears the form and still shows the
  *     receipt the card gives (the positive control: a card that never clears
  *     cannot pass);
- *   • a draft edited while the save was in flight keeps EVERY field — same day,
- *     text typed away and typed back, media included;
+ *   • a draft edited while the save was in flight keeps the fields the parent
+ *     GENUINELY edited and any media staged since — same day, text typed away
+ *     and typed back, a photo or a take added mid-save — and retires the
+ *     submitted components that draft only inherited within the same visit: an
+ *     unchanged submitted note, unchanged submitted minutes, and the exact
+ *     files that saved. The first cut of this file said *keeps EVERY field*,
+ *     which is what left an unchanged 45 minutes under a newly typed note for
+ *     the next tap to file a second `hours` row from (PR #1909 round 1). The
+ *     activity name and the category stay as context and cannot be saved alone;
+ *     nothing stored is deleted, and the notice on screen says what was taken;
  *   • a scope change — child or day, by the shell or by this card's own picker,
  *     including day A → day B → day A — keeps the draft too;
  *   • the receipt names the capture that actually saved (whose, and which day)
@@ -276,7 +284,15 @@ describe('Log work — a completion clears only its own draft (G1)', () => {
     await waitFor(() => expect(hoursWrites()).toHaveLength(1))
     expect(noteField().value).toBe('Built a tower and a bridge')
     expect(nameField().value).toBe('Lego build')
-    expect(minutesField().value).toBe('45')
+    // Her NOTE is an edit and stays. The 45 minutes are not: she never touched
+    // them, they are the submission's own, and the row for them is written — so
+    // leaving them here is what filed a second one on the next tap (PR #1909
+    // round 1). The activity name is filing rather than a record and remains as
+    // context; it cannot be saved on its own.
+    expect(minutesField().value).toBe('')
+    expect(screen.getByTestId('log-work-retired')).toHaveTextContent(
+      '45 minutes you submitted',
+    )
     expect(lastSnack(onSnackMessage)).toEqual({
       text:
         'Saved your note — 45 min logged — that earlier capture saved. ' +
@@ -311,7 +327,12 @@ describe('Log work — a completion clears only its own draft (G1)', () => {
     // Identical text, deliberately touched after submitting: the parent's note
     // is left where she put it rather than cleared on a text comparison.
     expect(noteField().value).toBe('Built a tower')
-    expect(minutesField().value).toBe('45')
+    // Away-and-back moved the NOTE's epoch and only the note's: the duration
+    // was never touched, so it is still the submitted one and is retired.
+    expect(minutesField().value).toBe('')
+    expect(screen.getByTestId('log-work-retired')).toHaveTextContent(
+      '45 minutes you submitted',
+    )
     expect(lastSnack(onSnackMessage).text).toContain('Your newer edits are still here')
   })
 
@@ -482,7 +503,13 @@ describe('Log work — the media in the draft owns it too', () => {
 
     await waitFor(() => expect(hoursWrites()).toHaveLength(1))
     expect(nameField().value).toBe('Lego build and paint')
-    expect(minutesField().value).toBe('45')
+    // The title she retyped stays. The minutes she never touched do not: the
+    // photo that saved already left the tray, and the submitted duration goes
+    // with it rather than waiting here for a second hours row.
+    expect(minutesField().value).toBe('')
+    expect(screen.getByTestId('log-work-retired')).toHaveTextContent(
+      '45 minutes you submitted',
+    )
     // The artifact kept the title the save was submitted with.
     expect(artifactWrites()[0].data).toMatchObject({
       type: EvidenceType.Photo,
@@ -566,9 +593,18 @@ describe('Log work — the media in the draft owns it too', () => {
     releaseWrites()
 
     await waitFor(() => expect(hoursWrites()).toHaveLength(1))
+    // The surface she opened is still open — the property this test exists for.
     expect(screen.getByTestId('photo-capture')).toBeInTheDocument()
     expect(nameField().value).toBe('Lego build')
-    expect(minutesField().value).toBe('45')
+    // Changing the attachment KIND is an edit to the draft, but it is not an
+    // edit to the note or the minutes: both are still the submitted ones, both
+    // are written, and both are therefore retired rather than left to be filed
+    // again. Nothing stored is deleted.
+    expect(noteField().value).toBe('')
+    expect(minutesField().value).toBe('')
+    expect(screen.getByTestId('log-work-retired')).toHaveTextContent(
+      '45 minutes you submitted',
+    )
     expect(lastSnack(onSnackMessage).text).toContain('Your newer edits are still here')
   })
 

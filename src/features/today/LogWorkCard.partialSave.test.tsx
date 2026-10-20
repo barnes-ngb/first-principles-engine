@@ -265,7 +265,18 @@ describe('LogWorkCard — the hours row failed and the evidence did not', () => 
     expect(new Set(hoursWrites().map((w) => w.id)).size).toBe(1)
   })
 
-  it('Stop waiting promises to KEEP a newer draft, and does', async () => {
+  /**
+   * Adapted, not dropped, in the PR #1909 repair.
+   *
+   * The assertion here used to require the words *"The draft you have typed
+   * since is kept as it is."* — and that promise was false for the fields the
+   * newer draft had only INHERITED: the unchanged 45 minutes stayed, and the
+   * next tap wrote them a second time. What this test was protecting is kept
+   * and still asserted — the parent's own typing is not cleared, and the dialog
+   * does not say it will be — with the inherited half now stated truthfully.
+   * The write-level proof lives in `LogWorkCard.submittedRetirement.test`.
+   */
+  it('Stop waiting keeps a newer draft’s own typing, and says what it takes', async () => {
     failingWrites = new Set(['hours'])
     renderCard()
     fillNoteAndMinutes()
@@ -277,18 +288,22 @@ describe('LogWorkCard — the hours row failed and the evidence did not', () => 
 
     const dialog = await screen.findByRole('dialog')
     // It must not imply the parent's newer typing will be cleared.
-    expect(dialog).toHaveTextContent('The draft you have typed since is kept as it is.')
+    expect(dialog).toHaveTextContent('what you have changed or attached since is kept')
     expect(dialog).not.toHaveTextContent('clears this draft')
+    // Nor promise that a field she never touched survives.
+    expect(dialog).toHaveTextContent('The parts you already submitted are taken out of this draft')
     fireEvent.click(within(dialog).getByRole('button', { name: 'Stop waiting' }))
 
     await waitFor(() =>
       expect(screen.queryByTestId('log-work-unfinished')).not.toBeInTheDocument(),
     )
     expect(noteField().value).toBe('A different thing')
+    // The submitted minutes are not left behind as an apparently unsaved entry.
+    expect(minutesField().value).toBe('')
     expect(artifactWrites()).toHaveLength(1)
   })
 
-  it('a finished retry leaves a NEWER draft alone', async () => {
+  it('a finished retry leaves a NEWER draft’s edits alone', async () => {
     failingWrites = new Set(['hours'])
     renderCard()
     fillNoteAndMinutes()
@@ -304,6 +319,9 @@ describe('LogWorkCard — the hours row failed and the evidence did not', () => 
 
     expect(noteField().value).toBe('The next thing entirely')
     expect(saveButton()).toBeEnabled()
+    // …and the 45 minutes it just finished are no longer in the draft, so her
+    // next tap files the new note and not a second hours row.
+    expect(minutesField().value).toBe('')
   })
 
   it('Stop waiting explains itself, then takes the submitted draft with it', async () => {

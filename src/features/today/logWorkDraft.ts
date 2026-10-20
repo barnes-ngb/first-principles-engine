@@ -264,15 +264,106 @@ export function selectedDayNotice(day: string, todayKey: string): string | null 
 /**
  * What *Stop waiting* will do, said before it is done.
  *
- * Two outcomes, and the difference matters: the submitted draft is cleared so
- * it cannot be filed twice, but a draft the parent has typed since is hers and
- * stays. Neither case deletes or rolls back anything already stored.
+ * Two outcomes, and the difference matters: the whole submitted draft goes when
+ * it is still the draft on screen, and otherwise only the parts that were
+ * submitted go, with everything the parent has changed since kept. Neither case
+ * deletes or rolls back anything already stored.
+ *
+ * The second sentence used to promise the newer draft was *"kept as it is"*,
+ * which was not true of the fields it had INHERITED: an unchanged 27 minutes
+ * sitting under a newly typed note belongs to the submission, not to the new
+ * draft, and leaving it there is how the next tap wrote a second `hours` row.
+ * A confirmation may not promise more than the action keeps.
  */
 export function stopPendingQuestion(ownsDraft: boolean): string {
   const kept = 'Whatever already saved stays saved — nothing is deleted.'
   return ownsDraft
     ? `${kept} This stops waiting on the rest and clears this draft, so the same work can’t be filed twice.`
-    : `${kept} This stops waiting on the rest. The draft you have typed since is kept as it is.`
+    : `${kept} This stops waiting on the rest. The parts you already submitted are taken out of this draft, because they may be saved already — what you have changed or attached since is kept.`
+}
+
+/**
+ * The two fields a submission can still own in the draft it came from, each on
+ * its own edit epoch.
+ *
+ * **Not a value comparison, deliberately.** `captureDraftOwnership`'s
+ * `revision` treats typing a word away and back as a new draft, and that
+ * judgement is kept here rather than contradicted one field down: a note or a
+ * minutes value the parent has RETYPED to the same characters is theirs, and a
+ * terminal transition may not take it. So the question is which epoch each
+ * field is on, not what it holds. Media is not here because it is object
+ * identity — the exact `File` a submission froze, or not that file at all.
+ */
+export interface LogWorkFieldEpochs {
+  note: number
+  duration: number
+}
+
+/** Which of the two the finished submission still owns. */
+export interface LogWorkRetirement {
+  note: boolean
+  minutes: boolean
+}
+
+/**
+ * Which submitted fields to take back out of the draft.
+ *
+ * Three conditions, all required: the submission may have STORED that part
+ * (`stored`, from `logWorkSubmittedParts`), the submission actually HELD it,
+ * and the field is still on the epoch the submission froze. The activity name
+ * and the category are absent on purpose — they are filing rather than a
+ * record, they cannot be saved on their own (`logWorkSaveable`), and leaving
+ * them is what lets a parent log a second thing of the same kind.
+ */
+export function logWorkRetirement(
+  submitted: { note: string; minutes: number; epochs: LogWorkFieldEpochs },
+  current: LogWorkFieldEpochs,
+  stored: { note: boolean; minutes: boolean },
+): LogWorkRetirement {
+  return {
+    note:
+      stored.note &&
+      submitted.note.trim().length > 0 &&
+      current.note === submitted.epochs.note,
+    minutes:
+      stored.minutes &&
+      submitted.minutes > 0 &&
+      current.duration === submitted.epochs.duration,
+  }
+}
+
+/**
+ * What was taken out of the draft, and what was not — said on screen, because a
+ * field emptying itself while a parent is typing in the same form has to be
+ * accounted for.
+ *
+ * `null` when nothing of the submission was left to take, which is the ordinary
+ * case: the parent changed all of it, or had already removed the photo by hand.
+ */
+export function logWorkRetiredNotice(retired: {
+  note: boolean
+  /** The submitted minutes, or `0` when they stay. */
+  minutes: number
+  photoCount: number
+  audio: boolean
+}): string | null {
+  const pieces: string[] = []
+  if (retired.note) pieces.push('the note')
+  if (retired.photoCount === 1) pieces.push('1 photo')
+  else if (retired.photoCount > 1) pieces.push(`${retired.photoCount} photos`)
+  if (retired.audio) pieces.push('the recording')
+  if (retired.minutes > 0) pieces.push(`${retired.minutes} minutes`)
+  if (pieces.length === 0) return null
+  const list =
+    pieces.length === 1
+      ? pieces[0]
+      : `${pieces.slice(0, -1).join(', ')} and ${pieces[pieces.length - 1]}`
+  // It opens a sentence on screen, and *"1 photo"* must not be capitalised into
+  // something else — so only the first character is touched.
+  const subject = list.charAt(0).toUpperCase() + list.slice(1)
+  return `${subject} you submitted ${
+    pieces.length === 1 && retired.photoCount <= 1 ? 'has' : 'have'
+  } been taken out of this draft, so the same work can’t be filed twice. Nothing saved was deleted, and anything you changed or attached since is still here.`
 }
 
 /** Said when a child or day change dropped staged media rather than moving it. */
