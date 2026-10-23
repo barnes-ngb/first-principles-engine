@@ -6,27 +6,69 @@ import type { Child, DadLabReport } from '../../core/types'
 
 // ── Mocks ──
 
-const addDocMock = vi.fn()
+/** The artifact record write. Since FIX-269 it is a `setDoc` on a client-allocated id, AFTER the file. */
+const setDocMock = vi.fn()
 const updateDocMock = vi.fn()
-const uploadArtifactFileMock = vi.fn()
+/** `uploadBytesResumable` — returns a fake task (see `makeTask`). */
+const uploadTaskMock = vi.fn()
+const deleteObjectMock = vi.fn()
+
+let artCounter = 0
 
 // Refs are tagged with their collection path so the tests can tell the report-doc
-// reference write apart from the artifact `uri` write (UX-82).
+// reference write apart from the artifact record write (UX-82). `doc(coll)` with
+// no id allocates one, as the real SDK does.
 vi.mock('firebase/firestore', () => ({
-  addDoc: (...args: unknown[]) => addDocMock(...args),
+  setDoc: (...args: unknown[]) => setDocMock(...args),
   updateDoc: (...args: unknown[]) => updateDocMock(...args),
-  doc: vi.fn((coll: { path?: string }, id: string) => ({ path: coll?.path, id })),
+  doc: vi.fn((coll: { path?: string }, id?: string) => ({
+    path: coll?.path,
+    id: id ?? `art-${++artCounter}`,
+  })),
   arrayUnion: (...values: unknown[]) => ({ __arrayUnion: values }),
 }))
+
+// The REAL bounded upload (`core/firebase/upload.ts`) runs over a mocked Storage
+// SDK, so the deadline and Cancel below exercise the code that ships.
+vi.mock('../../core/firebase/storage', () => ({ storage: {} }))
+vi.mock('firebase/storage', () => ({
+  ref: (_s: unknown, path: string) => ({ fullPath: path }),
+  uploadBytes: vi.fn(),
+  uploadBytesResumable: (...args: unknown[]) => uploadTaskMock(...args),
+  getDownloadURL: () => Promise.resolve('https://x/art'),
+  deleteObject: (...args: unknown[]) => deleteObjectMock(...args),
+}))
+
+const reportErrorMock = vi.fn()
+vi.mock('../../core/observability', () => ({
+  ErrorSource: { Handled: 'handled' },
+  reportError: (...args: unknown[]) => reportErrorMock(...args),
+}))
+
+/**
+ * A fake `UploadTask`: thenable, cancellable. `settle` decides how it ends;
+ * `'hang'` never ends on its own, which is the owner's case.
+ */
+function makeTask(settle: 'ok' | 'hang' | Error = 'ok') {
+  let rejectTask!: (e: unknown) => void
+  let resolveTask!: () => void
+  const p = new Promise<void>((resolve, reject) => {
+    resolveTask = resolve
+    rejectTask = reject
+  })
+  if (settle === 'ok') resolveTask()
+  else if (settle instanceof Error) rejectTask(settle)
+  p.catch(() => {})
+  return {
+    then: (f: () => unknown, r: (e: unknown) => unknown) => p.then(f, r),
+    cancel: vi.fn(() => rejectTask(Object.assign(new Error('canceled'), { code: 'storage/canceled' }))),
+    release: () => resolveTask(),
+  }
+}
 
 vi.mock('../../core/firebase/firestore', () => ({
   artifactsCollection: () => ({ path: 'artifacts' }),
   dadLabReportsCollection: () => ({ path: 'dadLabReports' }),
-}))
-
-vi.mock('../../core/firebase/upload', () => ({
-  generateFilename: (ext: string) => `file.${ext}`,
-  uploadArtifactFile: (...args: unknown[]) => uploadArtifactFileMock(...args),
 }))
 
 vi.mock('../../core/auth/useAuth', () => ({
@@ -58,6 +100,7 @@ vi.mock('../../components/AudioRecorder', () => ({
 }))
 
 import LabReportForm from './LabReportForm'
+import { DAD_LAB_UPLOAD_DEADLINE_MS } from './labArtifactUpload'
 
 const NOW = '2026-07-04T00:00:00.000Z'
 const LINCOLN: Child = { id: 'c-lincoln', name: 'Lincoln' }
@@ -101,16 +144,17 @@ const LEGACY_REPORT: DadLabReport = {
   updatedAt: NOW,
 }
 
-let artCounter = 0
-
 beforeEach(() => {
   artCounter = 0
-  addDocMock.mockReset()
-  addDocMock.mockImplementation(() => Promise.resolve({ id: `art-${++artCounter}` }))
+  setDocMock.mockReset()
+  setDocMock.mockResolvedValue(undefined)
   updateDocMock.mockReset()
   updateDocMock.mockResolvedValue(undefined)
-  uploadArtifactFileMock.mockReset()
-  uploadArtifactFileMock.mockResolvedValue({ downloadUrl: 'https://x/art' })
+  uploadTaskMock.mockReset()
+  uploadTaskMock.mockImplementation(() => makeTask('ok'))
+  deleteObjectMock.mockReset()
+  deleteObjectMock.mockResolvedValue(undefined)
+  reportErrorMock.mockReset()
 })
 
 const WRITING_PLACEHOLDER = 'want to write one word? totally optional'
@@ -130,10 +174,12 @@ describe('LabReportForm — three-beat capture (FEAT-56)', () => {
 
     // Capture a photo into the first beat (Predict).
     await user.click(screen.getAllByText('capture-photo')[0])
-    await waitFor(() => expect(addDocMock).toHaveBeenCalled())
+    await waitFor(() => expect(setDocMock).toHaveBeenCalled())
 
     // The uploaded artifact carries the additive labBeat tag.
-    const artifact = addDocMock.mock.calls[0][1] as { labBeat?: string; type?: string }
+    const artifact = setDocMock.mock.calls[0][1] as { labBeat?: string; type?: string; uri?: string }
+    // File before record (FIX-269): the record is written once, already carrying its file.
+    expect(artifact.uri).toBe('https://x/art')
     expect(artifact.labBeat).toBe('predict')
 
     await user.click(screen.getByRole('button', { name: 'Complete Lab' }))
@@ -155,7 +201,7 @@ describe('LabReportForm — three-beat capture (FEAT-56)', () => {
 
     // Record audio into the second beat (Try).
     await user.click(screen.getAllByText('capture-audio')[1])
-    await waitFor(() => expect(addDocMock).toHaveBeenCalled())
+    await waitFor(() => expect(setDocMock).toHaveBeenCalled())
 
     // The item's attribution toggle appears; reassign Both → Lincoln.
     await user.click(screen.getByRole('button', { name: 'Lincoln' }))
@@ -293,7 +339,7 @@ describe('LabReportForm — uploads to a saved report persist immediately (UX-82
 
   it('surfaces a failed reference write — the artifact is not silently lost', async () => {
     const user = userEvent.setup({ delay: null })
-    // The artifact `uri` write succeeds; the report reference write fails.
+    // The artifact record write succeeds; the report reference write fails.
     updateDocMock.mockImplementation((ref: { path?: string }) =>
       ref?.path === 'dadLabReports'
         ? Promise.reject(new Error('offline'))
@@ -322,7 +368,7 @@ describe('LabReportForm — uploads to a saved report persist immediately (UX-82
     )
 
     await user.click(screen.getAllByText('capture-photo')[0])
-    await waitFor(() => expect(addDocMock).toHaveBeenCalled())
+    await waitFor(() => expect(setDocMock).toHaveBeenCalled())
 
     expect(reportUpdates()).toHaveLength(0)
     expect(
@@ -332,13 +378,8 @@ describe('LabReportForm — uploads to a saved report persist immediately (UX-82
 
   it('disables Save while an upload is in flight — the full-doc Save must never race a reference write (Codex P1)', async () => {
     const user = userEvent.setup({ delay: null })
-    let release!: () => void
-    uploadArtifactFileMock.mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          release = () => resolve({ downloadUrl: 'https://x/art' })
-        }),
-    )
+    const task = makeTask('hang')
+    uploadTaskMock.mockImplementation(() => task)
     render(
       <LabReportForm report={ACTIVE_REPORT} children={KIDS} completing onSave={vi.fn()} onCancel={vi.fn()} />,
     )
@@ -352,7 +393,7 @@ describe('LabReportForm — uploads to a saved report persist immediately (UX-82
     expect(btn).toBeDisabled()
 
     await act(async () => {
-      release()
+      task.release()
     })
     await waitFor(() =>
       expect(screen.getByRole('button', { name: 'Complete Lab' })).toBeEnabled(),
@@ -448,4 +489,139 @@ describe('LabReportForm — a failed Save says so (UX-83)', () => {
     )
     expect(screen.queryByText(/didn't save/i)).toBeNull()
   })
+})
+
+// ── FIX-269 / UX-461: an upload ends, one way or the other ─────────────────
+// Owner, 2026-10-23: the parent lab report "spun and never finished". One hung
+// upload held Save disabled for as long as the SDK kept retrying (about half an
+// hour), with no Cancel and no sentence. These run the REAL bounded upload over
+// a Storage task that never ends.
+
+/** Flush pending promise work under fake timers. */
+const flush = () => act(async () => {})
+
+describe('LabReportForm — every upload ends (FIX-269)', () => {
+  it('a never-resolving upload ends at the deadline, says so, and releases Save', async () => {
+    vi.useFakeTimers()
+    try {
+      const task = makeTask('hang')
+      uploadTaskMock.mockImplementation(() => task)
+      render(
+        <LabReportForm report={ACTIVE_REPORT} children={KIDS} completing onSave={vi.fn()} onCancel={vi.fn()} />,
+      )
+      act(() => {
+        screen.getAllByText('capture-photo')[0].click()
+      })
+      await flush()
+
+      expect(screen.getByRole('button', { name: 'Uploading...' })).toBeDisabled()
+      expect(screen.getByText('Uploading the photo for Predict…')).toBeInTheDocument()
+
+      // Positive control on the boundary: a second early, still held.
+      await act(() => vi.advanceTimersByTimeAsync(DAD_LAB_UPLOAD_DEADLINE_MS - 1000))
+      expect(screen.getByRole('button', { name: 'Uploading...' })).toBeDisabled()
+
+      await act(() => vi.advanceTimersByTimeAsync(1000))
+      await flush()
+
+      expect(task.cancel).toHaveBeenCalledTimes(1)
+      expect(screen.getByRole('button', { name: 'Complete Lab' })).toBeEnabled()
+      expect(
+        screen.getByText(/The photo for Predict ran out of time on a slow connection\. Nothing was saved\./),
+      ).toBeInTheDocument()
+      // File before record: no artifact document was written for a file that never arrived.
+      expect(setDocMock).not.toHaveBeenCalled()
+      expect(reportUpdates()).toHaveLength(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('Cancel stops the upload itself and releases Save — and is not reported as an error', async () => {
+    const user = userEvent.setup({ delay: null })
+    const task = makeTask('hang')
+    uploadTaskMock.mockImplementation(() => task)
+    render(
+      <LabReportForm report={ACTIVE_REPORT} children={KIDS} completing onSave={vi.fn()} onCancel={vi.fn()} />,
+    )
+    await user.click(screen.getAllByText('capture-photo')[0])
+    await user.click(await screen.findByRole('button', { name: 'Cancel upload' }))
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Complete Lab' })).toBeEnabled())
+    expect(task.cancel).toHaveBeenCalledTimes(1)
+    expect(screen.getByText('The photo for Predict was cancelled. Nothing was saved.')).toBeInTheDocument()
+    expect(setDocMock).not.toHaveBeenCalled()
+    expect(reportErrorMock).not.toHaveBeenCalled()
+  }, 20000)
+
+  it('a failed upload leaves no artifact, renders its sentence, and Try again re-sends the SAME file', async () => {
+    const user = userEvent.setup({ delay: null })
+    uploadTaskMock.mockImplementationOnce(() =>
+      makeTask(Object.assign(new Error('nope'), { code: 'storage/retry-limit-exceeded' })),
+    )
+    render(
+      <LabReportForm report={ACTIVE_REPORT} children={KIDS} completing onSave={vi.fn()} onCancel={vi.fn()} />,
+    )
+    await user.click(screen.getAllByText('capture-photo')[0])
+
+    expect(
+      await screen.findByText("The photo for Predict didn't upload. Nothing was saved."),
+    ).toBeInTheDocument()
+    expect(setDocMock).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Complete Lab' })).toBeEnabled()
+
+    // The sink hears the SHAPE: handler, type, size, elapsed, code. Never the
+    // lab's title or a child's name.
+    expect(reportErrorMock).toHaveBeenCalledTimes(1)
+    const reported = reportErrorMock.mock.calls[0][0] as { message: string; source: string }
+    expect(reported.source).toBe('handled')
+    expect(reported.message).toMatch(/^dad-lab upload failed handler=parent-beat /)
+    expect(reported.message).toMatch(/code=storage\/retry-limit-exceeded$/)
+    expect(reported.message).not.toMatch(/Ramp|Lincoln|London|p\.jpg/)
+
+    const firstFile = uploadTaskMock.mock.calls[0][1]
+    await user.click(screen.getByRole('button', { name: 'Try again' }))
+
+    await waitFor(() => expect(setDocMock).toHaveBeenCalledTimes(1))
+    expect(uploadTaskMock).toHaveBeenCalledTimes(2)
+    expect(uploadTaskMock.mock.calls[1][1]).toBe(firstFile)
+    expect(screen.queryByText(/didn't upload/)).toBeNull()
+    // A retry is a fresh capture under a fresh id. The failed attempt's id
+    // (art-1) was allocated on the client and never written.
+    expect(screen.getByTestId('gallery')).toHaveTextContent('art-2')
+  }, 20000)
+
+  it('the in-flight count neither sticks above zero nor goes below it', async () => {
+    const user = userEvent.setup({ delay: null })
+    const tasks = [makeTask('hang'), makeTask('hang'), makeTask('hang')]
+    let n = 0
+    uploadTaskMock.mockImplementation(() => tasks[n++])
+    render(
+      <LabReportForm report={ACTIVE_REPORT} children={KIDS} completing onSave={vi.fn()} onCancel={vi.fn()} />,
+    )
+    // Two uploads at once, to two beats.
+    await user.click(screen.getAllByText('capture-photo')[0])
+    await user.click(screen.getAllByText('capture-photo')[1])
+    expect(await screen.findAllByRole('button', { name: 'Cancel upload' })).toHaveLength(2)
+
+    // One cancelled: the other is still in the air, so Save stays held.
+    await user.click(screen.getAllByRole('button', { name: 'Cancel upload' })[0])
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Cancel upload' })).toHaveLength(1))
+    expect(screen.getByRole('button', { name: 'Uploading...' })).toBeDisabled()
+
+    // The other lands: released exactly once.
+    await act(async () => {
+      tasks[1].release()
+    })
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Complete Lab' })).toBeEnabled())
+
+    // A later upload holds Save again — had the count gone negative, a single
+    // upload would read as zero and Save would wrongly stay live.
+    await user.click(screen.getAllByText('capture-photo')[2])
+    expect(await screen.findByRole('button', { name: 'Uploading...' })).toBeDisabled()
+    await act(async () => {
+      tasks[2].release()
+    })
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Complete Lab' })).toBeEnabled())
+  }, 20000)
 })

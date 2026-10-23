@@ -1,4 +1,10 @@
-import { getDownloadURL, ref, uploadBytes } from 'firebase/storage'
+import {
+  deleteObject,
+  getDownloadURL,
+  ref,
+  uploadBytes,
+  uploadBytesResumable,
+} from 'firebase/storage'
 import { storage } from './storage'
 
 /** Maximum number of upload attempts before giving up. */
@@ -86,6 +92,142 @@ export async function uploadArtifactFile(
   }
 
   throw lastError
+}
+
+// ── Bounded upload (FIX-269 / UX-461, opt-in) ─────────────────────────────
+//
+// `uploadArtifactFile` above has no deadline of its own. `uploadBytes` hands a
+// stalled upload to the SDK, which keeps retrying it for its default
+// `maxUploadRetryTime` (10 minutes in `@firebase/storage` 0.14.2, and nothing in
+// `src/` changes it), and the loop above then makes up to three such attempts.
+// On a weak connection that is about half an hour of spinner, and the caller
+// has nothing it can cancel.
+//
+// The function below is the bounded alternative, and it is OPT-IN: Dad Lab
+// is its only caller. Today's capture, strands, books, the planner, the avatar
+// page and the conundrum response keep calling `uploadArtifactFile` and behave
+// exactly as before. Changing their behaviour is a decision for each of those
+// surfaces, and each one has its own failure handling to update.
+
+/** Why a bounded upload stopped without a file. Codes are ours, not the SDK's. */
+export const BoundedUploadStop = {
+  /** The deadline passed first. On a phone that means a slow connection. */
+  Deadline: 'upload/deadline',
+  /** The caller's signal aborted: a person tapped Cancel. */
+  Cancelled: 'upload/cancelled',
+} as const
+export type BoundedUploadStop = (typeof BoundedUploadStop)[keyof typeof BoundedUploadStop]
+
+/** The rejection a bounded upload uses when it stops on its own terms. */
+export class BoundedUploadError extends Error {
+  readonly code: BoundedUploadStop
+  constructor(code: BoundedUploadStop) {
+    super(code === BoundedUploadStop.Deadline ? 'Upload ran out of time' : 'Upload cancelled')
+    this.name = 'BoundedUploadError'
+    this.code = code
+  }
+}
+
+export interface BoundedUploadOptions {
+  /** Total time for the bytes AND the download-URL read, in milliseconds. */
+  deadlineMs: number
+  /** Aborting this cancels the upload task itself rather than abandoning it. */
+  signal?: AbortSignal
+}
+
+/**
+ * Best-effort removal of an uploaded object. It never throws, because it only
+ * ever runs on a path that is already reporting another failure.
+ */
+export async function deleteArtifactFile(storagePath: string): Promise<void> {
+  try {
+    await deleteObject(ref(storage, storagePath))
+  } catch (err) {
+    console.warn('[upload] could not remove an abandoned upload', err)
+  }
+}
+
+/**
+ * Upload one artifact file under ONE overall deadline, cancellable.
+ *
+ * It uses `uploadBytesResumable` because that returns a task that can be
+ * cancelled. Racing a `setTimeout` against `uploadBytes` would report a
+ * timeout while the bytes kept uploading in the background, and could still
+ * create the object after the caller had said nothing was saved. There is one
+ * attempt, and the SDK's own retries happen inside it. When the deadline passes
+ * or the signal aborts, the task is cancelled and the promise rejects with a
+ * `BoundedUploadError`.
+ *
+ * If the bytes land and the download-URL read then misses the deadline or the
+ * abort, the object is deleted best-effort before rejecting. Otherwise a file
+ * would exist that no record points to.
+ */
+export function uploadArtifactFileWithDeadline(
+  familyId: string,
+  artifactId: string,
+  file: Blob | File,
+  filename: string,
+  { deadlineMs, signal }: BoundedUploadOptions,
+): Promise<UploadResult> {
+  const storagePath = artifactStoragePath(familyId, artifactId, filename)
+  const storageRef = ref(storage, storagePath)
+
+  return new Promise<UploadResult>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new BoundedUploadError(BoundedUploadStop.Cancelled))
+      return
+    }
+
+    let settled = false
+    let bytesLanded = false
+    const task = uploadBytesResumable(storageRef, file)
+
+    const stop = (code: BoundedUploadStop) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', onAbort)
+      if (bytesLanded) {
+        void deleteArtifactFile(storagePath)
+      } else {
+        task.cancel()
+      }
+      reject(new BoundedUploadError(code))
+    }
+    const onAbort = () => stop(BoundedUploadStop.Cancelled)
+    const timer = setTimeout(() => stop(BoundedUploadStop.Deadline), deadlineMs)
+    signal?.addEventListener('abort', onAbort)
+
+    task.then(
+      async () => {
+        if (settled) return
+        bytesLanded = true
+        try {
+          const downloadUrl = await getDownloadURL(storageRef)
+          if (settled) return
+          settled = true
+          clearTimeout(timer)
+          signal?.removeEventListener('abort', onAbort)
+          resolve({ downloadUrl, storagePath })
+        } catch (err) {
+          if (settled) return
+          settled = true
+          clearTimeout(timer)
+          signal?.removeEventListener('abort', onAbort)
+          void deleteArtifactFile(storagePath)
+          reject(err)
+        }
+      },
+      (err: unknown) => {
+        // A cancel we asked for has already settled the promise.
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        signal?.removeEventListener('abort', onAbort)
+        reject(err)
+      },
+    )
+  })
 }
 
 /**

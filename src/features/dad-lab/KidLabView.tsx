@@ -12,15 +12,19 @@ import { LoadingState } from '../../components/states'
 import PhotoCapture from '../../components/PhotoCapture'
 import AudioRecorder from '../../components/AudioRecorder'
 import SectionCard from '../../components/SectionCard'
-import { artifactsCollection, dadLabReportsCollection } from '../../core/firebase/firestore'
-import { generateFilename, uploadArtifactFile } from '../../core/firebase/upload'
+import { dadLabReportsCollection } from '../../core/firebase/firestore'
+import { generateFilename } from '../../core/firebase/upload'
 import type { Child, DadLabReport } from '../../core/types'
 import { DAD_LAB_TYPE_LABELS, LAB_FRAMEWORKS } from '../../core/types/dadlab'
 import { DadLabStatus, EvidenceType, SubjectBucket } from '../../core/types/enums'
 import type { DadLabType } from '../../core/types/enums'
-import { addDoc, updateDoc, doc } from 'firebase/firestore'
+import { arrayUnion, updateDoc, doc } from 'firebase/firestore'
 import { resolveChildAgeGroup } from '../../core/profile/childIdentity'
-import { normalizeChildRoles, resolveChildReport } from './childRoles'
+import { childReportKey, normalizeChildRoles, resolveChildReport } from './childRoles'
+import { DAD_LAB_REFERENCE_DEADLINE_MS, uploadLabArtifact, withDeadline } from './labArtifactUpload'
+import { LabUploadAudience, LabUploadHandler, LabUploadMedium } from './labUploadCopy'
+import LabUploadStatus from './LabUploadStatus'
+import { useLabUploads, type LabUploadJob } from './useLabUploads'
 
 const LAB_TYPE_ICONS: Record<DadLabType, string> = {
   science: '\u{1F9EA}',
@@ -45,7 +49,6 @@ export default function KidLabView({ familyId, child, children }: KidLabViewProp
   const [prediction, setPrediction] = useState('')
   const [explanation, setExplanation] = useState('')
   const [observation, setObservation] = useState('')
-  const [uploading, setUploading] = useState(false)
   const [artifactRefreshKey, setArtifactRefreshKey] = useState(0)
 
   // Scientific method step tracking (for experiment-type labs)
@@ -130,13 +133,40 @@ export default function KidLabView({ familyId, child, children }: KidLabViewProp
     [familyId, activeLab, childKey, child],
   )
 
-  const handlePhotoCapture = useCallback(
-    async (file: File) => {
-      if (!activeLab?.id) return
-      setUploading(true)
-      try {
-        const ext = file.name.split('.').pop() ?? 'jpg'
-        const artifact = {
+  // ── Uploads (FIX-269 / UX-461) ──
+  // One runner for both captures. The file goes up before the record
+  // (`uploadLabArtifact`), the whole capture has a deadline, and a failure
+  // leaves a sentence with Try again.
+  //
+  // `PhotoCapture` with `multiple` fires `onCapture` once per file without
+  // awaiting, so several of these run concurrently. The reference write used to
+  // be the WHOLE array, built from the `activeLab` this callback closed over,
+  // and each finishing upload overwrote the ones before it, so only the last
+  // stayed on the report. It is an `arrayUnion` of this one id now, the shape
+  // `LabReportForm` already used, and the local copy is updated with a
+  // functional update for the same reason.
+  const runUpload = useCallback(
+    async (job: LabUploadJob<EvidenceType>, signal: AbortSignal) => {
+      const lab = activeLab
+      if (!lab?.id) return
+      const labId = lab.id
+      const isAudio = job.target === EvidenceType.Audio
+      let file = job.file
+      let filename: string
+      if (isAudio) {
+        filename = generateFilename('webm')
+        file = new File([job.file], filename, { type: 'audio/webm' })
+      } else {
+        const name = job.file instanceof File ? job.file.name : ''
+        filename = generateFilename(name.includes('.') ? name.split('.').pop() || 'jpg' : 'jpg')
+      }
+
+      const artifactId = await uploadLabArtifact({
+        familyId,
+        file,
+        filename,
+        signal,
+        artifact: {
           // FEAT-183 (B14): the child's DOC ID, not the lowercase name. Every
           // artifact reader queries `where('childId','==', child.id)` (Kid
           // Today's My Stuff, the portfolio, the compliance pack), so a
@@ -145,8 +175,8 @@ export default function KidLabView({ familyId, child, children }: KidLabViewProp
           // "Artifact childId audit" reports them; a backfill is a separate,
           // confirmed decision.
           childId: child.id,
-          title: `Dad Lab photo - ${activeLab.title}`,
-          type: EvidenceType.Photo,
+          title: `Dad Lab ${isAudio ? 'recording' : 'photo'} - ${lab.title}`,
+          type: job.target,
           createdAt: new Date().toISOString(),
           tags: {
             engineStage: 'Build' as const,
@@ -154,80 +184,63 @@ export default function KidLabView({ familyId, child, children }: KidLabViewProp
             subjectBucket: SubjectBucket.Science,
             location: 'Home',
           },
-        }
-        const docRef = await addDoc(artifactsCollection(familyId), artifact as never)
-        const filename = generateFilename(ext)
-        const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, file, filename)
-        await updateDoc(doc(artifactsCollection(familyId), docRef.id), { uri: downloadUrl })
+        },
+      })
 
-        // Add artifact ID to child report
-        const cr = resolveChildReport(activeLab.childReports, child)
-        const updatedArtifacts = [...(cr.artifacts ?? []), docRef.id]
-        const labRef = doc(dadLabReportsCollection(familyId), activeLab.id!)
-        await updateDoc(labRef, {
-          [`childReports.${childKey}.artifacts`]: updatedArtifacts,
+      // Appended, never rewritten. The key is the one this report already
+      // reads him under, so the append lands where `resolveChildReport` looks.
+      const key = childReportKey(lab.childReports, child)
+      await withDeadline(
+        updateDoc(doc(dadLabReportsCollection(familyId), labId), {
+          [`childReports.${key}.artifacts`]: arrayUnion(artifactId),
           updatedAt: new Date().toISOString(),
-        })
-        setActiveLab({
-          ...activeLab,
+        }),
+        DAD_LAB_REFERENCE_DEADLINE_MS,
+      )
+      setActiveLab((prev) => {
+        if (!prev || prev.id !== labId) return prev
+        const cr = resolveChildReport(prev.childReports, child)
+        const artifacts = cr.artifacts ?? []
+        if (artifacts.includes(artifactId)) return prev
+        return {
+          ...prev,
           childReports: {
-            ...activeLab.childReports,
-            [childKey]: { ...cr, artifacts: updatedArtifacts },
+            ...prev.childReports,
+            [childReportKey(prev.childReports, child)]: { ...cr, artifacts: [...artifacts, artifactId] },
           },
-        })
-        setArtifactRefreshKey(prev => prev + 1)
-      } finally {
-        setUploading(false)
-      }
+        }
+      })
+      setArtifactRefreshKey((prev) => prev + 1)
     },
-    [familyId, activeLab, childKey, child],
+    [familyId, activeLab, child],
+  )
+
+  const uploads = useLabUploads(runUpload)
+  const startUpload = uploads.start
+  // The spinner stays until the LAST upload ends, rather than clearing when
+  // the first one finishes.
+  const uploading = uploads.pending > 0
+
+  const handlePhotoCapture = useCallback(
+    (file: File) =>
+      startUpload({
+        subject: { medium: LabUploadMedium.Photo },
+        handler: LabUploadHandler.KidPhoto,
+        file,
+        target: EvidenceType.Photo,
+      }),
+    [startUpload],
   )
 
   const handleAudioCapture = useCallback(
-    async (blob: Blob) => {
-      if (!activeLab?.id) return
-      setUploading(true)
-      try {
-        const artifact = {
-          // FEAT-183 (B14): the child's DOC ID, not the lowercase name — see
-          // the note on the photo capture above.
-          childId: child.id,
-          title: `Dad Lab recording - ${activeLab.title}`,
-          type: EvidenceType.Audio,
-          createdAt: new Date().toISOString(),
-          tags: {
-            engineStage: 'Build' as const,
-            domain: 'dad-lab',
-            subjectBucket: SubjectBucket.Science,
-            location: 'Home',
-          },
-        }
-        const docRef = await addDoc(artifactsCollection(familyId), artifact as never)
-        const filename = generateFilename('webm')
-        const file = new File([blob], filename, { type: 'audio/webm' })
-        const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, file, filename)
-        await updateDoc(doc(artifactsCollection(familyId), docRef.id), { uri: downloadUrl })
-
-        const cr = resolveChildReport(activeLab.childReports, child)
-        const updatedArtifacts = [...(cr.artifacts ?? []), docRef.id]
-        const labRef = doc(dadLabReportsCollection(familyId), activeLab.id!)
-        await updateDoc(labRef, {
-          [`childReports.${childKey}.artifacts`]: updatedArtifacts,
-          updatedAt: new Date().toISOString(),
-        })
-        setActiveLab({
-          ...activeLab,
-          childReports: {
-            ...activeLab.childReports,
-            [childKey]: { ...cr, artifacts: updatedArtifacts },
-          },
-        })
-        setArtifactRefreshKey(prev => prev + 1)
-      } finally {
-        setUploading(false)
-      }
-    },
-    [familyId, activeLab, childKey, child],
+    (blob: Blob) =>
+      startUpload({
+        subject: { medium: LabUploadMedium.Recording },
+        handler: LabUploadHandler.KidRecording,
+        file: blob,
+        target: EvidenceType.Audio,
+      }),
+    [startUpload],
   )
 
   if (loading) {
@@ -270,6 +283,18 @@ export default function KidLabView({ familyId, child, children }: KidLabViewProp
               label={`${LAB_TYPE_ICONS[activeLab.labType] ?? ''} ${DAD_LAB_TYPE_LABELS[activeLab.labType] ?? activeLab.labType}`.trim()}
               size="small"
               sx={{ mt: 1, bgcolor: 'rgba(255,255,255,0.2)', color: 'white' }}
+            />
+          </Box>
+
+          {/* How each upload is going, and how it ended (FIX-269). One place,
+              near the top, because the capture buttons are spread across steps. */}
+          <Box sx={{ mb: 2 }}>
+            <LabUploadStatus
+              audience={LabUploadAudience.Kid}
+              inFlight={uploads.inFlight}
+              failures={uploads.failures}
+              onRetry={uploads.retry}
+              onDismiss={uploads.dismiss}
             />
           </Box>
 

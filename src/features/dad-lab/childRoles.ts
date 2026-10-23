@@ -98,3 +98,24 @@ export function resolveChildReport(
   if (reports[child.name]) return reports[child.name]
   return { artifacts: [] }
 }
+
+/**
+ * The key a write into `childReports` should use for this child: the key the
+ * document ALREADY uses for him if there is one (the same order
+ * `resolveChildReport` reads in), otherwise his lowercase name.
+ *
+ * It is shared by the parent form and the kid view (FIX-269). An `arrayUnion`
+ * appends to the key it is given, so a write keyed differently from the read
+ * would land somewhere the read never looks.
+ */
+export function childReportKey(
+  childReports: Record<string, ChildLabReport> | undefined,
+  child: Child,
+): string {
+  const reports = childReports ?? {}
+  if (reports[child.id]) return child.id
+  const nameKey = child.name.toLowerCase()
+  if (reports[nameKey]) return nameKey
+  if (reports[child.name]) return child.name
+  return nameKey
+}
