@@ -64,10 +64,10 @@ logs. No number, fold, rounding or stored row was changed by this run.
 ## 3. The derived numbers
 
 ```
-source files scanned (non-test, src/ + functions/src/): 915
+source files scanned (non-test, src/ + functions/src/): 938
 surfaces naming a time or evidence collection: 60
-by role: {"WRITE":15,"READ":21,"BOTH":24}
-by collection: {"hours":16,"hoursAdjustments":9,"days":28,"artifacts":32}
+by role: {"WRITE":16,"READ":21,"BOTH":23}
+by collection: {"hours":17,"hoursAdjustments":9,"days":28,"artifacts":32}
 census rows: 60
 census problems: 0
 date-rule call sites (9 distinct rules): 35
@@ -91,6 +91,14 @@ consumers of the shared counting path: 8
        src/features/weekly-review/weekBySubject.ts
 ```
 
+
+The 2026-10-23 re-derivation (`FIX-269`, the Dad Lab upload run): the two Dad Lab capture
+surfaces (`KidLabView.tsx`, `BOTH`, and `LabReportForm.tsx`, `WRITE`) no longer name
+`artifacts`. Both now write through the one helper `labArtifactUpload.ts` (`WRITE`), which
+uploads the file before it writes the record. Their two §5 rows are replaced by its one row.
+The other differences from the block below the 2026-10-16 note (files scanned, `hours`,
+`WRITE`) were already on `main` before this run. They are pasted from the script's output
+here rather than accounted for one by one.
 
 The 2026-10-16 re-derivation (the before-work page check —
 `docs/review/BEFORE_WORK_PAGE_CHECK.md`): **`TodayPage.tsx` no longer names a time
@@ -223,8 +231,7 @@ no document.
 | `src/features/books/useBackgroundReimagine.ts` | artifacts | WRITE | — (no range rule) | Writes the reimagined picture's artifact. No minutes |
 | `src/features/books/useBook.ts` | hours · artifacts | BOTH | `todayStr()` — local | **WRITER.** Page-editing minutes as Language Arts (plus up to 5 Art minutes when art was generated), `notes` naming the book. `UX-353`'s unmount-order rule lives here |
 | `src/features/dad-lab/HoursRoutingAuditPanel.tsx` | hoursAdjustments | BOTH | `hoursRoutingAudit` over whole collection | **WRITER.** The DATA-16 audit's corrections — `hoursAdjustments` rows, positive and negative, each stamped with the `labReportId` that makes them idempotent |
-| `src/features/dad-lab/KidLabView.tsx` | artifacts | BOTH | — (no range rule) | Kid-side lab contributions: artifacts only |
-| `src/features/dad-lab/LabReportForm.tsx` | artifacts | WRITE | `weekKeyFromDate` for the report's week | Writes the lab's artifacts. The lab's MINUTES are written by `useDadLabReports`, below |
+| `src/features/dad-lab/labArtifactUpload.ts` | artifacts | WRITE | — (no range rule) | **The one Dad Lab artifact writer** (FIX-269 / UX-461), for both the parent's `LabReportForm` and the kid's `KidLabView`, neither of which names the collection any more. It uploads the file first and then writes the record with its `uri`, so a failed upload writes no artifact. Artifacts only: the lab's MINUTES are written by `useDadLabReports`, below |
 | `src/features/dad-lab/useDadLabReports.ts` | hours | BOTH | the report's own `date` — local | **WRITER.** DATA-04: a lab's minutes are split per subject tag and written **for every child**, by design. `notes` = *“Dad Lab: <title>”* |
 | `src/features/evaluate/EvaluateChatPage.tsx` | hours | BOTH | `todayKey()` — local | **WRITER.** An evaluation session's measured minutes, rounded up to 5, under the domain's subject |
 | `src/features/evaluate/useMasteryCheckoffs.ts` | days | READ | `toISOString().slice(0,10)` — **UTC** | Reads recent day logs for mastery check-offs. No minutes; the UTC date is a read bound, not a stored one |
