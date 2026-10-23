@@ -12,10 +12,14 @@ import type { Child, DadLabReport } from '../../core/types'
 // artifacts were invisible to `where('childId','==', child.id)` readers.
 
 const getDocsMock = vi.fn()
-/** Typed arity so the artifact payload can be read back off `mock.calls`. */
-const addDocMock = vi.fn(
-  async (col: unknown, data: unknown) => ({ id: 'artifact-1', col, data }),
-)
+/**
+ * The file-then-record capture (FIX-269). Typed arity so the artifact payload
+ * can be read back off `mock.calls`.
+ */
+const uploadLabArtifactMock = vi.fn(async (args: { artifact: Record<string, unknown> }) => {
+  void args
+  return 'artifact-1'
+})
 const updateDocMock = vi.fn()
 
 vi.mock('firebase/firestore', () => ({
@@ -25,7 +29,13 @@ vi.mock('firebase/firestore', () => ({
   orderBy: vi.fn(() => ({})),
   doc: vi.fn(() => ({})),
   updateDoc: (...args: unknown[]) => updateDocMock(...args),
-  addDoc: (col: unknown, data: unknown) => addDocMock(col, data),
+  arrayUnion: (...values: unknown[]) => ({ __arrayUnion: values }),
+}))
+
+vi.mock('./labArtifactUpload', () => ({
+  DAD_LAB_REFERENCE_DEADLINE_MS: 30_000,
+  uploadLabArtifact: (args: { artifact: Record<string, unknown> }) => uploadLabArtifactMock(args),
+  withDeadline: <T,>(work: Promise<T>) => work,
 }))
 
 vi.mock('../../core/firebase/firestore', () => ({
@@ -35,7 +45,6 @@ vi.mock('../../core/firebase/firestore', () => ({
 
 vi.mock('../../core/firebase/upload', () => ({
   generateFilename: () => 'f.jpg',
-  uploadArtifactFile: vi.fn(async () => ({ downloadUrl: 'https://example/f.jpg' })),
 }))
 
 vi.mock('../../components/ArtifactGallery', () => ({ default: () => <div data-testid="gallery" /> }))
@@ -132,15 +141,15 @@ describe('KidLabView — the capture flow follows the age group, not the name (B
 
 describe('KidLabView — captures are keyed by child doc id (B14)', () => {
   it('writes the artifact with child.id, never the lowercase name', async () => {
-    addDocMock.mockClear()
+    uploadLabArtifactMock.mockClear()
     await renderFor(LONDON)
 
     // The younger branch's PhotoCapture; the "Capture My Work" card renders
     // its own too, so fire the first one and read the artifact it wrote.
     fireEvent.click(screen.getAllByTestId('photo')[0]!)
-    await vi.waitFor(() => expect(addDocMock).toHaveBeenCalled())
+    await vi.waitFor(() => expect(uploadLabArtifactMock).toHaveBeenCalled())
 
-    const written = addDocMock.mock.calls[0]![1] as unknown as { childId: string }
+    const written = uploadLabArtifactMock.mock.calls[0]![0].artifact as unknown as { childId: string }
     expect(written.childId).toBe('c-london')
     expect(written.childId).not.toBe('london')
   })
