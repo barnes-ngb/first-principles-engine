@@ -549,7 +549,7 @@ invariant); the **client** keeps them in view instead, so a proposal that races 
 | `src/features/avatar/BrothersVoxelScene.tsx` | Side-by-side brothers scene |
 | `src/features/avatar/AccessoriesPanel.tsx` | Accessories system UI + slot conflicts |
 | `src/features/avatar/armorGate.ts` | Forge tier gate logic + phantom piece fix |
-| `functions/src/ai/tasks/index.ts` | Chat task registry (21 task types) |
+| `functions/src/ai/tasks/index.ts` | Chat task registry (22 task types) |
 
 ---
 
