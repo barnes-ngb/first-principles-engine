@@ -10,6 +10,7 @@ const getDoc = vi.fn()
 const setDoc = vi.fn()
 const updateDoc = vi.fn()
 vi.mock('firebase/firestore', () => ({
+  deleteField: () => '__deleteField__',
   doc: (...args: unknown[]) => doc(...args),
   getDoc: (...args: unknown[]) => getDoc(...args),
   setDoc: (...args: unknown[]) => setDoc(...args),
@@ -240,5 +241,24 @@ describe('applyChapterPoolToAll', () => {
     expect(written).toBe(1)
     expect(setDoc).toHaveBeenCalledTimes(1) // London created
     expect(updateDoc).not.toHaveBeenCalled() // Lincoln no-op
+  })
+})
+
+describe('a finished stamp on a partial pool (UX-464)', () => {
+  it('appending unanswered chapters clears completedAt in the same write', async () => {
+    getDoc.mockResolvedValue({
+      exists: () => true,
+      data: () => ({ questionPool: [{ ...item(1), answered: true }], completedAt: '2026-10-27T00:00:00Z' }),
+    })
+    await applyChapterPoolForChild('fam1', 'lincoln1', book, [item(1), item(2)])
+    const payload = updateDoc.mock.calls[0][1] as Record<string, unknown>
+    expect(payload.completedAt).toBe('__deleteField__')
+    expect((payload.questionPool as unknown[]).length).toBe(2)
+  })
+
+  it('positive control: an append to an unfinished book sends no completedAt at all', async () => {
+    getDoc.mockResolvedValue({ exists: () => true, data: () => ({ questionPool: [item(1)] }) })
+    await applyChapterPoolForChild('fam1', 'lincoln1', book, [item(2)])
+    expect(updateDoc.mock.calls[0][1]).not.toHaveProperty('completedAt')
   })
 })

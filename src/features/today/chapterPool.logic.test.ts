@@ -216,3 +216,18 @@ describe('kid chapter view has no skip control (FUNC-07)', () => {
     expect(src).not.toMatch(/Skip this chapter/i)
   })
 })
+
+describe('isBookFinished with the book\'s chapter count (UX-464)', () => {
+  const done = (chapter: number) => ({ chapter, questionType: 'opinion' as const, question: 'q', answered: true })
+  it('answering every question of a partial pool is NOT finishing the book', () => {
+    const twelve = Array.from({ length: 12 }, (_, i) => done(i + 1))
+    expect(isBookFinished(twelve, 58)).toBe(false)
+  })
+  it('a pool covering every chapter, all answered, is finished', () => {
+    expect(isBookFinished([done(1), done(2)], 2)).toBe(true)
+  })
+  it('without a chapter count the rule is the pool-only one it was', () => {
+    expect(isBookFinished([done(1)])).toBe(true)
+    expect(isBookFinished([done(1)], 0)).toBe(true)
+  })
+})

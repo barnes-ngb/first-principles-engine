@@ -1,4 +1,4 @@
-import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore'
+import { deleteField, doc, getDoc, setDoc, updateDoc } from 'firebase/firestore'
 
 import {
   bookProgressCollection,
@@ -93,8 +93,12 @@ export async function applyChapterPoolForChild(
     )
     if (additions.length === 0) return false
 
+    // Every addition is unanswered, so a book stamped finished on a partial
+    // pool (UX-464 — a batch run that stopped part-way) is not finished any
+    // more: the stamp goes with the append, in the same write.
     await updateDoc(progressRef, {
       questionPool: [...existing.questionPool, ...additions],
+      ...(existing.completedAt ? { completedAt: deleteField() } : {}),
       updatedAt: now,
     })
     return true
