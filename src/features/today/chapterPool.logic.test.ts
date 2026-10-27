@@ -231,3 +231,15 @@ describe('isBookFinished with the book\'s chapter count (UX-464)', () => {
     expect(isBookFinished([done(1)], 0)).toBe(true)
   })
 })
+
+describe('isReadAloudSectionVisible on an exhausted partial pool (UX-464)', () => {
+  const done = (chapter: number) => ({ chapter, questionType: 'opinion' as const, question: 'q', answered: true })
+  const twelve = Array.from({ length: 12 }, (_, i) => done(i + 1))
+  it('keeps the kid section when the book has chapters with no question yet', () => {
+    expect(isReadAloudSectionVisible(true, twelve, 58)).toBe(true)
+  })
+  it('positive control: a finished book still unmounts it, with or without a count', () => {
+    expect(isReadAloudSectionVisible(true, twelve, 12)).toBe(false)
+    expect(isReadAloudSectionVisible(true, twelve)).toBe(false)
+  })
+})

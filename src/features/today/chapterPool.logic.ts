@@ -90,15 +90,23 @@ export function isChapterPoolVisible(pool: ChapterQuestionPoolItem[]): boolean {
  * - No shared book → no section.
  * - Book but no per-child pool yet → show the section (book reaches Today).
  * - Pool exists → defer to `isChapterPoolVisible` so a finished book still
- *   unmounts the kid section (FUNC-07 behavior, unchanged).
+ *   unmounts the kid section (FUNC-07 behavior, unchanged) — and, given the
+ *   book's chapter count, an exhausted PARTIAL pool keeps it (UX-464).
  */
 export function isReadAloudSectionVisible(
   hasBook: boolean,
   pool: ChapterQuestionPoolItem[] | undefined,
+  totalChapters?: number,
 ): boolean {
   if (!hasBook) return false
   if (!pool || pool.length === 0) return true
-  return isChapterPoolVisible(pool)
+  if (isChapterPoolVisible(pool)) return true
+  // UX-464 — every saved question is done, but a batch run stopped part-way
+  // and the book has chapters with no question yet. That is not a finished
+  // book, so the section stays (showing the "a grown-up will add questions"
+  // placeholder, as for a book with no pool). Without a chapter count the rule
+  // is the one it was.
+  return !isBookFinished(pool, totalChapters)
 }
 
 /**
