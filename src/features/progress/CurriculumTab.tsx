@@ -70,6 +70,7 @@ import {
   type ReassignOwnerOption,
 } from './reassignActivity'
 import EditRoutinesDialog from './EditRoutinesDialog'
+import ReadAloudChapterLine from './ReadAloudChapterLine'
 import {
   CURRICULUM_SECTION_TITLE,
   CurriculumSection,
@@ -1035,6 +1036,16 @@ export default function CurriculumTab() {
                       <>
                         {`${config.defaultMinutes}m · ${ActivityFrequencyLabel[config.frequency] ?? config.frequency}`}
                         <ActivityAliases config={config} />
+                        {/* FEAT-243: a read-aloud row shows where THIS child is,
+                            read from `bookProgress` — never a stored position. */}
+                        {config.chapterBookId && (
+                          <ReadAloudChapterLine
+                            familyId={familyId}
+                            childId={activeChildId}
+                            childName={activeChild?.name}
+                            chapterBookId={config.chapterBookId}
+                          />
+                        )}
                       </>
                     }
                     secondaryTypographyProps={{ component: 'div' }}
