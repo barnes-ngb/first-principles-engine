@@ -49,7 +49,6 @@ import type {
   BookLookupResult,
   BookProgress,
   ChapterBook,
-  ChapterQuestionPoolItem,
   ChatMessage,
   DayLog,
   DayTypeConfig,
@@ -81,11 +80,12 @@ import { SKILL_TAG_MAP } from '../../core/types/skillTags'
 import { formatDateYmd, parseDateYmd } from '../../core/utils/format'
 import { todayKey } from '../../core/utils/dateKey'
 import { useTodayKey } from '../../core/hooks/useTodayKey'
-import { buildChapterPoolItem } from '../today/chapterPool.logic'
 import {
-  applyChapterPoolToAll,
-  collectExistingChapterPool,
-} from '../today/applyChapterPoolForChild'
+  ChapterGenerationKind,
+  chapterGenerationMessage,
+  chapterProgressLine,
+  generateChapterQuestionsInBatches,
+} from '../today/chapterQuestionBatches'
 import { dayLogDocId } from '../today/daylog.model'
 import { retainBlocksForApply, retainChecklistForApply } from '../today/applyReset'
 import { checklistItemKey, updateDayLogGuarded } from '../today/dayWriteGuard'
@@ -125,6 +125,16 @@ import {
 } from './chatPlanner.logic'
 import type { AdjustmentIntent } from './chatPlanner.logic'
 import { applyDraftWeek, WeekApplyError } from './applyWeekPlan'
+import { ensureReadAloudConfig } from './readAloudConfigWrites'
+import {
+  READ_ALOUD_ADD_FAILED,
+  earlierReadAloudDone,
+  earlierReadAloudFailed,
+  openEarlierReadAloudRows,
+  readAloudAddedLine,
+  readAloudConfigDocId,
+} from './readAloudCurriculum'
+import ReadAloudCurriculumNotices from './ReadAloudCurriculumNotices'
 import { parsePlannerBoundary } from '../../../functions/src/shared/plannerBoundary'
 import { BOUNDARY_BARE_REFUSAL_TEXT, BOUNDARY_DURING_GENERATE_TEXT } from './PlannerBoundaryLink'
 import {
@@ -424,7 +434,7 @@ export default function PlannerChatPage() {
   const [masterySummary, setMasterySummary] = useState<PlannerMasterySummary | null>(null)
 
   // Activity configs → routine text (replaces old free-text dailyRoutine)
-  const { configs: activityConfigs, loading: activityConfigsLoading, error: activityConfigsError, deleteConfig } = useActivityConfigs(activeChildId ?? '')
+  const { configs: activityConfigs, loading: activityConfigsLoading, error: activityConfigsError, deleteConfig, markComplete } = useActivityConfigs(activeChildId ?? '')
   const dailyRoutine = useMemo(
     () => activityConfigsToRoutineText(activityConfigs),
     [activityConfigs],
@@ -1011,6 +1021,64 @@ export default function PlannerChatPage() {
     [weekPlan, debouncedWriteWeekField],
   )
 
+  // ── The read-aloud's Curriculum row (FEAT-243 / UX-470) ──────────────────
+  // Owner decision 2026-10-27: picking a read-aloud adds it to Curriculum. The
+  // pick in the review phase is a draft, so the row lands when the week is
+  // APPLIED (an abandoned draft leaves nothing behind) — or when the book is
+  // changed on an already-applied week, where this page writes the week's
+  // `readAloudBookId` directly. Every path goes through the ONE create-only
+  // writer; an existing row (renamed, re-timed, finished) is never touched.
+  const [addingReadAloud, setAddingReadAloud] = useState(false)
+  const ensureReadAloudRow = useCallback(
+    async (book: ChapterBook): Promise<'created' | 'exists' | 'not-permitted' | 'failed'> => {
+      if (!familyId) return 'failed'
+      try {
+        const result = await ensureReadAloudConfig({ familyId, book, canEdit: isParent })
+        return result.status
+      } catch (err) {
+        console.error('[ReadAloud] Failed to add the read-aloud to Curriculum', err)
+        return 'failed'
+      }
+    },
+    [familyId, isParent],
+  )
+  const handleAddReadAloudRow = useCallback(async () => {
+    if (!selectedBook) return
+    setAddingReadAloud(true)
+    const status = await ensureReadAloudRow(selectedBook)
+    setAddingReadAloud(false)
+    if (status === 'failed') setSnack({ text: READ_ALOUD_ADD_FAILED, severity: 'warning' })
+    else if (status !== 'not-permitted') {
+      setSnack({ text: readAloudAddedLine(selectedBook.title, status === 'created'), severity: 'success' })
+    }
+  }, [selectedBook, ensureReadAloudRow])
+  const readAloudRowExists = selectedBook
+    ? activityConfigs.some((config) => config.id === readAloudConfigDocId(selectedBook.id))
+    : false
+  // Offered only once the list has actually been read: an unread list is not an
+  // empty one, and "Add" over a row that exists would be a claim about nothing.
+  const showReadAloudAdd = Boolean(
+    isParent && selectedBook && !activityConfigsLoading && !activityConfigsError && !readAloudRowExists,
+  )
+  const earlierReadAloudRows = useMemo(
+    () => (applied && isParent && selectedBook ? openEarlierReadAloudRows(activityConfigs, selectedBook.id) : []),
+    [applied, isParent, selectedBook, activityConfigs],
+  )
+  const handleFinishEarlierReadAloud = useCallback(
+    async (config: { id: string; name: string }) => {
+      if (!isParent) return
+      try {
+        // The existing mark-complete path — the same write as Curriculum's ⋮.
+        await markComplete(config.id)
+        setSnack({ text: earlierReadAloudDone(config), severity: 'success' })
+      } catch (err) {
+        console.error('[ReadAloud] Failed to mark an earlier read-aloud finished', err)
+        setSnack({ text: earlierReadAloudFailed(config), severity: 'warning' })
+      }
+    },
+    [isParent, markComplete],
+  )
+
   // Persist book change to plannerDefaults + weekPlan (used in review/active phases)
   const handleBookChangeAndPersist = useCallback((book: ChapterBook | null) => {
     handleSelectedBookChange(book)
@@ -1025,8 +1093,15 @@ export default function PlannerChatPage() {
       void updateDoc(weekPlanRef, {
         ...(book ? { readAloudBookId: book.id } : { readAloudBookId: null }),
       })
+      // FEAT-243: on an applied week this IS the week's read-aloud now, so it
+      // gets its Curriculum row exactly as an Apply would give it one.
+      if (book) {
+        void ensureReadAloudRow(book).then((status) => {
+          if (status === 'failed') setSnack({ text: READ_ALOUD_ADD_FAILED, severity: 'warning' })
+        })
+      }
     }
-  }, [handleSelectedBookChange, familyId, applied, weekPlanRef])
+  }, [handleSelectedBookChange, familyId, applied, weekPlanRef, ensureReadAloudRow])
 
   // Add welcome message on first load when child is selected (only after setup wizard is complete)
   useEffect(() => {
@@ -2769,6 +2844,12 @@ Generate a plan for Monday through Friday.`.trim()
         ...(overrideWeekStart ? {} : { weekChoice: effectiveWeekChoice }),
       })
 
+      // FEAT-243 / UX-470: the applied read-aloud gets its Curriculum row — an
+      // enrichment beside Apply (like the chapter pool below), not part of the
+      // day writes. Awaited so a failure can be said in the confirmation rather
+      // than lost under the snacks that follow; one transaction, one document.
+      const readAloudRowStatus = selectedBook ? await ensureReadAloudRow(selectedBook) : null
+
       // Persist readAloudBookId to plannerDefaults so it carries to the next week
       void setDoc(doc(db, `families/${familyId}/settings/plannerDefaults`), {
         readAloudBook: selectedBook?.title ?? '',
@@ -2833,7 +2914,11 @@ Generate a plan for Monday through Friday.`.trim()
       }
 
       // UX-63: "This Week" is not a page either — see the applied message above.
-      setSnack({ text: appliedConfirmation(effectiveWeekStart), severity: 'success' })
+      setSnack(
+        readAloudRowStatus === 'failed'
+          ? { text: `${appliedConfirmation(effectiveWeekStart)} ${READ_ALOUD_ADD_FAILED}`, severity: 'warning' }
+          : { text: appliedConfirmation(effectiveWeekStart), severity: 'success' },
+      )
 
       // Non-blocking (FEAT-43): batch-generate inline Help Card bodies for the
       // must-do Reading/Math items. Fire-and-forget — lock-in already succeeded;
@@ -2860,88 +2945,30 @@ Generate a plan for Monday through Friday.`.trim()
             const progressId = bookProgressDocId(activeChildId, selectedBook.id)
             const progressRef = doc(bookProgressCollection(familyId), progressId)
 
-            // Collect the family's existing pool across EVERY learner (canonical
-            // "same questions"), then copy it to every kid — siblings who already
-            // have a chapter no-op, kids missing it get the exact item. Backfills
-            // London from Lincoln WITHOUT regenerating (FEAT-19).
-            const existingMap = await collectExistingChapterPool(familyId, children, selectedBook.id)
-            const backfilled = await applyChapterPoolToAll(
-              familyId, children, selectedBook, [...existingMap.values()],
-            )
-
-            // AI-generate ONLY chapters no kid has yet.
-            const missingChapters = selectedBook.chapters?.filter(
-              (c) => !existingMap.has(c.number),
-            ) ?? []
-
-            if (missingChapters.length === 0) {
-              setSnack({
-                text: backfilled > 0
-                  ? `Chapter questions ready for ${selectedBook.title}!`
-                  : 'Chapter questions already generated.',
-                severity: backfilled > 0 ? 'success' : 'info',
-              })
-              // A backfill may have populated the active child too — refresh.
-              if (backfilled > 0) {
-                const refreshed = await getDoc(progressRef)
-                if (refreshed.exists()) {
-                  setBookProgress({ ...refreshed.data() as BookProgress, id: refreshed.id })
-                }
-              }
-              return
-            }
-
-            const result = await aiChat({
+            // UX-464 — one shared batching path: copies the family's existing
+            // pool to every kid first (FEAT-19), then generates ONLY the
+            // chapters no kid has, a batch at a time, writing each batch as it
+            // lands. A batch that fails keeps the earlier ones; Retry finishes
+            // the rest.
+            const outcome = await generateChapterQuestionsInBatches({
               familyId,
-              childId: activeChildId,
-              taskType: TaskType.ChapterQuestions,
-              messages: [{
-                role: 'user',
-                content: JSON.stringify({
-                  bookTitle: selectedBook.title,
-                  author: selectedBook.author,
-                  chapters: missingChapters,
-                  childName: activeChild?.name,
-                  weekTheme: weekPlan?.theme,
-                  weekVirtue: weekPlan?.virtue,
-                }),
-              }],
+              children,
+              book: selectedBook,
+              requestChildId: activeChildId,
+              childName: activeChild?.name,
+              weekTheme: weekPlan?.theme,
+              weekVirtue: weekPlan?.virtue,
+              chat: aiChat,
+              onProgress: (p) => setSnack({ text: chapterProgressLine(p), severity: 'info' }),
             })
-
-            if (!result?.message) {
-              setSnack({
-                text: "Couldn't generate chapter questions.",
-                severity: 'warning',
-                action: { label: 'Retry', onClick: () => void generatePool() },
-              })
-              return
-            }
-
-            let questions: Array<{ chapter: number; questionType: string; question: string }> = []
-            try {
-              const parsed = JSON.parse(result.message) as unknown
-              questions = Array.isArray(parsed) ? parsed as typeof questions : []
-            } catch {
-              setSnack({
-                text: "Couldn't parse chapter questions.",
-                severity: 'warning',
-                action: { label: 'Retry', onClick: () => void generatePool() },
-              })
-              return
-            }
-
-            const newPoolItems: ChapterQuestionPoolItem[] = questions
-              .map((q) =>
-                buildChapterPoolItem(q, selectedBook.chapters?.find((c) => c.number === q.chapter)?.title),
-              )
-              .filter((item): item is ChapterQuestionPoolItem => item !== null)
-
-            // The read-aloud is a family book: write the SAME newly-generated pool
-            // to every learner so each kid (Lincoln + London) gets the questions on
-            // their Today and records their own answers (FEAT-17). Deduped by chapter.
-            await applyChapterPoolToAll(familyId, children, selectedBook, newPoolItems)
-
-            setSnack({ text: `Chapter questions ready for ${selectedBook.title}!`, severity: 'success' })
+            const message = chapterGenerationMessage(outcome, selectedBook.title)
+            const failed = outcome.kind === ChapterGenerationKind.Partial
+              || outcome.kind === ChapterGenerationKind.ReadFailed
+            setSnack({
+              text: message.text,
+              severity: failed ? 'warning' : message.severity,
+              ...(failed ? { action: { label: 'Retry', onClick: () => void generatePool() } } : {}),
+            })
 
             // Refresh bookProgress state for the active child (the one viewing this page).
             const refreshed = await getDoc(progressRef)
@@ -2971,7 +2998,7 @@ Generate a plan for Monday through Friday.`.trim()
         severity: refusal === 'stale-week' ? 'warning' : 'error',
       })
     }
-  }, [activeChildId, familyId, weekRange.start, effectiveWeekChoice, currentDraft, messages, persistConversation, generateActivity, subjectToActivityType, selectedBook, activeChild, weekPlan, aiChat, children, activityConfigs, refreshTodayKey, dayTypes, filteredAppBlocks])
+  }, [activeChildId, familyId, weekRange.start, effectiveWeekChoice, currentDraft, messages, persistConversation, generateActivity, subjectToActivityType, selectedBook, activeChild, weekPlan, aiChat, children, activityConfigs, refreshTodayKey, dayTypes, filteredAppBlocks, ensureReadAloudRow])
 
   // Quick suggestion handler - sends the text immediately
   const handleQuickSuggestion = useCallback((text: string) => {
@@ -3521,6 +3548,13 @@ ${dayPrompts}`
                 loadError={chapterBooksLoadError}
                 onLookup={handleLookupBook}
               />
+              <ReadAloudCurriculumNotices
+                showAdd={showReadAloudAdd}
+                adding={addingReadAloud}
+                onAdd={() => void handleAddReadAloudRow()}
+                earlierRows={[]}
+                onConfirmFinish={handleFinishEarlierReadAloud}
+              />
             </Box>
           )}
 
@@ -3594,6 +3628,13 @@ ${dayPrompts}`
                   loading={chapterBooksLoading}
                   loadError={chapterBooksLoadError}
                   onLookup={handleLookupBook}
+                />
+                <ReadAloudCurriculumNotices
+                  showAdd={showReadAloudAdd}
+                  adding={addingReadAloud}
+                  onAdd={() => void handleAddReadAloudRow()}
+                  earlierRows={earlierReadAloudRows}
+                  onConfirmFinish={handleFinishEarlierReadAloud}
                 />
                 <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
                   Today&apos;s chapter question won&apos;t regenerate automatically — open the Today page and tap Refresh on the chapter question card.

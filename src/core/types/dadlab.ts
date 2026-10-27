@@ -162,6 +162,17 @@ export const DAD_LAB_TYPE_LABELS: Record<DadLabType, string> = {
   heart: 'Heart',
 }
 
+/**
+ * What a parent reads as each beat's name. The beat card heads with it, and
+ * an upload's sentence names the beat with it (FIX-269), so both always use
+ * the same words.
+ */
+export const LAB_BEAT_TITLES: Record<LabBeatId, string> = {
+  predict: 'Predict',
+  try: 'Try',
+  saw: 'What we saw',
+}
+
 /** Framework steps for each lab type */
 export const LAB_FRAMEWORKS: Record<string, { label: string; steps: string[] }> = {
   science: {

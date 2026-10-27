@@ -19,6 +19,7 @@ import { addDoc } from 'firebase/firestore'
 
 import { ErrorState, LoadingState } from '../../components/states'
 import { chapterBooksCollection } from '../../core/firebase/firestore'
+import { bookLookupNote } from './bookLookupNote'
 import type {
   BookLookupResult,
   BookProgress,
@@ -71,6 +72,8 @@ export default function ChapterBookPicker({
   // Lookup ("Look it up") state
   const [lookingUp, setLookingUp] = useState(false)
   const [lookupError, setLookupError] = useState<string | null>(null)
+  // UX-464 — what the lookup did not fill (no summaries, untitled chapters).
+  const [lookupNote, setLookupNote] = useState<string | null>(null)
   // Stashed lookup data not surfaced as editable fields — applied on save.
   const [lookupSummary, setLookupSummary] = useState<string | undefined>(undefined)
   const [lookupMovie, setLookupMovie] = useState<BookLookupResult['movie']>(undefined)
@@ -85,6 +88,7 @@ export default function ChapterBookPicker({
     setNewChapterTitles('')
     setSaveError(null)
     setLookupError(null)
+    setLookupNote(null)
     setLookupSummary(undefined)
     setLookupMovie(undefined)
     setLookupChapters([])
@@ -99,6 +103,7 @@ export default function ChapterBookPicker({
     }
     setLookingUp(true)
     setLookupError(null)
+    setLookupNote(null)
     try {
       const result = await onLookup(title)
       if (!result || !result.title) {
@@ -119,6 +124,7 @@ export default function ChapterBookPicker({
       } else {
         setLookupChapters([])
       }
+      setLookupNote(bookLookupNote(result))
       // Stash non-editable data for persistence on save.
       setLookupSummary(result.summary)
       setLookupMovie(result.movie)
@@ -353,6 +359,11 @@ export default function ChapterBookPicker({
             </Stack>
             {lookingUp && <LoadingState size={16} label="Looking up book details..." />}
             {lookupError && <ErrorState message={lookupError} />}
+            {lookupNote && (
+              <Typography variant="body2" color="text.secondary" role="status">
+                {lookupNote}
+              </Typography>
+            )}
             <TextField
               size="small"
               label="Author"

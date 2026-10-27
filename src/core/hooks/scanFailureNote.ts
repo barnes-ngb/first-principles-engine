@@ -59,7 +59,7 @@ export interface ScanFailureShape {
  * size on exactly the boundary cases, in a helper whose whole contract is that
  * it survives the scrubber.
  */
-function sizeToken(bytes: number | null | undefined): string {
+export function sizeToken(bytes: number | null | undefined): string {
   if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes < 0) return 'unknown'
   const b = Math.round(bytes)
   if (b < 1000) return `${b}B`

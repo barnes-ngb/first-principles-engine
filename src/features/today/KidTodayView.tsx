@@ -549,7 +549,7 @@ export default function KidTodayView({
   // items alone (see kidRitualRows.ts). Derived above the armor-gate early
   // return so hook order stays unconditional.
   const chapterRowVisible = Boolean(
-    selectedBook && isReadAloudSectionVisible(true, bookProgress?.questionPool),
+    selectedBook && isReadAloudSectionVisible(true, bookProgress?.questionPool, bookProgress?.totalChapters),
   )
   const chapterDone = useMemo(
     () => isChapterDoneToday(bookProgress?.questionPool, today),

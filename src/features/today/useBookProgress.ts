@@ -88,7 +88,7 @@ export function useBookProgress(
         .map((item) => item.chapter)
       const lastChapterAnswered =
         answeredChapters.length > 0 ? Math.max(...answeredChapters) : undefined
-      const stillFinished = isBookFinished(repairedPool)
+      const stillFinished = isBookFinished(repairedPool, data.totalChapters)
 
       void updateDoc(docRef, {
         questionPool: repairedPool,
@@ -163,7 +163,7 @@ export function useBookProgress(
 
       // Determine completedAt. A book is finished when no chapter is left
       // untouched — every chapter is either answered or parent-skipped (FUNC-07).
-      const completedAt = isBookFinished(updatedPool)
+      const completedAt = isBookFinished(updatedPool, bookProgress.totalChapters)
         ? new Date().toISOString()
         : undefined
 

@@ -60,6 +60,11 @@ export interface BookLookupResult {
   summary?: string
   chapters?: ChapterBookChapter[]
   movie?: { exists: boolean; title?: string; notes?: string }
+  /**
+   * The full lookup was cut short and it re-ran asking for chapter titles only
+   * (UX-464) — so no chapter has a summary. Set by the server, never the model.
+   */
+  chapterSummariesOmitted?: boolean
 }
 
 export interface ChapterQuestionPoolItem {
@@ -1359,6 +1364,15 @@ export interface ActivityConfig {
    * `features/today/quickLogChips.ts`, which owns the ordering and the cap.
    */
   quickLog?: boolean
+  /**
+   * The global `chapterBooks` id this row is the family's read-aloud for
+   * (FEAT-243 / UX-470). Present only on rows written by
+   * `core/firebase/readAloudConfigWrites.ts` (id `readaloud-<chapterBookId>`).
+   * Additive and optional, no migration. **It is a link, never a counter**: the
+   * row stores no position — chapter progress has one home, the per-child
+   * `bookProgress` document, which Curriculum reads through this id.
+   */
+  chapterBookId?: string
 
   // Metadata
   /** Shelly's notes */

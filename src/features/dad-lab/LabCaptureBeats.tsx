@@ -10,7 +10,7 @@ import ArtifactGallery from '../../components/ArtifactGallery'
 import AudioRecorder from '../../components/AudioRecorder'
 import PhotoCapture from '../../components/PhotoCapture'
 import type { Child } from '../../core/types'
-import { BEAT_BOTH, type LabBeat, type LabBeats } from '../../core/types/dadlab'
+import { BEAT_BOTH, LAB_BEAT_TITLES, type LabBeat, type LabBeats } from '../../core/types/dadlab'
 import { LabBeatId } from '../../core/types/enums'
 
 // ── Beat display metadata ──────────────────────────────────────
@@ -19,9 +19,9 @@ import { LabBeatId } from '../../core/types/enums'
 // demanded. Order is fixed: Predict → Try → What we saw.
 
 const BEATS: Array<{ id: LabBeatId; icon: string; title: string; prompt: string }> = [
-  { id: LabBeatId.Predict, icon: '\u{1F52E}', title: 'Predict', prompt: 'What do we think will happen?' },
-  { id: LabBeatId.Try, icon: '\u{1F9EA}', title: 'Try', prompt: 'What did we do?' },
-  { id: LabBeatId.Saw, icon: '\u{1F440}', title: 'What we saw', prompt: 'What happened?' },
+  { id: LabBeatId.Predict, icon: '\u{1F52E}', title: LAB_BEAT_TITLES[LabBeatId.Predict], prompt: 'What do we think will happen?' },
+  { id: LabBeatId.Try, icon: '\u{1F9EA}', title: LAB_BEAT_TITLES[LabBeatId.Try], prompt: 'What did we do?' },
+  { id: LabBeatId.Saw, icon: '\u{1F440}', title: LAB_BEAT_TITLES[LabBeatId.Saw], prompt: 'What happened?' },
 ]
 
 // The writing line is the writing stretch — inviting, never required, never
@@ -38,8 +38,11 @@ interface LabCaptureBeatsProps {
   familyId: string
   /** Read-only (completed report view). */
   disabled?: boolean
-  /** Beat currently uploading an artifact, if any. */
-  uploadingBeat?: LabBeatId | null
+  /**
+   * Beats with an upload in flight. A list, because a parent can upload to
+   * two beats at once and one finishing must not clear the other's spinner.
+   */
+  uploadingBeats?: readonly LabBeatId[]
   onTextChange: (beat: LabBeatId, text: string) => void
   onTextChildChange: (beat: LabBeatId, child: string) => void
   onPhotoCapture: (beat: LabBeatId, file: File) => void
@@ -107,7 +110,7 @@ export default function LabCaptureBeats({
   children,
   familyId,
   disabled,
-  uploadingBeat,
+  uploadingBeats = [],
   onTextChange,
   onTextChildChange,
   onPhotoCapture,
@@ -134,7 +137,7 @@ export default function LabCaptureBeats({
         {BEATS.map(({ id, icon, title, prompt }) => {
           const beat: LabBeat = beats[id] ?? { items: [] }
           const hasText = (beat.text?.trim().length ?? 0) > 0
-          const isUploading = uploadingBeat === id
+          const isUploading = uploadingBeats.includes(id)
 
           // In read-only view, a wholly empty beat renders nothing (keeps a
           // legacy/lightly-used report from showing three blank cards).

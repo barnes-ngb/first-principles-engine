@@ -53,9 +53,23 @@ export function isChapterToGo(item: ChapterQuestionPoolItem): boolean {
 /**
  * A book is finished only when no chapter is left untouched — every chapter is
  * either answered or parent-skipped. An empty pool is not "finished".
+ *
+ * UX-464: questions are now written a batch at a time and a run that stops
+ * part-way keeps what landed, so a pool can hold 12 of a book's 58 chapters.
+ * When the book's `totalChapters` is given, the pool must also COVER that many
+ * distinct chapters — answering every question that exists so far is not
+ * finishing the book. Omitted (or not a positive number), the rule is the
+ * pool-only one it always was.
  */
-export function isBookFinished(pool: ChapterQuestionPoolItem[]): boolean {
-  return pool.length > 0 && pool.every((item) => item.answered || item.skipped)
+export function isBookFinished(
+  pool: ChapterQuestionPoolItem[],
+  totalChapters?: number,
+): boolean {
+  if (pool.length === 0 || !pool.every((item) => item.answered || item.skipped)) return false
+  if (typeof totalChapters !== 'number' || !Number.isFinite(totalChapters) || totalChapters < 1) {
+    return true
+  }
+  return new Set(pool.map((item) => item.chapter)).size >= totalChapters
 }
 
 /** The kid chapter pool stays visible while any chapter is still to-go. */
@@ -76,15 +90,23 @@ export function isChapterPoolVisible(pool: ChapterQuestionPoolItem[]): boolean {
  * - No shared book → no section.
  * - Book but no per-child pool yet → show the section (book reaches Today).
  * - Pool exists → defer to `isChapterPoolVisible` so a finished book still
- *   unmounts the kid section (FUNC-07 behavior, unchanged).
+ *   unmounts the kid section (FUNC-07 behavior, unchanged) — and, given the
+ *   book's chapter count, an exhausted PARTIAL pool keeps it (UX-464).
  */
 export function isReadAloudSectionVisible(
   hasBook: boolean,
   pool: ChapterQuestionPoolItem[] | undefined,
+  totalChapters?: number,
 ): boolean {
   if (!hasBook) return false
   if (!pool || pool.length === 0) return true
-  return isChapterPoolVisible(pool)
+  if (isChapterPoolVisible(pool)) return true
+  // UX-464 — every saved question is done, but a batch run stopped part-way
+  // and the book has chapters with no question yet. That is not a finished
+  // book, so the section stays (showing the "a grown-up will add questions"
+  // placeholder, as for a book with no pool). Without a chapter count the rule
+  // is the one it was.
+  return !isBookFinished(pool, totalChapters)
 }
 
 /**

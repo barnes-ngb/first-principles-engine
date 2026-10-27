@@ -22,22 +22,27 @@ import ArtifactGallery from '../../components/ArtifactGallery'
 import AudioRecorder from '../../components/AudioRecorder'
 import PhotoCapture from '../../components/PhotoCapture'
 import { useFamilyId } from '../../core/auth/useAuth'
-import { artifactsCollection, dadLabReportsCollection } from '../../core/firebase/firestore'
-import { generateFilename, uploadArtifactFile } from '../../core/firebase/upload'
+import { dadLabReportsCollection } from '../../core/firebase/firestore'
+import { generateFilename } from '../../core/firebase/upload'
 import { useSaveState } from '../../core/hooks/useSaveState'
 import type { Child, ChildLabReport, DadLabReport } from '../../core/types'
 import type { LabBeats } from '../../core/types/dadlab'
 import {
   BEAT_BOTH,
   emptyLabBeats,
+  LAB_BEAT_TITLES,
   LAB_FRAMEWORKS,
   labBeatsHaveContent,
 } from '../../core/types/dadlab'
 import { ArcStepStatus, DadLabStatus, DadLabType, EvidenceType, LabBeatId, SubjectBucket } from '../../core/types/enums'
 import LabCaptureBeats from './LabCaptureBeats'
 import { todayKey, weekKeyFromDate } from '../../core/utils/dateKey'
-import { addDoc, arrayUnion, updateDoc, doc } from 'firebase/firestore'
-import { normalizeChildRoles, resolveChildReport } from './childRoles'
+import { arrayUnion, updateDoc, doc } from 'firebase/firestore'
+import { childReportKey, normalizeChildRoles, resolveChildReport } from './childRoles'
+import { DAD_LAB_REFERENCE_DEADLINE_MS, uploadLabArtifact, withDeadline } from './labArtifactUpload'
+import { LabUploadAudience, LabUploadHandler, LabUploadMedium } from './labUploadCopy'
+import LabUploadStatus from './LabUploadStatus'
+import { useLabUploads, type LabUploadJob } from './useLabUploads'
 import { subjectsForLabType } from './labTypeSubjects'
 import { useConceptArcs } from './useConceptArcs'
 
@@ -130,16 +135,23 @@ function getChildFields(childName: string) {
   return [...LINCOLN_FIELDS.filter((f) => f.key !== 'notes'), ...LONDON_FIELDS]
 }
 
-/** Return whichever key actually has data for this child */
-function getChildReportKey(
-  childReports: Record<string, ChildLabReport>,
-  child: Child,
-): string {
-  if (childReports[child.id]) return child.id
-  const nameKey = child.name.toLowerCase()
-  if (childReports[nameKey]) return nameKey
-  if (childReports[child.name]) return child.name
-  return nameKey
+/**
+ * Where a parent-form upload belongs: one boy's section, or one beat. Held on
+ * the job so that Try again re-sends to the same place (FIX-269).
+ */
+type LabFormUploadTarget =
+  | { kind: 'child'; childId: string; evidence: EvidenceType }
+  | { kind: 'beat'; beat: LabBeatId; evidence: EvidenceType }
+
+/** The stored file's name and type: a photo keeps its extension, audio is `webm`. */
+function uploadFileFor(evidence: EvidenceType, blob: Blob): { file: Blob; filename: string } {
+  if (evidence === EvidenceType.Audio) {
+    const filename = generateFilename('webm')
+    return { file: new File([blob], filename, { type: 'audio/webm' }), filename }
+  }
+  const name = blob instanceof File ? blob.name : ''
+  const ext = name.includes('.') ? name.split('.').pop() || 'jpg' : 'jpg'
+  return { file: blob, filename: generateFilename(ext) }
 }
 
 // ── Component ──────────────────────────────────────────────────
@@ -205,7 +217,6 @@ export default function LabReportForm({
     // per-beat reference write (UX-82) may carry fewer than three keys.
     report?.beats ? { ...emptyLabBeats(), ...report.beats } : emptyLabBeats(),
   )
-  const [uploadingBeat, setUploadingBeat] = useState<LabBeatId | null>(null)
   // "Show full framework" expand — the five-chip framework + legacy per-child
   // fields, preserved but no longer demanded. Collapsed by default on new labs;
   // auto-expanded on legacy reports that carry legacy-field content and no beats.
@@ -262,8 +273,6 @@ export default function LabReportForm({
   const linkedStep =
     linkedArc && typeof arcStepIndex === 'number' ? linkedArc.steps[arcStepIndex] : undefined
 
-  // Photo upload state
-  const [uploadingChildId, setUploadingChildId] = useState<string | null>(null)
   const [artifactRefreshKey, setArtifactRefreshKey] = useState(0)
 
   // ── Upload reference persistence (UX-82) ──
@@ -274,15 +283,6 @@ export default function LabReportForm({
   // failed reference write); `attachError` marks the failed-write case.
   const [unattachedUploads, setUnattachedUploads] = useState(0)
   const [attachError, setAttachError] = useState(false)
-  // In-flight uploads (Codex P1 on PR #1693). Save composes the FULL doc from
-  // state and `saveReport` writes it with `setDoc` — a Save tapped while an
-  // upload is mid-flight would capture state from before the upload landed and
-  // overwrite the narrow reference write with that stale snapshot, re-orphaning
-  // the artifact. A counter, not `uploadingChildId`/`uploadingBeat`: multi-select
-  // fires per-file uploads concurrently, so a single slot can read empty while
-  // a sibling upload is still in the air.
-  const [pendingUploads, setPendingUploads] = useState(0)
-
   useEffect(() => {
     onUnattachedUploadsChange?.(unattachedUploads)
   }, [unattachedUploads, onUnattachedUploadsChange])
@@ -307,29 +307,43 @@ export default function LabReportForm({
    * failure here leaves a recoverable orphan (visible in Firestore), never a
    * dangling reference — and the failure is said on the surface, not swallowed.
    */
+  const reportId = report?.id
   const persistArtifactRef = useCallback(
     async (fields: Record<string, unknown>) => {
-      if (!report?.id) {
+      if (!reportId) {
         // Never-saved report: there is no doc to reference — draft state is
         // correct, and the unattached warning + leave guard carry the honesty.
         setUnattachedUploads((n) => n + 1)
         return
       }
       try {
-        await updateDoc(doc(dadLabReportsCollection(familyId), report.id), {
-          ...fields,
-          updatedAt: new Date().toISOString(),
-        })
+        // Bounded (FIX-269): offline, a Firestore write waits for the server
+        // indefinitely. Past the deadline this is reported like any other
+        // failed reference write. The queued `arrayUnion` may still land
+        // later, which is harmless: Save writes the same id.
+        await withDeadline(
+          updateDoc(doc(dadLabReportsCollection(familyId), reportId), {
+            ...fields,
+            updatedAt: new Date().toISOString(),
+          }),
+          DAD_LAB_REFERENCE_DEADLINE_MS,
+        )
       } catch (err) {
         console.error('Artifact reference write failed', err)
         setUnattachedUploads((n) => n + 1)
         setAttachError(true)
       }
     },
-    [familyId, report?.id],
+    [familyId, reportId],
   )
 
   // Initialize from prefill
+  // Unchanged behaviour (FIX-269 note): this effect predates the rule. The
+  // React Compiler used to bail out of this component before this rule ever
+  // reached it. With the upload handlers rewritten, it now compiles the
+  // component, and the rule reports this effect. A prefill can arrive after
+  // mount, which `useState` initialisers cannot see.
+  /* eslint-disable react-hooks/set-state-in-effect -- re-seed the form from a prefill that arrives after mount */
   useEffect(() => {
     if (prefill && !report) {
       if (prefill.title) setTitle(prefill.title)
@@ -342,6 +356,7 @@ export default function LabReportForm({
       }
     }
   }, [prefill, report])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // ── Child report field update ──
 
@@ -349,7 +364,7 @@ export default function LabReportForm({
     (childId: string, field: string, value: string) => {
       setChildReports((prev) => {
         const child = children.find(c => c.id === childId)
-        const key = child ? getChildReportKey(prev, child) : childId
+        const key = child ? childReportKey(prev, child) : childId
         return {
           ...prev,
           [key]: { ...(prev[key] ?? emptyChildReport()), [field]: value },
@@ -359,95 +374,131 @@ export default function LabReportForm({
     [children],
   )
 
-  // ── Photo capture ──
+  // ── Uploads (FIX-269 / UX-461) ──
+  // Every capture on this form goes through ONE runner and ONE tracker. The
+  // file is uploaded before the record is written (`uploadLabArtifact`), the
+  // whole thing has a deadline and can be cancelled, and a failure leaves a
+  // sentence with Try again and keeps the file. Before this, five handlers ran
+  // `try … finally` with no `catch`.
+  //
+  // In-flight uploads still disable Save (Codex P1 on PR #1693). Save composes
+  // the FULL doc from state and `saveReport` writes it with `setDoc`. A Save
+  // tapped mid-upload would capture state from before the upload landed and
+  // overwrite the narrow reference write with that stale snapshot. What
+  // changed is that an upload now always ENDS, at its deadline or on Cancel,
+  // so it can no longer hold Save forever.
+  const runUpload = useCallback(
+    async (job: LabUploadJob<LabFormUploadTarget>, signal: AbortSignal) => {
+      const { target } = job
+      const { file, filename } = uploadFileFor(target.evidence, job.file)
+      const medium = target.evidence === EvidenceType.Audio ? 'recording' : 'photo'
 
-  const handlePhotoCapture = useCallback(
-    async (childId: string, file: File) => {
-      setUploadingChildId(childId)
-      setPendingUploads((n) => n + 1)
-      try {
-        const ext = file.name.split('.').pop() ?? 'jpg'
-        const artifact = {
-          childId,
-          title: `Dad Lab photo - ${title}`,
-          type: EvidenceType.Photo,
+      if (target.kind === 'child') {
+        const artifactId = await uploadLabArtifact({
+          familyId,
+          file,
+          filename,
+          signal,
+          artifact: {
+            childId: target.childId,
+            title: `Dad Lab ${medium} - ${title}`,
+            type: target.evidence,
+            createdAt: new Date().toISOString(),
+            tags: {
+              engineStage: 'Build' as const,
+              domain: 'dad-lab',
+              subjectBucket: SubjectBucket.Science,
+              location: 'Home',
+            },
+          },
+        })
+
+        // Artifact first, then reference (UX-82): persist into the report doc
+        // immediately, keyed the way the doc already keys this child. Once the
+        // artifact exists, Cancel is not honoured: dropping the reference
+        // would only orphan a record that is already complete.
+        const child = children.find((c) => c.id === target.childId)
+        const key = child ? childReportKey(childReports, child) : target.childId
+        await persistArtifactRef({
+          [`childReports.${key}.artifacts`]: arrayUnion(artifactId),
+        })
+
+        setChildReports((prev) => {
+          const cr = prev[key] ?? emptyChildReport()
+          return { ...prev, [key]: { ...cr, artifacts: [...cr.artifacts, artifactId] } }
+        })
+        setArtifactRefreshKey((prev) => prev + 1)
+        return
+      }
+
+      const { beat } = target
+      const artifactId = await uploadLabArtifact({
+        familyId,
+        file,
+        filename,
+        signal,
+        artifact: {
+          // Whole-family lab by default (DATA-04); the real per-item attribution
+          // lives on the beat entry below. Reassigning the kid chip updates the
+          // beat item, not this doc.
+          childId: BEAT_BOTH,
+          title: `Dad Lab ${medium} - ${title}`,
+          type: target.evidence,
           createdAt: new Date().toISOString(),
+          labBeat: beat,
           tags: {
             engineStage: 'Build' as const,
             domain: 'dad-lab',
             subjectBucket: SubjectBucket.Science,
             location: 'Home',
           },
-        }
-        const docRef = await addDoc(artifactsCollection(familyId), artifact as never)
-        const filename = generateFilename(ext)
-        const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, file, filename)
-        await updateDoc(doc(artifactsCollection(familyId), docRef.id), { uri: downloadUrl })
+        },
+      })
 
-        // Artifact first, then reference (UX-82): persist into the report doc
-        // immediately, keyed the way the doc already keys this child.
-        const child = children.find(c => c.id === childId)
-        const key = child ? getChildReportKey(childReports, child) : childId
-        await persistArtifactRef({
-          [`childReports.${key}.artifacts`]: arrayUnion(docRef.id),
-        })
+      // Artifact first, then reference (UX-82): the beat item lands on the
+      // report doc the moment the upload succeeds, not on a later Save.
+      await persistArtifactRef({
+        [`beats.${beat}.items`]: arrayUnion({ artifactId, child: BEAT_BOTH }),
+      })
 
-        setChildReports((prev) => {
-          const cr = prev[key] ?? emptyChildReport()
-          return { ...prev, [key]: { ...cr, artifacts: [...cr.artifacts, docRef.id] } }
-        })
-        setArtifactRefreshKey(prev => prev + 1)
-      } finally {
-        setUploadingChildId(null)
-        setPendingUploads((n) => n - 1)
-      }
+      setBeats((prev) => ({
+        ...prev,
+        [beat]: {
+          ...prev[beat],
+          items: [...(prev[beat]?.items ?? []), { artifactId, child: BEAT_BOTH }],
+        },
+      }))
     },
     [familyId, title, children, childReports, persistArtifactRef],
   )
 
-  // ── Audio capture ──
+  const uploads = useLabUploads(runUpload)
+  const startUpload = uploads.start
+  const pendingUploads = uploads.pending
+
+  const handlePhotoCapture = useCallback(
+    (childId: string, file: File) =>
+      startUpload({
+        subject: { medium: LabUploadMedium.Photo, owner: children.find((c) => c.id === childId)?.name },
+        handler: LabUploadHandler.ParentChildPhoto,
+        file,
+        target: { kind: 'child', childId, evidence: EvidenceType.Photo },
+      }),
+    [startUpload, children],
+  )
 
   const handleAudioCapture = useCallback(
-    async (childId: string, blob: Blob) => {
-      setUploadingChildId(childId)
-      setPendingUploads((n) => n + 1)
-      try {
-        const artifact = {
-          childId,
-          title: `Dad Lab recording - ${title}`,
-          type: EvidenceType.Audio,
-          createdAt: new Date().toISOString(),
-          tags: {
-            engineStage: 'Build' as const,
-            domain: 'dad-lab',
-            subjectBucket: SubjectBucket.Science,
-            location: 'Home',
-          },
-        }
-        const docRef = await addDoc(artifactsCollection(familyId), artifact as never)
-        const filename = generateFilename('webm')
-        const file = new File([blob], filename, { type: 'audio/webm' })
-        const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, file, filename)
-        await updateDoc(doc(artifactsCollection(familyId), docRef.id), { uri: downloadUrl })
-
-        // Artifact first, then reference (UX-82) — same as the photo path.
-        const child = children.find(c => c.id === childId)
-        const key = child ? getChildReportKey(childReports, child) : childId
-        await persistArtifactRef({
-          [`childReports.${key}.artifacts`]: arrayUnion(docRef.id),
-        })
-
-        setChildReports((prev) => {
-          const cr = prev[key] ?? emptyChildReport()
-          return { ...prev, [key]: { ...cr, artifacts: [...cr.artifacts, docRef.id] } }
-        })
-        setArtifactRefreshKey(prev => prev + 1)
-      } finally {
-        setUploadingChildId(null)
-        setPendingUploads((n) => n - 1)
-      }
-    },
-    [familyId, title, children, childReports, persistArtifactRef],
+    (childId: string, blob: Blob) =>
+      startUpload({
+        subject: {
+          medium: LabUploadMedium.Recording,
+          owner: children.find((c) => c.id === childId)?.name,
+        },
+        handler: LabUploadHandler.ParentChildRecording,
+        file: blob,
+        target: { kind: 'child', childId, evidence: EvidenceType.Audio },
+      }),
+    [startUpload, children],
   )
 
   // ── Three-beat capture (FEAT-56) ──
@@ -489,67 +540,35 @@ export default function LabReportForm({
     }))
   }, [])
 
-  const captureBeatArtifact = useCallback(
-    async (beat: LabBeatId, type: EvidenceType, file: File, filename: string) => {
-      setUploadingBeat(beat)
-      setPendingUploads((n) => n + 1)
-      try {
-        const artifact = {
-          // Whole-family lab by default (DATA-04); the real per-item attribution
-          // lives on the beat entry below. Reassigning the kid chip updates the
-          // beat item, not this doc.
-          childId: BEAT_BOTH,
-          title: `Dad Lab ${type === EvidenceType.Audio ? 'recording' : 'photo'} - ${title}`,
-          type,
-          createdAt: new Date().toISOString(),
-          labBeat: beat,
-          tags: {
-            engineStage: 'Build' as const,
-            domain: 'dad-lab',
-            subjectBucket: SubjectBucket.Science,
-            location: 'Home',
-          },
-        }
-        const docRef = await addDoc(artifactsCollection(familyId), artifact as never)
-        const { downloadUrl } = await uploadArtifactFile(familyId, docRef.id, file, filename)
-        await updateDoc(doc(artifactsCollection(familyId), docRef.id), { uri: downloadUrl })
-
-        // Artifact first, then reference (UX-82): the beat item lands on the
-        // report doc the moment the upload succeeds, not on a later Save.
-        await persistArtifactRef({
-          [`beats.${beat}.items`]: arrayUnion({ artifactId: docRef.id, child: BEAT_BOTH }),
-        })
-
-        setBeats((prev) => ({
-          ...prev,
-          [beat]: {
-            ...prev[beat],
-            items: [...(prev[beat]?.items ?? []), { artifactId: docRef.id, child: BEAT_BOTH }],
-          },
-        }))
-      } finally {
-        setUploadingBeat(null)
-        setPendingUploads((n) => n - 1)
-      }
-    },
-    [familyId, title, persistArtifactRef],
-  )
-
   const handleBeatPhoto = useCallback(
-    (beat: LabBeatId, file: File) => {
-      const ext = file.name.split('.').pop() ?? 'jpg'
-      return captureBeatArtifact(beat, EvidenceType.Photo, file, generateFilename(ext))
-    },
-    [captureBeatArtifact],
+    (beat: LabBeatId, file: File) =>
+      startUpload({
+        subject: { medium: LabUploadMedium.Photo, beat: LAB_BEAT_TITLES[beat] },
+        handler: LabUploadHandler.ParentBeat,
+        file,
+        target: { kind: 'beat', beat, evidence: EvidenceType.Photo },
+      }),
+    [startUpload],
   )
 
   const handleBeatAudio = useCallback(
-    (beat: LabBeatId, blob: Blob) => {
-      const filename = generateFilename('webm')
-      const file = new File([blob], filename, { type: 'audio/webm' })
-      return captureBeatArtifact(beat, EvidenceType.Audio, file, filename)
-    },
-    [captureBeatArtifact],
+    (beat: LabBeatId, blob: Blob) =>
+      startUpload({
+        subject: { medium: LabUploadMedium.Recording, beat: LAB_BEAT_TITLES[beat] },
+        handler: LabUploadHandler.ParentBeat,
+        file: blob,
+        target: { kind: 'beat', beat, evidence: EvidenceType.Audio },
+      }),
+    [startUpload],
+  )
+
+  // Spinner state for the capture buttons, derived from the in-flight list, so
+  // two concurrent uploads cannot clear each other's spinner.
+  const uploadingBeats = uploads.inFlight.flatMap((u) =>
+    u.job.target.kind === 'beat' ? [u.job.target.beat] : [],
+  )
+  const uploadingChildIds = new Set(
+    uploads.inFlight.flatMap((u) => (u.job.target.kind === 'child' ? [u.job.target.childId] : [])),
   )
 
   // ── Lab type change (FEAT-55: re-derive subjects unless manually edited) ──
@@ -930,7 +949,7 @@ export default function LabReportForm({
           children={children}
           familyId={familyId}
           disabled={disabled}
-          uploadingBeat={uploadingBeat}
+          uploadingBeats={uploadingBeats}
           onTextChange={setBeatText}
           onTextChildChange={setBeatTextChild}
           onPhotoCapture={handleBeatPhoto}
@@ -1042,7 +1061,7 @@ export default function LabReportForm({
         children.map((child) => {
           const cr = resolveChildReport(childReports, child)
           const fields = getChildFields(child.name)
-          const isUploading = uploadingChildId === child.id
+          const isUploading = uploadingChildIds.has(child.id)
 
           return (
             <Box key={child.id} sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
@@ -1226,6 +1245,19 @@ export default function LabReportForm({
             />
           </Stack>
         </Box>
+      )}
+
+      {/* Every upload ends in a sentence (FIX-269): in flight with Cancel, or
+          stopped with Try again. Right above Save, because it is what holds Save. */}
+      {!disabled && (
+        <LabUploadStatus
+          audience={LabUploadAudience.Parent}
+          inFlight={uploads.inFlight}
+          failures={uploads.failures}
+          onCancel={uploads.cancel}
+          onRetry={uploads.retry}
+          onDismiss={uploads.dismiss}
+        />
       )}
 
       {/* Upload-attachment honesty (UX-82) — impossible to miss, right above Save. */}

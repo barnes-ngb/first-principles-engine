@@ -44,7 +44,7 @@ import type { ArtifactChildIdAudit } from './auditArtifactChildIds'
 import { fetchArtifactChildIdAudit } from './auditArtifactChildIds'
 import type { DuplicateGroup, MergeOutcome } from './mergeDuplicateConfigs'
 import { applyMerge, fetchDuplicateGroups } from './mergeDuplicateConfigs'
-import { useAI, TaskType } from '../../core/ai/useAI'
+import { useAI } from '../../core/ai/useAI'
 import { useFamilyId } from '../../core/auth/useAuth'
 import {
   bookProgressCollection,
@@ -58,13 +58,13 @@ import {
   deleteDayLogGuarded,
 } from '../today/dayWriteGuard'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
-import type { BookProgress, ChapterBook, ChapterQuestionPoolItem } from '../../core/types'
+import type { BookProgress, ChapterBook } from '../../core/types'
 import { SEED_CHAPTER_BOOKS } from '../../core/data/chapterBooks'
-import { buildChapterPoolItem } from '../today/chapterPool.logic'
 import {
-  applyChapterPoolToAll,
-  collectExistingChapterPool,
-} from '../today/applyChapterPoolForChild'
+  chapterGenerationMessage,
+  chapterProgressLine,
+  generateChapterQuestionsInBatches,
+} from '../today/chapterQuestionBatches'
 import { getWeekRange } from '../../core/utils/time'
 import { parseDateYmd } from '../../core/utils/format'
 
@@ -398,75 +398,20 @@ export default function DevAdminTab() {
         return
       }
 
-      // Collect the family's existing pool across EVERY learner (canonical "same
-      // questions"), then copy it to every kid — siblings who already have a
-      // chapter no-op, kids missing it get the exact item. Backfills any kid who
-      // lacks a book another sibling already set up, WITHOUT regenerating (FEAT-19).
-      const existingMap = await collectExistingChapterPool(familyId, children, bookId)
-      const backfilled = await applyChapterPoolToAll(
-        familyId, children, book, [...existingMap.values()],
-      )
-
-      // AI-generate ONLY chapters no kid has yet.
-      const missingChapters = book.chapters?.filter(
-        (c) => !existingMap.has(c.number),
-      ) ?? []
-
-      if (missingChapters.length === 0) {
-        setPoolStatus({
-          severity: backfilled > 0 ? 'success' : 'info',
-          text: backfilled > 0
-            ? `Copied existing chapter questions to ${backfilled} more child${backfilled > 1 ? 'ren' : ''}.`
-            : 'All chapters already have questions.',
-        })
-        await refreshSelectedPoolCount()
-        setGeneratingPool(false)
-        return
-      }
-
-      const result = await aiChat({
+      // UX-464 — the shared batching path: copies the family's existing pool
+      // to every kid first (FEAT-19), then generates ONLY the chapters no kid
+      // has, a batch at a time, writing each batch as it lands.
+      const outcome = await generateChapterQuestionsInBatches({
         familyId,
-        childId: selectedChildId,
-        taskType: TaskType.ChapterQuestions,
-        messages: [{
-          role: 'user',
-          content: JSON.stringify({
-            bookTitle: book.title,
-            author: book.author,
-            chapters: missingChapters,
-            childName: activeChild?.name,
-          }),
-        }],
+        children,
+        book,
+        requestChildId: selectedChildId,
+        childName: activeChild?.name,
+        chat: aiChat,
+        onProgress: (p) => setPoolStatus({ severity: 'info', text: chapterProgressLine(p) }),
       })
+      setPoolStatus(chapterGenerationMessage(outcome, book.title))
 
-      if (!result?.message) {
-        setPoolStatus({ severity: 'error', text: 'AI returned empty response.' })
-        setGeneratingPool(false)
-        return
-      }
-
-      let questions: Array<{ chapter: number; questionType: string; question: string }> = []
-      try {
-        const parsed = JSON.parse(result.message) as unknown
-        questions = Array.isArray(parsed) ? parsed as typeof questions : []
-      } catch {
-        setPoolStatus({ severity: 'error', text: 'Failed to parse AI response.' })
-        setGeneratingPool(false)
-        return
-      }
-
-      const newPoolItems: ChapterQuestionPoolItem[] = questions
-        .map((q) =>
-          buildChapterPoolItem(q, book.chapters?.find((c) => c.number === q.chapter)?.title),
-        )
-        .filter((item): item is ChapterQuestionPoolItem => item !== null)
-
-      // The read-aloud is a family book: write the SAME newly-generated pool to
-      // every learner so each kid (Lincoln + London) gets the questions on their
-      // Today and records their own answers (FEAT-17). Deduped by chapter.
-      await applyChapterPoolToAll(familyId, children, book, newPoolItems)
-
-      setPoolStatus({ severity: 'success', text: `Generated ${newPoolItems.length} chapter questions!` })
       // Refresh pool info from the selected child's actual doc (it may have also
       // received backfilled copies for chapters a sibling already had).
       await refreshSelectedPoolCount()
