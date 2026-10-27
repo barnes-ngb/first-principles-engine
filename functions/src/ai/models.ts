@@ -166,6 +166,13 @@ export const EFFORT_BY_TASK: Readonly<Record<string, ReasoningEffort>> = {
   generateStoryFix: ReasoningEffort.Low,
   reviseStory: ReasoningEffort.Low,
   revisePage: ReasoningEffort.Low,
+  // UX-464 — the chapter-book pair. Both ask for a long, plain list (one
+  // question per chapter; every chapter's title and summary), which needs no
+  // deliberation, and at the default (high) the thinking spent the same 4,096
+  // `max_tokens` the list needed, so a long book stopped before its closing
+  // bracket. The client now also batches `chapterQuestions`.
+  chapterQuestions: ReasoningEffort.Low,
+  bookLookup: ReasoningEffort.Low,
 };
 
 /** Resolve a task type to its reasoning effort, or `undefined` (API default). */

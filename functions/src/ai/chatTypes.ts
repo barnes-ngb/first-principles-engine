@@ -77,6 +77,15 @@ export interface ChatTaskResult {
    */
   stopReason?: string;
   /**
+   * The reply could not be used, said as a closed word rather than handed back
+   * as text (UX-464). `cut-short` — the model stopped at `max_tokens`;
+   * `unreadable` — it finished but the JSON did not parse into the promised
+   * shape. Set by `chapterQuestions` only, and always with `message: ""`: a
+   * truncated reply is never returned as if it were the answer. Additive —
+   * `undefined` means the handler did not classify, never "fine".
+   */
+  failure?: "cut-short" | "unreadable";
+  /**
    * How readable the returned story actually is for this child (FEAT-176).
    * Set by `generateStory` only, and only when the reply parsed into pages —
    * `undefined` means "not measured", never "fine". Additive: a client that

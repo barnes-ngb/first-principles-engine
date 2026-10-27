@@ -49,7 +49,7 @@ import {
   skillSnapshotsCollection,
 } from '../../core/firebase/firestore'
 import { useProfile } from '../../core/profile/useProfile'
-import type { ActivityConfig, ChapterBook, ChapterQuestionPoolItem, ChecklistItem as ChecklistItemType, CurriculumDetected, DailyPlan, DraftDayPlan, DraftPlanItem, ScanRecord, SkillSnapshot, WatchVideo, WorksheetScanResult } from '../../core/types'
+import type { ActivityConfig, ChapterBook, ChecklistItem as ChecklistItemType, CurriculumDetected, DailyPlan, DraftDayPlan, DraftPlanItem, ScanRecord, SkillSnapshot, WatchVideo, WorksheetScanResult } from '../../core/types'
 import { effectiveRecommendation, isWorksheetScan } from '../../core/types'
 import TeachHelperDialog from '../planner/TeachHelperDialog'
 import {
@@ -63,12 +63,13 @@ import { weekdayName } from './dayProgressLabels'
 import { getTemplateForChild } from './dailyPlanTemplates'
 import { buildMaterialsPrompt, openPrintWindow } from '../planner-chat/generateMaterials'
 import ChapterQuestionPool from './ChapterQuestionPool'
-import { buildChapterPoolItem } from './chapterPool.logic'
 import { useBookProgress } from './useBookProgress'
 import {
-  applyChapterPoolToAll,
-  collectExistingChapterPool,
-} from './applyChapterPoolForChild'
+  chapterGenerationMessage,
+  chapterProgressLine,
+  generateChapterQuestionsInBatches,
+} from './chapterQuestionBatches'
+import type { ChapterGenerationState } from './ChapterQuestionPool'
 import DayStatusRow from './DayStatusRow'
 import HelperPanel from './HelperPanel'
 import KidTodayView from './KidTodayView'
@@ -698,81 +699,42 @@ export default function TodayPage() {
     today,
   )
 
+  // UX-464 — the book's questions are written a batch at a time, and the card
+  // shows which batch while they are. Keyed by the BOOK, because the writes go
+  // to every child's pool for that book (the read-aloud is a family book), so
+  // the line is true on either boy's card and on no other book's. The ref is
+  // the double-tap guard: state has not applied by the second tap.
+  const [chapterGen, setChapterGen] = useState<ChapterGenerationState | null>(null)
+  const chapterGenRunningRef = useRef(false)
+
   const handleRetryChapterGen = useCallback(async () => {
     if (!selectedBook || !selectedChildId || !familyId) return
+    if (chapterGenRunningRef.current) return
+    chapterGenRunningRef.current = true
+    const bookId = selectedBook.id
+    setChapterGen({ bookId, running: true, line: 'Getting ready to write questions…' })
     try {
-      setSnackMessage({ text: 'Generating chapter questions...', severity: 'success' })
-
-      // Collect the family's existing pool across EVERY learner (canonical "same
-      // questions"), then copy it to every kid — siblings who already have a
-      // chapter no-op, kids missing it get the exact item. This backfills London
-      // from Lincoln WITHOUT regenerating (FEAT-19).
-      const existingMap = await collectExistingChapterPool(familyId, children, selectedBook.id)
-      const backfilled = await applyChapterPoolToAll(
-        familyId, children, selectedBook, [...existingMap.values()],
-      )
-
-      // AI-generate ONLY chapters no kid has yet.
-      const missingChapters = selectedBook.chapters?.filter(
-        (c) => !existingMap.has(c.number),
-      ) ?? []
-
-      if (missingChapters.length === 0) {
-        setSnackMessage({
-          text: backfilled > 0
-            ? `Chapter questions copied for ${selectedBook.title}!`
-            : 'Chapter questions already generated.',
-          severity: 'success',
-        })
-        return
-      }
-
-      const result = await aiChat({
+      // Copies the family's existing pool to every kid first (FEAT-19), then
+      // generates ONLY the chapters no kid has, writing each batch as it lands.
+      const outcome = await generateChapterQuestionsInBatches({
         familyId,
-        childId: selectedChildId,
-        taskType: TaskType.ChapterQuestions,
-        messages: [{
-          role: 'user',
-          content: JSON.stringify({
-            bookTitle: selectedBook.title,
-            author: selectedBook.author,
-            chapters: missingChapters,
-            childName: activeChild?.name,
-            weekTheme: weekFocus?.theme,
-            weekVirtue: weekFocus?.virtue,
-          }),
-        }],
+        children,
+        book: selectedBook,
+        requestChildId: selectedChildId,
+        childName: activeChild?.name,
+        weekTheme: weekFocus?.theme,
+        weekVirtue: weekFocus?.virtue,
+        chat: aiChat,
+        onProgress: (p) => setChapterGen({ bookId, running: true, line: chapterProgressLine(p) }),
       })
-
-      if (!result?.message) {
-        setSnackMessage({ text: "Couldn't generate chapter questions.", severity: 'error' })
-        return
-      }
-
-      let questions: Array<{ chapter: number; questionType: string; question: string }> = []
-      try {
-        const parsed = JSON.parse(result.message) as unknown
-        questions = Array.isArray(parsed) ? parsed as typeof questions : []
-      } catch {
-        setSnackMessage({ text: "Couldn't parse chapter questions.", severity: 'error' })
-        return
-      }
-
-      const newPoolItems: ChapterQuestionPoolItem[] = questions
-        .map((q) =>
-          buildChapterPoolItem(q, selectedBook.chapters?.find((c) => c.number === q.chapter)?.title),
-        )
-        .filter((item): item is ChapterQuestionPoolItem => item !== null)
-
-      // The read-aloud is a family book: write the SAME newly-generated pool to
-      // every learner so each kid (Lincoln + London) gets the questions on their
-      // Today and records their own answers (FEAT-17). Deduped by chapter.
-      await applyChapterPoolToAll(familyId, children, selectedBook, newPoolItems)
-
-      setSnackMessage({ text: `Chapter questions ready for ${selectedBook.title}!`, severity: 'success' })
-    } catch (err) {
-      console.error('Failed to retry chapter question generation', err)
-      setSnackMessage({ text: "Couldn't generate chapter questions.", severity: 'error' })
+      const message = chapterGenerationMessage(outcome, selectedBook.title)
+      setChapterGen({ bookId, running: false, line: message.text, severity: message.severity })
+      setSnackMessage({
+        text: message.text,
+        severity: message.severity === 'info' ? 'success' : message.severity,
+      })
+    } finally {
+      chapterGenRunningRef.current = false
     }
   }, [selectedBook, selectedChildId, familyId, activeChild, weekFocus, aiChat, setSnackMessage, children])
 
@@ -1801,6 +1763,7 @@ export default function TodayPage() {
           dayLog={dayLog}
           persistDayLogImmediate={persistDayLogImmediate}
           onRetryGeneration={() => void handleRetryChapterGen()}
+          generation={chapterGen && chapterGen.bookId === selectedBook?.id ? chapterGen : null}
         />
       </SectionErrorBoundary>
 

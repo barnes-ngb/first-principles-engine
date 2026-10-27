@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import Box from '@mui/material/Box'
+import Alert from '@mui/material/Alert'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
 import CircularProgress from '@mui/material/CircularProgress'
@@ -21,6 +22,7 @@ import type {
   DayLog,
 } from '../../core/types'
 import { isChapterToGo } from './chapterPool.logic'
+import { CHAPTER_LIST_REPAIR } from './chapterQuestionBatches'
 import { TodayDecision } from './todayScope'
 import {
   ChapterSaveAudience,
@@ -35,6 +37,20 @@ const questionTypeEmoji: Record<string, string> = {
   connection: '\u{1F517}',
   opinion: '\u{1F4AD}',
   prediction: '\u{1F52E}',
+}
+
+/**
+ * A book's question generation as the card shows it (UX-464). The page owns the
+ * run; the card only says where it is and keeps the button from starting a
+ * second one while it runs.
+ */
+export interface ChapterGenerationState {
+  /** The book the run writes to — the card shows it only for that book. */
+  bookId: string
+  running: boolean
+  /** "Writing questions… chapters 13–24 of 58", or the run's outcome. */
+  line: string
+  severity?: 'success' | 'info' | 'warning' | 'error'
 }
 
 interface ChapterQuestionPoolProps {
@@ -63,6 +79,11 @@ interface ChapterQuestionPoolProps {
   persistDayLogImmediate?: (updated: DayLog) => void
   onRetryGeneration?: () => void
   /**
+   * UX-464 — the page's batch run for THIS book, or `null`. Optional, so a
+   * caller that does not pass it renders exactly as before.
+   */
+  generation?: ChapterGenerationState | null
+  /**
    * UX-343, Codex round 2 (P1) — which of this card's own drafts are open.
    *
    * This pool sits OUTSIDE `TodayChecklist`, so the scope `key` that closes the
@@ -83,6 +104,7 @@ export default function ChapterQuestionPool({
   dayLog,
   persistDayLogImmediate,
   onRetryGeneration,
+  generation = null,
   onOpenDecisionsChange,
 }: ChapterQuestionPoolProps) {
   const [selectedChapters, setSelectedChapters] = useState<Set<number>>(
@@ -181,15 +203,48 @@ export default function ChapterQuestionPool({
     )
   }
 
+  // UX-464 — the run's own line: which batch it is on, or how it ended. The
+  // snackbar is gone in four seconds; this stays on the card.
+  const generationLine = generation ? (
+    <Alert
+      severity={generation.running ? 'info' : (generation.severity ?? 'info')}
+      icon={generation.running ? <CircularProgress size={18} /> : undefined}
+      sx={{ mb: 1 }}
+      role="status"
+    >
+      {generation.line}
+    </Alert>
+  ) : null
+  const generating = Boolean(generation?.running)
+  const bookChapters = book.chapters ?? []
+
   // 3. Fetch resolved but no progress doc exists — pool never generated
   if (!bookProgress) {
+    // UX-464 — a book with no chapter list is not "not generated yet": there is
+    // nothing to generate FROM, and the button used to answer "already
+    // generated" over an empty card. Say so, and where it is fixed.
+    if (bookChapters.length === 0) {
+      return (
+        <SectionCard title={`\u{1F4D6} ${book.title}`}>
+          <EmptyState
+            title={`This book has no chapter list saved, so there are no chapters to ask about. ${CHAPTER_LIST_REPAIR}`}
+          />
+        </SectionCard>
+      )
+    }
     return (
       <SectionCard title={`\u{1F4D6} ${book.title}`}>
+        {generationLine}
         <EmptyState
           title="Chapter questions haven't been generated yet."
           action={
             onRetryGeneration ? (
-              <Button variant="contained" size="small" onClick={() => onRetryGeneration()}>
+              <Button
+                variant="contained"
+                size="small"
+                disabled={generating}
+                onClick={() => onRetryGeneration()}
+              >
                 Generate chapter questions
               </Button>
             ) : undefined
@@ -200,12 +255,51 @@ export default function ChapterQuestionPool({
   }
 
   const pool = bookProgress.questionPool
+  // UX-464 — a pool can hold some of a book's chapters: a batch run that
+  // stopped part-way keeps what landed. The card says how many and offers the
+  // rest, rather than reading as a finished book.
+  const poolChapters = new Set(pool.map((item) => item.chapter))
+  const chaptersWithout = bookChapters.filter((c) => !poolChapters.has(c.number)).length
+  const restLine = chaptersWithout > 0 && onRetryGeneration ? (
+    <Stack
+      direction="row"
+      spacing={1}
+      alignItems="center"
+      justifyContent="space-between"
+      flexWrap="wrap"
+      useFlexGap
+      sx={{ mb: 1 }}
+    >
+      <Typography variant="body2" color="text.secondary">
+        Questions ready for {bookChapters.length - chaptersWithout} of {bookChapters.length} chapters.
+      </Typography>
+      <Button
+        variant="outlined"
+        size="small"
+        disabled={generating}
+        onClick={() => onRetryGeneration()}
+      >
+        Write the rest
+      </Button>
+    </Stack>
+  ) : null
   // "To go" = neither answered nor parent-skipped. Skip no longer implies
   // answered (FUNC-07), so it gets its own bucket independent of `answered`.
   const unanswered = pool.filter(isChapterToGo)
   const answered = pool.filter((item) => item.answered && !item.skipped)
   const skipped = pool.filter((item) => item.skipped)
   const doneCount = answered.length + skipped.length
+
+  // Every chapter in the pool is done, but the book has chapters with no
+  // question yet (UX-464): that is not a finished book.
+  if (unanswered.length === 0 && restLine) {
+    return (
+      <SectionCard title={`\u{1F4D6} ${book.title}`}>
+        {generationLine}
+        {restLine}
+      </SectionCard>
+    )
+  }
 
   // All chapters answered — celebration state
   if (unanswered.length === 0) {
@@ -351,6 +445,8 @@ export default function ChapterQuestionPool({
 
   return (
     <SectionCard title={`\u{1F4D6} ${book.title}`}>
+      {generationLine}
+      {restLine}
       <Stack spacing={2}>
         {/* UX-355 — a chapter write that did not land, said where she is
             looking. Never a claim that anything was rolled back: this card
