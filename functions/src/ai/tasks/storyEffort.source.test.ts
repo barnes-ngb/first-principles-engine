@@ -91,3 +91,45 @@ describe("story calls pass a reasoning effort (UX-455)", () => {
     for (const key of keys) expect(all).toContain(`resolveEffortForTask("${key}")`);
   });
 });
+
+/**
+ * The chapter-book pair joins the rule (UX-464): both asked for a long list in
+ * one call at the default (high) effort, and a long book stopped before its
+ * closing bracket. Same scan, same proof that it can fail.
+ */
+describe("chapter-book calls pass a reasoning effort (UX-464)", () => {
+  const CHAPTER_TASK_FILES = ["chapterQuestions.ts", "bookLookup.ts"] as const;
+  const sources = CHAPTER_TASK_FILES.map((f) => ({
+    file: f,
+    source: readFileSync(join(here, f), "utf8"),
+  }));
+
+  it("finds exactly one callClaude in each file", () => {
+    const counts = Object.fromEntries(
+      sources.map(({ file, source }) => [file, callClaudeArgBlocks(source).length]),
+    );
+    expect(counts).toEqual({ "chapterQuestions.ts": 1, "bookLookup.ts": 1 });
+  });
+
+  it.each(CHAPTER_TASK_FILES)("%s: every callClaude passes `effort`", (file) => {
+    const { source } = sources.find((s) => s.file === file)!;
+    expect(callsWithoutEffort(source)).toEqual([]);
+  });
+
+  it.each(CHAPTER_TASK_FILES)("positive control: %s without its effort line fails", (file) => {
+    const { source } = sources.find((s) => s.file === file)!;
+    const stripped = source.replace(/\n\s*effort,\n/, "\n");
+    expect(stripped).not.toBe(source);
+    expect(callsWithoutEffort(stripped)).toHaveLength(1);
+  });
+
+  it("each resolves its own EFFORT_BY_TASK key, at LOW", () => {
+    for (const key of ["chapterQuestions", "bookLookup"]) {
+      expect(EFFORT_BY_TASK[key]).toBe(ReasoningEffort.Low);
+    }
+    const chapter = sources.find((s) => s.file === "chapterQuestions.ts")!.source;
+    const lookup = sources.find((s) => s.file === "bookLookup.ts")!.source;
+    expect(chapter).toContain('resolveEffortForTask("chapterQuestions")');
+    expect(lookup).toContain('resolveEffortForTask("bookLookup")');
+  });
+});

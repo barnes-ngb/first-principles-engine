@@ -60,6 +60,11 @@ export interface BookLookupResult {
   summary?: string
   chapters?: ChapterBookChapter[]
   movie?: { exists: boolean; title?: string; notes?: string }
+  /**
+   * The full lookup was cut short and it re-ran asking for chapter titles only
+   * (UX-464) — so no chapter has a summary. Set by the server, never the model.
+   */
+  chapterSummariesOmitted?: boolean
 }
 
 export interface ChapterQuestionPoolItem {

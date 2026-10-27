@@ -49,7 +49,6 @@ import type {
   BookLookupResult,
   BookProgress,
   ChapterBook,
-  ChapterQuestionPoolItem,
   ChatMessage,
   DayLog,
   DayTypeConfig,
@@ -81,11 +80,12 @@ import { SKILL_TAG_MAP } from '../../core/types/skillTags'
 import { formatDateYmd, parseDateYmd } from '../../core/utils/format'
 import { todayKey } from '../../core/utils/dateKey'
 import { useTodayKey } from '../../core/hooks/useTodayKey'
-import { buildChapterPoolItem } from '../today/chapterPool.logic'
 import {
-  applyChapterPoolToAll,
-  collectExistingChapterPool,
-} from '../today/applyChapterPoolForChild'
+  ChapterGenerationKind,
+  chapterGenerationMessage,
+  chapterProgressLine,
+  generateChapterQuestionsInBatches,
+} from '../today/chapterQuestionBatches'
 import { dayLogDocId } from '../today/daylog.model'
 import { retainBlocksForApply, retainChecklistForApply } from '../today/applyReset'
 import { checklistItemKey, updateDayLogGuarded } from '../today/dayWriteGuard'
@@ -2860,88 +2860,30 @@ Generate a plan for Monday through Friday.`.trim()
             const progressId = bookProgressDocId(activeChildId, selectedBook.id)
             const progressRef = doc(bookProgressCollection(familyId), progressId)
 
-            // Collect the family's existing pool across EVERY learner (canonical
-            // "same questions"), then copy it to every kid — siblings who already
-            // have a chapter no-op, kids missing it get the exact item. Backfills
-            // London from Lincoln WITHOUT regenerating (FEAT-19).
-            const existingMap = await collectExistingChapterPool(familyId, children, selectedBook.id)
-            const backfilled = await applyChapterPoolToAll(
-              familyId, children, selectedBook, [...existingMap.values()],
-            )
-
-            // AI-generate ONLY chapters no kid has yet.
-            const missingChapters = selectedBook.chapters?.filter(
-              (c) => !existingMap.has(c.number),
-            ) ?? []
-
-            if (missingChapters.length === 0) {
-              setSnack({
-                text: backfilled > 0
-                  ? `Chapter questions ready for ${selectedBook.title}!`
-                  : 'Chapter questions already generated.',
-                severity: backfilled > 0 ? 'success' : 'info',
-              })
-              // A backfill may have populated the active child too — refresh.
-              if (backfilled > 0) {
-                const refreshed = await getDoc(progressRef)
-                if (refreshed.exists()) {
-                  setBookProgress({ ...refreshed.data() as BookProgress, id: refreshed.id })
-                }
-              }
-              return
-            }
-
-            const result = await aiChat({
+            // UX-464 — one shared batching path: copies the family's existing
+            // pool to every kid first (FEAT-19), then generates ONLY the
+            // chapters no kid has, a batch at a time, writing each batch as it
+            // lands. A batch that fails keeps the earlier ones; Retry finishes
+            // the rest.
+            const outcome = await generateChapterQuestionsInBatches({
               familyId,
-              childId: activeChildId,
-              taskType: TaskType.ChapterQuestions,
-              messages: [{
-                role: 'user',
-                content: JSON.stringify({
-                  bookTitle: selectedBook.title,
-                  author: selectedBook.author,
-                  chapters: missingChapters,
-                  childName: activeChild?.name,
-                  weekTheme: weekPlan?.theme,
-                  weekVirtue: weekPlan?.virtue,
-                }),
-              }],
+              children,
+              book: selectedBook,
+              requestChildId: activeChildId,
+              childName: activeChild?.name,
+              weekTheme: weekPlan?.theme,
+              weekVirtue: weekPlan?.virtue,
+              chat: aiChat,
+              onProgress: (p) => setSnack({ text: chapterProgressLine(p), severity: 'info' }),
             })
-
-            if (!result?.message) {
-              setSnack({
-                text: "Couldn't generate chapter questions.",
-                severity: 'warning',
-                action: { label: 'Retry', onClick: () => void generatePool() },
-              })
-              return
-            }
-
-            let questions: Array<{ chapter: number; questionType: string; question: string }> = []
-            try {
-              const parsed = JSON.parse(result.message) as unknown
-              questions = Array.isArray(parsed) ? parsed as typeof questions : []
-            } catch {
-              setSnack({
-                text: "Couldn't parse chapter questions.",
-                severity: 'warning',
-                action: { label: 'Retry', onClick: () => void generatePool() },
-              })
-              return
-            }
-
-            const newPoolItems: ChapterQuestionPoolItem[] = questions
-              .map((q) =>
-                buildChapterPoolItem(q, selectedBook.chapters?.find((c) => c.number === q.chapter)?.title),
-              )
-              .filter((item): item is ChapterQuestionPoolItem => item !== null)
-
-            // The read-aloud is a family book: write the SAME newly-generated pool
-            // to every learner so each kid (Lincoln + London) gets the questions on
-            // their Today and records their own answers (FEAT-17). Deduped by chapter.
-            await applyChapterPoolToAll(familyId, children, selectedBook, newPoolItems)
-
-            setSnack({ text: `Chapter questions ready for ${selectedBook.title}!`, severity: 'success' })
+            const message = chapterGenerationMessage(outcome, selectedBook.title)
+            const failed = outcome.kind === ChapterGenerationKind.Partial
+              || outcome.kind === ChapterGenerationKind.ReadFailed
+            setSnack({
+              text: message.text,
+              severity: failed ? 'warning' : message.severity,
+              ...(failed ? { action: { label: 'Retry', onClick: () => void generatePool() } } : {}),
+            })
 
             // Refresh bookProgress state for the active child (the one viewing this page).
             const refreshed = await getDoc(progressRef)

@@ -72,6 +72,13 @@ export interface ChatResponse {
    */
   stopReason?: string
   /**
+   * Why the reply could not be used (UX-464) — `chapterQuestions` only, always
+   * with `message: ''`: `cut-short` (stopped at `max_tokens`) or `unreadable`
+   * (finished, not the promised JSON). `undefined` from every other task and
+   * from an older deploy; it means "not classified", never success.
+   */
+  failure?: 'cut-short' | 'unreadable'
+  /**
    * How readable the returned story actually is for this child (FEAT-176) —
    * `generateStory` only. The server measures the drafted story against the
    * child's assessed phonics level, makes at most one fix attempt, and reports

@@ -95,6 +95,8 @@ interface ChatResponse {
   usage: { inputTokens: number; outputTokens: number };
   /** Model stop reason, when the task handler reports it (FEAT-169). */
   stopReason?: string;
+  /** Why the reply could not be used, when the handler classifies it (UX-464). */
+  failure?: "cut-short" | "unreadable";
   /**
    * How readable the returned story is for this child (FEAT-176) —
    * `generateStory` only. `undefined` means "not measured", never "fine".
