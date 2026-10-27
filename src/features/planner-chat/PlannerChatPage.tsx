@@ -125,6 +125,16 @@ import {
 } from './chatPlanner.logic'
 import type { AdjustmentIntent } from './chatPlanner.logic'
 import { applyDraftWeek, WeekApplyError } from './applyWeekPlan'
+import { ensureReadAloudConfig } from './readAloudConfigWrites'
+import {
+  READ_ALOUD_ADD_FAILED,
+  earlierReadAloudDone,
+  earlierReadAloudFailed,
+  openEarlierReadAloudRows,
+  readAloudAddedLine,
+  readAloudConfigDocId,
+} from './readAloudCurriculum'
+import ReadAloudCurriculumNotices from './ReadAloudCurriculumNotices'
 import { parsePlannerBoundary } from '../../../functions/src/shared/plannerBoundary'
 import { BOUNDARY_BARE_REFUSAL_TEXT, BOUNDARY_DURING_GENERATE_TEXT } from './PlannerBoundaryLink'
 import {
@@ -424,7 +434,7 @@ export default function PlannerChatPage() {
   const [masterySummary, setMasterySummary] = useState<PlannerMasterySummary | null>(null)
 
   // Activity configs → routine text (replaces old free-text dailyRoutine)
-  const { configs: activityConfigs, loading: activityConfigsLoading, error: activityConfigsError, deleteConfig } = useActivityConfigs(activeChildId ?? '')
+  const { configs: activityConfigs, loading: activityConfigsLoading, error: activityConfigsError, deleteConfig, markComplete } = useActivityConfigs(activeChildId ?? '')
   const dailyRoutine = useMemo(
     () => activityConfigsToRoutineText(activityConfigs),
     [activityConfigs],
@@ -1011,6 +1021,64 @@ export default function PlannerChatPage() {
     [weekPlan, debouncedWriteWeekField],
   )
 
+  // ── The read-aloud's Curriculum row (FEAT-243 / UX-470) ──────────────────
+  // Owner decision 2026-10-27: picking a read-aloud adds it to Curriculum. The
+  // pick in the review phase is a draft, so the row lands when the week is
+  // APPLIED (an abandoned draft leaves nothing behind) — or when the book is
+  // changed on an already-applied week, where this page writes the week's
+  // `readAloudBookId` directly. Every path goes through the ONE create-only
+  // writer; an existing row (renamed, re-timed, finished) is never touched.
+  const [addingReadAloud, setAddingReadAloud] = useState(false)
+  const ensureReadAloudRow = useCallback(
+    async (book: ChapterBook): Promise<'created' | 'exists' | 'not-permitted' | 'failed'> => {
+      if (!familyId) return 'failed'
+      try {
+        const result = await ensureReadAloudConfig({ familyId, book, canEdit: isParent })
+        return result.status
+      } catch (err) {
+        console.error('[ReadAloud] Failed to add the read-aloud to Curriculum', err)
+        return 'failed'
+      }
+    },
+    [familyId, isParent],
+  )
+  const handleAddReadAloudRow = useCallback(async () => {
+    if (!selectedBook) return
+    setAddingReadAloud(true)
+    const status = await ensureReadAloudRow(selectedBook)
+    setAddingReadAloud(false)
+    if (status === 'failed') setSnack({ text: READ_ALOUD_ADD_FAILED, severity: 'warning' })
+    else if (status !== 'not-permitted') {
+      setSnack({ text: readAloudAddedLine(selectedBook.title, status === 'created'), severity: 'success' })
+    }
+  }, [selectedBook, ensureReadAloudRow])
+  const readAloudRowExists = selectedBook
+    ? activityConfigs.some((config) => config.id === readAloudConfigDocId(selectedBook.id))
+    : false
+  // Offered only once the list has actually been read: an unread list is not an
+  // empty one, and "Add" over a row that exists would be a claim about nothing.
+  const showReadAloudAdd = Boolean(
+    isParent && selectedBook && !activityConfigsLoading && !activityConfigsError && !readAloudRowExists,
+  )
+  const earlierReadAloudRows = useMemo(
+    () => (applied && isParent && selectedBook ? openEarlierReadAloudRows(activityConfigs, selectedBook.id) : []),
+    [applied, isParent, selectedBook, activityConfigs],
+  )
+  const handleFinishEarlierReadAloud = useCallback(
+    async (config: { id: string; name: string }) => {
+      if (!isParent) return
+      try {
+        // The existing mark-complete path — the same write as Curriculum's ⋮.
+        await markComplete(config.id)
+        setSnack({ text: earlierReadAloudDone(config), severity: 'success' })
+      } catch (err) {
+        console.error('[ReadAloud] Failed to mark an earlier read-aloud finished', err)
+        setSnack({ text: earlierReadAloudFailed(config), severity: 'warning' })
+      }
+    },
+    [isParent, markComplete],
+  )
+
   // Persist book change to plannerDefaults + weekPlan (used in review/active phases)
   const handleBookChangeAndPersist = useCallback((book: ChapterBook | null) => {
     handleSelectedBookChange(book)
@@ -1025,8 +1093,15 @@ export default function PlannerChatPage() {
       void updateDoc(weekPlanRef, {
         ...(book ? { readAloudBookId: book.id } : { readAloudBookId: null }),
       })
+      // FEAT-243: on an applied week this IS the week's read-aloud now, so it
+      // gets its Curriculum row exactly as an Apply would give it one.
+      if (book) {
+        void ensureReadAloudRow(book).then((status) => {
+          if (status === 'failed') setSnack({ text: READ_ALOUD_ADD_FAILED, severity: 'warning' })
+        })
+      }
     }
-  }, [handleSelectedBookChange, familyId, applied, weekPlanRef])
+  }, [handleSelectedBookChange, familyId, applied, weekPlanRef, ensureReadAloudRow])
 
   // Add welcome message on first load when child is selected (only after setup wizard is complete)
   useEffect(() => {
@@ -2769,6 +2844,12 @@ Generate a plan for Monday through Friday.`.trim()
         ...(overrideWeekStart ? {} : { weekChoice: effectiveWeekChoice }),
       })
 
+      // FEAT-243 / UX-470: the applied read-aloud gets its Curriculum row — an
+      // enrichment beside Apply (like the chapter pool below), not part of the
+      // day writes. Awaited so a failure can be said in the confirmation rather
+      // than lost under the snacks that follow; one transaction, one document.
+      const readAloudRowStatus = selectedBook ? await ensureReadAloudRow(selectedBook) : null
+
       // Persist readAloudBookId to plannerDefaults so it carries to the next week
       void setDoc(doc(db, `families/${familyId}/settings/plannerDefaults`), {
         readAloudBook: selectedBook?.title ?? '',
@@ -2833,7 +2914,11 @@ Generate a plan for Monday through Friday.`.trim()
       }
 
       // UX-63: "This Week" is not a page either — see the applied message above.
-      setSnack({ text: appliedConfirmation(effectiveWeekStart), severity: 'success' })
+      setSnack(
+        readAloudRowStatus === 'failed'
+          ? { text: `${appliedConfirmation(effectiveWeekStart)} ${READ_ALOUD_ADD_FAILED}`, severity: 'warning' }
+          : { text: appliedConfirmation(effectiveWeekStart), severity: 'success' },
+      )
 
       // Non-blocking (FEAT-43): batch-generate inline Help Card bodies for the
       // must-do Reading/Math items. Fire-and-forget — lock-in already succeeded;
@@ -2913,7 +2998,7 @@ Generate a plan for Monday through Friday.`.trim()
         severity: refusal === 'stale-week' ? 'warning' : 'error',
       })
     }
-  }, [activeChildId, familyId, weekRange.start, effectiveWeekChoice, currentDraft, messages, persistConversation, generateActivity, subjectToActivityType, selectedBook, activeChild, weekPlan, aiChat, children, activityConfigs, refreshTodayKey, dayTypes, filteredAppBlocks])
+  }, [activeChildId, familyId, weekRange.start, effectiveWeekChoice, currentDraft, messages, persistConversation, generateActivity, subjectToActivityType, selectedBook, activeChild, weekPlan, aiChat, children, activityConfigs, refreshTodayKey, dayTypes, filteredAppBlocks, ensureReadAloudRow])
 
   // Quick suggestion handler - sends the text immediately
   const handleQuickSuggestion = useCallback((text: string) => {
@@ -3463,6 +3548,13 @@ ${dayPrompts}`
                 loadError={chapterBooksLoadError}
                 onLookup={handleLookupBook}
               />
+              <ReadAloudCurriculumNotices
+                showAdd={showReadAloudAdd}
+                adding={addingReadAloud}
+                onAdd={() => void handleAddReadAloudRow()}
+                earlierRows={[]}
+                onConfirmFinish={handleFinishEarlierReadAloud}
+              />
             </Box>
           )}
 
@@ -3536,6 +3628,13 @@ ${dayPrompts}`
                   loading={chapterBooksLoading}
                   loadError={chapterBooksLoadError}
                   onLookup={handleLookupBook}
+                />
+                <ReadAloudCurriculumNotices
+                  showAdd={showReadAloudAdd}
+                  adding={addingReadAloud}
+                  onAdd={() => void handleAddReadAloudRow()}
+                  earlierRows={earlierReadAloudRows}
+                  onConfirmFinish={handleFinishEarlierReadAloud}
                 />
                 <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
                   Today&apos;s chapter question won&apos;t regenerate automatically — open the Today page and tap Refresh on the chapter question card.
