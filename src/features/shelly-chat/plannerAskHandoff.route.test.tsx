@@ -556,7 +556,11 @@ describe('her own unsent work survives the route', () => {
     await waitFor(() => expect(screen.queryByAltText('Selected 1')).not.toBeInTheDocument())
     expect(objectUrls.revoked).toContain(restoredPreview)
 
-    fireEvent.click(screen.getByRole('button', { name: /Use the planner's question/ }))
+    // The chooser's EXIT transition still has MUI's `aria-hidden` over the page
+    // behind it, so the notice's buttons are out of the accessibility tree for a
+    // moment after the selection has gone. Waited out, not reached past: a
+    // `getByText` bypass would pass while the real screen was still unusable.
+    fireEvent.click(await screen.findByRole('button', { name: /Use the planner's question/ }))
     expect(composer().value).toContain(ASK)
 
     // Nothing of hers was left to set aside, so there is nothing to bring back —
@@ -565,6 +569,52 @@ describe('her own unsent work survives the route', () => {
     expect(screen.queryByText('Attach to my message')).not.toBeInTheDocument()
     expect(screen.queryByAltText('Selected 1')).not.toBeInTheDocument()
     expect(chatCalls).toHaveLength(0)
+    expect(vi.mocked(uploadBytes)).not.toHaveBeenCalled()
+  })
+
+  it('keeps the edit she made to an OFFERED cross-thread draft while the choice was up', async () => {
+    // A cross-thread draft is not merely offered — the arrival PLACES it in this
+    // composer (`adoptRestoredUploadPreviews` then `applyDraft`) before the
+    // choice is shown, so it is hers to edit and to cancel media in exactly like
+    // the same-thread case above. The set-aside read the arrival snapshot for
+    // this one case, which lost the edit and brought the cancelled file back.
+    fixture.listenerDocs = [savedThread()]
+    const { container } = renderApp()
+    // Typed inside a SAVED conversation, so the hand-off's fresh thread is a
+    // different one and custody offers the draft rather than placing it on sight.
+    fireEvent.click(screen.getByText('Saved chat one'))
+    fireEvent.change(composer(), { target: { value: 'mine, from the saved chat' } })
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement
+    fireEvent.change(fileInput, {
+      target: { files: [new File(['x'], 'raw.png', { type: 'image/png' })] },
+    })
+    await screen.findByText('Attach to my message')
+
+    goToPlanner()
+    tapRefusal()
+
+    // The offer is in the box she is looking at, which is what makes it editable.
+    await screen.findByText(/You were already typing something/)
+    expect(composer().value).toBe('mine, from the saved chat')
+    expect(screen.getByAltText('Selected 1')).toBeInTheDocument()
+
+    // Both of her live actions, while the choice is still on screen.
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByAltText('Selected 1')).not.toBeInTheDocument())
+    // Same exit transition as the test above: wait for the real button.
+    await screen.findByRole('button', { name: /Use the planner's question/ })
+    fireEvent.change(composer(), { target: { value: 'mine, from the saved chat and edited' } })
+
+    fireEvent.click(screen.getByRole('button', { name: /Use the planner's question/ }))
+    expect(composer().value).toContain(ASK)
+
+    fireEvent.click(screen.getByRole('button', { name: /Bring my own draft back/ }))
+    expect(composer().value).toBe('mine, from the saved chat and edited')
+    // And the file she cancelled stays cancelled, here as everywhere.
+    expect(screen.queryByText('Attach to my message')).not.toBeInTheDocument()
+    expect(screen.queryByAltText('Selected 1')).not.toBeInTheDocument()
+    expect(chatCalls).toHaveLength(0)
+    expect(vi.mocked(addDoc)).not.toHaveBeenCalled()
     expect(vi.mocked(uploadBytes)).not.toHaveBeenCalled()
   })
 
@@ -729,9 +779,13 @@ describe('her own unsent work survives the route', () => {
     fireEvent.click(screen.getByText('Attach to my message'))
     await screen.findByText(/Image attached/)
 
+    // Asserted non-null first, because `not.toContain(null)` passes for a reason
+    // that has nothing to do with the preview: a missing `src` is already the
+    // defect this reads for.
     const attached = screen.getByAltText('Attached 1').getAttribute('src')
+    expect(attached).toBeTruthy()
     expect(attached).not.toBe(departedPreview)
-    expect(objectUrls.revoked).not.toContain(attached.src)
+    expect(objectUrls.revoked).not.toContain(attached)
     // The attachment itself — the payload and the note over it — is unchanged.
     expect(vi.mocked(getDownloadURL)).toHaveBeenCalled()
     expect(screen.getByText('Image attached — type your question')).toBeInTheDocument()

@@ -444,11 +444,14 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
     // arrival snapshot lost that edit and resurrected the cancelled file with a
     // revoked preview behind it.
     //
-    // The one exception is the OFFERED cross-thread draft, which is the contract
-    // this choice was made under: that work belongs to another thread and its
-    // snapshot is what the notice promised to give back.
-    const mine =
-      state.kind === 'collision' && state.fromOtherThread ? state.mine : live.current.draft
+    // That includes an OFFERED cross-thread draft. The arrival does not merely
+    // offer it: it PLACES it — `adoptRestoredUploadPreviews` then `applyDraft`,
+    // both before the collision state is set — so by the time the choice is on
+    // screen that work IS the live composer, editable and cancellable like any
+    // other collision. Reading its arrival snapshot threw exactly those edits
+    // away. The live draft is the placed work, so nothing is merged and nothing
+    // of another thread's is invented here.
+    const mine = live.current.draft
     fill(state.handoff, composerDraftIsEmpty(mine) ? null : mine)
   }, [state, guardHeld, fill])
 
