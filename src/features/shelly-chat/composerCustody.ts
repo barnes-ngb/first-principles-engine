@@ -13,6 +13,11 @@
 // typed under, and a save under a sign-in that has ended is refused — because a
 // logout is itself the unmount that hands the draft over, so ordering alone
 // cannot make that safe (see {@link endComposerCustodySession}).
+//
+// And a fifth, from the third browser run: what comes back must be something she
+// can ACT on. The slot carries no in-flight request, so a stage that only exists
+// while one is running comes back as a form with no controls — wound back at the
+// handover instead (see {@link normalizeInterruptedComposerDraft}).
 
 import type { ChatAttachment, ImageFlowStep, RefinementQuestion } from './useShellyChatState'
 
@@ -20,8 +25,10 @@ import type { ChatAttachment, ImageFlowStep, RefinementQuestion } from './useShe
  * Everything unsent the composer holds — all of it, not the three fields the
  * first cut called "everything": the raw file chooser and its previews, the
  * upload dialog, and the image-refinement form all survive the round trip too.
- * `loadingQuestions` is deliberately absent: a request that is no longer in
- * flight must not be restored as if it were.
+ * `loadingQuestions` and `uploading` are deliberately absent: a request that is
+ * no longer in flight must not be restored as if it were — which is why the
+ * stage it was launched from is wound back on the way in
+ * ({@link normalizeInterruptedComposerDraft}).
  */
 export interface ComposerDraft {
   text: string
@@ -150,11 +157,60 @@ function copy(draft: ComposerDraft): ComposerDraft {
 }
 
 /**
+ * Wind back work that was MID-REQUEST when the composer was handed over, to the
+ * stage that holds the controls for it.
+ *
+ * Custody deliberately carries no in-flight flag (`loadingQuestions`,
+ * `uploading`): a request that is no longer running must not come back looking
+ * as if it were. But the stage the request was launched FROM is carried, and two
+ * of those stages render nothing without their request — so a draft could come
+ * back as a form with no controls at all, whose only exit was the close button
+ * that discards it (the third browser run's blocker):
+ *
+ *  - the refinement's `questions` stage with no questions, and `generating`, are
+ *    the launch stages of a question / image request that died with the route;
+ *  - raw `uploadFiles` outside the chooser is the launch stage of an upload that
+ *    died with it.
+ *
+ * Each is returned to the stage that can render it, with the idea, the reference
+ * image, the raw files and their previews untouched, so she retries or cancels
+ * EXPLICITLY. Nothing here starts, resumes or retries anything, and a stage that
+ * can render — questions that arrived, an upload that finished — is left exactly
+ * as it was.
+ */
+export function normalizeInterruptedComposerDraft(draft: ComposerDraft): ComposerDraft {
+  let next = draft
+
+  // The chooser is the one stage that shows raw files and offers a choice for
+  // them. Never inferred from `attachments`: an earlier batch that DID finish
+  // sits there while these files are still unsent, so the raw files decide.
+  if (!next.uploadDialogOpen && (next.uploadFiles.length > 0 || next.uploadPreviews.length > 0)) {
+    next = { ...next, uploadDialogOpen: true }
+  }
+
+  if (next.imageFlowStep !== 'idea' && next.imageQuestions.length === 0) {
+    // Back to the idea, which is preserved verbatim. Answers are keyed by
+    // position in a question list that never arrived, so they can neither be
+    // shown nor be allowed to pre-select a retry's different list.
+    next = { ...next, imageFlowStep: 'idea', imageAnswers: {} }
+  } else if (next.imageFlowStep === 'generating') {
+    // Her answers are complete and renderable; only the Generate tap is gone.
+    next = { ...next, imageFlowStep: 'questions' }
+  }
+
+  return next
+}
+
+/**
  * Hand unsent work to custody on the way out, labelled with the owner it was
  * made under.
  *
  * An empty draft clears ONLY this owner's own entry: a pass that runs before the
  * tab has settled (or a StrictMode replay) must not wipe a draft it cannot see.
+ *
+ * What is stored is {@link normalizeInterruptedComposerDraft}'s reading of it:
+ * the handover is the moment the draft stops having a running request behind it,
+ * so it is the one place that has to decide what an interrupted stage means.
  */
 export function saveComposerCustody(
   owner: ComposerCustodyOwner,
@@ -171,7 +227,13 @@ export function saveComposerCustody(
     if (held && sameComposerOwner(held.owner, owner) && held.threadId === threadId) held = null
     return
   }
-  held = { owner, threadId, draft: copy(draft), savedAt: now, session: ownedSession }
+  held = {
+    owner,
+    threadId,
+    draft: normalizeInterruptedComposerDraft(copy(draft)),
+    savedAt: now,
+    session: ownedSession,
+  }
 }
 
 /** What is waiting for this caller, without consuming it. */

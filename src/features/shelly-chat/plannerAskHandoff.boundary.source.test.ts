@@ -118,6 +118,10 @@ describe('the hand-off path writes nothing and calls nothing', () => {
         .map((f) => f.path)
     expect(users('saveComposerCustody')).toEqual([RECEIVER])
     expect(users('takeComposerCustody')).toEqual([RECEIVER])
+    // Winding an interrupted stage back is the HANDOVER's decision and only its
+    // decision: a second caller would be a second answer to what an interrupted
+    // request means, applied somewhere the request may still be running.
+    expect(users('normalizeInterruptedComposerDraft')).toEqual([])
   })
 
   it('is read from exactly one place in the app', () => {

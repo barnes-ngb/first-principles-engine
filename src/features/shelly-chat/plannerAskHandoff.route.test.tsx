@@ -1,5 +1,5 @@
 import { createRef } from 'react'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { Link, MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -72,10 +72,30 @@ vi.mock('firebase/firestore', () => ({
   writeBatch: vi.fn(() => batchSpy),
 }))
 
+/**
+ * The requests a test holds open, so a route change can interrupt one.
+ *
+ * Read only inside a mock's call, never in a factory body — like `fixture`
+ * above, because a factory runs while the mocked module is imported, which is
+ * before this module body initialises anything.
+ */
+const inFlight: {
+  holdChat: boolean
+  holdUpload: boolean
+  releaseChat: ((value: { message: string }) => void) | null
+  releaseUpload: (() => void) | null
+} = { holdChat: false, holdUpload: false, releaseChat: null, releaseUpload: null }
+
 vi.mock('firebase/storage', () => ({
   getDownloadURL: vi.fn(async () => 'https://example.com/uploaded.jpg'),
   ref: vi.fn(() => ({})),
-  uploadBytes: vi.fn(async () => {}),
+  uploadBytes: vi.fn(async () => {
+    if (inFlight.holdUpload) {
+      await new Promise<void>((resolve) => {
+        inFlight.releaseUpload = () => resolve()
+      })
+    }
+  }),
 }))
 
 // Every collection helper the chat's hook tree reaches, stubbed by NAME — the
@@ -159,21 +179,32 @@ interface ChatCall {
   messages: { role: string; content: string }[]
 }
 const chatCalls: ChatCall[] = []
+/** Counted outside the hook, because `useAI()` hands out a new spy per render. */
+const generateImageCalls: unknown[] = []
 vi.mock('../../core/ai/useAI', () => ({
   TaskType: { ShellyChat: 'shellyChat' },
   useAI: () => ({
     imageFailureRef: { current: null },
     chat: vi.fn(async (args: ChatCall) => {
       chatCalls.push(args)
+      if (inFlight.holdChat) {
+        return await new Promise<{ message: string }>((resolve) => {
+          inFlight.releaseChat = (value) => resolve(value)
+        })
+      }
       return { message: 'synthetic answer' }
     }),
-    generateImage: vi.fn(async () => ({ url: '' })),
+    generateImage: vi.fn(async (args: unknown) => {
+      generateImageCalls.push(args)
+      return { url: '' }
+    }),
     lastErrorRef: { current: null },
   }),
 }))
 
 // Imported after the mocks and the consts their factories close over.
 import { addDoc, updateDoc } from 'firebase/firestore'
+import { getDownloadURL, uploadBytes } from 'firebase/storage'
 
 import type { ChatMessage } from '../../core/types'
 import { ChatMessageRole } from '../../core/types/enums'
@@ -190,6 +221,13 @@ import { clearComposerCustody } from './composerCustody'
 import ShellyChatPage from './ShellyChatPage'
 
 const ASK = 'add TGTB Math Level 1, 30 minutes daily'
+/** The image idea she had typed but never generated from. */
+const IDEA = 'a poster for our reading corner'
+const IDEA_PLACEHOLDER = 'e.g., something for our reading corner'
+/** The answer to the request she walked away from, arriving after the restore. */
+const LATE_QUESTIONS = {
+  message: JSON.stringify({ questions: [{ question: 'What style?', options: ['Cartoon'] }] }),
+}
 /** The live planning week, so the source-week check is exercised, not bypassed. */
 const WEEK_START = getWeekRange(new Date()).start
 
@@ -282,15 +320,25 @@ beforeEach(() => {
   fixture.listenerDocs = []
   fixture.legacyThreads = []
   chatCalls.length = 0
+  generateImageCalls.length = 0
+  inFlight.holdChat = false
+  inFlight.holdUpload = false
+  inFlight.releaseChat = null
+  inFlight.releaseUpload = null
   clearPlannerAskHandoff()
   clearComposerCustody()
   vi.mocked(addDoc).mockClear()
   vi.mocked(updateDoc).mockClear()
+  vi.mocked(uploadBytes).mockClear()
+  vi.mocked(getDownloadURL).mockClear()
   batchSpy.update.mockClear()
   batchSpy.commit.mockClear()
 })
 
 afterEach(() => {
+  // Let a held request finish, so it cannot resolve into the next test.
+  inFlight.releaseChat?.(LATE_QUESTIONS)
+  inFlight.releaseUpload?.()
   clearPlannerAskHandoff()
   clearComposerCustody()
 })
@@ -455,6 +503,104 @@ describe('her own unsent work survives the route', () => {
     expect(composer().value).toBe('what is this page?')
     expect(screen.getByText(/with 1 image/)).toBeInTheDocument()
     expect(screen.getByText(/Image attached/)).toBeInTheDocument()
+  })
+
+  it('gives an interrupted refinement back as a form she can act on', async () => {
+    // The third browser run's blocker. She typed an idea, tapped Next, and left
+    // for the planner while the question request was still running. Custody does
+    // not carry `loadingQuestions`, so the `questions` stage came back with no
+    // questions: no idea input, no Next, no Generate — only the close button,
+    // which discards the idea. Nothing on screen could repair it.
+    renderApp()
+    fireEvent.click(screen.getByRole('button', { name: 'Generate image' }))
+    fireEvent.change(await screen.findByPlaceholderText(IDEA_PLACEHOLDER), {
+      target: { value: IDEA },
+    })
+    inFlight.holdChat = true
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+    // The one explicit call, held open, so the departure interrupts it.
+    await waitFor(() => expect(screen.getByText(/Getting suggestions/)).toBeInTheDocument())
+    expect(chatCalls).toHaveLength(1)
+
+    goToPlanner()
+    tapRefusal()
+
+    await screen.findByText(/You were already typing something/)
+    fireEvent.click(screen.getByRole('button', { name: /Keep what I was typing/ }))
+
+    // Back at the idea stage, with her words verbatim and both exits live.
+    const idea = screen.getByPlaceholderText(IDEA_PLACEHOLDER) as HTMLInputElement
+    expect(idea.value).toBe(IDEA)
+    expect(screen.getByRole('button', { name: 'Next' })).not.toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Just generate' })).not.toBeDisabled()
+    expect(screen.queryByText(/Getting suggestions/)).not.toBeInTheDocument()
+    // The retry is hers to make: the restore asked nothing and generated nothing.
+    expect(chatCalls).toHaveLength(1)
+    expect(generateImageCalls).toHaveLength(0)
+
+    // And the request she walked away from cannot come back and take the form
+    // over, however well-formed its answer is: it finishes into the instance
+    // that asked it, which the route change unmounted.
+    const release = inFlight.releaseChat
+    inFlight.releaseChat = null
+    await act(async () => {
+      release?.(LATE_QUESTIONS)
+    })
+    expect((screen.getByPlaceholderText(IDEA_PLACEHOLDER) as HTMLInputElement).value).toBe(IDEA)
+    expect(screen.queryByText('What style?')).not.toBeInTheDocument()
+    expect(chatCalls).toHaveLength(1)
+    expect(generateImageCalls).toHaveLength(0)
+  })
+
+  it('gives an interrupted upload back in the chooser it was started from', async () => {
+    // The same boundary's second case. She chose a file and tapped Attach; the
+    // upload was still running when she left. The raw file and its preview came
+    // back but `uploading` is not carried and the dialog was closed, so the
+    // notice said "with 1 image" over a screen with no image, no chooser and no
+    // way to attach it.
+    const { container } = renderApp()
+    inFlight.holdUpload = true
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement
+    fireEvent.change(fileInput, {
+      target: { files: [new File(['x'], 'raw.png', { type: 'image/png' })] },
+    })
+    fireEvent.click(await screen.findByText('Attach to my message'))
+    // In flight: the chooser closed on the tap and the upload is running.
+    await waitFor(() => expect(vi.mocked(uploadBytes)).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(screen.queryByText('Attach to my message')).not.toBeInTheDocument())
+    expect(screen.getAllByRole('progressbar').length).toBeGreaterThan(0)
+
+    goToPlanner()
+    tapRefusal()
+
+    // Tapped by text, not by role: the restored chooser is modal and MUI hides
+    // the page behind it from the accessibility tree — the same shape the
+    // selection test below already pins, since a chooser she had not left is
+    // restored open too.
+    await screen.findByText(/You were already typing something/)
+    fireEvent.click(screen.getByText(/Keep what I was typing/))
+
+    // The chooser is back with the selection in it, which is where the choice
+    // for these files lives — retry or Cancel, both explicit.
+    expect(screen.getByText('Attach to my message')).toBeInTheDocument()
+    expect(screen.getByAltText('Selected 1')).toBeInTheDocument()
+    expect(screen.getByText('Analyze this image')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument()
+    // Nothing was re-uploaded on her behalf.
+    expect(vi.mocked(uploadBytes)).toHaveBeenCalledTimes(1)
+
+    // The upload she walked away from finishing cannot attach itself to the
+    // draft that came back: like the held question, it finishes into the
+    // instance that started it.
+    const release = inFlight.releaseUpload
+    inFlight.releaseUpload = null
+    await act(async () => {
+      release?.()
+    })
+    await waitFor(() => expect(vi.mocked(getDownloadURL)).toHaveBeenCalled())
+    expect(screen.getByText('Attach to my message')).toBeInTheDocument()
+    expect(screen.queryByText(/Image attached/)).not.toBeInTheDocument()
+    expect(vi.mocked(uploadBytes)).toHaveBeenCalledTimes(1)
   })
 
   it('protects a raw file selection and an image idea she had not sent', async () => {

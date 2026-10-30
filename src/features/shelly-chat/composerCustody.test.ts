@@ -149,6 +149,110 @@ describe('the composer custody slot', () => {
     expect(takeComposerCustody(OWNER, null).kind).toBe('same-thread')
   })
 
+  it('hands an interrupted refinement back at the idea, with the idea intact', () => {
+    // The third browser run's blocker: she tapped Next, the question request was
+    // still running when she left, and `loadingQuestions` is not carried — so the
+    // `questions` stage came back with no questions, no input, no Next and no
+    // Generate. Only the close button, which discards the idea.
+    const pending: ComposerDraft = {
+      ...FULL,
+      text: '',
+      imageFlowStep: 'questions',
+      imageQuestions: [],
+      imageAnswers: {},
+      uploadFiles: [],
+      uploadPreviews: [],
+      uploadDialogOpen: false,
+    }
+    saveComposerCustody(OWNER, null, pending)
+    const taken = takeComposerCustody(OWNER, null)
+    expect(taken.kind).toBe('same-thread')
+    if (taken.kind !== 'same-thread') return
+    expect(taken.draft.imageFlowStep).toBe('idea')
+    // Verbatim, and with everything a retry needs still attached.
+    expect(taken.draft.imageIdea).toBe(FULL.imageIdea)
+    expect(taken.draft.referenceImage).toEqual(FULL.referenceImage)
+    expect(taken.draft.imageFlowOpen).toBe(true)
+  })
+
+  it('drops answers that no longer have a question to belong to', () => {
+    // They are keyed by position; a retry's questions are a different list.
+    saveComposerCustody(OWNER, null, { ...FULL, imageFlowStep: 'questions', imageQuestions: [] })
+    const taken = takeComposerCustody(OWNER, null)
+    expect(taken.kind === 'same-thread' && taken.draft.imageAnswers).toEqual({})
+  })
+
+  it('leaves questions that arrived, and the answers she gave them, alone', () => {
+    saveComposerCustody(OWNER, null, FULL)
+    const taken = takeComposerCustody(OWNER, null)
+    expect(taken.kind).toBe('same-thread')
+    if (taken.kind !== 'same-thread') return
+    expect(taken.draft.imageFlowStep).toBe('questions')
+    expect(taken.draft.imageQuestions).toEqual(FULL.imageQuestions)
+    expect(taken.draft.imageAnswers).toEqual(FULL.imageAnswers)
+  })
+
+  it('returns an interrupted generation to the answers it was generating from', () => {
+    // `generating` renders a spinner and nothing else, so it is the same dead
+    // form one stage further on — but her answers are complete, so winding back
+    // to the idea would throw them away.
+    saveComposerCustody(OWNER, null, { ...FULL, imageFlowStep: 'generating' })
+    const taken = takeComposerCustody(OWNER, null)
+    expect(taken.kind).toBe('same-thread')
+    if (taken.kind !== 'same-thread') return
+    expect(taken.draft.imageFlowStep).toBe('questions')
+    expect(taken.draft.imageAnswers).toEqual(FULL.imageAnswers)
+  })
+
+  it('hands an interrupted upload back in the chooser it was started from', () => {
+    // The same boundary's second case: Attach was tapped, the upload was still
+    // running when she left, and `uploading` is not carried — so the raw files
+    // and their previews came back with no dialog to show them in.
+    const pending: ComposerDraft = {
+      ...FULL,
+      uploadDialogOpen: false,
+      imageFlowOpen: false,
+      imageFlowStep: 'idea',
+      imageIdea: '',
+      imageQuestions: [],
+      imageAnswers: {},
+    }
+    saveComposerCustody(OWNER, null, pending)
+    const taken = takeComposerCustody(OWNER, null)
+    expect(taken.kind).toBe('same-thread')
+    if (taken.kind !== 'same-thread') return
+    expect(taken.draft.uploadDialogOpen).toBe(true)
+    expect(taken.draft.uploadFiles).toEqual(FULL.uploadFiles)
+    expect(taken.draft.uploadPreviews).toEqual(FULL.uploadPreviews)
+    // An earlier batch that DID finish is hers too, and is not re-offered.
+    expect(taken.draft.attachments).toEqual(FULL.attachments)
+  })
+
+  it('does not read a finished attachment as the raw files being done', () => {
+    // The inference that would lose the work: `attachments` is non-empty from an
+    // EARLIER batch, which says nothing about the files still in the chooser.
+    saveComposerCustody(OWNER, null, {
+      ...EMPTY_COMPOSER_DRAFT,
+      attachments: FULL.attachments,
+      uploadFiles: FULL.uploadFiles,
+      uploadPreviews: FULL.uploadPreviews,
+    })
+    const taken = takeComposerCustody(OWNER, null)
+    expect(taken.kind === 'same-thread' && taken.draft.uploadDialogOpen).toBe(true)
+  })
+
+  it('leaves a draft with nothing in flight exactly as it was', () => {
+    // The ordinary hand-off, which is most of them: normalizing is not meant to
+    // be something she can notice on a draft that was not interrupted.
+    const ordinary: ComposerDraft = {
+      ...EMPTY_COMPOSER_DRAFT,
+      text: 'what should Lincoln work on next?',
+      attachments: FULL.attachments,
+    }
+    saveComposerCustody(OWNER, null, ordinary)
+    expect(takeComposerCustody(OWNER, null)).toEqual({ kind: 'same-thread', draft: ordinary })
+  })
+
   it('hands back a copy, so a later edit cannot reach into the slot', () => {
     const live: ComposerDraft = { ...FULL, attachments: [...FULL.attachments] }
     saveComposerCustody(OWNER, null, live)
