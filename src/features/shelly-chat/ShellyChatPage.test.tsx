@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 // ── Firebase + app-service mocks ────────────────────────────────
 // The page is a thin shell; useShellyChatFlows fires Firestore listeners on
@@ -67,7 +67,14 @@ vi.mock('../../core/ai/useAI', () => ({
   }),
 }))
 
+import { addDoc, updateDoc } from 'firebase/firestore'
+
 import ShellyChatPage from './ShellyChatPage'
+import {
+  clearPlannerAskHandoff,
+  PLANNER_ASK_HANDOFF_STATE_KEY,
+  stagePlannerAskHandoff,
+} from '../planner-chat/plannerAskHandoff'
 
 function renderPage() {
   return render(
@@ -76,6 +83,8 @@ function renderPage() {
     </MemoryRouter>,
   )
 }
+
+const composer = () => screen.getByPlaceholderText('Ask AI…') as HTMLTextAreaElement
 
 describe('ShellyChatPage (shell smoke test)', () => {
   it('renders the general empty state with greeting and starter prompts', () => {
@@ -100,5 +109,61 @@ describe('ShellyChatPage (shell smoke test)', () => {
   it('disables Send while the input is empty', () => {
     renderPage()
     expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled()
+  })
+})
+
+/**
+ * UX-273 on the shell this file already mocks: a family with NO resolved child.
+ *
+ * The journeys live in `plannerAskHandoff.route.test.tsx`, which mounts a real
+ * two-child identity and drives the route. What this shell is good for is the
+ * fail-closed direction — nothing about the receiving end may fill a composer
+ * when the app cannot say whose question it is.
+ */
+describe('a planner question arriving where no child is resolved', () => {
+  afterEach(() => {
+    clearPlannerAskHandoff()
+    vi.mocked(addDoc).mockClear()
+    vi.mocked(updateDoc).mockClear()
+  })
+
+  it('fills nothing, says why, and writes nothing', async () => {
+    const payload = stagePlannerAskHandoff({
+      familyId: 'fam-1',
+      childId: 'child-lincoln',
+      weekStart: '2099-01-04',
+      question: 'add TGTB Math Level 1, 30 minutes daily',
+      jobId: 'curriculum',
+    })
+
+    render(
+      <MemoryRouter
+        initialEntries={[
+          { pathname: '/chat', state: { [PLANNER_ASK_HANDOFF_STATE_KEY]: payload?.generation } },
+        ]}
+      >
+        <ShellyChatPage />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText(/still in Plan My Week/)).toBeInTheDocument()
+    expect(composer().value).toBe('')
+    expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled()
+    expect(vi.mocked(addDoc)).not.toHaveBeenCalled()
+    expect(vi.mocked(updateDoc)).not.toHaveBeenCalled()
+  })
+
+  it('leaves the composer empty, and the slot unread, on an ordinary visit', () => {
+    stagePlannerAskHandoff({
+      familyId: 'fam-1',
+      childId: 'child-lincoln',
+      weekStart: '2099-01-04',
+      question: 'add TGTB Math Level 1',
+      jobId: 'curriculum',
+    })
+    renderPage()
+    expect(composer().value).toBe('')
+    expect(screen.queryByText(/Plan My Week/)).not.toBeInTheDocument()
+    expect(vi.mocked(addDoc)).not.toHaveBeenCalled()
   })
 })

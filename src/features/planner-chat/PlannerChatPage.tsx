@@ -137,6 +137,7 @@ import {
 import ReadAloudCurriculumNotices from './ReadAloudCurriculumNotices'
 import { parsePlannerBoundary } from '../../../functions/src/shared/plannerBoundary'
 import { BOUNDARY_BARE_REFUSAL_TEXT, BOUNDARY_DURING_GENERATE_TEXT } from './PlannerBoundaryLink'
+import type { PlannerAskHandoffSource } from './plannerAskHandoff'
 import {
   appliedConfirmation,
   applyButtonLabel,
@@ -312,6 +313,26 @@ export default function PlannerChatPage() {
    */
   const liveWeekOption = planningWeek.options.find((o) => o.choice === 'this')
   const liveWeekStart = liveWeekOption?.range.start ?? weekRange.start
+  /**
+   * What a refusal's Ask AI button may carry with it (UX-273).
+   *
+   * Derived, never held: it reads the same live `weekRange` every other read and
+   * write on this page derives from, and the same active child the header owns,
+   * so it cannot describe a week or a child the page is no longer showing — and
+   * there is no state here for a child switch to leave behind. Absent for a
+   * child profile and until a child has resolved, so the button keeps UX-269's
+   * plain navigation rather than carrying a question with nothing true to say
+   * about whose it is. The receiving view re-checks every field anyway.
+   */
+  const askHandoffSource = useMemo<PlannerAskHandoffSource | undefined>(() => {
+    if (!isParent || !familyId || !activeChildId) return undefined
+    return {
+      familyId,
+      childId: activeChildId,
+      ...(activeChild?.name ? { childName: activeChild.name } : {}),
+      weekStart: weekRange.start,
+    }
+  }, [isParent, familyId, activeChildId, activeChild?.name, weekRange.start])
   const chatEndRef = useRef<HTMLDivElement>(null)
   const autoSuggestTriggered = useRef(false)
 
@@ -3743,6 +3764,7 @@ ${dayPrompts}`
             onSend={() => handleSend()}
             loading={aiLoading}
             messagesEndRef={chatEndRef}
+            {...(askHandoffSource ? { askHandoffSource } : {})}
           />
         </>
       )}

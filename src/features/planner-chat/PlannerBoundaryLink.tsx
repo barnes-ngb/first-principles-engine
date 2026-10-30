@@ -1,11 +1,18 @@
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward'
+import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
+import Typography from '@mui/material/Typography'
 import { useNavigate } from 'react-router-dom'
 
 import {
   PLANNER_BOUNDARY_FALLBACK,
   plannerBoundaryJobById,
 } from '../../../functions/src/shared/plannerBoundary'
+import {
+  PLANNER_ASK_HANDOFF_STATE_KEY,
+  stagePlannerAskHandoff,
+  type PlannerAskHandoffRequest,
+} from './plannerAskHandoff'
 
 /**
  * What the bubble says when the model wrote the marker and nothing else.
@@ -40,6 +47,18 @@ export const BOUNDARY_BARE_REFUSAL_TEXT = "I can't do that from here."
 export const BOUNDARY_DURING_GENERATE_TEXT =
   "One thing in your notes isn't something I can change from here. The plan is below; the button says where that one lives."
 
+/**
+ * What the control says it will do with her sentence, before she taps it.
+ *
+ * The repo's rail for a surface whose tap carries work somewhere else: say so
+ * ahead of the tap, and say the part that matters — that nothing is sent. A
+ * pre-filled turn that sent itself would put a confirm-card write one tap from a
+ * screen she did not choose to be on, so "unsent" is the promise this line is
+ * making and the one the receiving view keeps.
+ */
+export const BOUNDARY_HANDOFF_CAPTION =
+  'Takes your question with you — unsent, so you choose when to send it.'
+
 interface PlannerBoundaryLinkProps {
   /**
    * The job the assistant turn declined, as the model named it. Resolved here
@@ -47,6 +66,14 @@ interface PlannerBoundaryLinkProps {
    * conversation at once.
    */
   jobId: string
+  /**
+   * Her sentence and the context it was asked in, when this refusal has one to
+   * carry (UX-273). **Absent is the normal case and the original behaviour**: a
+   * conversation reloaded from Firestore, a refusal beside a generated plan, a
+   * destination that is a screen rather than Ask AI — all of those navigate
+   * exactly as UX-269 shipped, with nothing carried and no extra line on screen.
+   */
+  handoff?: PlannerAskHandoffRequest
 }
 
 /**
@@ -66,23 +93,49 @@ interface PlannerBoundaryLinkProps {
  * - **It does not guess.** An id the table does not carry falls through to the
  *   one general destination (Ask AI), because a wrong link is worse than a
  *   general one.
- * - **It does not carry her sentence across.** Ask AI has no prefill today, and
- *   adding one reaches into the portal chat this run does not own — filed as
- *   UX-273 rather than half-built here.
+ * - **It does not send anything.** Since UX-273 the tap may carry her sentence
+ *   to Ask AI's composer, where it sits UNSENT. The third thing it did not do
+ *   was carry her sentence at all; that is now the `handoff` prop, and the two
+ *   rules above are untouched by it — the route is still the app's, the
+ *   destination is still never guessed, and a refusal with nothing to carry
+ *   still navigates exactly as it did.
  */
-export default function PlannerBoundaryLink({ jobId }: PlannerBoundaryLinkProps) {
+export default function PlannerBoundaryLink({ jobId, handoff }: PlannerBoundaryLinkProps) {
   const navigate = useNavigate()
   const destination = plannerBoundaryJobById(jobId) ?? PLANNER_BOUNDARY_FALLBACK
 
+  // The staging happens on the TAP, never on render: a refusal sitting on screen
+  // has put nothing anywhere, so a parent who reads it and goes elsewhere leaves
+  // no sentence behind to surface on a later visit. A stage that refuses (over
+  // the cap, or a destination with no composer) falls through to the plain
+  // UX-269 navigation rather than to nothing — the button's job is the screen.
+  const handleClick = () => {
+    const stagedHandoff = handoff ? stagePlannerAskHandoff(handoff) : null
+    if (!stagedHandoff) {
+      navigate(destination.route)
+      return
+    }
+    navigate(destination.route, {
+      state: { [PLANNER_ASK_HANDOFF_STATE_KEY]: stagedHandoff.generation },
+    })
+  }
+
   return (
-    <Button
-      size="small"
-      variant="outlined"
-      endIcon={<ArrowForwardIcon fontSize="small" />}
-      onClick={() => navigate(destination.route)}
-      sx={{ mt: 1, textTransform: 'none' }}
-    >
-      {destination.linkLabel}
-    </Button>
+    <Box sx={{ mt: 1 }}>
+      <Button
+        size="small"
+        variant="outlined"
+        endIcon={<ArrowForwardIcon fontSize="small" />}
+        onClick={handleClick}
+        sx={{ textTransform: 'none' }}
+      >
+        {destination.linkLabel}
+      </Button>
+      {handoff && (
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+          {BOUNDARY_HANDOFF_CAPTION}
+        </Typography>
+      )}
+    </Box>
   )
 }

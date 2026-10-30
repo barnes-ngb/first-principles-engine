@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import AddIcon from '@mui/icons-material/Add'
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate'
@@ -44,6 +44,9 @@ import type { ChatContext } from '../../core/types'
 import { UserProfile } from '../../core/types/enums'
 import ActionConfirmCard from './ActionConfirmCard'
 import NextWeekDraftCard from './NextWeekDraftCard'
+import PlannerAskHandoffNotice from './PlannerAskHandoffNotice'
+import { usePlannerAskHandoff } from './usePlannerAskHandoff'
+import type { ComposerDraft } from './composerCustody'
 import { useChatActivityConfigs } from './useChatActivityConfigs'
 import { useChatArtQuota } from './useChatArtQuota'
 import { useChatConceptArcs } from './useChatConceptArcs'
@@ -99,7 +102,9 @@ const SUGGESTIONS_BY_CONTEXT: Record<ChatContext, { greeting: string; subtitle: 
 
 export default function ShellyChatPage() {
   const familyId = useFamilyId()
-  const { activeChildId, children } = useActiveChild()
+  // `isLoading` is read for the UX-273 hand-off and nothing else: an unsettled
+  // children read must not be mistaken for "the active child changed".
+  const { activeChildId, children, isLoading: childrenLoading } = useActiveChild()
   const { chat, generateImage, lastErrorRef, imageFailureRef } = useAI()
 
   const [searchParams, setSearchParams] = useSearchParams()
@@ -129,7 +134,7 @@ export default function ShellyChatPage() {
     uploading,
     uploadDialogOpen,
     pendingAttachments, setPendingAttachments,
-    pendingReferenceImage,
+    pendingReferenceImage, setPendingReferenceImage,
     imageFlowOpen,
     imageFlowStep,
     imageIdea, setImageIdea,
@@ -154,7 +159,8 @@ export default function ShellyChatPage() {
   // is offered, and give the card a name + a true old → new diff. Parent-only,
   // stated here at the component as well as in the write layer: `/chat` is
   // nav-gated, not route-gated, so neither layer assumes the other.
-  const isParent = useProfile().profile === UserProfile.Parents
+  const { profile } = useProfile()
+  const isParent = profile === UserProfile.Parents
   // UX-189 — the acting child's weekly art budget, on FEAT-175's ONE counter.
   // Inert for a parent (uncapped, no subscription, `recordGeneration` a no-op),
   // so this costs a parent nothing and exists so the chat's paid image door is
@@ -302,6 +308,52 @@ export default function ShellyChatPage() {
     isParent,
     artQuota: chatArtQuota,
   })
+
+  // ── UX-273: a planner refusal's question, arriving as an UNSENT draft, and
+  //    this page's own unsent draft surviving the route change that fetches it.
+  //    Mounted here rather than inside `useShellyChatFlows` because it adds no
+  //    write capability: it reads a one-shot in-memory slot and a page-session
+  //    custody slot, re-checks what Send would DO, and at most puts text (and
+  //    back her own attachments) into the composer. No thread, no message, no
+  //    model call. The whole composer is handed over, not just its text, because
+  //    an unmount loses the staged attachments too.
+  const composerDraft = useMemo(
+    () => ({ text: input, attachments: pendingAttachments, referenceImage: pendingReferenceImage }),
+    [input, pendingAttachments, pendingReferenceImage],
+  )
+  const applyComposerDraft = useCallback(
+    (next: ComposerDraft) => {
+      setInput(next.text)
+      setPendingAttachments(next.attachments)
+      setPendingReferenceImage(next.referenceImage)
+    },
+    [setInput, setPendingAttachments, setPendingReferenceImage],
+  )
+  const plannerAsk = usePlannerAskHandoff({
+    familyId,
+    profile,
+    isParent,
+    activeChildId,
+    childrenLoading,
+    children,
+    // The TAB and the THREAD, because they are what `handleSend` sends under.
+    chatContext,
+    threadId: activeThreadId,
+    draft: composerDraft,
+    applyDraft: applyComposerDraft,
+    startFreshThread: handleNewThread,
+  })
+
+  // The ONE funnel every send door reaches (UX-189's lesson, applied to a guard
+  // instead of a quota): the button and the Enter key both come through here, so
+  // a question that may no longer be sent from this tab cannot leave by the
+  // other door. The guard evaluates at CALL time; when it passes, the existing
+  // `handleSend` runs completely unchanged.
+  const guardedSend = useCallback(() => {
+    plannerAsk.guardSend(() => {
+      void handleSend()
+    })
+  }, [plannerAsk, handleSend])
 
   const activeThread = threads.find((t) => t.id === activeThreadId)
   const showEmpty = !activeThreadId && messages.length === 0
@@ -673,6 +725,19 @@ export default function ShellyChatPage() {
         </Box>
       )}
 
+      {/* Where a planner question came from, or why it didn't arrive (UX-273).
+          Directly above the composer it fills, so the sentence and the line
+          explaining it are read together. */}
+      <PlannerAskHandoffNotice
+        state={plannerAsk.state}
+        onKeepExisting={plannerAsk.keepExisting}
+        onReplace={plannerAsk.replaceWithQuestion}
+        onRestoreSetAside={plannerAsk.restoreSetAside}
+        onStartFresh={plannerAsk.startFresh}
+        onKeepConversation={plannerAsk.keepConversation}
+        onDismiss={plannerAsk.dismiss}
+      />
+
       {/* Input area */}
       <Paper elevation={2} sx={{ p: 1.5, borderTop: '1px solid', borderColor: 'divider' }}>
         {uploading && <LinearProgress sx={{ mb: 1 }} />}
@@ -751,12 +816,20 @@ export default function ShellyChatPage() {
             inputRef={chatInputRef}
             value={input}
             onChange={(e) => { setInput(e.target.value); if (followUps.length) setFollowUps([]) }}
-            onKeyDown={handleKeyDown}
+            onKeyDown={(e) => {
+              // Enter is the second send door; it goes through the same guard.
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                guardedSend()
+                return
+              }
+              handleKeyDown(e)
+            }}
             disabled={isBusy}
             sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
           />
           <IconButton
-            onClick={handleSend}
+            onClick={guardedSend}
             disabled={!input.trim() || isBusy}
             color="primary"
             size="small"
