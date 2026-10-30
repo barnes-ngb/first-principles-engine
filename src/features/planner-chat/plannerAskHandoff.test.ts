@@ -11,7 +11,9 @@ import {
   plannerAskContextLine,
   plannerAskHandoffGenerationFromState,
   plannerAskHandoffGoesToAskAi,
+  plannerAskSourceOwned,
   resolveChatContextChild,
+  samePlannerAskSource,
   PLANNER_ASK_HANDOFF_MAX_CHARS,
   PLANNER_ASK_HANDOFF_STATE_KEY,
   PLANNER_ASK_HANDOFF_TTL_MS,
@@ -533,5 +535,36 @@ describe('what travels with the question', () => {
   it('shows the same context the draft carries', () => {
     expect(plannerAskContextLine(handoff)).toContain('Lincoln')
     expect(plannerAskContextLine(handoff)).toContain('Week of')
+  })
+})
+
+describe('whose transcript this is', () => {
+  const live = { familyId: 'fam-1', childId: 'child-lincoln', weekStart: '2026-11-01', epoch: 3 }
+
+  it('owns a transcript stamped with exactly this scope', () => {
+    expect(plannerAskSourceOwned({ ...live }, live)).toBe(true)
+  })
+
+  it('refuses an unstamped transcript — nothing has proved where it came from', () => {
+    expect(plannerAskSourceOwned(null, live)).toBe(false)
+  })
+
+  it('refuses an unresolved scope rather than matching a blank against a blank', () => {
+    const blank = { familyId: '', childId: '', weekStart: '', epoch: 1 }
+    expect(plannerAskSourceOwned(blank, blank)).toBe(false)
+  })
+
+  it('refuses the same ids under an earlier epoch — the A → B → A case', () => {
+    // Family, child and week are all equal; only the epoch records that the
+    // scope was left and came back, which is what makes the old pending reply
+    // a stranger rather than the current visit's own work.
+    expect(plannerAskSourceOwned({ ...live, epoch: 1 }, live)).toBe(false)
+    expect(samePlannerAskSource({ ...live, epoch: 1 }, live)).toBe(false)
+  })
+
+  it('refuses a different child or week at the same epoch', () => {
+    expect(plannerAskSourceOwned({ ...live, childId: 'child-london' }, live)).toBe(false)
+    expect(plannerAskSourceOwned({ ...live, weekStart: '2026-11-08' }, live)).toBe(false)
+    expect(plannerAskSourceOwned({ ...live, familyId: 'fam-2' }, live)).toBe(false)
   })
 })

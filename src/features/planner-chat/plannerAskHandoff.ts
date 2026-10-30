@@ -105,6 +105,61 @@ export interface PlannerAskHandoffSource {
   weekStart: string
 }
 
+// ── Whose transcript is this? (the source-provenance rail) ──────────────────
+//
+// The independent review's third blocker: the source above was DERIVED from the
+// live family / active child / planning week, while `messages` is unrelated
+// local state. A child or week change during the `await` of a free-form reply
+// puts the OLD refusal into the view the shell has already relabelled, and the
+// link under it would then carry her old question stamped with the new child and
+// week. The receiver cannot detect that — the payload is already mislabelled at
+// source, and every field it re-checks agrees.
+//
+// So eligibility is bound to the scope the transcript was READ or REQUESTED
+// under, captured once and never re-derived. The epoch is what makes A → B → A
+// fail: the three ids are equal again on the way back, so a field-by-field
+// comparison would hand the old pending transcript its authority back.
+
+/** The scope a planner transcript came from. Immutable once captured. */
+export interface PlannerAskSourceKey {
+  familyId: string
+  /** The child the read or request was made for. */
+  childId: string
+  /** Sunday-start key of the week it was made for. */
+  weekStart: string
+  /**
+   * The nth scope this page has been in. Bumped on every change, so a switch
+   * away and back is a NEW epoch rather than the old one coming round again.
+   */
+  epoch: number
+}
+
+/** Identical scope? Field by field, so a new field cannot be forgotten. */
+export function samePlannerAskSource(a: PlannerAskSourceKey, b: PlannerAskSourceKey): boolean {
+  return (
+    a.familyId === b.familyId &&
+    a.childId === b.childId &&
+    a.weekStart === b.weekStart &&
+    a.epoch === b.epoch
+  )
+}
+
+/**
+ * May the transcript stamped `stamped` be offered as this scope's own?
+ *
+ * Fails closed on an unstamped transcript (nothing has proved where it came
+ * from) and on an unresolved scope, because the alternative is a guess about
+ * whose question a parent is about to carry into a chat that can write records.
+ */
+export function plannerAskSourceOwned(
+  stamped: PlannerAskSourceKey | null,
+  live: PlannerAskSourceKey,
+): boolean {
+  if (!stamped) return false
+  if (!live.familyId || !live.childId || !live.weekStart) return false
+  return samePlannerAskSource(stamped, live)
+}
+
 /** One tap's worth of handoff: the source, her sentence, and the declined job. */
 export interface PlannerAskHandoffRequest extends PlannerAskHandoffSource {
   /** Her words, verbatim — never re-worded, re-wrapped or summarised. */

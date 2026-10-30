@@ -28,6 +28,11 @@ interface PlannerChatDrawerProps {
    * straight through — the drawer holds nothing about it and decides nothing.
    */
   askHandoffSource?: PlannerAskHandoffSource
+  /**
+   * Re-asks at the TAP whether the transcript on screen is still this scope's
+   * (UX-273). Passed straight through, like the source beside it.
+   */
+  authorizeHandoff?: () => boolean
 }
 
 export default function PlannerChatDrawer({
@@ -38,6 +43,7 @@ export default function PlannerChatDrawer({
   loading,
   messagesEndRef,
   askHandoffSource,
+  authorizeHandoff,
 }: PlannerChatDrawerProps) {
   const [open, setOpen] = useState(false)
   const internalEndRef = useRef<HTMLDivElement>(null)
@@ -93,6 +99,7 @@ export default function PlannerChatDrawer({
             messages={messages}
             messagesEndRef={endRef}
             {...(askHandoffSource ? { askHandoffSource } : {})}
+            {...(authorizeHandoff ? { authorizeHandoff } : {})}
           />
           <Stack direction="row" spacing={1} alignItems="flex-end" sx={{ mt: 1 }}>
             <TextField

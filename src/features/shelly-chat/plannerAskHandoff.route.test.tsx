@@ -1,5 +1,5 @@
 import { createRef } from 'react'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { Link, MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -505,10 +505,45 @@ describe('a hand-off visit writes nothing on arrival', () => {
 
     expect(await screen.findByText(/saved conversation/)).toBeInTheDocument()
     expect(composer().value).toBe('')
-    await waitFor(() => expect(screen.getByText(/older thread talk/)).toBeInTheDocument())
+    // The saved turn IS rendered, in the transcript — the positive control for
+    // the scoped assertion the "new conversation" test below makes. A page-wide
+    // query cannot tell this from the same sentence appearing as a sidebar
+    // PREVIEW, and those are opposite answers.
+    await waitFor(() =>
+      expect(
+        within(screen.getByTestId('chat-transcript')).getByText(/older thread talk/),
+      ).toBeInTheDocument(),
+    )
     expect(chatCalls).toHaveLength(0)
     expect(vi.mocked(addDoc)).not.toHaveBeenCalled()
     expect(vi.mocked(updateDoc)).not.toHaveBeenCalled()
+  })
+
+  it('does not auto-send when a saved conversation is opened AFTER arrival', async () => {
+    // The independent run's second blocker. `handleSelectThread` calls
+    // `setSearchParams`, which replaces the history entry and takes the
+    // hand-off's router state with it — so a `handoffVisit` recomputed from
+    // `location.state` flipped back to false here and the pre-seeded auto-send
+    // effect called the model, writing an assistant turn into a conversation she
+    // had only LOOKED at, under a notice reading "Nothing was sent."
+    fixture.listenerDocs = [savedThread()]
+    renderApp()
+    goToPlanner()
+    tapRefusal()
+    await screen.findByText(/From Plan My Week/)
+
+    fireEvent.click(screen.getByText('Saved chat one'))
+
+    expect(await screen.findByText(/wasn't added to this conversation/)).toBeInTheDocument()
+    await waitFor(() =>
+      expect(
+        within(screen.getByTestId('chat-transcript')).getByText(/older thread talk/),
+      ).toBeInTheDocument(),
+    )
+    expect(chatCalls).toHaveLength(0)
+    expect(vi.mocked(addDoc)).not.toHaveBeenCalled()
+    expect(vi.mocked(updateDoc)).not.toHaveBeenCalled()
+    expect(batchSpy.commit).not.toHaveBeenCalled()
   })
 
   it('still auto-sends a pre-seeded thread on an ordinary visit', async () => {
@@ -532,7 +567,14 @@ describe('a hand-off visit writes nothing on arrival', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Ask in a new conversation/ }))
     expect(composer().value).toContain(ASK)
-    expect(screen.queryByText(/older thread talk/)).not.toBeInTheDocument()
+    // Scoped to the TRANSCRIPT. The old conversation's `lastMessagePreview`
+    // still names that sentence under "Recent conversations", which is her
+    // history and must stay; what must not happen is the saved TURN being in
+    // the view she is about to send into. The first cut asked the whole page and
+    // failed on the preview.
+    const transcript = screen.queryByTestId('chat-transcript')
+    expect(transcript && within(transcript).queryByText(/older thread talk/)).toBeFalsy()
+    expect(screen.getByText('Ask about Lincoln')).toBeInTheDocument()
     expect(chatCalls).toHaveLength(0)
     expect(vi.mocked(addDoc)).not.toHaveBeenCalled()
 

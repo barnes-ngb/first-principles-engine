@@ -137,7 +137,7 @@ import {
 import ReadAloudCurriculumNotices from './ReadAloudCurriculumNotices'
 import { parsePlannerBoundary } from '../../../functions/src/shared/plannerBoundary'
 import { BOUNDARY_BARE_REFUSAL_TEXT, BOUNDARY_DURING_GENERATE_TEXT } from './PlannerBoundaryLink'
-import type { PlannerAskHandoffSource } from './plannerAskHandoff'
+import { usePlannerAskSource } from './usePlannerAskSource'
 import {
   appliedConfirmation,
   applyButtonLabel,
@@ -316,23 +316,29 @@ export default function PlannerChatPage() {
   /**
    * What a refusal's Ask AI button may carry with it (UX-273).
    *
-   * Derived, never held: it reads the same live `weekRange` every other read and
-   * write on this page derives from, and the same active child the header owns,
-   * so it cannot describe a week or a child the page is no longer showing — and
-   * there is no state here for a child switch to leave behind. Absent for a
-   * child profile and until a child has resolved, so the button keeps UX-269's
-   * plain navigation rather than carrying a question with nothing true to say
-   * about whose it is. The receiving view re-checks every field anyway.
+   * **Bound to the transcript, not to the header.** The first cut derived this
+   * from the live child and week on every render, which is a true description of
+   * the HEADER and not of `messages`: a switch during the `await` of a free-form
+   * reply installs the old refusal under the new labels, and the receiver cannot
+   * see it because every field it re-checks agrees. So `usePlannerAskSource`
+   * holds the scope the transcript was read or requested under, this page stamps
+   * it at each of those two places, and the button is offered only while that
+   * stamp still matches the live scope — at render AND at the tap. When it does
+   * not, every link behaves exactly as UX-269 shipped.
    */
-  const askHandoffSource = useMemo<PlannerAskHandoffSource | undefined>(() => {
-    if (!isParent || !familyId || !activeChildId) return undefined
-    return {
-      familyId,
-      childId: activeChildId,
-      ...(activeChild?.name ? { childName: activeChild.name } : {}),
-      weekStart: weekRange.start,
-    }
-  }, [isParent, familyId, activeChildId, activeChild?.name, weekRange.start])
+  const {
+    live: liveAskSource,
+    stampTranscript: stampAskSource,
+    clearTranscript: clearAskSource,
+    handoffSource: askHandoffSource,
+    authorizeHandoff: authorizeAskHandoff,
+  } = usePlannerAskSource({
+    isParent,
+    familyId,
+    activeChildId,
+    ...(activeChild?.name ? { childName: activeChild.name } : {}),
+    weekStart: weekRange.start,
+  })
   const chatEndRef = useRef<HTMLDivElement>(null)
   const autoSuggestTriggered = useRef(false)
 
@@ -768,7 +774,12 @@ export default function PlannerChatPage() {
 
   // Load existing conversation
   useEffect(() => {
-    if (!conversationDocId || !activeChildId) return
+    if (!conversationDocId || !activeChildId) {
+      // Nothing on screen is provably anyone's, so no refusal may carry a
+      // question (UX-273's source rail).
+      clearAskSource()
+      return
+    }
     // FEAT-112 follow-up: the planning week (or child) changed, so `weekRange`
     // and `conversationDocId` re-keyed. Clear the previous context's week-scoped
     // state before (re)subscribing — otherwise, when the new week's doc is absent
@@ -782,11 +793,19 @@ export default function PlannerChatPage() {
     setDayTypes([])
     setApplied(false)
     setSetupComplete(false)
+    // The scope this subscription belongs to, captured once. Everything it
+    // installs is stamped with THIS — never with whatever is live when a
+    // callback happens to land (UX-273's source rail).
+    const source = liveAskSource
+    stampAskSource(source)
+    let cancelled = false
     const ref = doc(plannerConversationsCollection(familyId), conversationDocId)
     const unsubscribe = onSnapshot(ref, (snap) => {
+      if (cancelled) return
       if (snap.exists()) {
         const data = snap.data()
         setMessages(data.messages)
+        stampAskSource(source)
         setHoursPerDay(data.availableHoursPerDay)
         if (data.currentDraft) setCurrentDraft(data.currentDraft)
         // UX-261: absent on every week planned before this field existed, and on
@@ -799,8 +818,11 @@ export default function PlannerChatPage() {
         }
       }
     })
-    return unsubscribe
-  }, [familyId, conversationDocId, activeChildId])
+    return () => {
+      cancelled = true
+      unsubscribe()
+    }
+  }, [familyId, conversationDocId, activeChildId, liveAskSource, stampAskSource, clearAskSource])
 
   /**
    * Load skill snapshot.
@@ -1481,6 +1503,8 @@ Return as JSON:
   // Submit photos and generate plan (AI path with local fallback)
   const handleSubmitPhotos = useCallback(async () => {
     if (photoLabels.length === 0) return
+    // UX-273: the scope this request belongs to, captured before any await.
+    const requestSource = liveAskSource
 
     // Attempt AI-based content extraction for labels without existing extracted content
     // Uses vision API when base64 image data is cached, otherwise falls back to text analysis
@@ -1582,16 +1606,19 @@ Return as JSON:
 
     const updatedMessages = [...messages, userMsg, assistantMsg]
     setMessages(updatedMessages)
+    stampAskSource(requestSource)
 
     void persistConversation({
       messages: updatedMessages,
       currentDraft: draft,
       assignments,
     })
-  }, [photoLabels, snapshot, prioritySkillTags, hoursPerDay, filteredAppBlocks, adjustments, filteredDailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, extractPhotoContent, subjectTimeDefaults, masteryPromptContext, parentRequestSection, shapedByLine, shapeDraft, dayTypeSection])
+  }, [photoLabels, snapshot, prioritySkillTags, hoursPerDay, filteredAppBlocks, adjustments, filteredDailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, extractPhotoContent, subjectTimeDefaults, masteryPromptContext, parentRequestSection, shapedByLine, shapeDraft, dayTypeSection, liveAskSource, stampAskSource])
 
   // Generate Plan button handler (AI path with local fallback)
   const handleGeneratePlan = useCallback(async () => {
+    // UX-273: the scope this request belongs to, captured before any await.
+    const requestSource = liveAskSource
     const assignments = photoLabelsToAssignments(photoLabels)
 
     const userMsg: ChatMessage = {
@@ -1687,18 +1714,26 @@ Return as JSON:
 
     const updatedMessages = [...messages, userMsg, assistantMsg]
     setMessages(updatedMessages)
+    stampAskSource(requestSource)
 
     void persistConversation({
       messages: updatedMessages,
       currentDraft: draft,
       assignments,
     })
-  }, [photoLabels, snapshot, prioritySkillTags, hoursPerDay, filteredAppBlocks, adjustments, filteredDailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, subjectTimeDefaults, masteryPromptContext, parentRequestSection, shapedByLine, shapeDraft, dayTypeSection])
+  }, [photoLabels, snapshot, prioritySkillTags, hoursPerDay, filteredAppBlocks, adjustments, filteredDailyRoutine, messages, persistConversation, isEnabled, activeChildId, familyId, aiChat, subjectTimeDefaults, masteryPromptContext, parentRequestSection, shapedByLine, shapeDraft, dayTypeSection, liveAskSource, stampAskSource])
 
   // Handle text message send (AI path for free-form with local fallback)
   const handleSend = useCallback(async (overrideText?: string) => {
     const text = (overrideText ?? inputText).trim()
     if (!text) return
+    // UX-273 — the scope this ask belongs to, captured BEFORE the model call.
+    // This is the exact path the independent review named: the reply can land
+    // after a child or week change, and the transcript it installs is the old
+    // scope's. Stamping it with the request's own scope (rather than with
+    // whatever is live when it returns) is what stops the refusal's button
+    // labelling her old question with the new child and week.
+    const requestSource = liveAskSource
 
     // ── Detect plan-generation intent and redirect ──
     // If the user types something like "generate a plan" or "build my schedule"
@@ -1870,6 +1905,7 @@ Return as JSON:
         : updatedWithUser
       const final = [...turns, assistantMsg]
       setMessages(final)
+      stampAskSource(requestSource)
       const persistStatus = applied ? { status: PlannerConversationStatus.Applied } : {}
       void persistConversation({ messages: final, currentDraft: aiDraft ?? currentDraft ?? undefined, ...persistStatus })
       return
@@ -1952,7 +1988,7 @@ Return as JSON:
       currentDraft: currentDraft ?? undefined,
       ...(applied ? { status: PlannerConversationStatus.Applied } : {}),
     })
-  }, [inputText, currentDraft, adjustments, photoLabels, snapshot, prioritySkillTags, hoursPerDay, filteredAppBlocks, messages, persistConversation, isEnabled, activeChildId, aiChat, familyId, applied, filteredDailyRoutine, handleGeneratePlan, subjectTimeDefaults, shapeDraft])
+  }, [inputText, currentDraft, adjustments, photoLabels, snapshot, prioritySkillTags, hoursPerDay, filteredAppBlocks, messages, persistConversation, isEnabled, activeChildId, aiChat, familyId, applied, filteredDailyRoutine, handleGeneratePlan, subjectTimeDefaults, shapeDraft, liveAskSource, stampAskSource])
 
   const buildWeekFocusContext = useCallback(() => {
     const contextParts: string[] = []
@@ -2010,6 +2046,8 @@ Return as JSON:
     const skipFocusGeneration = focusIsFresh && !forceRefreshFocus
 
     try {
+      // UX-273: the scope this request belongs to, captured before any await.
+      const requestSource = liveAskSource
       const assignments = photoLabelsToAssignments(photoLabels)
       const userMsg: ChatMessage = {
         id: generateItemId(),
@@ -2101,11 +2139,12 @@ Return as JSON:
       }
       const updatedMessages = [...messages, userMsg, assistantMsg]
       setMessages(updatedMessages)
+      stampAskSource(requestSource)
       await persistConversation({ messages: updatedMessages, currentDraft: draft, assignments })
     } finally {
       setGeneratingWeek(false)
     }
-  }, [activeChildId, weekPlan, photoLabels, subjectTimeDefaults, snapshot, prioritySkillTags, hoursPerDay, filteredAppBlocks, adjustments, filteredDailyRoutine, isEnabled, aiChat, familyId, messages, persistConversation, masteryPromptContext, buildWeekFocusContext, parsePlanThemeFields, weekPlanRef, parentRequestSection, shapedByLine, shapeDraft, dayTypeSection])
+  }, [activeChildId, weekPlan, photoLabels, subjectTimeDefaults, snapshot, prioritySkillTags, hoursPerDay, filteredAppBlocks, adjustments, filteredDailyRoutine, isEnabled, aiChat, familyId, messages, persistConversation, masteryPromptContext, buildWeekFocusContext, parsePlanThemeFields, weekPlanRef, parentRequestSection, shapedByLine, shapeDraft, dayTypeSection, liveAskSource, stampAskSource])
 
   // Setup wizard completion handler
   const handleSetupComplete = useCallback(async () => {
@@ -2714,6 +2753,9 @@ Generate a plan for Monday through Friday.`.trim()
   // Apply plan to WeekPlan + DayLogs
   const handleApplyPlan = useCallback(async (overrideWeekStart?: string) => {
     if (!activeChildId || !currentDraft) return
+    // UX-273: the scope this apply belongs to, captured before any await — the
+    // confirmation turn it appends carries the transcript it was applied under.
+    const requestSource = liveAskSource
 
     // UX-261, Codex round 3 (P1): shape HERE, and use the same object for the
     // write, the card and the persist.
@@ -2893,6 +2935,7 @@ Generate a plan for Monday through Friday.`.trim()
       }
       const updatedMessages = [...messages, appliedMsg]
       setMessages(updatedMessages)
+      stampAskSource(requestSource)
       setApplied(true)
       setPlanDirty(false) // the plan is now saved to the days — no pending edits
 
@@ -3019,7 +3062,7 @@ Generate a plan for Monday through Friday.`.trim()
         severity: refusal === 'stale-week' ? 'warning' : 'error',
       })
     }
-  }, [activeChildId, familyId, weekRange.start, effectiveWeekChoice, currentDraft, messages, persistConversation, generateActivity, subjectToActivityType, selectedBook, activeChild, weekPlan, aiChat, children, activityConfigs, refreshTodayKey, dayTypes, filteredAppBlocks, ensureReadAloudRow])
+  }, [activeChildId, familyId, weekRange.start, effectiveWeekChoice, currentDraft, messages, persistConversation, generateActivity, subjectToActivityType, selectedBook, activeChild, weekPlan, aiChat, children, activityConfigs, refreshTodayKey, dayTypes, filteredAppBlocks, ensureReadAloudRow, liveAskSource, stampAskSource])
 
   // Quick suggestion handler - sends the text immediately
   const handleQuickSuggestion = useCallback((text: string) => {
@@ -3765,6 +3808,7 @@ ${dayPrompts}`
             loading={aiLoading}
             messagesEndRef={chatEndRef}
             {...(askHandoffSource ? { askHandoffSource } : {})}
+            authorizeHandoff={authorizeAskHandoff}
           />
         </>
       )}

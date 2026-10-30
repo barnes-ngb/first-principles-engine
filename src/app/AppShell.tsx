@@ -17,7 +17,6 @@ import AvatarThumbnail from '../features/avatar/AvatarThumbnail'
 import { useAvatarProfile } from '../features/avatar/useAvatarProfile'
 import { isArmorComplete } from '../features/avatar/armorGate'
 import { canAccessKnowledgeMine } from '../features/quest/knowledgeMineAccess'
-import { useHandoffScopeWatch } from '../features/shelly-chat/useHandoffScopeWatch'
 
 const navItems = [
   { label: 'Today', to: '/today' },
@@ -187,11 +186,10 @@ export function AppShell({ children }: AppShellProps) {
 
   const isParent = profile === UserProfile.Parents
 
-  // UX-273: the planner→Ask AI hand-off keeps two page-session slots (one staged
-  // question, one unsent composer). Account / role / child all change HERE, and
-  // Ask AI's own guards cannot run while it is unmounted, so the shell drops
-  // them on a scope change. Read-only — it never sets a selection.
-  useHandoffScopeWatch(familyId ?? '', profile, activeChildId)
+  // UX-273's hand-off scope observer used to be mounted here. It is in `App.tsx`
+  // above `AuthGate` now: the shell is inside the gate, so a logout unmounted the
+  // observer and the two page-session slots outlived the session that filled
+  // them. Nothing else about the shell changed.
 
   // Kid nav Knowledge Mine visibility mirrors the /quest route guard: only kids
   // with Mine calibration see the item (gate + nav can never disagree).

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import AddIcon from '@mui/icons-material/Add'
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate'
@@ -116,11 +116,25 @@ export default function ShellyChatPage() {
    *
    * Read from router state during RENDER, so the two mount effects that write
    * without a tap — the legacy `chatContext` migration and the pre-seeded-thread
-   * auto-send — can be suppressed before they can start. True for the whole
-   * visit, so a cancel, a new-conversation choice or a replay cannot re-arm
-   * them. An ordinary visit carries no state and is unchanged.
+   * auto-send — can be suppressed before they can start. An ordinary visit
+   * carries no state and is unchanged.
+   *
+   * **LATCHED for the whole mounted visit, which the first cut got wrong.** The
+   * answer was recomputed from `location.state` every render, and this page
+   * navigates to itself: `handleSelectThread` calls `setSearchParams`, which
+   * replaces the entry and takes the hand-off state with it. So opening a saved
+   * conversation after arriving flipped the suppression back off, the pre-seeded
+   * auto-send effect saw one old user message and called the model — writing an
+   * assistant turn into a conversation she had only LOOKED at, under a notice
+   * that said "Nothing was sent." The latch covers every later transition the
+   * same way (tab, thread, query, new conversation, cancel, failure, replay),
+   * and `useShellyChatFlows` re-reads it through a ref after its own `await`, so
+   * work already begun cannot commit either.
    */
-  const handoffVisit = plannerAskHandoffGenerationFromState(location.state) !== null
+  const handoffArrival = plannerAskHandoffGenerationFromState(location.state) !== null
+  const handoffVisitLatch = useRef(false)
+  if (handoffArrival) handoffVisitLatch.current = true
+  const handoffVisit = handoffVisitLatch.current
 
   // Copy/.md-download toast (FEAT-59). Local Snackbar per the repo pattern.
   const [snack, setSnack] = useState<string | null>(null)
@@ -548,7 +562,12 @@ export default function ShellyChatPage() {
             )}
           </Box>
         ) : (
-          <>
+          /* The TRANSCRIPT, named so an assertion can be scoped to it. The
+             empty state above renders the saved-conversation list with its
+             last-message previews, so a page-wide text query cannot tell a
+             sidebar preview of an old conversation from one of its turns
+             leaking into the view — and those are opposite answers. */
+          <Box data-testid="chat-transcript">
             {messages.map((msg) => (
               <ChatMessageBubble
                 key={msg.id}
@@ -578,7 +597,7 @@ export default function ShellyChatPage() {
               </Box>
             )}
             <div ref={messagesEndRef} />
-          </>
+          </Box>
         )}
       </Box>
 

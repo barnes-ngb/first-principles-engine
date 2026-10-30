@@ -63,13 +63,18 @@ function transcript(over: { ask?: string; jobId?: string } = {}): ChatMessage[] 
   ]
 }
 
-function renderTranscript(messages: ChatMessage[], source?: PlannerAskHandoffSource) {
+function renderTranscript(
+  messages: ChatMessage[],
+  source?: PlannerAskHandoffSource,
+  authorizeHandoff?: () => boolean,
+) {
   return render(
     <MemoryRouter>
       <PlannerChatMessages
         messages={messages}
         messagesEndRef={createRef<HTMLDivElement>()}
         {...(source ? { askHandoffSource: source } : {})}
+        {...(authorizeHandoff ? { authorizeHandoff } : {})}
       />
     </MemoryRouter>,
   )
@@ -179,6 +184,26 @@ describe('what the tap does', () => {
     const buttons = screen.getAllByRole('button', { name: /Open Ask AI/ })
     fireEvent.click(buttons[1])
     expect(takePlannerAskHandoff()?.question).toBe('put volcano week back on')
+  })
+
+  it('re-asks the owner AT THE TAP and falls back when it cannot be proven', () => {
+    // The staging happens on the click, so the click is where the last word
+    // belongs: a tap can land on a render the shell has already superseded.
+    renderTranscript(transcript(), SOURCE, () => false)
+    fireEvent.click(screen.getByRole('button', { name: /Open Ask AI/ }))
+    expect(mockNavigate).toHaveBeenCalledWith('/chat')
+    expect(takePlannerAskHandoff()).toBeNull()
+  })
+
+  it('reads that answer at call time, not at render time', () => {
+    // Rendered while owned, tapped after ownership went away — the render-time
+    // value must not be the one the tap obeys.
+    let owned = true
+    renderTranscript(transcript(), SOURCE, () => owned)
+    owned = false
+    fireEvent.click(screen.getByRole('button', { name: /Open Ask AI/ }))
+    expect(mockNavigate).toHaveBeenCalledWith('/chat')
+    expect(takePlannerAskHandoff()).toBeNull()
   })
 
   it('keeps her words byte-for-byte, markers and newlines included', () => {

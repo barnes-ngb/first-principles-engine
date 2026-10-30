@@ -25,12 +25,24 @@ interface PlannerChatMessagesProps {
    * not want the hand-off) means every link behaves exactly as UX-269 shipped.
    */
   askHandoffSource?: PlannerAskHandoffSource
+  /**
+   * Asked again at the TAP: is the transcript below still the live scope's?
+   * (UX-273's source rail.)
+   *
+   * Render proved it once, but a tap can land on a render the shell has already
+   * superseded — a queued click, a slow frame — so the owner is re-asked at
+   * activation and the button falls back to UX-269's plain navigation when it
+   * cannot be proven. Omitted means "nothing to re-ask", which is the harness
+   * and pre-UX-273 behaviour.
+   */
+  authorizeHandoff?: () => boolean
 }
 
 export default function PlannerChatMessages({
   messages,
   messagesEndRef,
   askHandoffSource,
+  authorizeHandoff,
 }: PlannerChatMessagesProps) {
   if (messages.length === 0) return null
 
@@ -100,6 +112,7 @@ export default function PlannerChatMessages({
                           question: askQuestion,
                           jobId: msg.boundaryJobId,
                         },
+                        ...(authorizeHandoff ? { authorizeHandoff } : {}),
                       }
                     : {})}
                 />

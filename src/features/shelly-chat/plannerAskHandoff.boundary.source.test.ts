@@ -42,8 +42,10 @@ const LINK = 'src/features/planner-chat/PlannerBoundaryLink.tsx'
 const CUSTODY = 'src/features/shelly-chat/composerCustody.ts'
 const LINES = 'src/features/shelly-chat/plannerAskHandoffLines.ts'
 const SCOPE_WATCH = 'src/features/shelly-chat/useHandoffScopeWatch.ts'
+/** The planner-side ownership rail: which scope the transcript on screen is. */
+const SOURCE_OWNERSHIP = 'src/features/planner-chat/usePlannerAskSource.ts'
 
-const PATH_MODULES = [TRANSFER, RECEIVER, NOTICE, LINK, CUSTODY, LINES, SCOPE_WATCH]
+const PATH_MODULES = [TRANSFER, RECEIVER, NOTICE, LINK, CUSTODY, LINES, SCOPE_WATCH, SOURCE_OWNERSHIP]
 
 /** Every way this repo spells a write, a send, or a paid call. */
 const FORBIDDEN = [

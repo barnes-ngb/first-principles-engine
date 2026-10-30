@@ -74,6 +74,17 @@ interface PlannerBoundaryLinkProps {
    * exactly as UX-269 shipped, with nothing carried and no extra line on screen.
    */
   handoff?: PlannerAskHandoffRequest
+  /**
+   * Is the transcript this refusal sits in still the live scope's? Asked at the
+   * TAP, not at render (UX-273's source rail).
+   *
+   * Render already proved it, but a tap can land on a render the shell has
+   * superseded — the staging happens on the click, so the click is where the
+   * last word belongs. Absent means there is nothing to re-ask and the `handoff`
+   * prop stands on its own, which is how the pre-existing call sites and the
+   * tests that compose a fixed source behave.
+   */
+  authorizeHandoff?: () => boolean
 }
 
 /**
@@ -100,17 +111,23 @@ interface PlannerBoundaryLinkProps {
  *   destination is still never guessed, and a refusal with nothing to carry
  *   still navigates exactly as it did.
  */
-export default function PlannerBoundaryLink({ jobId, handoff }: PlannerBoundaryLinkProps) {
+export default function PlannerBoundaryLink({
+  jobId,
+  handoff,
+  authorizeHandoff,
+}: PlannerBoundaryLinkProps) {
   const navigate = useNavigate()
   const destination = plannerBoundaryJobById(jobId) ?? PLANNER_BOUNDARY_FALLBACK
 
   // The staging happens on the TAP, never on render: a refusal sitting on screen
   // has put nothing anywhere, so a parent who reads it and goes elsewhere leaves
   // no sentence behind to surface on a later visit. A stage that refuses (over
-  // the cap, or a destination with no composer) falls through to the plain
-  // UX-269 navigation rather than to nothing — the button's job is the screen.
+  // the cap, a destination with no composer, or an owner that can no longer be
+  // proven) falls through to the plain UX-269 navigation rather than to nothing —
+  // the button's job is the screen.
   const handleClick = () => {
-    const stagedHandoff = handoff ? stagePlannerAskHandoff(handoff) : null
+    const owned = handoff ? authorizeHandoff?.() ?? true : false
+    const stagedHandoff = owned && handoff ? stagePlannerAskHandoff(handoff) : null
     if (!stagedHandoff) {
       navigate(destination.route)
       return
