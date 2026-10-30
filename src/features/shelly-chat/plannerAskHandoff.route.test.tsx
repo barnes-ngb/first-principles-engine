@@ -594,7 +594,9 @@ describe('her own unsent work survives the route', () => {
     tapRefusal()
 
     // The offer is in the box she is looking at, which is what makes it editable.
-    await screen.findByText(/You were already typing something/)
+    // The other-thread wording is the assertion: it is what proves this fixture
+    // really reached the cross-thread branch and not the same-thread one.
+    await screen.findByText(/You were typing this in another conversation/)
     expect(composer().value).toBe('mine, from the saved chat')
     expect(screen.getByAltText('Selected 1')).toBeInTheDocument()
 
