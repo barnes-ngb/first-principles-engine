@@ -578,7 +578,11 @@ describe('her own unsent work survives the route', () => {
     // choice is shown, so it is hers to edit and to cancel media in exactly like
     // the same-thread case above. The set-aside read the arrival snapshot for
     // this one case, which lost the edit and brought the cancelled file back.
-    fixture.listenerDocs = [savedThread()]
+    // An ANSWERED saved conversation: a thread whose only message is still hers
+    // is a pre-seeded one, which an ordinary open auto-sends (pinned by its own
+    // tests below). That send is not what this test is about, so give custody a
+    // completed history to offer the draft from.
+    fixture.listenerDocs = [savedThread({ role: 'assistant' })]
     const { container } = renderApp()
     // Typed inside a SAVED conversation, so the hand-off's fresh thread is a
     // different one and custody offers the draft rather than placing it on sight.
