@@ -262,6 +262,13 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
   useEffect(() => {
     if (!settled) return
     if (live.current.receiver.contextChildId === '' && contextSettlePass === 0) {
+      // The extra COMMIT is the point, which is the one thing the render-phase
+      // alternative cannot express: state set during render re-runs this
+      // component immediately, still before the chat's own mount effect has
+      // installed its tab — the pass being waited out. The hand-off is an
+      // external one-time take, so believing an unresolved tab too early
+      // refuses it for good.
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- deliberate one-commit settle; see above
       setContextSettlePass(1)
       return
     }

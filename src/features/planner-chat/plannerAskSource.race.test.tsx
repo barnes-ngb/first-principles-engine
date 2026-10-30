@@ -75,9 +75,10 @@ let release: (() => void) | null = null
 function PlannerHarness() {
   const [childId, setChildId] = useState(CHILD_A)
   const [weekStart, setWeekStart] = useState(WEEK_A)
+  const [isParent, setIsParent] = useState(true)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const { live, stampTranscript, handoffSource, authorizeHandoff } = usePlannerAskSource({
-    isParent: true,
+    isParent,
     familyId: FAMILY,
     activeChildId: childId,
     childName: 'Lincoln',
@@ -119,6 +120,14 @@ function PlannerHarness() {
       <button onClick={() => setChildId(CHILD_B)}>switch to London</button>
       <button onClick={() => setChildId(CHILD_A)}>switch back to Lincoln</button>
       <button onClick={() => setWeekStart(WEEK_B)}>plan next week</button>
+      {/*
+        The profile menu's `selectProfile`, which changes the profile in place:
+        this route sits outside the parent gate, so no remount and no new
+        snapshot — the child and the week do not move, and the listener is keyed
+        on those.
+      */}
+      <button onClick={() => setIsParent(false)}>open a child profile</button>
+      <button onClick={() => setIsParent(true)}>return to the parent profile</button>
     </>
   )
 }
@@ -154,6 +163,9 @@ const nextWeek = () => {
   fireEvent.click(screen.getByText('plan next week'))
   deliver()
 }
+/** Leave the parent role, then come back to it — child and week held constant. */
+const leaveParentRole = () => fireEvent.click(screen.getByText('open a child profile'))
+const returnToParentRole = () => fireEvent.click(screen.getByText('return to the parent profile'))
 const tapRefusal = () => fireEvent.click(screen.getByRole('button', { name: /Open Ask AI/ }))
 const carries = () => screen.queryByText(/Takes your question with you/)
 
@@ -249,5 +261,46 @@ describe('a scope change during the model call revokes the hand-off', () => {
     expect(carries()).toBeInTheDocument()
     tapRefusal()
     expect(takePlannerAskHandoff()?.childId).toBe(CHILD_B)
+  })
+})
+
+describe('a role departure and return during the model call revokes the hand-off', () => {
+  /**
+   * The independent run's fourth finding, on the same frozen source: the ask is
+   * made as a parent, the profile menu selects a child profile and then the
+   * parents profile again, and the awaited refusal lands. `/planner/chat` is
+   * outside `RequireParent` and `selectProfile` does not remount, so the page
+   * is the same instance throughout and the active child and the week never
+   * move — a field-by-field comparison, and a plain `isParent` gate on the
+   * answer, both hand the in-flight transcript its authority back. The role has
+   * to be part of the scope identity for the epoch to know it was left.
+   */
+  it('refuses to carry it after the parent role was left and resumed', async () => {
+    renderPlanner()
+    ask()
+    leaveParentRole()
+    returnToParentRole()
+    await releaseReply()
+
+    expect(screen.getByText(REFUSAL)).toBeInTheDocument()
+    expect(carries()).toBeNull()
+
+    tapRefusal()
+    expect(takePlannerAskHandoff()).toBeNull()
+  })
+
+  it('still carries an ask made AFTER the round trip — the role is not sticky', async () => {
+    renderPlanner()
+    leaveParentRole()
+    returnToParentRole()
+    ask()
+    await releaseReply()
+
+    expect(carries()).toBeInTheDocument()
+    tapRefusal()
+    const staged = takePlannerAskHandoff()
+    expect(staged?.question).toBe(ASK)
+    expect(staged?.childId).toBe(CHILD_A)
+    expect(staged?.weekStart).toBe(WEEK_A)
   })
 })

@@ -48,7 +48,7 @@ import { handoffScopeIdentity, useHandoffScopeWatch } from './useHandoffScopeWat
 
 const FAMILY = 'fam-1'
 const CHILD = { id: 'child-lincoln', name: 'Lincoln' }
-const DRAFT = 'her private draft — nobody else may read this'
+const DRAFT = "the parent's private draft — nobody else may read this"
 
 const OWNER: ComposerCustodyOwner = {
   familyId: FAMILY,

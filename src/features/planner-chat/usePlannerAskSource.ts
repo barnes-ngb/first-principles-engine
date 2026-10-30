@@ -73,7 +73,14 @@ export function usePlannerAskSource({
   // render, which is a mutation a thrown-away render would make invisibly.
   // Monotonic, so A → B → A ends on a third epoch and the first one's pending
   // work can never be mistaken for the current visit's.
-  const scopeKey = `${familyId}|${activeChildId}|${weekStart}`
+  //
+  // `isParent` is PART OF THE IDENTITY, not just a gate on the answer: the
+  // planner chat route lives outside the parent gate and the profile menu
+  // switches profile without remounting, so a departure to a child profile and
+  // back leaves family, child and week all equal to the request's. Keyed here,
+  // both transitions move the epoch, and a reply awaited across the round trip
+  // can no longer have its authority handed back.
+  const scopeKey = `${familyId}|${activeChildId}|${weekStart}|${isParent ? 'parent' : 'other'}`
   const [scope, setScope] = useState<{ key: string; epoch: number }>({ key: scopeKey, epoch: 1 })
   const generation = scope.key === scopeKey ? scope.epoch : scope.epoch + 1
   if (scope.key !== scopeKey) {
