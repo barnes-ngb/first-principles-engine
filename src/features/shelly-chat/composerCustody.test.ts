@@ -1,6 +1,7 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import {
+  adoptRestoredUploadPreviews,
   clearComposerCustody,
   composerDraftIsEmpty,
   COMPOSER_CUSTODY_TTL_MS,
@@ -259,5 +260,84 @@ describe('the composer custody slot', () => {
     live.attachments.push({ url: 'https://example.com/b.jpg', previewUrl: 'blob:b' })
     const taken = takeComposerCustody(OWNER, null)
     expect(taken.kind === 'same-thread' && taken.draft.attachments).toHaveLength(1)
+  })
+})
+
+describe('adopting a restored selection’s previews', () => {
+  const created: string[] = []
+  const revoked: string[] = []
+  const realCreate = URL.createObjectURL
+  const realRevoke = URL.revokeObjectURL
+
+  beforeEach(() => {
+    created.length = 0
+    revoked.length = 0
+    let seq = 0
+    URL.createObjectURL = ((file: File) => {
+      const url = `blob:fresh-${(seq += 1)}-${file.name}`
+      created.push(url)
+      return url
+    }) as unknown as typeof URL.createObjectURL
+    URL.revokeObjectURL = ((url: string) => void revoked.push(url)) as typeof URL.revokeObjectURL
+  })
+
+  afterEach(() => {
+    URL.createObjectURL = realCreate
+    URL.revokeObjectURL = realRevoke
+  })
+
+  it('derives one fresh preview per preserved file and leaves the files alone', () => {
+    const second = new File(['y'], 'page-2.png', { type: 'image/png' })
+    const restored: ComposerDraft = {
+      ...FULL,
+      uploadFiles: [...FULL.uploadFiles, second],
+      uploadPreviews: ['blob:departed-1', 'blob:departed-2'],
+    }
+
+    const adopted = adoptRestoredUploadPreviews(restored)
+
+    expect(adopted.uploadPreviews).toEqual(created)
+    expect(created).toHaveLength(2)
+    expect(adopted.uploadFiles).toEqual(restored.uploadFiles)
+    // Everything else — her text, a finished attachment, a reference image —
+    // is not raw-file ownership and is passed through untouched.
+    expect({ ...adopted, uploadPreviews: [] }).toEqual({ ...restored, uploadPreviews: [] })
+  })
+
+  it('never revokes the view the departed instance may still be using', () => {
+    // The operation that minted those URLs can still be running into the
+    // instance that owns it; revoking them from here is the defect, not the fix.
+    adoptRestoredUploadPreviews({ ...FULL, uploadPreviews: ['blob:departed-1'] })
+    expect(revoked).toEqual([])
+  })
+
+  it('drops a preview no preserved file can re-derive, rather than showing it dead', () => {
+    const adopted = adoptRestoredUploadPreviews({
+      ...FULL,
+      uploadFiles: [],
+      uploadPreviews: ['blob:departed-1'],
+    })
+    expect(adopted.uploadPreviews).toEqual([])
+    expect(created).toEqual([])
+    expect(revoked).toEqual([])
+  })
+
+  it('mints nothing for a draft with no raw files at all', () => {
+    // The cost of the mistake this guards is a URL per peek or per render, so
+    // the no-op case has to BE a no-op: same object back, nothing created.
+    const plain: ComposerDraft = { ...EMPTY_COMPOSER_DRAFT, text: 'just words' }
+    expect(adoptRestoredUploadPreviews(plain)).toBe(plain)
+    expect(created).toEqual([])
+  })
+
+  it('is not reached by a peek or a take, which only read the slot', () => {
+    saveComposerCustody(OWNER, null, FULL)
+    peekComposerCustody(OWNER, null)
+    peekComposerCustody(OWNER, null)
+    const taken = takeComposerCustody(OWNER, null)
+    expect(created).toEqual([])
+    // The carried strings come back as they were; adopting them is the
+    // PLACEMENT's job, which is where the clean-up lives.
+    expect(taken.kind === 'same-thread' && taken.draft.uploadPreviews).toEqual(FULL.uploadPreviews)
   })
 })

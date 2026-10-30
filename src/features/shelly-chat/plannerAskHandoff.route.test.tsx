@@ -82,9 +82,11 @@ vi.mock('firebase/firestore', () => ({
 const inFlight: {
   holdChat: boolean
   holdUpload: boolean
+  /** The held upload ends in a throw, so its owner's catch runs. */
+  failUpload: boolean
   releaseChat: ((value: { message: string }) => void) | null
   releaseUpload: (() => void) | null
-} = { holdChat: false, holdUpload: false, releaseChat: null, releaseUpload: null }
+} = { holdChat: false, holdUpload: false, failUpload: false, releaseChat: null, releaseUpload: null }
 
 vi.mock('firebase/storage', () => ({
   getDownloadURL: vi.fn(async () => 'https://example.com/uploaded.jpg'),
@@ -95,6 +97,7 @@ vi.mock('firebase/storage', () => ({
         inFlight.releaseUpload = () => resolve()
       })
     }
+    if (inFlight.failUpload) throw new Error('synthetic upload failure')
   }),
 }))
 
@@ -301,11 +304,28 @@ const goToPlanner = () => fireEvent.click(screen.getByText('to-planner'))
 const tapRefusal = () => fireEvent.click(screen.getByRole('button', { name: /Open Ask AI/ }))
 const sendButton = () => screen.getByRole('button', { name: 'Send message' })
 
+/**
+ * Object-URL lifetimes, which jsdom has none of: a distinct string per call and
+ * a note of what was revoked, so a preview's USABILITY is assertable here. A
+ * revoked `blob:` is exactly the `naturalWidth === 0` the browser run read off
+ * the restored chooser's retry.
+ */
+const objectUrls: { minted: string[]; revoked: string[] } = { minted: [], revoked: [] }
+let objectUrlSeq = 0
+
 beforeAll(() => {
-  if (!URL.createObjectURL) {
-    Object.defineProperty(URL, 'createObjectURL', { value: () => 'blob:preview', writable: true })
-    Object.defineProperty(URL, 'revokeObjectURL', { value: () => {}, writable: true })
-  }
+  Object.defineProperty(URL, 'createObjectURL', {
+    writable: true,
+    value: () => {
+      const url = `blob:preview-${(objectUrlSeq += 1)}`
+      objectUrls.minted.push(url)
+      return url
+    },
+  })
+  Object.defineProperty(URL, 'revokeObjectURL', {
+    writable: true,
+    value: (url: string) => void objectUrls.revoked.push(url),
+  })
   // jsdom has no layout; the transcript's auto-scroll calls it.
   if (!Element.prototype.scrollIntoView) {
     Object.defineProperty(Element.prototype, 'scrollIntoView', { value: () => {}, writable: true })
@@ -323,8 +343,11 @@ beforeEach(() => {
   generateImageCalls.length = 0
   inFlight.holdChat = false
   inFlight.holdUpload = false
+  inFlight.failUpload = false
   inFlight.releaseChat = null
   inFlight.releaseUpload = null
+  objectUrls.minted.length = 0
+  objectUrls.revoked.length = 0
   clearPlannerAskHandoff()
   clearComposerCustody()
   vi.mocked(addDoc).mockClear()
@@ -336,7 +359,10 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  // Let a held request finish, so it cannot resolve into the next test.
+  // Let a held request finish, so it cannot resolve into the next test — and
+  // let it finish SUCCESSFULLY, since a throw nobody is awaiting any more is an
+  // unhandled rejection charged to whichever test is running by then.
+  inFlight.failUpload = false
   inFlight.releaseChat?.(LATE_QUESTIONS)
   inFlight.releaseUpload?.()
   clearPlannerAskHandoff()
@@ -601,6 +627,88 @@ describe('her own unsent work survives the route', () => {
     expect(screen.getByText('Attach to my message')).toBeInTheDocument()
     expect(screen.queryByText(/Image attached/)).not.toBeInTheDocument()
     expect(vi.mocked(uploadBytes)).toHaveBeenCalledTimes(1)
+  })
+
+  it('gives back a selection she can still SEE after the old upload failed', async () => {
+    // The eighth browser run's blocker, and the one case the test above cannot
+    // reach: that upload was released successfully, this one FAILS. The failure
+    // cleanup belongs to the departed instance and revokes the `blob:` URLs it
+    // was showing — which custody had carried into the restored chooser, so the
+    // retry attached a dead preview (cached it still looked right; reloaded it
+    // was a blank 40×40). What comes back must be a view this page owns.
+    const { container } = renderApp()
+    inFlight.holdUpload = true
+    inFlight.failUpload = true
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement
+    fireEvent.change(fileInput, {
+      target: { files: [new File(['x'], 'raw.png', { type: 'image/png' })] },
+    })
+    const departedPreview = objectUrls.minted[0]
+    fireEvent.click(await screen.findByText('Attach to my message'))
+    await waitFor(() => expect(vi.mocked(uploadBytes)).toHaveBeenCalledTimes(1))
+
+    goToPlanner()
+    tapRefusal()
+    await screen.findByText(/You were already typing something/)
+    fireEvent.click(screen.getByText(/Keep what I was typing/))
+
+    // Now the upload she left behind fails, into the instance that started it.
+    const release = inFlight.releaseUpload
+    inFlight.releaseUpload = null
+    await act(async () => {
+      release?.()
+    })
+    expect(objectUrls.revoked).toContain(departedPreview)
+
+    // The chooser is back, and showing a URL of its own — not the dead one.
+    // Read as the attribute, which is the string the component put there; the
+    // `src` property is resolved against the document's base URL.
+    const selected = screen.getByAltText('Selected 1').getAttribute('src')
+    expect(selected).not.toBe(departedPreview)
+    expect(objectUrls.revoked).not.toContain(selected)
+
+    // Her explicit retry, which is the only upload anything here starts.
+    inFlight.holdUpload = false
+    inFlight.failUpload = false
+    fireEvent.click(screen.getByText('Attach to my message'))
+    await screen.findByText(/Image attached/)
+
+    const attached = screen.getByAltText('Attached 1').getAttribute('src')
+    expect(attached).not.toBe(departedPreview)
+    expect(objectUrls.revoked).not.toContain(attached.src)
+    // The attachment itself — the payload and the note over it — is unchanged.
+    expect(vi.mocked(getDownloadURL)).toHaveBeenCalled()
+    expect(screen.getByText('Image attached — type your question')).toBeInTheDocument()
+    expect(vi.mocked(uploadBytes)).toHaveBeenCalledTimes(2)
+    expect(chatCalls).toHaveLength(0)
+    expect(generateImageCalls).toHaveLength(0)
+  })
+
+  it('revokes the preview it minted when she cancels the restored chooser', async () => {
+    // The other half of owning it: a fresh URL is a resource, so the restored
+    // chooser's own exits have to free it. Cancel is the one that frees it
+    // without an upload behind it.
+    const { container } = renderApp()
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement
+    fireEvent.change(fileInput, {
+      target: { files: [new File(['x'], 'raw.png', { type: 'image/png' })] },
+    })
+    await screen.findByText('Attach to my message')
+
+    goToPlanner()
+    tapRefusal()
+    await screen.findByText(/You were already typing something/)
+    fireEvent.click(screen.getByText(/Keep what I was typing/))
+
+    const restoredPreview = screen.getByAltText('Selected 1').getAttribute('src')
+    expect(objectUrls.revoked).not.toContain(restoredPreview)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByAltText('Selected 1')).not.toBeInTheDocument())
+    expect(objectUrls.revoked).toContain(restoredPreview)
+    // One live view at a time: the restore derived exactly one URL from the one
+    // preserved file, so a repeated render or a second pass cannot pile them up.
+    expect(objectUrls.minted).toHaveLength(2)
   })
 
   it('protects a raw file selection and an image idea she had not sent', async () => {

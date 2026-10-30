@@ -34,6 +34,7 @@ import {
   type PlannerAskReceiver,
 } from '../planner-chat/plannerAskHandoff'
 import {
+  adoptRestoredUploadPreviews,
   composerDraftIsEmpty,
   currentComposerCustodySession,
   EMPTY_COMPOSER_DRAFT,
@@ -285,13 +286,16 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
         { acceptOtherThread: generation !== null },
       )
       if (look.kind === 'same-thread') {
-        restored = look.draft
+        // Placed, so its raw-file previews become this page's to own and to
+        // clean up; `restored` is the adopted draft everywhere below, or a
+        // later set-aside would hand the departed instance's URLs back.
+        restored = adoptRestoredUploadPreviews(look.draft)
         draftOwner.current = {
           owner: ownerOf(live.current.receiver),
           threadId,
           session: currentComposerCustodySession(),
         }
-        live.current.applyDraft(look.draft)
+        live.current.applyDraft(restored)
       } else if (look.kind === 'other-thread' && generation !== null) {
         offered = look.draft
       }
@@ -323,18 +327,22 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
       return
     }
 
+    // Adopted here and not where it was taken: the refusal and the saved-thread
+    // choice above drop a cross-thread draft unplaced, and a preview minted for
+    // work that is never placed is a URL nothing would revoke.
+    const placed = offered ? adoptRestoredUploadPreviews(offered) : null
     const mine =
-      offered ??
+      placed ??
       (restored && !composerDraftIsEmpty(restored) ? restored : null) ??
       (!composerDraftIsEmpty(live.current.draft) ? live.current.draft : null)
     if (mine) {
-      if (offered) {
+      if (placed) {
         draftOwner.current = {
           owner: ownerOf(live.current.receiver),
           threadId,
           session: currentComposerCustodySession(),
         }
-        live.current.applyDraft(offered)
+        live.current.applyDraft(placed)
       }
       hold(decision.handoff)
       setState({ kind: 'collision', handoff: decision.handoff, mine, fromOtherThread: offered !== null })

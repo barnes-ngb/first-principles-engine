@@ -202,6 +202,36 @@ export function normalizeInterruptedComposerDraft(draft: ComposerDraft): Compose
 }
 
 /**
+ * Give a restored raw-file selection previews THIS page owns.
+ *
+ * The slot carries `File`s, which survive anything, and the `blob:` strings the
+ * departed instance was showing them through — and those strings belong to that
+ * instance's lifetime, not to custody's. Its upload-failure cleanup revokes
+ * them, so the restored chooser can render a view of a file that no longer has
+ * one: cached it looks right, and the next explicit retry carries the dead URL
+ * into the attachment strip as a blank 40×40 (the eighth browser run's
+ * blocker).
+ *
+ * So the preserved files are the source of truth and fresh URLs are derived
+ * from them. The carried strings are dropped, never revoked: the operation that
+ * made them may still be running into the instance that owns it, and revoking
+ * another owner's view is the defect, not the fix. A preview with no file
+ * behind it cannot be re-derived, so it is dropped rather than shown dead.
+ *
+ * Call this where restored work is PLACED, exactly once per placement — not on
+ * a peek and not in a render — because every URL it mints is one the live
+ * composer's own lifecycle (Cancel, upload failure, attach, remove) is then
+ * responsible for revoking. A draft that is taken and then dropped unplaced
+ * must not pass through here at all.
+ */
+export function adoptRestoredUploadPreviews(draft: ComposerDraft): ComposerDraft {
+  if (draft.uploadFiles.length === 0) {
+    return draft.uploadPreviews.length === 0 ? draft : { ...draft, uploadPreviews: [] }
+  }
+  return { ...draft, uploadPreviews: draft.uploadFiles.map((file) => URL.createObjectURL(file)) }
+}
+
+/**
  * Hand unsent work to custody on the way out, labelled with the owner it was
  * made under.
  *

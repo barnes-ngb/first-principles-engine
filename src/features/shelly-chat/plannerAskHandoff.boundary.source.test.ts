@@ -122,6 +122,9 @@ describe('the hand-off path writes nothing and calls nothing', () => {
     // decision: a second caller would be a second answer to what an interrupted
     // request means, applied somewhere the request may still be running.
     expect(users('normalizeInterruptedComposerDraft')).toEqual([])
+    // Minting a preview is taking ownership of a resource somebody then has to
+    // free, so it belongs to the one module that PLACES restored work.
+    expect(users('adoptRestoredUploadPreviews')).toEqual([RECEIVER])
   })
 
   it('is read from exactly one place in the app', () => {
