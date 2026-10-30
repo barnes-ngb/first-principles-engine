@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import type { SetURLSearchParams } from 'react-router-dom'
 import {
   addDoc,
@@ -98,6 +98,20 @@ export interface ShellyChatFlowsDeps {
    * uncapped, which is the fail-open direction a courtesy cap wants.
    */
   artQuota?: { atLimit: boolean; recordGeneration: () => Promise<void> }
+  /**
+   * Hold back the two things this hook does on mount WITHOUT a tap — the legacy
+   * `chatContext` back-fill (`writeBatch`) and the pre-seeded-thread auto-send
+   * (a model call plus an assistant message) — for a visit that arrived from the
+   * planner's hand-off (UX-273), whose contract is zero writes until Send.
+   *
+   * Opt-in and `false` by default, so ordinary entry — including
+   * `openChatWithContext`'s deliberately pre-seeded thread — is unchanged. It is
+   * a value the caller reads during render, not a ref written in an effect, so
+   * the suppression is in force before either effect can start; and it is
+   * re-checked after the migration's `await`, because work already begun must
+   * not commit under a visit that no longer wants it.
+   */
+  suppressMountWrites?: boolean
 }
 
 /**
@@ -111,7 +125,12 @@ export interface ShellyChatFlowsDeps {
  * keeping its external prop/route contract identical.
  */
 export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlowsDeps) {
-  const { familyId, children, activeChildId, chat, generateImage, lastErrorRef, imageFailureRef, setSearchParams, stagePendingActions, dropPendingForContext, currentContextScope, isParent = false, artQuota } = deps
+  const { familyId, children, activeChildId, chat, generateImage, lastErrorRef, imageFailureRef, setSearchParams, stagePendingActions, dropPendingForContext, currentContextScope, isParent = false, artQuota, suppressMountWrites = false } = deps
+
+  // Readable synchronously from any async continuation, so a commit cannot land
+  // after the answer changed.
+  const suppressMountWritesRef = useRef(suppressMountWrites)
+  suppressMountWritesRef.current = suppressMountWrites
 
   const {
     chatContext, setChatContext,
@@ -201,11 +220,16 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
 
   // ── Migrate old threads without chatContext ────────────────────
   useEffect(() => {
+    // UX-273: a hand-off visit promises zero writes until Send, and this is a
+    // write nobody asked for. Deferred, not deleted — the next ordinary visit
+    // runs it. Checked here AND after the read, since the read is awaited.
+    if (suppressMountWrites) return
     const migrateOldThreads = async () => {
       try {
         const oldThreads = await getDocs(
           query(shellyChatThreadsCollection(familyId), where('archived', '==', false))
         )
+        if (suppressMountWritesRef.current) return
         const batch = writeBatch(db)
         let needsMigration = false
         for (const threadDoc of oldThreads.docs) {
@@ -215,6 +239,7 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
           }
         }
         if (needsMigration) {
+          if (suppressMountWritesRef.current) return
           await batch.commit()
           console.log('[shellyChat] Migrated old threads to general context')
         }
@@ -223,7 +248,7 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
       }
     }
     migrateOldThreads()
-  }, [familyId])
+  }, [familyId, suppressMountWrites])
 
   // ── Context change handler ────────────────────────────────────
   const handleContextChange = useCallback((_: unknown, val: ChatContext | null) => {
@@ -303,6 +328,11 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
 
   // ── Auto-send for pre-seeded threads ───────────────────────────
   useEffect(() => {
+    // UX-273: on a hand-off visit this effect would call the model and write an
+    // assistant turn into a saved conversation the parent only LOOKED at — the
+    // thread she was offered a choice about. `openChatWithContext`'s own
+    // pre-seeded entry is unaffected: it carries no hand-off state.
+    if (suppressMountWrites) return
     if (
       activeThreadId &&
       messages.length === 1 &&
@@ -314,7 +344,7 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
       sendToAI(messages)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages, activeThreadId])
+  }, [messages, activeThreadId, suppressMountWrites])
 
   // parseFollowUps now lives in ./parseFollowups (pure, unit-tested — TEST-01).
 

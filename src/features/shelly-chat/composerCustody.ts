@@ -1,47 +1,52 @@
-// ── The Ask AI composer's unsent draft, across one route unmount (UX-273) ───
+// The Ask AI composer's unsent work, across the one route unmount the planner's
+// refusal link causes (UX-273). Page-session memory: no URL, no storage, no
+// Firestore, no transcript — one slot, one owner, read once.
 //
-// WHY THIS EXISTS. The planner's refusal link is a route change, so `/chat`
-// unmounts and `useShellyChatState`'s `input` / `pendingAttachments` /
-// `pendingReferenceImage` are discarded with it. The independent browser run
-// found the consequence: a parent typing in Ask AI, going to the planner and
-// tapping its refusal came back to a composer the incoming question filled
-// silently — the collision choice this feature promises could never appear,
-// because by then there was nothing left to collide with.
-//
-// WHAT IT IS, AND THE FOUR LIMITS. One module-level slot, in page-session
-// memory, holding one composer's unsent contents plus the identity they were
-// typed under.
-//
-//  1. **Not persistence.** No URL, no `localStorage`/`sessionStorage`, no
-//     Firestore. A reload loses it, which is the honest promise: it survives a
-//     route unmount, not a visit.
-//  2. **Not a transcript store.** It holds a DRAFT — text and the attachments
-//     already staged beside it — never messages, never a thread's history, and
-//     never more than one of them.
-//  3. **Owner-keyed, and restored in place only.** `{family, profile, tab,
-//     tab's child}` must match exactly, or nothing is handed back. A draft typed
-//     inside a saved conversation is returned only on a visit to that same
-//     conversation; the cross-thread case is reported to the caller as such so
-//     it can be OFFERED rather than quietly placed somewhere it was not typed.
-//  4. **Read once, and never read by a stranger.** A take on a mismatched owner
-//     leaves the slot alone (clearing someone's draft to tidy up is the loss this
-//     module exists to prevent); a take on a match empties it.
-//
-// Attachments carry their uploaded Storage `url` (already durable) and a
-// page-session `previewUrl` blob. Nothing here revokes either, so a restored
-// strip shows the same thumbnails; a reload invalidates the blob, which is the
-// same visit boundary the slot itself has.
+// Three rules the second browser run proved are load-bearing:
+//  - a save NEVER clears another owner's entry (StrictMode's simulated unmount
+//    ran a save with an empty, not-yet-settled draft and wiped the real one);
+//  - a draft is labelled with the owner it was EDITED under, never the latest
+//    identity, so a scope change while mounted cannot re-label her work;
+//  - an entry that cannot be acted on is PEEKED, never consumed and dropped.
 
-import type { ChatAttachment } from './useShellyChatState'
+import type { ChatAttachment, ImageFlowStep, RefinementQuestion } from './useShellyChatState'
 
-/** Everything unsent that the composer holds. */
+/**
+ * Everything unsent the composer holds — all of it, not the three fields the
+ * first cut called "everything": the raw file chooser and its previews, the
+ * upload dialog, and the image-refinement form all survive the round trip too.
+ * `loadingQuestions` is deliberately absent: a request that is no longer in
+ * flight must not be restored as if it were.
+ */
 export interface ComposerDraft {
   text: string
   attachments: ChatAttachment[]
   referenceImage: ChatAttachment | null
+  uploadFiles: File[]
+  uploadPreviews: string[]
+  uploadDialogOpen: boolean
+  imageFlowOpen: boolean
+  imageFlowStep: ImageFlowStep
+  imageIdea: string
+  imageQuestions: RefinementQuestion[]
+  imageAnswers: Record<number, string>
 }
 
-/** Who the draft belongs to. Thread is tracked separately — see `takeComposerCustody`. */
+export const EMPTY_COMPOSER_DRAFT: ComposerDraft = {
+  text: '',
+  attachments: [],
+  referenceImage: null,
+  uploadFiles: [],
+  uploadPreviews: [],
+  uploadDialogOpen: false,
+  imageFlowOpen: false,
+  imageFlowStep: 'idea',
+  imageIdea: '',
+  imageQuestions: [],
+  imageAnswers: {},
+}
+
+/** Who the draft belongs to. The thread is tracked beside it, not inside it. */
 export interface ComposerCustodyOwner {
   familyId: string
   profile: string | null
@@ -50,19 +55,14 @@ export interface ComposerCustodyOwner {
   contextChildId: string
 }
 
-/**
- * How long a held draft stays takeable.
- *
- * A courtesy bound on a page-session slot, not a durability promise: the journey
- * it exists for is one navigation and back.
- */
+/** A courtesy bound on page-session memory, not a durability promise. */
 export const COMPOSER_CUSTODY_TTL_MS = 10 * 60_000
 
-export type ComposerCustodyTake =
+export type ComposerCustodyLook =
   | { kind: 'none' }
   /** Typed in this very place — hand it straight back. */
   | { kind: 'same-thread'; draft: ComposerDraft }
-  /** Typed in another conversation of the same tab — offer it, do not place it. */
+  /** Typed in another conversation of the same tab — offer it, never place it. */
   | { kind: 'other-thread'; draft: ComposerDraft }
 
 interface HeldCustody {
@@ -75,10 +75,21 @@ interface HeldCustody {
 let held: HeldCustody | null = null
 
 export function composerDraftIsEmpty(draft: ComposerDraft): boolean {
-  return draft.text.trim() === '' && draft.attachments.length === 0 && draft.referenceImage === null
+  return (
+    draft.text.trim() === '' &&
+    draft.attachments.length === 0 &&
+    draft.referenceImage === null &&
+    draft.uploadFiles.length === 0 &&
+    draft.uploadPreviews.length === 0 &&
+    !draft.uploadDialogOpen &&
+    !draft.imageFlowOpen &&
+    draft.imageIdea.trim() === '' &&
+    draft.imageQuestions.length === 0 &&
+    Object.keys(draft.imageAnswers).length === 0
+  )
 }
 
-function sameOwner(a: ComposerCustodyOwner, b: ComposerCustodyOwner): boolean {
+export function sameComposerOwner(a: ComposerCustodyOwner, b: ComposerCustodyOwner): boolean {
   return (
     a.familyId === b.familyId &&
     a.profile === b.profile &&
@@ -87,11 +98,23 @@ function sameOwner(a: ComposerCustodyOwner, b: ComposerCustodyOwner): boolean {
   )
 }
 
+function copy(draft: ComposerDraft): ComposerDraft {
+  return {
+    ...draft,
+    attachments: [...draft.attachments],
+    uploadFiles: [...draft.uploadFiles],
+    uploadPreviews: [...draft.uploadPreviews],
+    imageQuestions: [...draft.imageQuestions],
+    imageAnswers: { ...draft.imageAnswers },
+  }
+}
+
 /**
- * Hand the composer's unsent contents to custody on the way out.
+ * Hand unsent work to custody on the way out, labelled with the owner it was
+ * made under.
  *
- * An empty draft CLEARS the slot rather than storing nothing: leaving a stale
- * draft behind after she cleared the box is a reappearance she did not ask for.
+ * An empty draft clears ONLY this owner's own entry: a pass that runs before the
+ * tab has settled (or a StrictMode replay) must not wipe a draft it cannot see.
  */
 export function saveComposerCustody(
   owner: ComposerCustodyOwner,
@@ -100,39 +123,49 @@ export function saveComposerCustody(
   now: number = Date.now(),
 ): void {
   if (composerDraftIsEmpty(draft)) {
-    held = null
+    if (held && sameComposerOwner(held.owner, owner) && held.threadId === threadId) held = null
     return
   }
-  held = {
-    owner,
-    threadId,
-    draft: {
-      text: draft.text,
-      attachments: [...draft.attachments],
-      referenceImage: draft.referenceImage,
-    },
-    savedAt: now,
-  }
+  held = { owner, threadId, draft: copy(draft), savedAt: now }
 }
 
-/** Read and empty the slot, if and only if it belongs to this caller. */
-export function takeComposerCustody(
+/** What is waiting for this caller, without consuming it. */
+export function peekComposerCustody(
   owner: ComposerCustodyOwner,
   threadId: string | null,
   now: number = Date.now(),
-): ComposerCustodyTake {
+): ComposerCustodyLook {
   if (!held) return { kind: 'none' }
   if (now - held.savedAt > COMPOSER_CUSTODY_TTL_MS) {
     held = null
     return { kind: 'none' }
   }
-  if (!sameOwner(held.owner, owner)) return { kind: 'none' }
-  const { draft, threadId: from } = held
-  held = null
-  return from === threadId ? { kind: 'same-thread', draft } : { kind: 'other-thread', draft }
+  if (!sameComposerOwner(held.owner, owner)) return { kind: 'none' }
+  return held.threadId === threadId
+    ? { kind: 'same-thread', draft: copy(held.draft) }
+    : { kind: 'other-thread', draft: copy(held.draft) }
 }
 
-/** Drop whatever is held. For a scope change, and for test isolation. */
+/**
+ * Read and empty the slot, if and only if it belongs to this caller.
+ *
+ * `acceptOtherThread` is opt-in: a caller that cannot yet SHOW a cross-thread
+ * draft must leave it where it is rather than consuming and dropping it.
+ */
+export function takeComposerCustody(
+  owner: ComposerCustodyOwner,
+  threadId: string | null,
+  options: { acceptOtherThread?: boolean } = {},
+  now: number = Date.now(),
+): ComposerCustodyLook {
+  const look = peekComposerCustody(owner, threadId, now)
+  if (look.kind === 'none') return look
+  if (look.kind === 'other-thread' && !options.acceptOtherThread) return look
+  held = null
+  return look
+}
+
+/** Drop whatever is held. The scope observer and test isolation use this. */
 export function clearComposerCustody(): void {
   held = null
 }

@@ -12,10 +12,13 @@ import {
   type PlannerAskHandoff,
   type PlannerAskHandoffRequest,
 } from '../planner-chat/plannerAskHandoff'
-import { clearComposerCustody, type ComposerDraft } from './composerCustody'
-import PlannerAskHandoffNotice, {
-  PLANNER_ASK_HANDOFF_REFUSAL_LINES,
-} from './PlannerAskHandoffNotice'
+import {
+  clearComposerCustody,
+  EMPTY_COMPOSER_DRAFT,
+  type ComposerDraft,
+} from './composerCustody'
+import PlannerAskHandoffNotice from './PlannerAskHandoffNotice'
+import { PLANNER_ASK_HANDOFF_REFUSAL_LINES } from './plannerAskHandoffLines'
 import { usePlannerAskHandoff, type PlannerAskHandoffState } from './usePlannerAskHandoff'
 
 /**
@@ -61,11 +64,7 @@ function Harness({
   activeChildId = 'child-lincoln',
   chatContext = 'lincoln',
 }: HarnessProps) {
-  const [draft, setDraft] = useState<ComposerDraft>({
-    text: '',
-    attachments: [],
-    referenceImage: null,
-  })
+  const [draft, setDraft] = useState<ComposerDraft>(EMPTY_COMPOSER_DRAFT)
   const handoff = usePlannerAskHandoff({
     familyId: 'fam-1',
     profile,
@@ -176,7 +175,7 @@ describe('the notice, state by state', () => {
     generation: 1,
     stagedAt: 0,
   }
-  const mine = { text: 'mine', attachments: [], referenceImage: null }
+  const mine: ComposerDraft = { ...EMPTY_COMPOSER_DRAFT, text: 'mine' }
   const noop = () => {}
 
   const show = (state: PlannerAskHandoffState) =>

@@ -40,8 +40,10 @@ const RECEIVER = 'src/features/shelly-chat/usePlannerAskHandoff.ts'
 const NOTICE = 'src/features/shelly-chat/PlannerAskHandoffNotice.tsx'
 const LINK = 'src/features/planner-chat/PlannerBoundaryLink.tsx'
 const CUSTODY = 'src/features/shelly-chat/composerCustody.ts'
+const LINES = 'src/features/shelly-chat/plannerAskHandoffLines.ts'
+const SCOPE_WATCH = 'src/features/shelly-chat/useHandoffScopeWatch.ts'
 
-const PATH_MODULES = [TRANSFER, RECEIVER, NOTICE, LINK, CUSTODY]
+const PATH_MODULES = [TRANSFER, RECEIVER, NOTICE, LINK, CUSTODY, LINES, SCOPE_WATCH]
 
 /** Every way this repo spells a write, a send, or a paid call. */
 const FORBIDDEN = [
@@ -87,6 +89,19 @@ describe('the hand-off path writes nothing and calls nothing', () => {
       .filter((f) => stripComments(f.source).includes('stagePlannerAskHandoff('))
       .map((f) => f.path)
     expect(callers).toEqual([LINK])
+  })
+
+  it('clears its two slots from the receiver and the shell observer only', () => {
+    // The observer exists so a scope change is honoured while Ask AI is
+    // unmounted; a third caller would be a lifetime nobody can reason about.
+    const callers = (name: string) =>
+      loadSourceFiles()
+        .filter((f) => f.path !== TRANSFER && f.path !== CUSTODY)
+        .filter((f) => stripComments(f.source).includes(`${name}(`))
+        .map((f) => f.path)
+        .sort()
+    expect(callers('clearComposerCustody')).toEqual([SCOPE_WATCH])
+    expect(callers('clearPlannerAskHandoff')).toEqual([SCOPE_WATCH])
   })
 
   it('keeps the composer-custody slot to one writer and one reader', () => {

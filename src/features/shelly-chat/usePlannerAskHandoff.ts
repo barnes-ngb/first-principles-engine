@@ -1,26 +1,21 @@
-// ── Ask AI's end of the planner hand-off (UX-273) ───────────────────────────
+// Ask AI's end of the planner hand-off (UX-273).
 //
-// The planner stages one sentence and navigates here (`planner-chat/
-// plannerAskHandoff.ts` holds the shape and the reasons). This hook is the
-// receiving end. Four invariants, each one a finding the independent browser run
-// made rather than a precaution:
-//
-//  1. **Her draft survives the journey.** `/chat` unmounts on the way to the
-//     planner, so the composer is handed to `composerCustody` on unmount and
-//     taken back on arrival — BEFORE the collision decision, which is the only
-//     way that decision can see anything to collide with.
-//  2. **The incoming draft is owned for its whole unsent life** — through edits,
-//     through a dismissed notice, through a keep-my-draft detour. Ownership is
-//     the identity that decides what Send would DO: the chat tab and the child
-//     it maps to, the thread, the family, the profile. `handleSend` takes its
-//     `childId` from the TAB, so agreeing with the app header proved nothing.
-//  3. **Guards run at action time.** `guardSend` / `replaceWithQuestion` /
-//     `startFresh` re-evaluate from render-scope values on the click itself, so
-//     a Send racing the invalidation effect cannot slip through. A revoked
-//     authority is dropped, never recomputed, so A → B → A revives nothing.
-//  4. **Nothing here writes.** No thread, no message, no model call, no domain
-//     data — pinned on the source by `plannerAskHandoff.boundary.source.test.ts`.
-//     The chat's own Send and its confirm cards remain the only writers.
+// Contracts, each one a finding from an independent browser run:
+//  1. An accepted question is OWNED for its whole unsent life — through the
+//     arrival render, edits, a dismissed notice, a keep-my-draft detour. The
+//     owned text is tracked (`expectedText`/`observed`) so the PRE-FILL empty
+//     render is never mistaken for a clear or a send, which is what erased the
+//     authority in candidate 2.
+//  2. Ownership is re-evaluated in an effect AND synchronously inside
+//     `guardSend` / `replaceWithQuestion` / `startFresh`, from render-scope
+//     values, so a Send racing the effect cannot leave under another identity.
+//     A revocation drops the authority; A→B→A cannot revive it.
+//  3. Her own unsent work survives the route unmount through `composerCustody`,
+//     labelled with the owner it was EDITED under (never the latest identity),
+//     restored before any collision choice, and never consumed when it cannot
+//     be shown.
+//  4. Nothing here writes: no thread, no message, no model call, no domain data
+//     (pinned by `plannerAskHandoff.boundary.source.test.ts`).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
@@ -40,46 +35,36 @@ import {
 } from '../planner-chat/plannerAskHandoff'
 import {
   composerDraftIsEmpty,
+  EMPTY_COMPOSER_DRAFT,
   saveComposerCustody,
   takeComposerCustody,
+  type ComposerCustodyOwner,
   type ComposerDraft,
 } from './composerCustody'
 
 /** What the receiving view has to say, if anything. */
 export type PlannerAskHandoffState =
   | { kind: 'idle' }
-  /** The question is in the composer, unsent. `setAside` is her displaced draft. */
   | { kind: 'filled'; handoff: PlannerAskHandoff; setAside: ComposerDraft | null }
-  /** She was already typing — her draft is in the box and she chooses. */
   | { kind: 'collision'; handoff: PlannerAskHandoff; mine: ComposerDraft; fromOtherThread: boolean }
-  /** She kept her own draft; the question is still offered. */
   | { kind: 'kept'; handoff: PlannerAskHandoff }
-  /** A saved conversation is open — a fresh one, or not now. */
   | { kind: 'thread-choice'; handoff: PlannerAskHandoff }
-  /** She chose to stay in the saved conversation. */
   | { kind: 'declined'; handoff: PlannerAskHandoff }
-  /** It was accepted and has been taken back out of her hands. */
   | { kind: 'withdrawn'; handoff: PlannerAskHandoff; reason: PlannerAskHandoffRefusal }
-  /** It never landed. */
   | { kind: 'refused'; reason: PlannerAskHandoffRefusal }
 
 export interface PlannerAskHandoffDeps {
   familyId: string
-  /** The signed-in profile; `null` until one is chosen. */
   profile: string | null
   isParent: boolean
-  /** The shell's active child — `''` until the read settles. */
   activeChildId: string
-  /** True while the family's children are loading. Nothing is taken until false. */
   childrenLoading: boolean
   children: readonly { id: string; name: string }[]
-  /** The chat tab. What Send derives its child from. */
+  /** The chat tab. What `handleSend` derives its child from. */
   chatContext: string
-  /** The saved conversation the composer would send into, or `null`. */
   threadId: string | null
-  /** The composer's live unsent contents. */
+  /** Everything unsent in the composer. */
   draft: ComposerDraft
-  /** Put contents into the composer. The hook's only effect on the page. */
   applyDraft: (draft: ComposerDraft) => void
   /** Leave the saved conversation for a fresh, unwritten one. */
   startFreshThread: () => void
@@ -92,13 +77,43 @@ export interface PlannerAskHandoffResult {
   restoreSetAside: () => void
   startFresh: () => void
   keepConversation: () => void
-  /** Hides the notice. Deliberately does NOT drop ownership. */
+  /** Hides the notice; deliberately does NOT drop ownership. */
   dismiss: () => void
-  /**
-   * Run a send — or refuse it, synchronously, when the box holds an incoming
-   * question that may no longer be sent from here.
-   */
   guardSend: (send: () => void) => void
+}
+
+/** The authority plus what the composer is expected to be holding for it. */
+interface HeldAsk extends PlannerAskAuthority {
+  /** The owned text as last placed or last adopted from an edit. */
+  expectedText: string
+  /** Has the owned text actually been seen in the composer yet? */
+  observed: boolean
+}
+
+function ownerOf(receiver: PlannerAskReceiver): ComposerCustodyOwner {
+  return {
+    familyId: receiver.familyId,
+    profile: receiver.profile,
+    chatContext: receiver.chatContext,
+    contextChildId: receiver.contextChildId,
+  }
+}
+
+/** Cheap content signature — changes exactly when unsent work changes. */
+function draftSignature(draft: ComposerDraft): string {
+  return [
+    draft.text,
+    draft.attachments.map((a) => a.url).join(','),
+    draft.referenceImage?.url ?? '',
+    draft.uploadFiles.map((f) => `${f.name}:${f.size}`).join(','),
+    draft.uploadPreviews.join(','),
+    String(draft.uploadDialogOpen),
+    String(draft.imageFlowOpen),
+    draft.imageFlowStep,
+    draft.imageIdea,
+    String(draft.imageQuestions.length),
+    Object.entries(draft.imageAnswers).map(([k, v]) => `${k}=${v}`).join(','),
+  ].join('\u0001')
 }
 
 export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHandoffResult {
@@ -119,40 +134,32 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
     startFreshThread,
   } = deps
 
-  // What Send would do, recomputed every render and read by the guards through
-  // a ref, so a click evaluates the identity of the render it happened in.
+  // What Send would do, this render.
   const contextChild = resolveChatContextChild(children, chatContext)
   const contextChildId = contextChild.ok ? contextChild.childId : ''
   const receiver = useMemo<PlannerAskReceiver>(
     () => ({ familyId, profile, chatContext, contextChildId, threadId }),
     [familyId, profile, chatContext, contextChildId, threadId],
   )
-  /** One string for effect dependencies — object identity would re-run them blindly. */
   const receiverKey = `${familyId}|${profile ?? ''}|${chatContext}|${contextChildId}|${threadId ?? ''}`
-
   const childIds = useMemo(() => children.map((c) => c.id), [children])
   const draftText = draft.text
+  const signature = draftSignature(draft)
 
   const live = useRef({ receiver, activeChildId, isParent, draft, applyDraft, startFreshThread, childIds })
   live.current = { receiver, activeChildId, isParent, draft, applyDraft, startFreshThread, childIds }
 
   /** The held question. A ref, so an action reads it with no render in between. */
-  const authority = useRef<PlannerAskAuthority | null>(null)
+  const authority = useRef<HeldAsk | null>(null)
+  /** Where her own unsent work belongs — stamped once, never re-stamped. */
+  const draftOwner = useRef<{ owner: ComposerCustodyOwner; threadId: string | null } | null>(null)
   const restoreAttempted = useRef(false)
   const decidedGeneration = useRef<number | null>(null)
 
   const generation = plannerAskHandoffGenerationFromState(location.state)
   const settled = profile !== null && Boolean(familyId) && !childrenLoading
-  /**
-   * One extra pass before believing "this tab maps to no child".
-   *
-   * `useShellyChatFlows` initialises the tab in its OWN mount effect, which runs
-   * in the same flush as the arrival below — so the first pass can see `general`
-   * purely because that effect has not been applied yet, and both the custody
-   * owner and the Send-target check key on the tab's child. One bounded extra
-   * pass is enough (the two setStates batch into a single re-render) and keeps a
-   * child the tabs genuinely do not cover failing closed rather than hanging.
-   */
+  // One extra pass before believing "this tab maps to no child": the chat
+  // initialises its tab in its own mount effect, which runs in this same flush.
   const [contextSettlePass, setContextSettlePass] = useState(0)
 
   const authorityNow = useCallback(
@@ -165,61 +172,66 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
     [],
   )
 
-  /**
-   * Take the question back out of her hands.
-   *
-   * Only the question's own text goes — attachments she staged are hers and stay
-   * — and the notice says where the question still is. Dropping the authority
-   * rather than recomputing it is what makes a revocation final.
-   */
-  const revoke = useCallback((held: PlannerAskAuthority, reason: PlannerAskHandoffRefusal) => {
+  /** Take the question back; her other unsent work stays untouched. */
+  const revoke = useCallback((held: HeldAsk, reason: PlannerAskHandoffRefusal) => {
     authority.current = null
-    if (held.inComposer) {
-      const current = live.current.draft
-      live.current.applyDraft({
-        text: '',
-        attachments: current.attachments,
-        referenceImage: current.referenceImage,
-      })
-    }
+    if (held.inComposer) live.current.applyDraft({ ...live.current.draft, text: '' })
     setState({ kind: 'withdrawn', handoff: held.handoff, reason })
   }, [])
 
-  /** Put the question in the box and stamp what it may be sent under. */
   const fill = useCallback(
     (
       handoff: PlannerAskHandoff,
       setAside: ComposerDraft | null,
       receiverOverride?: PlannerAskReceiver,
     ) => {
-      const current = live.current.draft
-      live.current.applyDraft({
-        text: buildPlannerAskDraft(handoff),
-        attachments: setAside ? [] : current.attachments,
-        referenceImage: setAside ? null : current.referenceImage,
-      })
+      const text = buildPlannerAskDraft(handoff)
+      // A set-aside draft takes its media with it; otherwise hers stays put.
+      const base = setAside ? EMPTY_COMPOSER_DRAFT : live.current.draft
+      live.current.applyDraft({ ...base, text })
       authority.current = {
         handoff,
         receiver: receiverOverride ?? live.current.receiver,
         activeChildId: live.current.activeChildId,
         inComposer: true,
+        expectedText: text,
+        observed: false,
       }
       setState({ kind: 'filled', handoff, setAside })
     },
     [],
   )
 
-  const hold = useCallback(
-    (handoff: PlannerAskHandoff, receiverOverride?: PlannerAskReceiver) => {
-      authority.current = {
-        handoff,
-        receiver: receiverOverride ?? live.current.receiver,
-        activeChildId: live.current.activeChildId,
-        inComposer: false,
+  const hold = useCallback((handoff: PlannerAskHandoff, receiverOverride?: PlannerAskReceiver) => {
+    authority.current = {
+      handoff,
+      receiver: receiverOverride ?? live.current.receiver,
+      activeChildId: live.current.activeChildId,
+      inComposer: false,
+      expectedText: '',
+      observed: false,
+    }
+  }, [])
+
+  // ── Her own work: stamp its owner once, and release the slot when emptied ──
+  useEffect(() => {
+    const current = live.current.draft
+    const held = authority.current
+    if (composerDraftIsEmpty(current)) {
+      if (draftOwner.current) {
+        saveComposerCustody(draftOwner.current.owner, draftOwner.current.threadId, EMPTY_COMPOSER_DRAFT)
+        draftOwner.current = null
       }
-    },
-    [],
-  )
+      return
+    }
+    // The incoming question is not hers; it never takes ownership of the slot.
+    if (held?.inComposer && current.text === held.expectedText && composerDraftIsEmpty({ ...current, text: '' })) {
+      return
+    }
+    if (!draftOwner.current) {
+      draftOwner.current = { owner: ownerOf(live.current.receiver), threadId: live.current.receiver.threadId }
+    }
+  }, [signature])
 
   // ── Arrival: custody first, then the question ───────────────────────────
   useEffect(() => {
@@ -233,21 +245,19 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
     let offered: ComposerDraft | null = null
     if (!restoreAttempted.current) {
       restoreAttempted.current = true
-      const { receiver: here } = live.current
-      const taken = takeComposerCustody(
-        {
-          familyId: here.familyId,
-          profile: here.profile,
-          chatContext: here.chatContext,
-          contextChildId: here.contextChildId,
-        },
+      const look = takeComposerCustody(
+        ownerOf(live.current.receiver),
         threadId,
+        // A cross-thread draft is only consumed when there is a choice to show
+        // it in; otherwise it is left where it is.
+        { acceptOtherThread: generation !== null },
       )
-      if (taken.kind === 'same-thread') {
-        restored = taken.draft
-        live.current.applyDraft(taken.draft)
-      } else if (taken.kind === 'other-thread') {
-        offered = taken.draft
+      if (look.kind === 'same-thread') {
+        restored = look.draft
+        draftOwner.current = { owner: ownerOf(live.current.receiver), threadId }
+        live.current.applyDraft(look.draft)
+      } else if (look.kind === 'other-thread' && generation !== null) {
+        offered = look.draft
       }
     }
 
@@ -269,9 +279,8 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
       return
     }
 
-    // A saved conversation is open. Filling its composer would send this
-    // question with that transcript's history attached, which is the merge the
-    // contract forbids — so she decides, and nothing is written either way.
+    // A saved conversation is open: filling it would send this question with
+    // that transcript's history. She decides; nothing is written either way.
     if (threadId !== null) {
       hold(decision.handoff)
       setState({ kind: 'thread-choice', handoff: decision.handoff })
@@ -283,20 +292,19 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
       (restored && !composerDraftIsEmpty(restored) ? restored : null) ??
       (!composerDraftIsEmpty(live.current.draft) ? live.current.draft : null)
     if (mine) {
-      // A draft from another conversation is placed here — in a FRESH one, so no
-      // history comes with it — and the card says where it came from rather than
-      // letting it appear as if she had typed it here.
-      if (offered) live.current.applyDraft(offered)
+      if (offered) {
+        draftOwner.current = { owner: ownerOf(live.current.receiver), threadId }
+        live.current.applyDraft(offered)
+      }
       hold(decision.handoff)
       setState({ kind: 'collision', handoff: decision.handoff, mine, fromOtherThread: offered !== null })
       return
     }
 
     fill(decision.handoff, null)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settled, contextSettlePass, generation, threadId, receiverKey, activeChildId, isParent, fill, hold])
 
-  // ── Invalidation, and the end of a draft's life ─────────────────────────
+  // ── Invalidation, and the end of an owned draft's life ──────────────────
   useEffect(() => {
     const held = authority.current
     if (!held) return
@@ -306,48 +314,43 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
       return
     }
     if (!held.inComposer) return
+    if (!held.observed) {
+      // The fill is scheduled but has not rendered: an empty box here is the
+      // PRE-FILL value, never a clear and never a send (candidate 2's P1).
+      if (draftText === held.expectedText) authority.current = { ...held, observed: true }
+      return
+    }
     if (draftText === '') {
-      // Sent, or cleared by hand. Nothing is held any more, and the note stops
-      // describing a box it no longer describes.
       authority.current = null
       setState((prev) => (prev.kind === 'filled' ? { kind: 'idle' } : prev))
+      return
     }
     // An edit is adopted, not disowned: edited incoming text keeps its guard.
+    if (draftText !== held.expectedText) authority.current = { ...held, expectedText: draftText }
   }, [draftText, receiverKey, activeChildId, isParent, authorityNow, revoke])
 
-  // ── On the way out: hand her draft to page-session custody ──────────────
+  // ── On the way out: hand HER work to custody, under its own owner ───────
   useEffect(
     () => () => {
+      const stamp = draftOwner.current
+      // Nothing of hers to keep: touch the slot at all and a StrictMode replay
+      // (or a pre-settle pass) would wipe a draft it cannot see.
+      if (!stamp) return
       const held = authority.current
-      const { receiver: here, draft: outgoing } = live.current
-      // An incoming question is NOT hers to hold across a visit: it is
-      // recoverable from the planner, and keeping it would revive a transfer
-      // that no longer has authority. Her attachments still travel.
-      const kept: ComposerDraft = held?.inComposer
-        ? { text: '', attachments: outgoing.attachments, referenceImage: outgoing.referenceImage }
-        : outgoing
-      saveComposerCustody(
-        {
-          familyId: here.familyId,
-          profile: here.profile,
-          chatContext: here.chatContext,
-          contextChildId: here.contextChildId,
-        },
-        here.threadId,
-        kept,
-      )
+      const outgoing = live.current.draft
+      saveComposerCustody(stamp.owner, stamp.threadId, {
+        ...outgoing,
+        // The incoming question is recoverable from the planner and must not
+        // come back without authority.
+        text: held?.inComposer ? '' : outgoing.text,
+      })
     },
     [],
   )
 
-  /**
-   * The one place an action asks "may this still be used?".
-   *
-   * Returns `'blocked'` after revoking, so every caller fails closed by doing
-   * nothing more. `null` means there is nothing held and the action is ordinary.
-   */
+  /** The one place an action asks "may this still be used?". */
   const guardHeld = useCallback(
-    (requireInComposer: boolean): PlannerAskAuthority | 'blocked' | null => {
+    (requireInComposer: boolean): HeldAsk | 'blocked' | null => {
       const held = authority.current
       if (!held) return null
       if (requireInComposer && !held.inComposer) return null
@@ -376,6 +379,7 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
   const replaceWithQuestion = useCallback(() => {
     if (state.kind !== 'collision' && state.kind !== 'kept') return
     if (guardHeld(false) === 'blocked') return
+    // Her draft is preserved BEFORE the replacement, not after.
     const mine = state.kind === 'collision' ? state.mine : live.current.draft
     fill(state.handoff, composerDraftIsEmpty(mine) ? null : mine)
   }, [state, guardHeld, fill])
@@ -383,7 +387,11 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
   const restoreSetAside = useCallback(() => {
     if (state.kind !== 'filled' || !state.setAside) return
     const held = authority.current
-    if (held) authority.current = { ...held, inComposer: false }
+    if (held) authority.current = { ...held, inComposer: false, expectedText: '', observed: false }
+    draftOwner.current = {
+      owner: ownerOf(live.current.receiver),
+      threadId: live.current.receiver.threadId,
+    }
     live.current.applyDraft(state.setAside)
     setState(held ? { kind: 'kept', handoff: state.handoff } : { kind: 'idle' })
   }, [state])
@@ -393,12 +401,10 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
     if (guardHeld(false) === 'blocked') return
     const { handoff } = state
     const mine = live.current.draft
-    // Leaves the saved conversation without writing anything — local state and
-    // the `?thread` param only. The next Send mints the new thread.
+    // Local state and the `?thread` param only — no write. Send mints the thread.
     live.current.startFreshThread()
     // Stamped with the thread this draft is now in (`null`), not the one the ref
-    // still shows: no render has happened yet, and a stale stamp would revoke
-    // the question the moment the next effect ran.
+    // still shows: no render has happened yet.
     const fresh: PlannerAskReceiver = { ...live.current.receiver, threadId: null }
     if (composerDraftIsEmpty(mine)) {
       fill(handoff, null, fresh)
@@ -414,8 +420,6 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
     setState(held ? { kind: 'declined', handoff: held.handoff } : { kind: 'idle' })
   }, [])
 
-  // Hides the note. Ownership is untouched on purpose: a dismissed notice must
-  // not become a way to send a question from somewhere it may not be sent.
   const dismiss = useCallback(() => setState({ kind: 'idle' }), [])
 
   return {

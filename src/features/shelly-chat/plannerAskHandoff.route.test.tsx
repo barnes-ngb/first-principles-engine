@@ -6,66 +6,70 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 /**
  * UX-273 across the REAL route journey.
  *
- * The first candidate passed its unit tests and failed in a browser, for one
- * reason: every receiver test had the page already mounted, and the actual
- * journey unmounts it. So this suite drives the real `PlannerChatMessages` →
- * `PlannerBoundaryLink` → router → `ShellyChatPage` → `useShellyChatFlows`
- * composition, with only the service boundaries stubbed (Firebase, auth,
- * profile, identity, the AI hook). Nothing here imports a helper to assert what
- * the helper already says: the assertions are the composer's value, the
- * rendered notice, the Firestore mocks, and the arguments the AI service
- * received.
+ * Real `PlannerChatMessages` → `PlannerBoundaryLink` → router →
+ * `ShellyChatPage` → `useShellyChatFlows` → `usePlannerAskHandoff`. Only the
+ * service boundaries are stubbed (Firebase SDK + the app's collection helpers,
+ * auth, profile, identity, the AI hook) — every feature effect, including the
+ * legacy migration and the pre-seeded auto-send, runs for real. Assertions are
+ * the composer's value, the rendered notice, the Firestore mocks and the
+ * arguments the AI service received.
  */
 
-// ── Service boundaries only ─────────────────────────────────────
+// ── Mutable fixture state (read by the mock factories at import time) ───────
+const batchSpy = { update: vi.fn(), commit: vi.fn(async () => {}) }
+
+interface DocLike {
+  id: string
+  data: () => Record<string, unknown>
+  ref?: unknown
+}
+const fixture: { listenerDocs: DocLike[]; legacyThreads: DocLike[] } = {
+  listenerDocs: [],
+  legacyThreads: [],
+}
+
+const savedThread = (over: Record<string, unknown> = {}): DocLike => ({
+  id: 't1',
+  ref: { id: 't1' },
+  data: () => ({
+    role: 'user',
+    content: 'older thread talk',
+    timestamp: '2026-10-01T00:00:00.000Z',
+    title: 'Saved chat one',
+    lastMessagePreview: 'older thread talk',
+    updatedAt: '2026-10-01T00:00:00.000Z',
+    chatContext: 'lincoln',
+    archived: false,
+    ...over,
+  }),
+})
+
 vi.mock('firebase/firestore', () => ({
   addDoc: vi.fn(async () => ({ id: 'new-thread' })),
+  arrayRemove: vi.fn(() => ({})),
+  arrayUnion: vi.fn(() => ({})),
+  collection: vi.fn(() => ({})),
+  deleteDoc: vi.fn(async () => {}),
   doc: vi.fn(() => ({})),
-  getDocs: vi.fn(async () => ({ docs: [] })),
+  documentId: vi.fn(() => 'id'),
+  getDoc: vi.fn(async () => ({ exists: () => false, data: () => undefined })),
+  getDocs: vi.fn(async () => ({ docs: fixture.legacyThreads })),
   increment: vi.fn(() => 1),
   limit: vi.fn(() => ({})),
-  onSnapshot: (_q: unknown, onNext: (snap: { docs: unknown[] }) => void) => {
-    // Two docs: enough that the pre-seeded-thread auto-send (length === 1)
-    // cannot fire, so "no model call on arrival" is a real assertion.
-    // The same docs serve the thread-list and message listeners, so they carry
-    // both shapes: a title for the list, a role/content for the transcript.
-    onNext({
-      docs: [
-        {
-          id: 't1',
-          data: () => ({
-            role: 'user',
-            content: 'older thread talk',
-            timestamp: '2026-10-01T00:00:00.000Z',
-            title: 'Saved chat one',
-            lastMessagePreview: 'older thread talk',
-            updatedAt: '2026-10-01T00:00:00.000Z',
-            chatContext: 'lincoln',
-            archived: false,
-          }),
-        },
-        {
-          id: 't2',
-          data: () => ({
-            role: 'assistant',
-            content: 'older answer',
-            timestamp: '2026-10-01T00:01:00.000Z',
-            title: 'Saved chat two',
-            lastMessagePreview: 'older answer',
-            updatedAt: '2026-10-01T00:01:00.000Z',
-            chatContext: 'lincoln',
-            archived: false,
-          }),
-        },
-      ],
-    })
+  onSnapshot: (_ref: unknown, onNext: (snap: unknown) => void) => {
+    // Serves both query and document listeners.
+    onNext({ docs: fixture.listenerDocs, exists: () => false, data: () => undefined, id: 'synthetic' })
     return () => {}
   },
   orderBy: vi.fn(() => ({})),
   query: vi.fn(() => ({})),
+  runTransaction: vi.fn(async () => undefined),
+  serverTimestamp: vi.fn(() => 'now'),
+  setDoc: vi.fn(async () => {}),
+  startAfter: vi.fn(() => ({})),
   updateDoc: vi.fn(async () => {}),
   where: vi.fn(() => ({})),
-  writeBatch: vi.fn(() => ({ update: vi.fn(), commit: vi.fn(async () => {}) })),
+  writeBatch: vi.fn(() => batchSpy),
 }))
 
 vi.mock('firebase/storage', () => ({
@@ -74,24 +78,61 @@ vi.mock('firebase/storage', () => ({
   uploadBytes: vi.fn(async () => {}),
 }))
 
-vi.mock('../../core/firebase/firestore', () => ({
-  daysCollection: vi.fn(() => ({})),
-  db: {},
-  shellyChatMessagesCollection: vi.fn(() => ({})),
-  shellyChatThreadsCollection: vi.fn(() => ({})),
-}))
+// Every collection helper the chat's hook tree reaches, stubbed by NAME — the
+// previous fixture omitted `activityConfigsCollection` and the suite failed for
+// a reason that had nothing to do with the feature.
+vi.mock('../../core/firebase/firestore', () => {
+  const mod: Record<string, unknown> = { db: {}, stripUndefined: (v: unknown) => v }
+  const collections = [
+    'childrenCollection', 'weeksCollection', 'daysCollection', 'artifactsCollection',
+    'hoursCollection', 'evaluationsCollection', 'hoursAdjustmentsCollection',
+    'dailyPlansCollection', 'dadLabReportsCollection', 'conceptArcsCollection',
+    'ladderProgressCollection', 'skillSnapshotsCollection', 'lessonCardsCollection',
+    'helpCardsCollection', 'plannerConversationsCollection', 'workbookConfigsCollection',
+    'activityConfigsCollection', 'weeklyReviewsCollection', 'monthlyReviewsCollection',
+    'xpLedgerCollection', 'featureRequestsCollection', 'booksCollection',
+    'stickerLibraryCollection', 'sightWordProgressCollection', 'aiUsageCollection',
+    'avatarProfilesCollection', 'dailyArmorSessionsCollection', 'stonebridgeProgressCollection',
+    'evaluationSessionsCollection', 'scansCollection', 'storyGamesCollection',
+    'shellyChatThreadsCollection', 'shellyChatMessagesCollection', 'childSkillMapsCollection',
+    'learnerModelsCollection', 'learnerReviewSessionsCollection', 'chapterResponsesCollection',
+    'chapterBooksCollection', 'bookProgressCollection', 'businessLogCollection',
+    'businessGoalsCollection', 'kitRostersCollection', 'catalogProductsCollection',
+    'catalogOrdersCollection', 'artQuotaCollection', 'watchLibraryCollection',
+    'nativeProgressObservationsCollection', 'programCompletionEventsCollection',
+    'programCompletionStateCollection', 'nativeProgressCorrectionMarkersCollection',
+    'errorLogsCollection',
+  ]
+  for (const name of collections) mod[name] = () => ({})
+  const ids = [
+    'dailyPlanDocId', 'ladderProgressDocId', 'plannerConversationDocId', 'workbookConfigDocId',
+    'weeklyReviewDocId', 'monthlyReviewDocId', 'xpLedgerDocId', 'dailyArmorSessionDocId',
+    'sightWordProgressDocId', 'bookProgressDocId', 'nativeProgressObservationDocId',
+  ]
+  for (const name of ids) mod[name] = () => 'synthetic-id'
+  for (const name of ['conceptArcConverter', 'kitRosterConverter', 'catalogProductConverter', 'catalogOrderConverter']) {
+    mod[name] = {}
+  }
+  mod.normalizePlanType = (v: unknown) => v
+  mod.normalizeCurriculumKey = (v: unknown) => v
+  mod.monthlyReviewDoc = () => ({})
+  return mod
+})
 
 vi.mock('../../core/firebase/storage', () => ({ storage: {} }))
 vi.mock('../../core/utils/compressImage', () => ({
   compressIfNeeded: vi.fn(async (f: unknown) => f),
 }))
-vi.mock('../../core/auth/useAuth', () => ({ useFamilyId: () => identity.familyId }))
+vi.mock('../../core/auth/useAuth', () => ({
+  useFamilyId: () => identity.familyId,
+  useAuth: () => ({ familyId: identity.familyId }),
+}))
 
 const LINCOLN = { id: 'synthetic-a', name: 'Lincoln' }
 const LONDON = { id: 'synthetic-b', name: 'London' }
 const CHILDREN = [LINCOLN, LONDON]
 
-/** Mutable synthetic identity — the shell's answers, changed between acts. */
+/** The shell's answers, changed between acts. */
 const identity = {
   familyId: 'fam-1',
   profile: 'parents' as string | null,
@@ -102,6 +143,7 @@ const identity = {
 vi.mock('../../core/hooks/useActiveChild', () => ({
   useActiveChild: () => ({
     activeChildId: identity.activeChildId,
+    activeChild: CHILDREN.find((c) => c.id === identity.activeChildId),
     children: CHILDREN,
     isLoading: identity.isLoading,
   }),
@@ -130,8 +172,7 @@ vi.mock('../../core/ai/useAI', () => ({
   }),
 }))
 
-// Imported after the mocks and the consts they close over, matching
-// ShellyChatPage.test.tsx — the module graph is evaluated in source order.
+// Imported after the mocks and the consts their factories close over.
 import { addDoc, updateDoc } from 'firebase/firestore'
 
 import type { ChatMessage } from '../../core/types'
@@ -175,7 +216,6 @@ function declinedTranscript(ask = ASK): ChatMessage[] {
   ]
 }
 
-/** The real source component, on its own route. */
 function PlannerRoute({ ask }: { ask?: string }) {
   return (
     <PlannerChatMessages
@@ -198,16 +238,39 @@ function renderApp(entry = '/chat', ask?: string) {
   )
 }
 
+/** A direct arrival, for the cases no link composes today. */
+function renderArrival(search = '') {
+  const payload = stagePlannerAskHandoff({ ...SOURCE, question: ASK, jobId: 'curriculum' })
+  return render(
+    <MemoryRouter
+      initialEntries={[
+        {
+          pathname: '/chat',
+          search,
+          state: { [PLANNER_ASK_HANDOFF_STATE_KEY]: payload?.generation },
+        },
+      ]}
+    >
+      <Routes>
+        <Route path="/chat" element={<ShellyChatPage />} />
+      </Routes>
+    </MemoryRouter>,
+  )
+}
+
 const composer = () => screen.getByPlaceholderText('Ask AI…') as HTMLTextAreaElement
 const goToPlanner = () => fireEvent.click(screen.getByText('to-planner'))
 const tapRefusal = () => fireEvent.click(screen.getByRole('button', { name: /Open Ask AI/ }))
 const sendButton = () => screen.getByRole('button', { name: 'Send message' })
 
 beforeAll(() => {
-  // jsdom has no object URLs; the upload path needs one for its preview strip.
   if (!URL.createObjectURL) {
     Object.defineProperty(URL, 'createObjectURL', { value: () => 'blob:preview', writable: true })
     Object.defineProperty(URL, 'revokeObjectURL', { value: () => {}, writable: true })
+  }
+  // jsdom has no layout; the transcript's auto-scroll calls it.
+  if (!Element.prototype.scrollIntoView) {
+    Object.defineProperty(Element.prototype, 'scrollIntoView', { value: () => {}, writable: true })
   }
 })
 
@@ -216,11 +279,15 @@ beforeEach(() => {
   identity.profile = 'parents'
   identity.activeChildId = LINCOLN.id
   identity.isLoading = false
+  fixture.listenerDocs = []
+  fixture.legacyThreads = []
   chatCalls.length = 0
   clearPlannerAskHandoff()
   clearComposerCustody()
   vi.mocked(addDoc).mockClear()
   vi.mocked(updateDoc).mockClear()
+  batchSpy.update.mockClear()
+  batchSpy.commit.mockClear()
 })
 
 afterEach(() => {
@@ -228,15 +295,125 @@ afterEach(() => {
   clearComposerCustody()
 })
 
-describe('the journey the browser run failed on', () => {
-  it("preserves the destination's unsent draft across the route unmount", async () => {
+describe('the arrival keeps its notice and its ownership', () => {
+  it('fills, says where it came from, and still says so after the flush', async () => {
+    renderApp()
+    goToPlanner()
+    tapRefusal()
+
+    const notice = await screen.findByText(/From Plan My Week/)
+    expect(notice).toBeInTheDocument()
+    const draft = composer().value
+    expect(draft).toContain(ASK)
+    expect(draft).toContain('Lincoln')
+    // The defect: the notice vanished on the very next flush.
+    await waitFor(() => expect(composer().value).toContain(ASK))
+    expect(screen.getByText(/From Plan My Week/)).toBeInTheDocument()
+    expect(screen.getByText(/unsent/i)).toBeInTheDocument()
+    expect(sendButton()).not.toBeDisabled()
+    expect(vi.mocked(addDoc)).not.toHaveBeenCalled()
+    expect(vi.mocked(updateDoc)).not.toHaveBeenCalled()
+    expect(chatCalls).toHaveLength(0)
+  })
+
+  it('targets exactly the reviewed child on Send, with the disclosed context', async () => {
+    renderApp()
+    goToPlanner()
+    tapRefusal()
+    await screen.findByText(/From Plan My Week/)
+
+    fireEvent.click(sendButton())
+
+    await waitFor(() => expect(chatCalls).toHaveLength(1))
+    expect(chatCalls[0].childId).toBe(LINCOLN.id)
+    expect(chatCalls[0].messages).toHaveLength(1)
+    expect(chatCalls[0].messages[0].content).toContain(ASK)
+    expect(chatCalls[0].messages[0].content).toContain('Lincoln')
+  })
+})
+
+describe('the question cannot be sent under another identity', () => {
+  async function arrive() {
+    renderApp()
+    goToPlanner()
+    tapRefusal()
+    await screen.findByText(/From Plan My Week/)
+  }
+
+  it('is withdrawn when the chat tab moves, and Send does nothing stale', async () => {
+    await arrive()
+    fireEvent.click(screen.getByRole('tab', { name: 'London' }))
+
+    expect(await screen.findByText(/another child's conversation/)).toBeInTheDocument()
+    expect(composer().value).toBe('')
+    expect(sendButton()).toBeDisabled()
+    expect(chatCalls).toHaveLength(0)
+    expect(vi.mocked(addDoc)).not.toHaveBeenCalled()
+  })
+
+  it('keeps the guard over EDITED text and a dismissed notice', async () => {
+    await arrive()
+    fireEvent.change(composer(), { target: { value: `${composer().value} and more phonics` } })
+    fireEvent.click(screen.getByRole('button', { name: /close/i }))
+    expect(screen.queryByText(/From Plan My Week/)).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('tab', { name: 'London' }))
+    expect(await screen.findByText(/another child's conversation/)).toBeInTheDocument()
+    expect(composer().value).toBe('')
+    expect(chatCalls).toHaveLength(0)
+  })
+
+  it('cannot be revived by returning to the tab it came from', async () => {
+    await arrive()
+    fireEvent.click(screen.getByRole('tab', { name: 'London' }))
+    await screen.findByText(/another child's conversation/)
+    fireEvent.click(screen.getByRole('tab', { name: 'Lincoln' }))
+
+    expect(composer().value).toBe('')
+    expect(screen.queryByText(/is in the box below/)).not.toBeInTheDocument()
+    expect(chatCalls).toHaveLength(0)
+  })
+
+  it('is withdrawn when the shell changes child under it', async () => {
+    await arrive()
+    identity.activeChildId = LONDON.id
+    fireEvent.change(composer(), { target: { value: `${composer().value} ` } })
+
+    expect(await screen.findByText(/active child changed/)).toBeInTheDocument()
+    expect(composer().value).toBe('')
+    expect(chatCalls).toHaveLength(0)
+  })
+
+  it('is withdrawn when the profile stops being a parent', async () => {
+    await arrive()
+    identity.profile = 'lincoln'
+    fireEvent.change(composer(), { target: { value: `${composer().value} ` } })
+
+    expect(await screen.findByText(/can't carry a planner question/)).toBeInTheDocument()
+    expect(composer().value).toBe('')
+    expect(chatCalls).toHaveLength(0)
+  })
+
+  it('is withdrawn when she opens a saved conversation holding it', async () => {
+    fixture.listenerDocs = [savedThread()]
+    await arrive()
+    fireEvent.click(screen.getByText('Saved chat one'))
+
+    expect(await screen.findByText(/wasn't added to this conversation/)).toBeInTheDocument()
+    expect(composer().value).toBe('')
+    expect(chatCalls).toHaveLength(0)
+    expect(vi.mocked(addDoc)).not.toHaveBeenCalled()
+  })
+})
+
+describe('her own unsent work survives the route', () => {
+  it('is restored and offered as a choice, not overwritten', async () => {
     renderApp()
     fireEvent.change(composer(), { target: { value: 'Existing destination draft — preserve me' } })
 
     goToPlanner()
     tapRefusal()
 
-    // Back on the real /chat route, freshly mounted.
     await screen.findByText(/You were already typing something/)
     expect(composer().value).toBe('Existing destination draft — preserve me')
     expect(screen.getByText(ASK)).toBeInTheDocument()
@@ -244,7 +421,7 @@ describe('the journey the browser run failed on', () => {
     expect(chatCalls).toHaveLength(0)
   })
 
-  it('keeps her draft when she says keep, and only then replaces on an explicit tap', async () => {
+  it('keeps hers on keep, replaces only on an explicit tap, and gives hers back', async () => {
     renderApp()
     fireEvent.change(composer(), { target: { value: 'mine' } })
     goToPlanner()
@@ -256,12 +433,12 @@ describe('the journey the browser run failed on', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Use the planner's question/ }))
     expect(composer().value).toContain(ASK)
-    // Her displaced draft is retrievable for the rest of the visit.
+
     fireEvent.click(screen.getByRole('button', { name: /Bring my own draft back/ }))
     expect(composer().value).toBe('mine')
   })
 
-  it('protects a staged attachment, not only text', async () => {
+  it('protects a staged attachment as well as the text', async () => {
     const { container } = renderApp()
     const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement
     fireEvent.change(fileInput, {
@@ -276,161 +453,87 @@ describe('the journey the browser run failed on', () => {
 
     await screen.findByText(/You were already typing something/)
     expect(composer().value).toBe('what is this page?')
-    expect(screen.getByText(/1 image attached/)).toBeInTheDocument()
+    expect(screen.getByText(/with 1 image/)).toBeInTheDocument()
     expect(screen.getByText(/Image attached/)).toBeInTheDocument()
   })
 
-  it('fills exactly once, with the context that will be sent, and writes nothing', async () => {
-    renderApp()
+  it('protects a raw file selection and an image idea she had not sent', async () => {
+    const { container } = renderApp()
+    // The chooser's dialog, with the raw file still selected.
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement
+    fireEvent.change(fileInput, {
+      target: { files: [new File(['x'], 'raw.png', { type: 'image/png' })] },
+    })
+    await screen.findByText('Attach to my message')
+
     goToPlanner()
     tapRefusal()
 
+    // The dialog and its selection came back, and the incoming question did not
+    // silently take the box.
+    expect(await screen.findByText(/You were already typing something/)).toBeInTheDocument()
+    expect(screen.getByText('Attach to my message')).toBeInTheDocument()
+  })
+})
+
+describe('a hand-off visit writes nothing on arrival', () => {
+  it('does not run the legacy chatContext migration', async () => {
+    renderApp()
+    goToPlanner()
+    // The legacy threads appear while Ask AI is unmounted, so the only mount
+    // that could migrate them is the hand-off's.
+    fixture.legacyThreads = [{ id: 'old', ref: { id: 'old' }, data: () => ({ archived: false }) }]
+    batchSpy.update.mockClear()
+    batchSpy.commit.mockClear()
+    tapRefusal()
     await screen.findByText(/From Plan My Week/)
-    const draft = composer().value
-    expect(draft).toContain(ASK)
-    expect(draft).toContain('Lincoln')
-    expect(screen.getByText(/unsent/i)).toBeInTheDocument()
+
+    await waitFor(() => expect(composer().value).toContain(ASK))
+    expect(batchSpy.update).not.toHaveBeenCalled()
+    expect(batchSpy.commit).not.toHaveBeenCalled()
+  })
+
+  it('still runs that migration on an ordinary visit', async () => {
+    fixture.legacyThreads = [{ id: 'old', ref: { id: 'old' }, data: () => ({ archived: false }) }]
+    renderApp()
+    await waitFor(() => expect(batchSpy.commit).toHaveBeenCalled())
+  })
+
+  it('does not auto-send into a saved one-message conversation', async () => {
+    fixture.listenerDocs = [savedThread()]
+    renderArrival('?thread=t1')
+
+    expect(await screen.findByText(/saved conversation/)).toBeInTheDocument()
+    expect(composer().value).toBe('')
+    await waitFor(() => expect(screen.getByText(/older thread talk/)).toBeInTheDocument())
+    expect(chatCalls).toHaveLength(0)
     expect(vi.mocked(addDoc)).not.toHaveBeenCalled()
     expect(vi.mocked(updateDoc)).not.toHaveBeenCalled()
-    expect(chatCalls).toHaveLength(0)
-  })
-})
-
-describe('explicit Send', () => {
-  it('targets exactly the reviewed child and carries the disclosed context', async () => {
-    renderApp()
-    goToPlanner()
-    tapRefusal()
-    await screen.findByText(/From Plan My Week/)
-
-    fireEvent.click(sendButton())
-
-    await waitFor(() => expect(chatCalls).toHaveLength(1))
-    expect(chatCalls[0].childId).toBe(LINCOLN.id)
-    expect(chatCalls[0].familyId).toBe('fam-1')
-    // One message: a fresh conversation inherits no unrelated history.
-    expect(chatCalls[0].messages).toHaveLength(1)
-    expect(chatCalls[0].messages[0].content).toContain(ASK)
-    expect(chatCalls[0].messages[0].content).toContain('Lincoln')
-  })
-})
-
-describe('the question cannot be sent under another identity', () => {
-  it('is withdrawn when the chat tab moves, and Send does nothing stale', async () => {
-    renderApp()
-    goToPlanner()
-    tapRefusal()
-    await screen.findByText(/From Plan My Week/)
-
-    fireEvent.click(screen.getByRole('tab', { name: 'London' }))
-
-    expect(await screen.findByText(/another child's conversation/)).toBeInTheDocument()
-    expect(composer().value).toBe('')
-    expect(sendButton()).toBeDisabled()
-    expect(chatCalls).toHaveLength(0)
-    expect(vi.mocked(addDoc)).not.toHaveBeenCalled()
   })
 
-  it('keeps the guard over EDITED incoming text and a dismissed notice', async () => {
-    renderApp()
-    goToPlanner()
-    tapRefusal()
-    await screen.findByText(/From Plan My Week/)
-
-    fireEvent.change(composer(), { target: { value: `${composer().value} and more phonics` } })
-    fireEvent.click(screen.getByRole('button', { name: /close/i }))
-    expect(screen.queryByText(/From Plan My Week/)).not.toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('tab', { name: 'London' }))
-    expect(await screen.findByText(/another child's conversation/)).toBeInTheDocument()
-    expect(composer().value).toBe('')
-    expect(chatCalls).toHaveLength(0)
-  })
-
-  it('cannot be revived by going back to the tab it came from', async () => {
-    renderApp()
-    goToPlanner()
-    tapRefusal()
-    await screen.findByText(/From Plan My Week/)
-
-    fireEvent.click(screen.getByRole('tab', { name: 'London' }))
-    await screen.findByText(/another child's conversation/)
-    fireEvent.click(screen.getByRole('tab', { name: 'Lincoln' }))
-
-    expect(composer().value).toBe('')
-    expect(screen.queryByText(/is in the box below/)).not.toBeInTheDocument()
-    fireEvent.click(sendButton())
-    expect(chatCalls).toHaveLength(0)
-  })
-
-  it('is withdrawn when the shell changes child under it', async () => {
-    renderApp()
-    goToPlanner()
-    tapRefusal()
-    await screen.findByText(/From Plan My Week/)
-
-    identity.activeChildId = LONDON.id
-    // Any re-render re-evaluates ownership; typing is the cheapest real one.
-    fireEvent.change(composer(), { target: { value: `${composer().value} ` } })
-
-    expect(await screen.findByText(/active child changed/)).toBeInTheDocument()
-    expect(composer().value).toBe('')
-    expect(chatCalls).toHaveLength(0)
-  })
-
-  it('is withdrawn when the profile stops being a parent', async () => {
-    renderApp()
-    goToPlanner()
-    tapRefusal()
-    await screen.findByText(/From Plan My Week/)
-
-    identity.profile = 'lincoln'
-    fireEvent.change(composer(), { target: { value: `${composer().value} ` } })
-
-    expect(await screen.findByText(/can't carry a planner question/)).toBeInTheDocument()
-    expect(composer().value).toBe('')
-    expect(chatCalls).toHaveLength(0)
-  })
-})
-
-describe('a saved conversation is not joined silently', () => {
-  /**
-   * The planner's own link lands on a FRESH `/chat`, so arrival inside a saved
-   * conversation is reached the two ways it is actually reachable: a navigation
-   * that already carries `?thread=` (staged directly, since no link composes
-   * that today), and — the journey a parent really takes — opening a saved
-   * conversation while the question is still in the box.
-   */
-  function arriveInThread() {
-    const payload = stagePlannerAskHandoff({ ...SOURCE, question: ASK, jobId: 'curriculum' })
-    return render(
-      <MemoryRouter
-        initialEntries={[
-          {
-            pathname: '/chat',
-            search: '?thread=t1',
-            state: { [PLANNER_ASK_HANDOFF_STATE_KEY]: payload?.generation },
-          },
-        ]}
-      >
+  it('still auto-sends a pre-seeded thread on an ordinary visit', async () => {
+    // `openChatWithContext` deliberately pre-seeds one user message and expects
+    // the answer; suppression must be the hand-off's alone.
+    fixture.listenerDocs = [savedThread()]
+    render(
+      <MemoryRouter initialEntries={[{ pathname: '/chat', search: '?thread=t1' }]}>
         <Routes>
           <Route path="/chat" element={<ShellyChatPage />} />
         </Routes>
       </MemoryRouter>,
     )
-  }
+    await waitFor(() => expect(chatCalls).toHaveLength(1))
+  })
 
-  it('asks first, writes nothing, and inherits no history on the fresh path', async () => {
-    arriveInThread()
-    expect(await screen.findByText(/saved conversation/)).toBeInTheDocument()
-    expect(screen.getByText(/older thread talk/)).toBeInTheDocument()
-    expect(composer().value).toBe('')
-    expect(vi.mocked(addDoc)).not.toHaveBeenCalled()
-    expect(chatCalls).toHaveLength(0)
+  it('keeps the suppression through the new-conversation choice', async () => {
+    fixture.listenerDocs = [savedThread()]
+    renderArrival('?thread=t1')
+    await screen.findByText(/saved conversation/)
 
     fireEvent.click(screen.getByRole('button', { name: /Ask in a new conversation/ }))
     expect(composer().value).toContain(ASK)
     expect(screen.queryByText(/older thread talk/)).not.toBeInTheDocument()
+    expect(chatCalls).toHaveLength(0)
     expect(vi.mocked(addDoc)).not.toHaveBeenCalled()
 
     fireEvent.click(sendButton())
@@ -439,28 +542,14 @@ describe('a saved conversation is not joined silently', () => {
     expect(chatCalls[0].childId).toBe(LINCOLN.id)
   })
 
-  it('leaves the conversation alone when she says not now', async () => {
-    arriveInThread()
+  it('leaves the saved conversation alone on "not now"', async () => {
+    fixture.listenerDocs = [savedThread()]
+    renderArrival('?thread=t1')
     await screen.findByText(/saved conversation/)
 
     fireEvent.click(screen.getByRole('button', { name: /Not now/ }))
     expect(composer().value).toBe('')
     expect(screen.getByText(/still in Plan My Week/)).toBeInTheDocument()
-    expect(screen.getByText(/older thread talk/)).toBeInTheDocument()
-    expect(vi.mocked(addDoc)).not.toHaveBeenCalled()
-    expect(chatCalls).toHaveLength(0)
-  })
-
-  it('withdraws the question when she opens a saved conversation holding it', async () => {
-    renderApp()
-    goToPlanner()
-    tapRefusal()
-    await screen.findByText(/From Plan My Week/)
-
-    fireEvent.click(screen.getByText('Saved chat one'))
-
-    expect(await screen.findByText(/wasn't added to this conversation/)).toBeInTheDocument()
-    expect(composer().value).toBe('')
     expect(chatCalls).toHaveLength(0)
     expect(vi.mocked(addDoc)).not.toHaveBeenCalled()
   })
@@ -469,7 +558,6 @@ describe('a saved conversation is not joined silently', () => {
 describe('the ordinary visit is unchanged', () => {
   it('fills nothing and says nothing when she walks in herself', async () => {
     renderApp()
-    // No refusal tapped: the slot is never read, so there is nothing to say.
     await waitFor(() => expect(screen.getByText('Ask about Lincoln')).toBeInTheDocument())
     expect(composer().value).toBe('')
     expect(screen.queryByText(/Plan My Week/)).not.toBeInTheDocument()
@@ -484,8 +572,6 @@ describe('the ordinary visit is unchanged', () => {
   })
 
   it('reports an empty slot after a refresh rather than filling silently', async () => {
-    // A reload loses page-session memory while the history entry still names a
-    // hand-off — the Back/forward and refresh case.
     render(
       <MemoryRouter
         initialEntries={[{ pathname: '/chat', state: { [PLANNER_ASK_HANDOFF_STATE_KEY]: 99 } }]}

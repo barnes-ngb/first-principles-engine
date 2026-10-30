@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import AddIcon from '@mui/icons-material/Add'
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
@@ -47,6 +47,7 @@ import NextWeekDraftCard from './NextWeekDraftCard'
 import PlannerAskHandoffNotice from './PlannerAskHandoffNotice'
 import { usePlannerAskHandoff } from './usePlannerAskHandoff'
 import type { ComposerDraft } from './composerCustody'
+import { plannerAskHandoffGenerationFromState } from '../planner-chat/plannerAskHandoff'
 import { useChatActivityConfigs } from './useChatActivityConfigs'
 import { useChatArtQuota } from './useChatArtQuota'
 import { useChatConceptArcs } from './useChatConceptArcs'
@@ -109,6 +110,17 @@ export default function ShellyChatPage() {
 
   const [searchParams, setSearchParams] = useSearchParams()
   const navigate = useNavigate()
+  const location = useLocation()
+  /**
+   * Is this visit the planner's hand-off (UX-273)?
+   *
+   * Read from router state during RENDER, so the two mount effects that write
+   * without a tap — the legacy `chatContext` migration and the pre-seeded-thread
+   * auto-send — can be suppressed before they can start. True for the whole
+   * visit, so a cancel, a new-conversation choice or a replay cannot re-arm
+   * them. An ordinary visit carries no state and is unchanged.
+   */
+  const handoffVisit = plannerAskHandoffGenerationFromState(location.state) !== null
 
   // Copy/.md-download toast (FEAT-59). Local Snackbar per the repo pattern.
   const [snack, setSnack] = useState<string | null>(null)
@@ -129,16 +141,16 @@ export default function ShellyChatPage() {
     sending,
     drawerOpen, setDrawerOpen,
     generatingImage,
-    uploadPreviews,
-    uploadFiles,
+    uploadPreviews, setUploadPreviews,
+    uploadFiles, setUploadFiles,
     uploading,
-    uploadDialogOpen,
+    uploadDialogOpen, setUploadDialogOpen,
     pendingAttachments, setPendingAttachments,
     pendingReferenceImage, setPendingReferenceImage,
-    imageFlowOpen,
-    imageFlowStep,
+    imageFlowOpen, setImageFlowOpen,
+    imageFlowStep, setImageFlowStep,
     imageIdea, setImageIdea,
-    imageQuestions,
+    imageQuestions, setImageQuestions,
     imageAnswers, setImageAnswers,
     loadingQuestions,
     fileInputRef,
@@ -307,6 +319,8 @@ export default function ShellyChatPage() {
     // outside the accounting.
     isParent,
     artQuota: chatArtQuota,
+    // UX-273: opt-in, explicit, and read before either mount effect can run.
+    suppressMountWrites: handoffVisit,
   })
 
   // ── UX-273: a planner refusal's question, arriving as an UNSENT draft, and
@@ -317,17 +331,45 @@ export default function ShellyChatPage() {
   //    back her own attachments) into the composer. No thread, no message, no
   //    model call. The whole composer is handed over, not just its text, because
   //    an unmount loses the staged attachments too.
-  const composerDraft = useMemo(
-    () => ({ text: input, attachments: pendingAttachments, referenceImage: pendingReferenceImage }),
-    [input, pendingAttachments, pendingReferenceImage],
+  const composerDraft = useMemo<ComposerDraft>(
+    () => ({
+      text: input,
+      attachments: pendingAttachments,
+      referenceImage: pendingReferenceImage,
+      uploadFiles,
+      uploadPreviews,
+      uploadDialogOpen,
+      imageFlowOpen,
+      imageFlowStep,
+      imageIdea,
+      imageQuestions,
+      imageAnswers,
+    }),
+    [
+      input, pendingAttachments, pendingReferenceImage,
+      uploadFiles, uploadPreviews, uploadDialogOpen,
+      imageFlowOpen, imageFlowStep, imageIdea, imageQuestions, imageAnswers,
+    ],
   )
   const applyComposerDraft = useCallback(
     (next: ComposerDraft) => {
       setInput(next.text)
       setPendingAttachments(next.attachments)
       setPendingReferenceImage(next.referenceImage)
+      setUploadFiles(next.uploadFiles)
+      setUploadPreviews(next.uploadPreviews)
+      setUploadDialogOpen(next.uploadDialogOpen)
+      setImageFlowOpen(next.imageFlowOpen)
+      setImageFlowStep(next.imageFlowStep)
+      setImageIdea(next.imageIdea)
+      setImageQuestions(next.imageQuestions)
+      setImageAnswers(next.imageAnswers)
     },
-    [setInput, setPendingAttachments, setPendingReferenceImage],
+    [
+      setInput, setPendingAttachments, setPendingReferenceImage,
+      setUploadFiles, setUploadPreviews, setUploadDialogOpen,
+      setImageFlowOpen, setImageFlowStep, setImageIdea, setImageQuestions, setImageAnswers,
+    ],
   )
   const plannerAsk = usePlannerAskHandoff({
     familyId,
