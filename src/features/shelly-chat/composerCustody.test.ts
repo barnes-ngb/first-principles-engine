@@ -4,7 +4,9 @@ import {
   clearComposerCustody,
   composerDraftIsEmpty,
   COMPOSER_CUSTODY_TTL_MS,
+  currentComposerCustodySession,
   EMPTY_COMPOSER_DRAFT,
+  endComposerCustodySession,
   peekComposerCustody,
   saveComposerCustody,
   takeComposerCustody,
@@ -113,6 +115,38 @@ describe('the composer custody slot', () => {
   it('does not hand back work from a different visit', () => {
     saveComposerCustody(OWNER, null, FULL, Date.now() - COMPOSER_CUSTODY_TTL_MS - 1)
     expect(takeComposerCustody(OWNER, null)).toEqual({ kind: 'none' })
+  })
+
+  it('refuses work from a sign-in that is over, however late it arrives', () => {
+    // The logout case, as a rule rather than as an ordering. The composer hands
+    // its unsent work over in its UNMOUNT cleanup and a logout IS that unmount,
+    // so the save and the invalidation race; an upload or image callback that
+    // outlived the route is the same shape one step later.
+    const session = currentComposerCustodySession()
+    endComposerCustodySession()
+
+    saveComposerCustody(OWNER, null, FULL, Date.now(), session)
+
+    expect(peekComposerCustody(OWNER, null)).toEqual({ kind: 'none' })
+    // And the next sign-in can still save and read its own work.
+    saveComposerCustody(OWNER, null, FULL)
+    expect(takeComposerCustody(OWNER, null).kind).toBe('same-thread')
+  })
+
+  it('empties the slot when a sign-in ends, not only on the next save', () => {
+    saveComposerCustody(OWNER, null, FULL)
+    endComposerCustodySession()
+    expect(peekComposerCustody(OWNER, null)).toEqual({ kind: 'none' })
+  })
+
+  it('keeps an ordinary scope change saveable — clearing is not ending', () => {
+    // A child or tab change inside one sign-in clears the slot, but her
+    // composer is still mounted and must be able to hand its work over later.
+    const session = currentComposerCustodySession()
+    saveComposerCustody(OWNER, null, FULL)
+    clearComposerCustody()
+    saveComposerCustody(OWNER, null, FULL, Date.now(), session)
+    expect(takeComposerCustody(OWNER, null).kind).toBe('same-thread')
   })
 
   it('hands back a copy, so a later edit cannot reach into the slot', () => {

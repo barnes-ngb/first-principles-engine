@@ -2,7 +2,36 @@ import { useEffect, useRef, useSyncExternalStore } from 'react'
 
 import { getActiveChildId, subscribeActiveChildId } from '../../core/hooks/activeChildStore'
 import { clearPlannerAskHandoff } from '../planner-chat/plannerAskHandoff'
-import { clearComposerCustody } from './composerCustody'
+import { clearComposerCustody, endComposerCustodySession } from './composerCustody'
+
+/** What the observer needs to know about the session, and nothing more. */
+export interface HandoffScopeAuth {
+  /** Still settling: no answer either way yet. */
+  loading: boolean
+  /** The signed-in user, or `null`. No credential is read or stored. */
+  user: { isAnonymous: boolean } | null
+  /** The uid the app keys family data on. */
+  familyId: string | null
+}
+
+/**
+ * The family identity the GATE actually grants, or `''` for none.
+ *
+ * Not simply `familyId`. `AuthContext` sets `familyId = user?.uid ?? null`, and
+ * an **anonymous** user has a uid — while `AuthGate` shows the login page for an
+ * anonymous user exactly as it does for no user. So the uid alone would read a
+ * closed gate as an open one, and an authority downgraded to anonymous would
+ * look like an unchanged session. Loading stays its own answer: `''` while
+ * nothing has resolved is a page still settling, never a session ending.
+ *
+ * Exported so the observer and its regression read the SAME rule; a second copy
+ * in a test would be a second definition of who is signed in.
+ */
+export function handoffScopeIdentity(auth: HandoffScopeAuth): string {
+  if (auth.loading) return ''
+  if (!auth.user || auth.user.isAnonymous) return ''
+  return auth.familyId ?? ''
+}
 
 /**
  * Drop UX-273's two page-session slots when the scope they belong to changes —
@@ -50,11 +79,10 @@ export function useHandoffScopeWatch(familyId: string, profile: string | null): 
   /** Has a resolved scope ENDED since the last one started? */
   const closed = useRef(false)
 
-  // A PASSIVE effect, deliberately, and not a layout one. The composer hands its
-  // unsent work to custody in its own unmount CLEANUP, which is passive: React
-  // runs every destroy in the commit before any create, so this clear lands
-  // after the save it has to beat. A layout effect would run in the mutation
-  // phase — before that save — and the draft would come back.
+  // Passive, like the composer's own unmount cleanup, so the two run in one
+  // phase with every destroy before any create. The ORDER is not what makes
+  // this safe, though — a save carries the session it was typed under, so one
+  // that lands after the session ended is refused however the phases interleave.
   useEffect(() => {
     if (key === '') {
       // Initial load: nothing has been resolved yet, so there is nothing to
@@ -63,7 +91,12 @@ export function useHandoffScopeWatch(familyId: string, profile: string | null): 
       seen.current = null
       closed.current = true
       clearPlannerAskHandoff()
-      clearComposerCustody()
+      // END the session, not merely empty the slot: the composer hands its work
+      // over in its unmount cleanup, and a logout IS that unmount, so a save can
+      // land after this runs. Ending refuses those as well as dropping what is
+      // there. An ordinary scope change below only clears, because her composer
+      // is still mounted and must keep being able to save its own work.
+      endComposerCustodySession()
       return
     }
     if (seen.current === null) {
@@ -75,7 +108,7 @@ export function useHandoffScopeWatch(familyId: string, profile: string | null): 
       if (closed.current) {
         closed.current = false
         clearPlannerAskHandoff()
-        clearComposerCustody()
+        endComposerCustodySession()
       }
       return
     }

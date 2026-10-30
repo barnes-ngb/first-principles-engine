@@ -17,7 +17,7 @@
 //  4. Nothing here writes: no thread, no message, no model call, no domain data
 //     (pinned by `plannerAskHandoff.boundary.source.test.ts`).
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 
 import { formatDateYmd } from '../../core/utils/format'
@@ -35,6 +35,7 @@ import {
 } from '../planner-chat/plannerAskHandoff'
 import {
   composerDraftIsEmpty,
+  currentComposerCustodySession,
   EMPTY_COMPOSER_DRAFT,
   saveComposerCustody,
   takeComposerCustody,
@@ -146,13 +147,32 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
   const draftText = draft.text
   const signature = draftSignature(draft)
 
+  // Committed in a LAYOUT effect rather than written during render: a render can
+  // be thrown away, and a ref written in one is a mutation that never happened.
+  // Layout is early enough for every reader — React runs layout effects before
+  // the passive effects below, and an event handler (the Send guard) runs later
+  // still — so the synchronous, fail-closed guards read the identity of the last
+  // COMMITTED render, which is the one she is looking at.
   const live = useRef({ receiver, activeChildId, isParent, draft, applyDraft, startFreshThread, childIds })
-  live.current = { receiver, activeChildId, isParent, draft, applyDraft, startFreshThread, childIds }
+  useLayoutEffect(() => {
+    live.current = { receiver, activeChildId, isParent, draft, applyDraft, startFreshThread, childIds }
+  }, [receiver, activeChildId, isParent, draft, applyDraft, startFreshThread, childIds])
 
   /** The held question. A ref, so an action reads it with no render in between. */
   const authority = useRef<HeldAsk | null>(null)
-  /** Where her own unsent work belongs — stamped once, never re-stamped. */
-  const draftOwner = useRef<{ owner: ComposerCustodyOwner; threadId: string | null } | null>(null)
+  /**
+   * Where her own unsent work belongs — stamped once, never re-stamped.
+   *
+   * The `session` is the sign-in it was typed under. It travels with the save so
+   * that a save arriving after that sign-in ended — this hook's own unmount
+   * cleanup on a logout, or a callback that outlived the route — is refused
+   * instead of re-filling a slot the ending session emptied.
+   */
+  const draftOwner = useRef<{
+    owner: ComposerCustodyOwner
+    threadId: string | null
+    session: number
+  } | null>(null)
   const restoreAttempted = useRef(false)
   const decidedGeneration = useRef<number | null>(null)
 
@@ -219,7 +239,8 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
     const held = authority.current
     if (composerDraftIsEmpty(current)) {
       if (draftOwner.current) {
-        saveComposerCustody(draftOwner.current.owner, draftOwner.current.threadId, EMPTY_COMPOSER_DRAFT)
+        const { owner, threadId: owned, session } = draftOwner.current
+        saveComposerCustody(owner, owned, EMPTY_COMPOSER_DRAFT, Date.now(), session)
         draftOwner.current = null
       }
       return
@@ -229,7 +250,11 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
       return
     }
     if (!draftOwner.current) {
-      draftOwner.current = { owner: ownerOf(live.current.receiver), threadId: live.current.receiver.threadId }
+      draftOwner.current = {
+        owner: ownerOf(live.current.receiver),
+        threadId: live.current.receiver.threadId,
+        session: currentComposerCustodySession(),
+      }
     }
   }, [signature])
 
@@ -254,7 +279,11 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
       )
       if (look.kind === 'same-thread') {
         restored = look.draft
-        draftOwner.current = { owner: ownerOf(live.current.receiver), threadId }
+        draftOwner.current = {
+          owner: ownerOf(live.current.receiver),
+          threadId,
+          session: currentComposerCustodySession(),
+        }
         live.current.applyDraft(look.draft)
       } else if (look.kind === 'other-thread' && generation !== null) {
         offered = look.draft
@@ -293,7 +322,11 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
       (!composerDraftIsEmpty(live.current.draft) ? live.current.draft : null)
     if (mine) {
       if (offered) {
-        draftOwner.current = { owner: ownerOf(live.current.receiver), threadId }
+        draftOwner.current = {
+          owner: ownerOf(live.current.receiver),
+          threadId,
+          session: currentComposerCustodySession(),
+        }
         live.current.applyDraft(offered)
       }
       hold(decision.handoff)
@@ -338,12 +371,22 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
       if (!stamp) return
       const held = authority.current
       const outgoing = live.current.draft
-      saveComposerCustody(stamp.owner, stamp.threadId, {
-        ...outgoing,
-        // The incoming question is recoverable from the planner and must not
-        // come back without authority.
-        text: held?.inComposer ? '' : outgoing.text,
-      })
+      // The session stamp is why this is safe on a LOGOUT, which is also an
+      // unmount: the scope observer ends that session in the same commit, and a
+      // save carrying the session it was typed under is refused rather than
+      // re-filling the slot for whoever signs in next.
+      saveComposerCustody(
+        stamp.owner,
+        stamp.threadId,
+        {
+          ...outgoing,
+          // The incoming question is recoverable from the planner and must not
+          // come back without authority.
+          text: held?.inComposer ? '' : outgoing.text,
+        },
+        Date.now(),
+        stamp.session,
+      )
     },
     [],
   )
@@ -391,6 +434,7 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
     draftOwner.current = {
       owner: ownerOf(live.current.receiver),
       threadId: live.current.receiver.threadId,
+      session: currentComposerCustodySession(),
     }
     live.current.applyDraft(state.setAside)
     setState(held ? { kind: 'kept', handoff: state.handoff } : { kind: 'idle' })

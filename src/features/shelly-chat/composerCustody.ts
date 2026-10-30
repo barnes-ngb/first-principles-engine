@@ -8,6 +8,11 @@
 //  - a draft is labelled with the owner it was EDITED under, never the latest
 //    identity, so a scope change while mounted cannot re-label her work;
 //  - an entry that cannot be acted on is PEEKED, never consumed and dropped.
+//
+// And a fourth, from the acceptance closeout: work carries the SIGN-IN it was
+// typed under, and a save under a sign-in that has ended is refused — because a
+// logout is itself the unmount that hands the draft over, so ordering alone
+// cannot make that safe (see {@link endComposerCustodySession}).
 
 import type { ChatAttachment, ImageFlowStep, RefinementQuestion } from './useShellyChatState'
 
@@ -70,9 +75,44 @@ interface HeldCustody {
   threadId: string | null
   draft: ComposerDraft
   savedAt: number
+  /** The sign-in this work was done under. See {@link endComposerCustodySession}. */
+  session: number
 }
 
 let held: HeldCustody | null = null
+
+// ── The session: whose sign-in this slot belongs to ─────────────────────────
+//
+// An owner (family / profile / tab / tab's child) is not enough to make a
+// logout safe. The composer hands its unsent work over in its UNMOUNT cleanup,
+// and a logout is exactly an unmount — so the save and the invalidation race,
+// and a save that lands afterwards would re-fill a slot the ending session had
+// just emptied. The same shape covers a callback that outlives the route.
+//
+// So the work is stamped with the sign-in it was done under, the stamp is taken
+// once (when the draft's owner is stamped, never re-taken), and a save under a
+// session that is over is REFUSED rather than written.
+
+let session = 1
+
+/** The sign-in work saved right now would belong to. */
+export function currentComposerCustodySession(): number {
+  return session
+}
+
+/**
+ * End the current sign-in: empty the slot AND refuse anything still to come
+ * from it.
+ *
+ * Called only by the scope observer, for an identity that has gone away
+ * (logout, profile exit, an authority downgraded). An ordinary scope change
+ * inside one sign-in uses {@link clearComposerCustody} instead, because her
+ * still-mounted composer must keep being able to save its own work.
+ */
+export function endComposerCustodySession(): void {
+  session += 1
+  held = null
+}
 
 export function composerDraftIsEmpty(draft: ComposerDraft): boolean {
   return (
@@ -121,12 +161,17 @@ export function saveComposerCustody(
   threadId: string | null,
   draft: ComposerDraft,
   now: number = Date.now(),
+  ownedSession: number = session,
 ): void {
+  // The sign-in this work was done under is over: its unmount cleanup, or a
+  // callback that outlived the route, must not re-fill a slot the ending
+  // session emptied. Omitted means "this one", so an ordinary save is unchanged.
+  if (ownedSession !== session) return
   if (composerDraftIsEmpty(draft)) {
     if (held && sameComposerOwner(held.owner, owner) && held.threadId === threadId) held = null
     return
   }
-  held = { owner, threadId, draft: copy(draft), savedAt: now }
+  held = { owner, threadId, draft: copy(draft), savedAt: now, session: ownedSession }
 }
 
 /** What is waiting for this caller, without consuming it. */
@@ -136,6 +181,12 @@ export function peekComposerCustody(
   now: number = Date.now(),
 ): ComposerCustodyLook {
   if (!held) return { kind: 'none' }
+  // Belt for the same boundary, read-side: an entry from a sign-in that is over
+  // is never handed to the next one.
+  if (held.session !== session) {
+    held = null
+    return { kind: 'none' }
+  }
   if (now - held.savedAt > COMPOSER_CUSTODY_TTL_MS) {
     held = null
     return { kind: 'none' }

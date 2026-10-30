@@ -104,6 +104,9 @@ describe('the hand-off path writes nothing and calls nothing', () => {
         .sort()
     expect(callers('clearComposerCustody')).toEqual([SCOPE_WATCH])
     expect(callers('clearPlannerAskHandoff')).toEqual([SCOPE_WATCH])
+    // Ending a sign-in refuses every save still to come from it, which is a
+    // stronger act than clearing and belongs to the same single caller.
+    expect(callers('endComposerCustodySession')).toEqual([SCOPE_WATCH])
   })
 
   it('keeps the composer-custody slot to one writer and one reader', () => {

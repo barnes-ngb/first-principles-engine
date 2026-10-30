@@ -12,6 +12,7 @@ import {
   plannerAskHandoffGenerationFromState,
   plannerAskHandoffGoesToAskAi,
   plannerAskSourceOwned,
+  plannerAskWeekLabel,
   resolveChatContextChild,
   samePlannerAskSource,
   PLANNER_ASK_HANDOFF_MAX_CHARS,
@@ -535,6 +536,33 @@ describe('what travels with the question', () => {
   it('shows the same context the draft carries', () => {
     expect(plannerAskContextLine(handoff)).toContain('Lincoln')
     expect(plannerAskContextLine(handoff)).toContain('Week of')
+  })
+
+  it('names the source week by its start date, so a year boundary is unambiguous', () => {
+    // Sunday 2026-12-27 is the week Mon Dec 28 – Fri Jan 1, which is in the
+    // NEXT year: the label is month-and-day only, and this is exactly where the
+    // planner's This week / Next week pick crosses the boundary.
+    const label = plannerAskWeekLabel('2026-12-27')
+    expect(label).not.toMatch(/\d{4}/)
+
+    const across = buildPlannerAskDraft({ ...handoff, weekStart: '2026-12-27' })
+    expect(across).toContain('week of')
+    expect(across).toContain('2026-12-27')
+
+    // The following week is in the other year and is a different sentence.
+    const after = buildPlannerAskDraft({ ...handoff, weekStart: '2027-01-03' })
+    expect(after).toContain('2027-01-03')
+    expect(across).not.toBe(after)
+
+    // Her words stay literal, contiguous and last, whatever the context says.
+    expect(across.endsWith(handoff.question)).toBe(true)
+    expect(across.split('\n\n')).toHaveLength(2)
+  })
+
+  it('still says nothing about a week it could not read', () => {
+    const noWeek = buildPlannerAskDraft({ ...handoff, weekStart: 'not-a-date' })
+    expect(noWeek).not.toContain('starting')
+    expect(noWeek).not.toContain('not-a-date')
   })
 })
 

@@ -17,7 +17,7 @@
 // output is "may this refusal carry her sentence, or does the button fall back
 // to UX-269's plain navigation".
 
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import {
   plannerAskSourceOwned,
@@ -68,14 +68,17 @@ export function usePlannerAskSource({
 }: PlannerAskSourceInputs): PlannerAskSource {
   // Derived during render, not in an effect: an effect's value is one commit
   // behind, and the render that is one commit behind is the one that offers the
-  // button. Monotonic, so A → B → A ends on a third epoch and the first one's
-  // pending work can never be mistaken for the current visit's.
+  // button. Held as STATE adjusted during render — React's own
+  // "adjusting state when a prop changes" — rather than as a ref written in
+  // render, which is a mutation a thrown-away render would make invisibly.
+  // Monotonic, so A → B → A ends on a third epoch and the first one's pending
+  // work can never be mistaken for the current visit's.
   const scopeKey = `${familyId}|${activeChildId}|${weekStart}`
-  const epoch = useRef<{ key: string; epoch: number }>({ key: scopeKey, epoch: 1 })
-  if (epoch.current.key !== scopeKey) {
-    epoch.current = { key: scopeKey, epoch: epoch.current.epoch + 1 }
+  const [scope, setScope] = useState<{ key: string; epoch: number }>({ key: scopeKey, epoch: 1 })
+  const generation = scope.key === scopeKey ? scope.epoch : scope.epoch + 1
+  if (scope.key !== scopeKey) {
+    setScope({ key: scopeKey, epoch: generation })
   }
-  const generation = epoch.current.epoch
 
   const live = useMemo<PlannerAskSourceKey>(
     () => ({ familyId, childId: activeChildId, weekStart, epoch: generation }),
@@ -106,8 +109,14 @@ export function usePlannerAskSource({
     }
   }, [owned, stamped, childName])
 
-  const ownedNow = useRef(owned)
-  ownedNow.current = owned
+  // Committed in a layout effect, so the answer a tap gets is the one the render
+  // she is looking at actually committed — and so nothing is mutated during a
+  // render that may be discarded. It starts `false`, which is the fail-closed
+  // direction: a click cannot happen before the first commit.
+  const ownedNow = useRef(false)
+  useLayoutEffect(() => {
+    ownedNow.current = owned
+  }, [owned])
   const authorizeHandoff = useCallback(() => ownedNow.current, [])
 
   return { live, stampTranscript, clearTranscript, handoffSource, authorizeHandoff }

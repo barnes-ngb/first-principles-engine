@@ -1,4 +1,4 @@
-import { createRef, useEffect, useState } from 'react'
+import { createRef, useState } from 'react'
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -84,12 +84,14 @@ function PlannerHarness() {
     weekStart,
   })
 
-  // `PlannerChatPage`'s conversation listener: it re-keys on (child, week),
-  // clears the week-scoped state, and stamps the scope it subscribed under.
-  useEffect(() => {
+  // `PlannerChatPage`'s conversation listener, DELIVERED EXPLICITLY. The real
+  // one is a Firestore subscription whose snapshot arrives after the subscribe,
+  // and this is a race test: the test owning the delivery moment is the point,
+  // and it keeps the harness free of an effect that sets state on its own.
+  const deliverSnapshot = () => {
     setMessages([])
     stampTranscript(live)
-  }, [live, stampTranscript])
+  }
 
   // `PlannerChatPage`'s free-form send: capture the scope, await the model,
   // install the transcript, stamp it with the scope the REQUEST was made under.
@@ -112,6 +114,7 @@ function PlannerHarness() {
         {...(handoffSource ? { askHandoffSource: handoffSource } : {})}
         authorizeHandoff={authorizeHandoff}
       />
+      <button onClick={deliverSnapshot}>deliver the snapshot</button>
       <button onClick={send}>ask</button>
       <button onClick={() => setChildId(CHILD_B)}>switch to London</button>
       <button onClick={() => setChildId(CHILD_A)}>switch back to Lincoln</button>
@@ -121,7 +124,7 @@ function PlannerHarness() {
 }
 
 function renderPlanner() {
-  return render(
+  const result = render(
     <MemoryRouter initialEntries={['/planner/chat']}>
       <Routes>
         <Route path="/planner/chat" element={<PlannerHarness />} />
@@ -129,12 +132,28 @@ function renderPlanner() {
       </Routes>
     </MemoryRouter>,
   )
+  // The mount's own subscription lands: an empty transcript, stamped with the
+  // scope it subscribed under. Until something is stamped nothing is owned,
+  // which is the fail-closed starting point.
+  deliver()
+  return result
 }
 
 const ask = () => fireEvent.click(screen.getByText('ask'))
-const switchChild = () => fireEvent.click(screen.getByText('switch to London'))
-const switchBack = () => fireEvent.click(screen.getByText('switch back to Lincoln'))
-const nextWeek = () => fireEvent.click(screen.getByText('plan next week'))
+/** The listener's snapshot for whatever scope is live now. */
+const deliver = () => fireEvent.click(screen.getByText('deliver the snapshot'))
+const switchChild = () => {
+  fireEvent.click(screen.getByText('switch to London'))
+  deliver()
+}
+const switchBack = () => {
+  fireEvent.click(screen.getByText('switch back to Lincoln'))
+  deliver()
+}
+const nextWeek = () => {
+  fireEvent.click(screen.getByText('plan next week'))
+  deliver()
+}
 const tapRefusal = () => fireEvent.click(screen.getByRole('button', { name: /Open Ask AI/ }))
 const carries = () => screen.queryByText(/Takes your question with you/)
 

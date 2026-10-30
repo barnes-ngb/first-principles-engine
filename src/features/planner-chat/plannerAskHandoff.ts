@@ -574,12 +574,22 @@ export function plannerAskContextLine(handoff: PlannerAskHandoff): string {
  *
  * Says only what the planner knew — never a guess, and nothing at all when it
  * knew neither the name nor a readable week.
+ *
+ * **The week names its own start date, in full.** The label is month-and-day
+ * only (*"week of Dec 28–Jan 1"*), and the planner's This week / Next week pick
+ * crosses the new year: in the last week of December the two options differ by
+ * a YEAR and read almost identically, and the model — and the stored user turn,
+ * which is the record of what she meant — would have no way to tell them apart.
+ * So the ISO start travels with it. It is the same `weekStart` every check is
+ * made against, not a second derivation of which week this is.
  */
 export function plannerAskSendContextSentence(handoff: PlannerAskHandoff): string {
   const week = plannerAskWeekLabel(handoff.weekStart)
   const bits = [
     ...(handoff.childName ? [handoff.childName] : []),
-    ...(week ? [`${week.charAt(0).toLowerCase()}${week.slice(1)}`] : []),
+    ...(week
+      ? [`${week.charAt(0).toLowerCase()}${week.slice(1)} starting ${handoff.weekStart}`]
+      : []),
   ]
   if (bits.length === 0) return ''
   return `Context: ${bits.join(', ')} (from Plan My Week).`

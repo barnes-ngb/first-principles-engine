@@ -14,7 +14,10 @@ import { AppRouter } from './router'
 import LoginPage from '../features/auth/LoginPage'
 import ProfileSelectPage from '../features/login/ProfileSelectPage'
 import ErrorReporterSync from '../core/observability/ErrorReporterSync'
-import { useHandoffScopeWatch } from '../features/shelly-chat/useHandoffScopeWatch'
+import {
+  handoffScopeIdentity,
+  useHandoffScopeWatch,
+} from '../features/shelly-chat/useHandoffScopeWatch'
 
 /**
  * UX-273's scope observer, mounted ABOVE `AuthGate` and outside the error
@@ -27,12 +30,16 @@ import { useHandoffScopeWatch } from '../features/shelly-chat/useHandoffScopeWat
  * the same account and Ask AI handed the previous session's private draft back.
  * Here nothing unmounts it, so logout and profile exit are observable.
  *
- * It renders nothing, reads the scope, and never sets a selection.
+ * The identity it watches is the one the GATE grants, through
+ * `handoffScopeIdentity` — `AuthGate` closes for an anonymous user and
+ * `familyId` is the uid, which an anonymous user has, so the uid alone would
+ * read a shut gate as an open one. It renders nothing, reads the scope, holds no
+ * credential, and never sets a selection.
  */
 function HandoffScopeObserver() {
-  const { familyId } = useAuth()
+  const { user, loading, familyId } = useAuth()
   const { profile } = useProfile()
-  useHandoffScopeWatch(familyId ?? '', profile)
+  useHandoffScopeWatch(handoffScopeIdentity({ loading, user, familyId }), profile)
   return null
 }
 

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import AddIcon from '@mui/icons-material/Add'
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate'
@@ -130,11 +130,19 @@ export default function ShellyChatPage() {
    * same way (tab, thread, query, new conversation, cancel, failure, replay),
    * and `useShellyChatFlows` re-reads it through a ref after its own `await`, so
    * work already begun cannot commit either.
+   *
+   * The latch is STATE adjusted during render (React's own "adjusting state when
+   * a prop changes"), not a ref written in render: the suppression has to be
+   * true on the arrival render itself, before either mount effect can run, and a
+   * ref written in a render that is then discarded is a latch that silently did
+   * not happen. `handoffArrival ||` keeps it true on the very render that sets it.
    */
   const handoffArrival = plannerAskHandoffGenerationFromState(location.state) !== null
-  const handoffVisitLatch = useRef(false)
-  if (handoffArrival) handoffVisitLatch.current = true
-  const handoffVisit = handoffVisitLatch.current
+  const [handoffSeen, setHandoffSeen] = useState(handoffArrival)
+  const handoffVisit = handoffArrival || handoffSeen
+  if (handoffArrival && !handoffSeen) {
+    setHandoffSeen(true)
+  }
 
   // Copy/.md-download toast (FEAT-59). Local Snackbar per the repo pattern.
   const [snack, setSnack] = useState<string | null>(null)
