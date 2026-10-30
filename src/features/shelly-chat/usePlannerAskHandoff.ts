@@ -437,8 +437,18 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
   const replaceWithQuestion = useCallback(() => {
     if (state.kind !== 'collision' && state.kind !== 'kept') return
     if (guardHeld(false) === 'blocked') return
-    // Her draft is preserved BEFORE the replacement, not after.
-    const mine = state.kind === 'collision' ? state.mine : live.current.draft
+    // Her draft is preserved BEFORE the replacement, not after — and it is the
+    // composer as it stands AT THE DECISION, not the snapshot taken when the
+    // collision arrived. The notice is live: she can edit the text, or cancel a
+    // raw-file selection, while the choice is on screen, and setting aside the
+    // arrival snapshot lost that edit and resurrected the cancelled file with a
+    // revoked preview behind it.
+    //
+    // The one exception is the OFFERED cross-thread draft, which is the contract
+    // this choice was made under: that work belongs to another thread and its
+    // snapshot is what the notice promised to give back.
+    const mine =
+      state.kind === 'collision' && state.fromOtherThread ? state.mine : live.current.draft
     fill(state.handoff, composerDraftIsEmpty(mine) ? null : mine)
   }, [state, guardHeld, fill])
 

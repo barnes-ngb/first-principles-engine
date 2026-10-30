@@ -512,6 +512,62 @@ describe('her own unsent work survives the route', () => {
     expect(composer().value).toBe('mine')
   })
 
+  it('sets aside the edit she made WHILE the choice was on screen', async () => {
+    // The ninth browser run's blocker. The choice is a live notice, not a modal:
+    // the composer still holds her draft and she can keep typing in it. The
+    // set-aside was taken from the snapshot made when the collision arrived, so
+    // replacing and then bringing her draft back restored the ORIGINAL text and
+    // her newer edit was gone.
+    renderApp()
+    fireEvent.change(composer(), { target: { value: 'mine' } })
+    goToPlanner()
+    tapRefusal()
+    await screen.findByText(/You were already typing something/)
+
+    fireEvent.change(composer(), { target: { value: 'mine, and the newer edit' } })
+    fireEvent.click(screen.getByRole('button', { name: /Use the planner's question/ }))
+    expect(composer().value).toContain(ASK)
+
+    fireEvent.click(screen.getByRole('button', { name: /Bring my own draft back/ }))
+    expect(composer().value).toBe('mine, and the newer edit')
+    expect(chatCalls).toHaveLength(0)
+    expect(vi.mocked(addDoc)).not.toHaveBeenCalled()
+  })
+
+  it('does not resurrect a selection she cancelled WHILE the choice was on screen', async () => {
+    // The same stale snapshot, read through the restored chooser. She cancels the
+    // raw file — which removes it and revokes the preview this page minted — and
+    // then takes the planner's question. The arrival snapshot still held the file,
+    // so the set-aside brought the cancelled chooser back with a dead `blob:`
+    // behind its thumbnail (`naturalWidth === 0` on the browser run).
+    const { container } = renderApp()
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement
+    fireEvent.change(fileInput, {
+      target: { files: [new File(['x'], 'raw.png', { type: 'image/png' })] },
+    })
+    await screen.findByText('Attach to my message')
+
+    goToPlanner()
+    tapRefusal()
+    await screen.findByText(/You were already typing something/)
+    const restoredPreview = screen.getByAltText('Selected 1').getAttribute('src')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByAltText('Selected 1')).not.toBeInTheDocument())
+    expect(objectUrls.revoked).toContain(restoredPreview)
+
+    fireEvent.click(screen.getByRole('button', { name: /Use the planner's question/ }))
+    expect(composer().value).toContain(ASK)
+
+    // Nothing of hers was left to set aside, so there is nothing to bring back —
+    // and the cancelled chooser stays cancelled either way.
+    expect(screen.queryByRole('button', { name: /Bring my own draft back/ })).not.toBeInTheDocument()
+    expect(screen.queryByText('Attach to my message')).not.toBeInTheDocument()
+    expect(screen.queryByAltText('Selected 1')).not.toBeInTheDocument()
+    expect(chatCalls).toHaveLength(0)
+    expect(vi.mocked(uploadBytes)).not.toHaveBeenCalled()
+  })
+
   it('protects a staged attachment as well as the text', async () => {
     const { container } = renderApp()
     const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement
