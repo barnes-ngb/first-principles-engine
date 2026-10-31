@@ -1094,3 +1094,225 @@ describe('every snapshot, write and celebration is stamped with its visit', () =
     expect(fx.setDoc).toHaveBeenCalledTimes(1)
   })
 })
+
+/**
+ * THE BLOCKER the independent review reproduced on candidate 3, and the three
+ * routes back to it.
+ *
+ * Candidate 3 stamped every snapshot, write and celebration with
+ * `${familyId}_${childId}#${retryN}` and called that a generation. **That string
+ * repeats.** Leave a child and come back and the new visit's stamp is
+ * character-for-character the first visit's — same child, same Retry count — so
+ * the reducer's guard, which was doing exactly what it was written to do,
+ * accepted a write issued by a visit that had ended. A pending Watchtower
+ * advance acknowledged after a switch-away-and-back therefore raised the
+ * banner-raise celebration over a visit in which the child had completed
+ * nothing: a party for a mission he finished before he left, replayed because
+ * the identity could not tell the two visits apart.
+ *
+ * The repair is a visit id with a monotonically increasing serial
+ * (`scope#retry@serial`), so no later visit can ever hold an earlier one's id.
+ *
+ * POSITIVE CONTROL. Drop the serial — make the visit id `${key}#${retryN}`
+ * again — and all three tests below fail on a `justCompletedMissionId` of
+ * `'watchtower'` / `'library_hut'` where they assert `null`. They are three
+ * tests rather than one because the scope string can repeat along three
+ * independent axes: the child, the family, and the empty selection in between.
+ *
+ * What must NOT be lost to the fix is written out too: the per-child write lane,
+ * the issued-signature dedup and the rejection memory are keyed by CHILD and
+ * must keep ignoring the serial entirely (asserted here as the write count that
+ * does not move), and a completion the LATEST visit earns must still celebrate
+ * however many returns preceded it.
+ */
+describe('an old visit’s acknowledgement cannot celebrate in a new one', () => {
+  it('raises no banner when a pending advance acknowledges after A → B → A', async () => {
+    const { result, rerender } = mount({ childId: LONDON })
+    // London finishes Watchtower: 11 lifetime − baseline 5 = his 6.
+    act(() => {
+      fx.reading[0].next(readingSnapshot(11))
+      fx.progress[0].next(progressSnapshot(LONDON_SAVED))
+    })
+    await flush()
+    expect(fx.setDoc).toHaveBeenCalledTimes(1)
+    expect(fx.writes[0].path).toBe(`${FAM}/stonebridgeProgress/${LONDON}`)
+    expect(fx.writes[0].payload.completedMissions).toEqual(['old_bridge', 'watchtower'])
+    // Nothing is celebrated yet — that write has not been acknowledged, and it
+    // is still in flight for the whole of the rest of this test.
+    expect(result.current.justCompletedMissionId).toBeNull()
+
+    // B: the brother, who has his own village and changes nothing.
+    rerender({ familyId: FAM, childId: LINCOLN })
+    act(() => {
+      fx.reading[1].next(readingSnapshot(14))
+      fx.progress[1].next(progressSnapshot(SAVED))
+    })
+    await flush()
+    expect(result.current.justCompletedMissionId).toBeNull()
+    expect(fx.setDoc).toHaveBeenCalledTimes(1)
+
+    // Back to A, whose listener is still behind the in-flight write and so
+    // delivers the progress saved BEFORE it — truthfully, as far as the server
+    // has said anything.
+    rerender({ familyId: FAM, childId: LONDON })
+    act(() => {
+      fx.reading[2].next(readingSnapshot(11))
+      fx.progress[2].next(progressSnapshot(LONDON_SAVED))
+    })
+    await flush()
+    // The dedup is the CHILD's, so the return issues no second write…
+    expect(fx.setDoc).toHaveBeenCalledTimes(1)
+    // …and the board shows what the server has told us, not what is in flight.
+    expect(result.current.completedMissions).toEqual(['old_bridge'])
+    expect(result.current.stale).toBe(false)
+    expect(result.current.justCompletedMissionId).toBeNull()
+
+    // THE REPRODUCTION: the first visit's write acknowledges now, during a visit
+    // whose scope key and Retry count are identical to the one that issued it.
+    await act(async () => {
+      fx.writes[0].resolve()
+      await Promise.resolve()
+    })
+    await flush()
+
+    expect(result.current.justCompletedMissionId).toBeNull()
+    // It kept its own target and its own payload — the write was never cancelled
+    // or re-aimed, it simply celebrates nothing here.
+    expect(fx.setDoc).toHaveBeenCalledTimes(1)
+    expect(fx.writes[0].path).toBe(`${FAM}/stonebridgeProgress/${LONDON}`)
+
+    // And the celebration is not merely deferred to the catch-up snapshot: the
+    // banner is his, visible, and raised without a party being thrown for it.
+    act(() => {
+      fx.progress[2].next(progressSnapshot(fx.writes[0].payload))
+    })
+    await flush()
+    expect(result.current.raisedBanners).toEqual(['old_bridge', 'watchtower'])
+    expect(result.current.completedMissions).toEqual(['old_bridge', 'watchtower'])
+    expect(result.current.mission?.id).toBe('library_hut')
+    expect(result.current.justCompletedMissionId).toBeNull()
+    expect(result.current.stale).toBe(false)
+    expect(fx.setDoc).toHaveBeenCalledTimes(1)
+  })
+
+  it('raises no banner when the family goes away and comes back', async () => {
+    const { result, rerender } = mount()
+    // 19 lifetime actions completes Lincoln's Library Hut.
+    act(() => {
+      fx.reading[0].next(readingSnapshot(19))
+      fx.progress[0].next(progressSnapshot(SAVED))
+    })
+    await flush()
+    expect(fx.setDoc).toHaveBeenCalledTimes(1)
+    expect(fx.writes[0].payload.completedMissions).toContain('library_hut')
+
+    // The same child under a different family is a different child's document.
+    rerender({ familyId: 'fam-2', childId: LINCOLN })
+    act(() => {
+      fx.reading[1].next(readingSnapshot(0))
+      fx.progress[1].next(progressSnapshot(null))
+    })
+    await flush()
+    expect(fx.writes[1].path).toBe(`fam-2/stonebridgeProgress/${LINCOLN}`)
+
+    rerender({ familyId: FAM, childId: LINCOLN })
+    act(() => {
+      fx.reading[2].next(readingSnapshot(19))
+      fx.progress[2].next(progressSnapshot(SAVED))
+    })
+    await flush()
+    expect(fx.setDoc).toHaveBeenCalledTimes(2)
+
+    await act(async () => {
+      fx.writes[0].resolve()
+      await Promise.resolve()
+    })
+    await flush()
+
+    expect(result.current.justCompletedMissionId).toBeNull()
+    expect(fx.setDoc).toHaveBeenCalledTimes(2)
+  })
+
+  it('raises no banner when the child is deselected and chosen again', async () => {
+    const { result, rerender } = mount()
+    act(() => {
+      fx.reading[0].next(readingSnapshot(19))
+      fx.progress[0].next(progressSnapshot(SAVED))
+    })
+    await flush()
+    expect(fx.setDoc).toHaveBeenCalledTimes(1)
+
+    // No child chosen: the quiet placeholder, and no subscription of its own.
+    rerender({ familyId: FAM, childId: '' })
+    await flush()
+    expect(fx.progress).toHaveLength(1)
+    expect(fx.progress[0].closed).toBe(true)
+    expect(result.current.loading).toBe(true)
+    expect(result.current.totalReadingActions).toBeNull()
+
+    rerender({ familyId: FAM, childId: LINCOLN })
+    act(() => {
+      fx.reading[1].next(readingSnapshot(19))
+      fx.progress[1].next(progressSnapshot(SAVED))
+    })
+    await flush()
+    expect(fx.setDoc).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      fx.writes[0].resolve()
+      await Promise.resolve()
+    })
+    await flush()
+
+    expect(result.current.justCompletedMissionId).toBeNull()
+    expect(fx.setDoc).toHaveBeenCalledTimes(1)
+  })
+
+  /**
+   * The other half of the property: the serial must not make celebrations
+   * unreachable. A visit several returns deep still raises the banner for a
+   * completion IT earned and IT had acknowledged.
+   */
+  it('still celebrates a completion the latest visit earned, after repeated returns', async () => {
+    const { result, rerender } = mount()
+    act(() => {
+      // Nothing completes at 14 — Library Hut is 3 of 8.
+      fx.reading[0].next(readingSnapshot(14))
+      fx.progress[0].next(progressSnapshot(SAVED))
+    })
+    await flush()
+    expect(fx.setDoc).not.toHaveBeenCalled()
+
+    // Away and back, twice: four more visits, each with its own listener pair.
+    rerender({ familyId: FAM, childId: LONDON })
+    rerender({ familyId: FAM, childId: LINCOLN })
+    rerender({ familyId: FAM, childId: LONDON })
+    rerender({ familyId: FAM, childId: LINCOLN })
+    expect(fx.progress).toHaveLength(5)
+    expect(fx.reading).toHaveLength(5)
+    expect(result.current.loading).toBe(true)
+
+    // This visit reads the 19th action, and the completion is its own.
+    act(() => {
+      fx.reading[4].next(readingSnapshot(19))
+      fx.progress[4].next(progressSnapshot(SAVED))
+    })
+    await flush()
+    expect(fx.setDoc).toHaveBeenCalledTimes(1)
+    expect(fx.writes[0].path).toBe(`${FAM}/stonebridgeProgress/${LINCOLN}`)
+    expect(result.current.justCompletedMissionId).toBeNull()
+
+    await act(async () => {
+      fx.writes[0].resolve()
+      await Promise.resolve()
+    })
+    await flush()
+
+    expect(result.current.justCompletedMissionId).toBe('library_hut')
+    act(() => {
+      result.current.clearJustCompleted()
+    })
+    expect(result.current.justCompletedMissionId).toBeNull()
+    expect(fx.setDoc).toHaveBeenCalledTimes(1)
+  })
+})
