@@ -407,8 +407,8 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
    * Put a carried question back UNDER ITS ORIGINAL GUARD.
    *
    * The release review's behavioural blocker in one function. A restored
-   * question used to come back as ordinary typing, so Send sent it wherever she
-   * happened to be — London's tab wrote London's conversation while the text
+   * question used to come back as ordinary typing, so Send sent it wherever
+   * Shelly happened to be — London's tab wrote London's conversation while the text
    * still named Lincoln and carried Lincoln's week. The authority is rebuilt
    * from the origin the draft travelled with, which is the identity it was
    * ACCEPTED under: the original receiver, the original active child, the
@@ -827,7 +827,7 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
   // The closeout's blocker, and the one case the thread check gets wrong.
   //
   // A restored, edited Lincoln question sits in a FRESH conversation, so the
-  // guard's conversation is `null`. She picks a photo and taps "Attach to my
+  // guard's conversation is `null`. Shelly picks a photo and taps "Attach to my
   // message" — the existing upload, her own explicit tap — and that handler
   // creates the thread document a fresh conversation has been missing and sets
   // it active. The guard then saw `null → 'abc'`, read it as "she opened another

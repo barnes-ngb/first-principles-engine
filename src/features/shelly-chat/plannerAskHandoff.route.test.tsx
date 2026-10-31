@@ -1022,7 +1022,7 @@ describe('a draft the question displaced is still hers', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'London' }))
     expect(await screen.findByText(/another child's conversation/)).toBeInTheDocument()
 
-    // Her Lincoln draft is not offered into London's composer — not now, and
+    // Shelly's Lincoln draft is not offered into London's composer — not now, and
     // not by coming back, exactly as the question's own authority cannot be
     // revived by returning to the tab it came from.
     expect(screen.queryByRole('button', { name: /Bring my own draft back/ })).not.toBeInTheDocument()
@@ -1081,13 +1081,13 @@ describe('a question restored across the route is still a GUARDED question', () 
   /**
    * The release review's behavioural blocker, reproduced then closed.
    *
-   * She edits the Lincoln question, leaves for the planner, comes back to find
+   * Shelly edits the Lincoln question, leaves for the planner, comes back to find
    * it restored verbatim — and the guard did not come back with it. The text
    * was ordinary typing, so a Send from London's tab wrote a thread with
    * `chatContext: 'london'` and called the model with London's `childId`,
    * carrying Lincoln's name, Lincoln's week and Lincoln's question. No error,
-   * no notice: the wrong child's record, one tap from a screen she had opened
-   * for the other one.
+   * no notice: the wrong child's record, one tap from a screen the parent had
+   * opened for the other one.
    *
    * The draft and its authority travel together now. Both of these assert the
    * SAME thing from the two directions the scope can move — the tab she sends
@@ -1354,7 +1354,7 @@ describe('an offered draft is consumed only where it is placed', () => {
   it('never hands a draft to a tab it was not typed in, or consumes it there', async () => {
     strandInTheSavedConversation()
     // London's tab is a different owner, so the same conversation key is not
-    // enough: her Lincoln draft is neither shown here nor taken away.
+    // enough: Shelly's Lincoln draft is neither shown here nor taken away.
     identity.activeChildId = LONDON.id
     const stranger = mountChat({ pathname: '/chat', search: '?thread=t1' })
     await waitFor(() =>
