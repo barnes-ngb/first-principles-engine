@@ -45,7 +45,17 @@ const savedThread = (over: Record<string, unknown> = {}): DocLike => ({
 })
 
 vi.mock('firebase/firestore', () => ({
-  addDoc: vi.fn(async () => ({ id: 'new-thread' })),
+  // Holdable, like the upload below: the closeout's blocker is about the moment
+  // a thread CREATION resolves, so a test has to be able to stand in it. Held
+  // only when a test asks; every other test sees the immediate resolve it did.
+  addDoc: vi.fn(async () => {
+    if (inFlight.holdThread) {
+      await new Promise<void>((resolve) => {
+        inFlight.releaseThread = () => resolve()
+      })
+    }
+    return { id: 'new-thread' }
+  }),
   arrayRemove: vi.fn(() => ({})),
   arrayUnion: vi.fn(() => ({})),
   collection: vi.fn(() => ({})),
@@ -82,11 +92,22 @@ vi.mock('firebase/firestore', () => ({
 const inFlight: {
   holdChat: boolean
   holdUpload: boolean
+  /** The thread document an explicit Attach creates for a fresh conversation. */
+  holdThread: boolean
   /** The held upload ends in a throw, so its owner's catch runs. */
   failUpload: boolean
   releaseChat: ((value: { message: string }) => void) | null
   releaseUpload: (() => void) | null
-} = { holdChat: false, holdUpload: false, failUpload: false, releaseChat: null, releaseUpload: null }
+  releaseThread: (() => void) | null
+} = {
+  holdChat: false,
+  holdUpload: false,
+  holdThread: false,
+  failUpload: false,
+  releaseChat: null,
+  releaseUpload: null,
+  releaseThread: null,
+}
 
 vi.mock('firebase/storage', () => ({
   getDownloadURL: vi.fn(async () => 'https://example.com/uploaded.jpg'),
@@ -353,9 +374,11 @@ beforeEach(() => {
   generateImageCalls.length = 0
   inFlight.holdChat = false
   inFlight.holdUpload = false
+  inFlight.holdThread = false
   inFlight.failUpload = false
   inFlight.releaseChat = null
   inFlight.releaseUpload = null
+  inFlight.releaseThread = null
   objectUrls.minted.length = 0
   objectUrls.revoked.length = 0
   clearPlannerAskHandoff()
@@ -373,8 +396,10 @@ afterEach(() => {
   // let it finish SUCCESSFULLY, since a throw nobody is awaiting any more is an
   // unhandled rejection charged to whichever test is running by then.
   inFlight.failUpload = false
+  inFlight.holdThread = false
   inFlight.releaseChat?.(LATE_QUESTIONS)
   inFlight.releaseUpload?.()
+  inFlight.releaseThread?.()
   clearPlannerAskHandoff()
   clearComposerCustody()
 })
@@ -1451,6 +1476,268 @@ describe('a hand-off visit writes nothing on arrival', () => {
     expect(screen.getByText(/still in Plan My Week/)).toBeInTheDocument()
     expect(chatCalls).toHaveLength(0)
     expect(vi.mocked(addDoc)).not.toHaveBeenCalled()
+  })
+})
+
+describe('the conversation her own Attach creates for the question', () => {
+  /**
+   * The release closeout's blocker, reproduced then closed.
+   *
+   * The whole journey in the normal UI: her own draft displaced, the planner's
+   * question edited in the box, the route left and returned — and then a NEW raw
+   * photo and an explicit "Attach to my message". That tap's handler creates the
+   * thread document a FRESH conversation has never had and sets it active, so
+   * the guard saw its own conversation go from `null` to an id, read it as her
+   * opening a different conversation, revoked — and cleared the edited question
+   * behind a notice whose message had just been withdrawn. The photo arrived
+   * attached to an empty box and her words were gone.
+   *
+   * The thread check is right and stays. What is added is provenance: the
+   * operation takes a one-shot authority before its first `await`, and only the
+   * id its own creation returned, landing while everything it captured is still
+   * true, may move the guard's conversation.
+   */
+  const MINE = 'mine — the one copy of this'
+  const EDIT = ' and more phonics'
+
+  /**
+   * Both drafts alive, the question edited and restored across the route, and a
+   * raw photo chosen but not yet attached.
+   */
+  async function readyToAttach() {
+    const app = renderApp()
+    fireEvent.change(composer(), { target: { value: MINE } })
+    goToPlanner()
+    tapRefusal()
+    await screen.findByText(/You were already typing something/)
+    fireEvent.click(screen.getByRole('button', { name: /Use the planner's question/ }))
+    expect(composer().value).toContain(ASK)
+    fireEvent.change(composer(), { target: { value: `${composer().value}${EDIT}` } })
+
+    // Away and back: the edited question comes back under its own guard and her
+    // original is still set aside, which is the state the blocker was found in.
+    goToPlanner()
+    tapRefusal()
+    await screen.findByText(/You were already typing something/)
+    expect(composer().value).toContain(EDIT)
+    fireEvent.click(screen.getByRole('button', { name: /Keep what I was typing/ }))
+
+    const fileInput = app.container.querySelector('input[type="file"]') as HTMLInputElement
+    fireEvent.change(fileInput, {
+      target: { files: [new File(['x'], 'raw.png', { type: 'image/png' })] },
+    })
+    await screen.findByText('Attach to my message')
+    return app
+  }
+
+  /** Her explicit tap, run to completion. */
+  async function attach() {
+    fireEvent.click(screen.getByText('Attach to my message'))
+    await screen.findByText(/Image attached/)
+  }
+
+  it('keeps the edited question, and mints the conversation under the same child', async () => {
+    await readyToAttach()
+    await attach()
+
+    // The blocker: this came back empty.
+    expect(composer().value).toContain(ASK)
+    expect(composer().value).toContain(EDIT)
+    expect(screen.queryByText(/wasn't added to this conversation/)).not.toBeInTheDocument()
+    expect(screen.getByText(/Kept what you were typing/)).toBeInTheDocument()
+
+    // One conversation, created by the existing handler for the tab she is on —
+    // the same child, not a new scope, and the photo really did upload.
+    expect(vi.mocked(addDoc)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(addDoc).mock.calls[0][1]).toMatchObject({
+      chatContext: 'lincoln',
+      messageCount: 0,
+    })
+    expect(vi.mocked(uploadBytes)).toHaveBeenCalledTimes(1)
+    expect(chatCalls).toHaveLength(0)
+
+    // And the way back to her own draft is still there, behind the notice's
+    // close exactly as it is everywhere else.
+    fireEvent.click(screen.getByRole('button', { name: /close/i }))
+    expect(screen.getByText(/Your own draft is set aside/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Bring my own draft back/ })).toBeInTheDocument()
+  })
+
+  it('still owns the right conversation after a swap to her draft and back', async () => {
+    await readyToAttach()
+    await attach()
+
+    // Swap: her original comes back into the box and the edited question — with
+    // the photo now on it — takes the set-aside home.
+    fireEvent.click(screen.getByRole('button', { name: /close/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Bring my own draft back/ }))
+    expect(composer().value).toBe(MINE)
+
+    // Swap back. The question is armed from the origin it travelled with, and
+    // that origin now names the conversation her own Attach minted — so this is
+    // a restore rather than a revocation, which is what the stamps are for.
+    fireEvent.click(screen.getByRole('button', { name: /close/i }))
+    expect(screen.getByText(/The planner's question is set aside/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Bring that draft back/ }))
+    expect(composer().value).toContain(ASK)
+    expect(composer().value).toContain(EDIT)
+    expect(screen.getByText('Image attached — type your question')).toBeInTheDocument()
+    expect(screen.queryByText(/wasn't added to this conversation/)).not.toBeInTheDocument()
+
+    // Both drafts are still alive after the two swaps.
+    fireEvent.click(screen.getByRole('button', { name: /close/i }))
+    expect(screen.getByText(/Your own draft is set aside/)).toBeInTheDocument()
+    expect(vi.mocked(addDoc)).toHaveBeenCalledTimes(1)
+  })
+
+  it('positive control: Send goes to the reviewed child, in the minted conversation', async () => {
+    // The guard is a guard, not a wall: nothing moved, so the question she
+    // attached a photo to goes where it was accepted for.
+    await readyToAttach()
+    await attach()
+
+    fireEvent.click(sendButton())
+
+    await waitFor(() => expect(chatCalls).toHaveLength(1))
+    expect(chatCalls[0].childId).toBe(LINCOLN.id)
+    expect(chatCalls[0].messages[0].content).toContain(ASK)
+    expect(chatCalls[0].messages[0].content).toContain(EDIT.trim())
+    expect(chatCalls[0].messages[0].content).toContain('Lincoln')
+    // No second conversation was created by the Send: it sent into the one the
+    // Attach minted. Counted by the payload that only a thread document has, so
+    // the message writes the Send does make are not mistaken for one.
+    const threadCreations = vi
+      .mocked(addDoc)
+      .mock.calls.filter(
+        (call) => typeof call[1] === 'object' && call[1] !== null && 'chatContext' in call[1],
+      )
+    expect(threadCreations).toHaveLength(1)
+  })
+
+  it('still blocks when she moves to another child’s tab afterwards', async () => {
+    await readyToAttach()
+    await attach()
+
+    fireEvent.click(screen.getByRole('tab', { name: 'London' }))
+
+    // Withdrawn and emptied, as before the mint — the one difference is WHICH
+    // line it uses: a tab switch also leaves the minted conversation for a fresh
+    // one, and the thread check is the first of the two to notice. Both say
+    // where the question still is, and neither lets it go anywhere.
+    expect(await screen.findByText(/wasn't added to this conversation/)).toBeInTheDocument()
+    expect(composer().value).toBe('')
+    expect(sendButton()).toBeDisabled()
+    fireEvent.click(sendButton())
+    expect(chatCalls).toHaveLength(0)
+    // And returning to the tab it came from does not revive it.
+    fireEvent.click(screen.getByRole('tab', { name: 'Lincoln' }))
+    expect(composer().value).toBe('')
+    expect(chatCalls).toHaveLength(0)
+  })
+
+  it('still blocks when the shell changes child afterwards', async () => {
+    await readyToAttach()
+    await attach()
+
+    identity.activeChildId = LONDON.id
+    fireEvent.change(composer(), { target: { value: `${composer().value} ` } })
+
+    expect(await screen.findByText(/active child changed/)).toBeInTheDocument()
+    expect(composer().value).toBe('')
+    expect(chatCalls).toHaveLength(0)
+  })
+
+  it('still blocks when she leaves the minted conversation for a new one', async () => {
+    // The conversation half, from the direction the mint created: the guard now
+    // owns an id, and "New" is her moving off it. Advancing the stamp did not
+    // turn the thread check off — it only told the check which conversation this
+    // composer's work is in.
+    await readyToAttach()
+    await attach()
+
+    fireEvent.click(screen.getByRole('button', { name: 'New' }))
+
+    expect(await screen.findByText(/wasn't added to this conversation/)).toBeInTheDocument()
+    expect(composer().value).toBe('')
+    expect(chatCalls).toHaveLength(0)
+    expect(vi.mocked(addDoc)).toHaveBeenCalledTimes(1)
+  })
+
+  /** Tap Attach and stand in the moment its thread creation has not resolved. */
+  async function attachWithTheMintHeld() {
+    inFlight.holdThread = true
+    fireEvent.click(screen.getByText('Attach to my message'))
+    await waitFor(() => expect(vi.mocked(addDoc)).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(screen.queryByText('Attach to my message')).not.toBeInTheDocument())
+  }
+
+  /** Let the held creation resolve into whoever is still listening. */
+  async function releaseTheMint() {
+    const release = inFlight.releaseThread
+    inFlight.releaseThread = null
+    inFlight.holdThread = false
+    await act(async () => {
+      release?.()
+    })
+    await waitFor(() => expect(vi.mocked(uploadBytes)).toHaveBeenCalled())
+  }
+
+  it('cannot re-arm a revoked question when the mint lands after a tab switch', async () => {
+    // The authority was taken before the `await`, and by the time the id comes
+    // back she is on another child's tab: the operation is no longer in the scope
+    // it was started in, so its id is dropped and the revocation stands. A
+    // version that simply allowed `null → id` would hand the guard a conversation
+    // nobody is in — and re-arm a question that had already been withdrawn.
+    await readyToAttach()
+    await attachWithTheMintHeld()
+
+    fireEvent.click(screen.getByRole('tab', { name: 'London' }))
+    expect(await screen.findByText(/another child's conversation/)).toBeInTheDocument()
+    expect(composer().value).toBe('')
+
+    await releaseTheMint()
+
+    // Nothing was put back, nothing was re-armed, and nothing was sent.
+    expect(composer().value).toBe('')
+    expect(screen.getByText(/another child's conversation/)).toBeInTheDocument()
+    expect(sendButton()).toBeDisabled()
+    expect(chatCalls).toHaveLength(0)
+    fireEvent.click(screen.getByRole('tab', { name: 'Lincoln' }))
+    expect(composer().value).toBe('')
+    expect(chatCalls).toHaveLength(0)
+  })
+
+  it('cannot reach the next visit’s draft when the mint lands after she leaves and returns', async () => {
+    // The same lateness across the route. The operation holds the refs of the
+    // instance the departure unmounted, and the draft in front of her now was
+    // placed by a different visit — so the id addresses nothing.
+    await readyToAttach()
+    await attachWithTheMintHeld()
+
+    goToPlanner()
+    tapRefusal()
+    // Restored, with the chooser wound back open: the raw files were never
+    // cleared, because the upload that would have cleared them is still held.
+    await screen.findByText(/You were already typing something/)
+    expect(composer().value).toContain(EDIT)
+    fireEvent.click(screen.getByText(/Keep what I was typing/))
+
+    await releaseTheMint()
+
+    // This visit's words are untouched and its guard is its own: still the fresh
+    // conversation, so nothing has been revoked.
+    expect(composer().value).toContain(ASK)
+    expect(composer().value).toContain(EDIT)
+    expect(screen.queryByText(/wasn't added to this conversation/)).not.toBeInTheDocument()
+
+    // Positive control, through the chooser the restore gave her back: cancel the
+    // selection she has already seen attached once, then send.
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByAltText('Selected 1')).not.toBeInTheDocument())
+    fireEvent.click(sendButton())
+    await waitFor(() => expect(chatCalls).toHaveLength(1))
+    expect(chatCalls[0].childId).toBe(LINCOLN.id)
+    expect(chatCalls[0].messages[0].content).toContain(EDIT.trim())
   })
 })
 

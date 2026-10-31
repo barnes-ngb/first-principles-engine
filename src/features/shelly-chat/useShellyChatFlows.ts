@@ -112,6 +112,24 @@ export interface ShellyChatFlowsDeps {
    * not commit under a visit that no longer wants it.
    */
   suppressMountWrites?: boolean
+  /**
+   * Take the single-use authority for the thread THIS attach is about to create
+   * (UX-273 closeout), or `null` when there is nothing to authorise.
+   *
+   * Owned by `usePlannerAskHandoff` and passed in, like `currentContextScope`
+   * above and for the same reason: the context an operation STARTED in has to be
+   * captured before its first `await`, and a planner question held in a fresh
+   * conversation is guarded on that conversation. Her explicit "Attach to my
+   * message" is the one upload that creates the conversation she is already
+   * standing in, so without this the guard read its own thread creation as her
+   * opening a different conversation and cleared the edited question.
+   *
+   * No write capability moves either way: this hook still creates the thread
+   * exactly as before, and all the callback does is report the id it got.
+   * Optional, so an ordinary mount — and every existing test harness — is
+   * unchanged.
+   */
+  beginOwnThreadMint?: () => ((mintedThreadId: string) => void) | null
 }
 
 /**
@@ -125,7 +143,7 @@ export interface ShellyChatFlowsDeps {
  * keeping its external prop/route contract identical.
  */
 export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlowsDeps) {
-  const { familyId, children, activeChildId, chat, generateImage, lastErrorRef, imageFailureRef, setSearchParams, stagePendingActions, dropPendingForContext, currentContextScope, isParent = false, artQuota, suppressMountWrites = false } = deps
+  const { familyId, children, activeChildId, chat, generateImage, lastErrorRef, imageFailureRef, setSearchParams, stagePendingActions, dropPendingForContext, currentContextScope, isParent = false, artQuota, suppressMountWrites = false, beginOwnThreadMint } = deps
 
   // Readable synchronously from any async continuation, so a commit cannot land
   // after the answer changed.
@@ -946,6 +964,12 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
     setUploadDialogOpen(false)
     setUploading(true)
 
+    // The authority for the conversation this tap may create, taken before any
+    // `await` — the same rule as `currentContextScope` above (UX-273 closeout).
+    // Taken unconditionally rather than only when `activeThreadId` is empty,
+    // because the condition that matters is the one at the TAP: reading it later
+    // would be reading it from a continuation.
+    const claimOwnThread = beginOwnThreadMint?.() ?? null
     try {
       let threadId = activeThreadId
 
@@ -960,6 +984,11 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
           archived: false,
         })
         threadId = threadRef.id
+        // Reported before the conversation becomes the active one, so the guard
+        // already owns this id by the time the render that changes it happens.
+        // Only THIS id, and only once: whether it may be honoured is the
+        // guard's own decision, made against the context it captured.
+        claimOwnThread?.(threadId)
         setActiveThreadId(threadId)
         setSearchParams({ thread: threadId })
       }
@@ -985,7 +1014,7 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
       setUploadPreviews([])
       setUploading(false)
     }
-  }, [uploadFiles, uploadPreviews, activeThreadId, familyId, setSearchParams, chatContext, setActiveThreadId, setPendingAttachments, setUploadDialogOpen, setUploadFiles, setUploadPreviews, setUploading])
+  }, [uploadFiles, uploadPreviews, activeThreadId, familyId, setSearchParams, chatContext, setActiveThreadId, setPendingAttachments, setUploadDialogOpen, setUploadFiles, setUploadPreviews, setUploading, beginOwnThreadMint])
 
   const handleUploadAnalyze = useCallback(async () => {
     // Single-image path — the dialog only offers Analyze when one file is chosen.

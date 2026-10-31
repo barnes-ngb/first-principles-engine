@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import AddIcon from '@mui/icons-material/Add'
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate'
@@ -46,6 +46,7 @@ import ActionConfirmCard from './ActionConfirmCard'
 import NextWeekDraftCard from './NextWeekDraftCard'
 import PlannerAskHandoffNotice from './PlannerAskHandoffNotice'
 import { usePlannerAskHandoff } from './usePlannerAskHandoff'
+import type { PlannerAskOwnThreadClaim } from './usePlannerAskHandoff'
 import type { ComposerDraft } from './composerCustody'
 import { plannerAskHandoffGenerationFromState } from '../planner-chat/plannerAskHandoff'
 import { useChatActivityConfigs } from './useChatActivityConfigs'
@@ -304,6 +305,18 @@ export default function ShellyChatPage() {
     onDraftNextWeek: generateNextWeek,
   })
 
+  // UX-273 closeout — the one-way channel from the explicit Attach back to the
+  // hand-off guard, through a ref because the two hooks need each other: the
+  // guard is mounted BELOW the flows hook (it takes `handleNewThread` from it),
+  // and the flows hook needs to ask the guard a question before its own
+  // `await`. A ref is the smallest thing that closes that circle without
+  // re-ordering the composition or moving any capability between them. Assigned
+  // in a layout effect, so it is in place before any tap can read it, and never
+  // during render — a ref written in a render that is thrown away is a wire
+  // that silently is not there.
+  const ownThreadMint = useRef<(() => PlannerAskOwnThreadClaim | null) | null>(null)
+  const beginOwnThreadMint = useCallback(() => ownThreadMint.current?.() ?? null, [])
+
   const {
     handleContextChange,
     handleSend,
@@ -343,6 +356,7 @@ export default function ShellyChatPage() {
     artQuota: chatArtQuota,
     // UX-273: opt-in, explicit, and read before either mount effect can run.
     suppressMountWrites: handoffVisit,
+    beginOwnThreadMint,
   })
 
   // ── UX-273: a planner refusal's question, arriving as an UNSENT draft, and
@@ -407,6 +421,9 @@ export default function ShellyChatPage() {
     applyDraft: applyComposerDraft,
     startFreshThread: handleNewThread,
   })
+  useLayoutEffect(() => {
+    ownThreadMint.current = plannerAsk.beginOwnThreadMint
+  }, [plannerAsk.beginOwnThreadMint])
 
   // The ONE funnel every send door reaches (UX-189's lesson, applied to a guard
   // instead of a quota): the button and the Enter key both come through here, so

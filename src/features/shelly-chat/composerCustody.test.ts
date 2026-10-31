@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import {
   adoptRestoredUploadPreviews,
+  advanceComposerCustodyThread,
   clearComposerCustody,
   composerDraftIsEmpty,
   COMPOSER_CUSTODY_TTL_MS,
@@ -14,6 +15,7 @@ import {
   saveDisplacedComposerCustody,
   takeComposerCustody,
   takeDisplacedComposerCustody,
+  type ComposerCustodyOrigin,
   type ComposerCustodyOwner,
   type ComposerDraft,
 } from './composerCustody'
@@ -44,6 +46,35 @@ const FULL: ComposerDraft = {
   imageIdea: 'a reading corner poster',
   imageQuestions: [{ question: 'What style?', options: ['Cartoon'] }],
   imageAnswers: { 0: 'Cartoon' },
+}
+
+/**
+ * A carried hand-off's guard metadata, as the receiver hands it over.
+ *
+ * Custody never interprets it, so what the slot owes it is a verbatim round
+ * trip: the identity the question was ACCEPTED under is what makes a later scope
+ * change read as a revocation rather than as a fresh arrival, and a field this
+ * module quietly dropped or re-stamped would be that check reading a lie.
+ */
+const ORIGIN: ComposerCustodyOrigin = {
+  handoff: {
+    familyId: 'fam-1',
+    childId: 'child-lincoln',
+    childName: 'Lincoln',
+    weekStart: '2026-11-02',
+    question: 'add TGTB Math Level 1, 30 minutes daily',
+    jobId: 'curriculum',
+    generation: 3,
+    stagedAt: 1_762_000_000_000,
+  },
+  receiver: {
+    familyId: 'fam-1',
+    profile: 'parents',
+    chatContext: 'lincoln',
+    contextChildId: 'child-lincoln',
+    threadId: null,
+  },
+  activeChildId: 'child-lincoln',
 }
 
 afterEach(() => clearComposerCustody())
@@ -273,7 +304,16 @@ describe('the composer custody slot', () => {
       attachments: FULL.attachments,
     }
     saveComposerCustody(OWNER, null, ordinary)
-    expect(takeComposerCustody(OWNER, null)).toEqual({ kind: 'same-thread', draft: ordinary })
+    // The WHOLE look, `origin` included: an ordinary draft is hers and carries
+    // no guard, and `null` is the answer the receiver acts on. Asserted as an
+    // exact object rather than matched loosely, so a field added to this shape
+    // has to be stated here — a `toMatchObject` would have let the new one
+    // through unread, which is the opposite of what these tests are for.
+    expect(takeComposerCustody(OWNER, null)).toEqual({
+      kind: 'same-thread',
+      draft: ordinary,
+      origin: null,
+    })
   })
 
   it('hands back a copy, so a later edit cannot reach into the slot', () => {
@@ -302,12 +342,17 @@ describe('the set-aside home, beside the box', () => {
     saveDisplacedComposerCustody(OWNER, null, HERS, 'mine')
     saveComposerCustody(OWNER, null, EDITED)
 
-    expect(takeComposerCustody(OWNER, null)).toEqual({ kind: 'same-thread', draft: EDITED })
+    expect(takeComposerCustody(OWNER, null)).toEqual({
+      kind: 'same-thread',
+      draft: EDITED,
+      origin: null,
+    })
     expect(takeDisplacedComposerCustody(OWNER)).toEqual({
       kind: 'held',
       draft: HERS,
       threadId: null,
       holds: 'mine',
+      origin: null,
     })
   })
 
@@ -328,6 +373,7 @@ describe('the set-aside home, beside the box', () => {
       draft: HERS,
       threadId: 'thread-7',
       holds: 'mine',
+      origin: null,
     })
   })
 
@@ -390,6 +436,145 @@ describe('the set-aside home, beside the box', () => {
     saveDisplacedComposerCustody(OWNER, null, HERS, 'mine')
     clearComposerCustody()
     expect(peekDisplacedComposerCustody(OWNER)).toEqual({ kind: 'none' })
+  })
+})
+
+describe('the guard a carried draft travels with', () => {
+  /**
+   * The release review's behavioural blocker, at the slot's own level: a
+   * restored question that came back without its authority was ordinary text in
+   * a box, and a Send from another child's tab wrote that child's conversation
+   * while the words still named the first. So the guard travels WITH the draft,
+   * and what is pinned here is that this module hands it back unchanged — it is
+   * carried, never interpreted.
+   */
+  const QUESTION: ComposerDraft = { ...EMPTY_COMPOSER_DRAFT, text: 'the question, as she edited it' }
+  const HERS: ComposerDraft = { ...EMPTY_COMPOSER_DRAFT, text: 'the draft she set aside' }
+
+  it('round-trips the origin through the box’s slot, field for field', () => {
+    saveComposerCustody(OWNER, null, QUESTION, Date.now(), currentComposerCustodySession(), ORIGIN)
+    expect(takeComposerCustody(OWNER, null)).toEqual({
+      kind: 'same-thread',
+      draft: QUESTION,
+      origin: ORIGIN,
+    })
+  })
+
+  it('round-trips it through the set-aside home too, because a set-aside question is still one', () => {
+    saveDisplacedComposerCustody(
+      OWNER,
+      null,
+      QUESTION,
+      'question',
+      Date.now(),
+      currentComposerCustodySession(),
+      ORIGIN,
+    )
+    expect(takeDisplacedComposerCustody(OWNER)).toEqual({
+      kind: 'held',
+      draft: QUESTION,
+      threadId: null,
+      holds: 'question',
+      origin: ORIGIN,
+    })
+  })
+
+  it('offers a cross-conversation draft with its origin, rather than stripping it', () => {
+    // The receiver's rule is that a carried question is only PLACED where its
+    // guard can be rebuilt with it, which it can only decide if the look says
+    // there is one.
+    saveComposerCustody(OWNER, 'thread-7', QUESTION, Date.now(), currentComposerCustodySession(), ORIGIN)
+    expect(peekComposerCustody(OWNER, null)).toEqual({
+      kind: 'other-thread',
+      draft: QUESTION,
+      origin: ORIGIN,
+    })
+  })
+
+  describe('and the conversation her own Attach minted for it', () => {
+    /**
+     * The closeout's blocker, from the slot's side. A fresh conversation has no
+     * id, so everything about this work is stamped `null`; her explicit "Attach
+     * to my message" creates the thread document without her going anywhere, and
+     * a slot still naming `null` then disagrees with the live composer about
+     * where its work is. The entry moves, the IDENTITY does not.
+     */
+    it('moves both homes’ stamp and the carried origin’s conversation', () => {
+      saveComposerCustody(OWNER, null, QUESTION, Date.now(), currentComposerCustodySession(), ORIGIN)
+      saveDisplacedComposerCustody(
+        OWNER,
+        null,
+        HERS,
+        'question',
+        Date.now(),
+        currentComposerCustodySession(),
+        ORIGIN,
+      )
+
+      advanceComposerCustodyThread(OWNER, null, 'minted-1')
+
+      const box = peekComposerCustody(OWNER, 'minted-1')
+      expect(box.kind).toBe('same-thread')
+      // Everything the identity is made of is untouched — only the conversation
+      // moved, and only from the fresh one it actually named.
+      expect(box.kind !== 'none' && box.origin).toEqual({
+        ...ORIGIN,
+        receiver: { ...ORIGIN.receiver, threadId: 'minted-1' },
+      })
+      const aside = peekDisplacedComposerCustody(OWNER)
+      expect(aside.kind === 'held' && aside.threadId).toBe('minted-1')
+      expect(aside.kind === 'held' && aside.origin?.receiver.threadId).toBe('minted-1')
+      expect(aside.kind === 'held' && aside.origin?.handoff).toEqual(ORIGIN.handoff)
+      expect(aside.kind === 'held' && aside.holds).toBe('question')
+    })
+
+    it('leaves an entry that names a different conversation exactly where it is', () => {
+      // The one-way bound that keeps this from being a free re-address: an entry
+      // already in a saved conversation was not in the one that just got an id.
+      saveComposerCustody(OWNER, 'thread-7', QUESTION, Date.now(), currentComposerCustodySession(), ORIGIN)
+      advanceComposerCustodyThread(OWNER, null, 'minted-1')
+      expect(peekComposerCustody(OWNER, 'thread-7')).toEqual({
+        kind: 'same-thread',
+        draft: QUESTION,
+        origin: ORIGIN,
+      })
+    })
+
+    it('never re-addresses a stranger’s work, or work from a sign-in that has ended', () => {
+      saveComposerCustody(OWNER, null, QUESTION, Date.now(), currentComposerCustodySession(), ORIGIN)
+      for (const stranger of [
+        { ...OWNER, familyId: 'fam-2' },
+        { ...OWNER, profile: 'lincoln' },
+        { ...OWNER, chatContext: 'london' },
+        { ...OWNER, contextChildId: 'child-london' },
+      ]) {
+        advanceComposerCustodyThread(stranger, null, 'minted-1')
+      }
+      expect(peekComposerCustody(OWNER, null).kind).toBe('same-thread')
+
+      // A late result from a sign-in that is over moves nothing, exactly as a
+      // late SAVE from one writes nothing.
+      const ended = currentComposerCustodySession()
+      endComposerCustodySession()
+      saveComposerCustody(OWNER, null, QUESTION, Date.now(), currentComposerCustodySession(), ORIGIN)
+      advanceComposerCustodyThread(OWNER, null, 'minted-1', ended)
+      expect(peekComposerCustody(OWNER, null).kind).toBe('same-thread')
+    })
+
+    it('leaves an origin accepted in another conversation under its own identity', () => {
+      // The draft is in the fresh conversation; the guard it carries was accepted
+      // in a saved one. Moving that receiver would re-stamp the question as newly
+      // legitimate somewhere it never was, so only the entry moves.
+      const elsewhere: ComposerCustodyOrigin = {
+        ...ORIGIN,
+        receiver: { ...ORIGIN.receiver, threadId: 'thread-7' },
+      }
+      saveComposerCustody(OWNER, null, QUESTION, Date.now(), currentComposerCustodySession(), elsewhere)
+      advanceComposerCustodyThread(OWNER, null, 'minted-1')
+      const box = peekComposerCustody(OWNER, 'minted-1')
+      expect(box.kind).toBe('same-thread')
+      expect(box.kind !== 'none' && box.origin).toEqual(elsewhere)
+    })
   })
 })
 

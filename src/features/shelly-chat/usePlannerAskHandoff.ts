@@ -51,6 +51,7 @@ import {
 } from '../planner-chat/plannerAskHandoff'
 import {
   adoptRestoredUploadPreviews,
+  advanceComposerCustodyThread,
   composerDraftIsEmpty,
   currentComposerCustodySession,
   EMPTY_COMPOSER_DRAFT,
@@ -119,6 +120,16 @@ export interface PlannerAskHandoffDeps {
   startFreshThread: () => void
 }
 
+/**
+ * Report the id an operation's OWN thread creation returned.
+ *
+ * One shot, and only the operation that took it out of
+ * {@link PlannerAskHandoffResult.beginOwnThreadMint} may call it. Calling it
+ * neither creates nor opens anything: it hands the guard the one id that is
+ * allowed to become its conversation, and the guard still decides.
+ */
+export type PlannerAskOwnThreadClaim = (mintedThreadId: string) => void
+
 export interface PlannerAskHandoffResult {
   state: PlannerAskHandoffState
   keepExisting: () => void
@@ -140,6 +151,20 @@ export interface PlannerAskHandoffResult {
    */
   dismiss: () => void
   guardSend: (send: () => void) => void
+  /**
+   * Called by an operation that is ABOUT TO create this composer's own
+   * conversation — today only the explicit "Attach to my message" upload — to
+   * take the single-use authority for the id it is about to get.
+   *
+   * Call it BEFORE the operation's first `await`: that is the whole point. What
+   * it returns closes over the identity, the sign-in and the draft generation of
+   * the moment the tap happened, so a result that lands after she has moved,
+   * signed out, left the route or had a different draft placed is refused
+   * instead of re-arming a guard against a scope nobody is in. Returns `null`
+   * when there is nothing to authorise — no held question, or a conversation
+   * that already has an id, which is every ordinary upload.
+   */
+  beginOwnThreadMint: () => PlannerAskOwnThreadClaim | null
 }
 
 /** The authority plus what the composer is expected to be holding for it. */
@@ -157,6 +182,17 @@ function ownerOf(receiver: PlannerAskReceiver): ComposerCustodyOwner {
     chatContext: receiver.chatContext,
     contextChildId: receiver.contextChildId,
   }
+}
+
+/**
+ * The owner as one comparable string — no conversation in it.
+ *
+ * The same composition the render-time `ownerKey` uses, so a check made from an
+ * async continuation (which has no render values) asks exactly the question the
+ * screen answers.
+ */
+function ownerKeyOf(owner: ComposerCustodyOwner): string {
+  return `${owner.familyId}|${owner.profile ?? ''}|${owner.chatContext}|${owner.contextChildId}`
 }
 
 /** Cheap content signature — changes exactly when unsent work changes. */
@@ -277,6 +313,32 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
   const restoreAttempted = useRef(false)
   const decidedGeneration = useRef<number | null>(null)
 
+  // ── What a late result has to still be true for ──────────────────────────
+  //
+  // Two facts an async continuation cannot read off a render, both for the same
+  // reason: an operation that started under one draft in one visit must not be
+  // able to act on another.
+  //
+  // `onThisVisit` is the route. A departure unmounts this hook, and the
+  // continuation of an operation it started keeps running — holding THIS
+  // instance's refs, which nothing else will ever read again. Re-assigned in the
+  // effect body, not just cleared in the cleanup, so a StrictMode replay's
+  // simulated unmount does not retire the instance that is actually mounted.
+  //
+  // `placements` counts the times this hook has PLACED a draft wholesale — a
+  // fill, an arrival restore, a swap, a revocation. It does not count her
+  // typing: an edit keeps its guard and must keep a claim too, since typing
+  // while an upload runs is ordinary. A placement is the opposite — the box now
+  // holds different work from the one the operation was started for.
+  const onThisVisit = useRef(false)
+  useEffect(() => {
+    onThisVisit.current = true
+    return () => {
+      onThisVisit.current = false
+    }
+  }, [])
+  const placements = useRef(0)
+
   const generation = plannerAskHandoffGenerationFromState(location.state)
   const settled = profile !== null && Boolean(familyId) && !childrenLoading
   // One extra pass before believing "this tab maps to no child": the chat
@@ -295,6 +357,7 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
 
   /** Take the question back; her other unsent work stays untouched. */
   const revoke = useCallback((held: HeldAsk, reason: PlannerAskHandoffRefusal) => {
+    placements.current += 1
     authority.current = null
     if (held.inComposer) live.current.applyDraft({ ...live.current.draft, text: '' })
     setState({ kind: 'withdrawn', handoff: held.handoff, reason })
@@ -350,6 +413,7 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
    * still is, and Send does nothing.
    */
   const armFromOrigin = useCallback((origin: ComposerCustodyOrigin, text: string) => {
+    placements.current += 1
     authority.current = {
       handoff: origin.handoff,
       receiver: origin.receiver,
@@ -393,7 +457,7 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
           ? {
               draft: kept.draft,
               owner,
-              ownerKey: `${owner.familyId}|${owner.profile ?? ''}|${owner.chatContext}|${owner.contextChildId}`,
+              ownerKey: ownerKeyOf(owner),
               threadId: kept.threadId,
               session,
               holds: kept.holds,
@@ -444,6 +508,7 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
       const kept = setAside
         ? setWorkAside(setAside, receiver, asideHolds, originOf(leaving))
         : null
+      placements.current += 1
       live.current.applyDraft({ ...base, text })
       authority.current = {
         handoff,
@@ -557,6 +622,7 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
           threadId,
           session: currentComposerCustodySession(),
         }
+        placements.current += 1
         live.current.applyDraft(restored)
         // A carried question is placed back under the guard it was accepted
         // with, BEFORE anything on this page can send it. The checks below and
@@ -645,6 +711,7 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
           threadId,
           session: currentComposerCustodySession(),
         }
+        placements.current += 1
         live.current.applyDraft(placed)
       }
       // Not a plain `hold`: the box may already be holding a question restored
@@ -745,6 +812,117 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
     [originOf],
   )
 
+  // ── The conversation this composer MINTS for itself ──────────────────────
+  //
+  // The closeout's blocker, and the one case the thread check gets wrong.
+  //
+  // A restored, edited Lincoln question sits in a FRESH conversation, so the
+  // guard's conversation is `null`. She picks a photo and taps "Attach to my
+  // message" — the existing upload, her own explicit tap — and that handler
+  // creates the thread document a fresh conversation has been missing and sets
+  // it active. The guard then saw `null → 'abc'`, read it as "she opened another
+  // conversation", revoked, and CLEARED the edited text behind a notice whose
+  // own message had been withdrawn. The photo survived; her words did not.
+  //
+  // The thread check is right and stays: a question accepted for one
+  // conversation must not be sent into another, and `null → id` is exactly what
+  // selecting a saved conversation from the drawer looks like too. So the two
+  // are told apart by PROVENANCE rather than by shape — not by matching the
+  // child, not by allowing a `null` to be replaced freely:
+  //
+  //  - the authority to move is taken by the operation BEFORE its first
+  //    `await`, from the identity, sign-in and draft generation of the tap;
+  //  - only the id that operation's own creation returned is offered back, once;
+  //  - and the offer is refused unless all of that is still true at the moment
+  //    it lands — same visit, same owner, same shell child, same sign-in, same
+  //    placed draft, same held question, and the live conversation still the
+  //    fresh one. A result arriving after a tab switch, a logout, a departure,
+  //    or a swap that moved the draft cannot re-arm anything or address a draft
+  //    it was not started for; it is simply dropped, and the ordinary
+  //    revocation stands.
+  //
+  // Nothing here creates, opens, writes or sends: the thread already exists by
+  // the time this is told about it, and what moves is a stamp.
+  const beginOwnThreadMint = useCallback((): PlannerAskOwnThreadClaim | null => {
+    const held = authority.current
+    if (!held) return null
+    const receiver = live.current.receiver
+    // Only a composer standing in a fresh conversation can mint one, and only a
+    // question whose own authority names that same fresh conversation has
+    // anything to advance. Either already naming an id means this is not the
+    // case the blocker is about, and an ordinary upload stays untouched.
+    if (receiver.threadId !== null || held.receiver.threadId !== null) return null
+    const captured = {
+      owner: ownerOf(receiver),
+      ownerKey: ownerKeyOf(ownerOf(receiver)),
+      activeChildId: live.current.activeChildId,
+      /** By identity: the very question held at the tap, not one like it. */
+      handoff: held.handoff,
+      session: currentComposerCustodySession(),
+      placements: placements.current,
+    }
+    let spent = false
+    return (mintedThreadId: string) => {
+      if (spent) return
+      spent = true
+      if (!mintedThreadId) return
+      if (!onThisVisit.current) return
+      if (currentComposerCustodySession() !== captured.session) return
+      if (placements.current !== captured.placements) return
+      const now = live.current.receiver
+      // She has opened a conversation in the meantime, so this id is not the
+      // conversation she is in and the thread check's answer is the right one.
+      if (now.threadId !== null) return
+      if (ownerKeyOf(ownerOf(now)) !== captured.ownerKey) return
+      if (live.current.activeChildId !== captured.activeChildId) return
+      const still = authority.current
+      if (!still || still.handoff !== captured.handoff) return
+      if (still.receiver.threadId !== null) return
+
+      // The guard's conversation, and nothing else about its identity.
+      authority.current = {
+        ...still,
+        receiver: { ...still.receiver, threadId: mintedThreadId },
+      }
+      // The box's own home moves with it: the work in the composer now lives in
+      // this conversation, so that is the conversation it would be handed over
+      // from and restored into.
+      const stamp = draftOwner.current
+      if (
+        stamp &&
+        stamp.threadId === null &&
+        stamp.session === captured.session &&
+        sameComposerOwner(stamp.owner, captured.owner)
+      ) {
+        draftOwner.current = { ...stamp, threadId: mintedThreadId }
+      }
+      // And the set-aside home, in the slot and in the mirror the notice reads
+      // from — including a set-aside QUESTION's carried origin, so a swap after
+      // the upload arms it against the conversation it is actually in, instead
+      // of revoking it for a fresh conversation that now has an id.
+      advanceComposerCustodyThread(captured.owner, null, mintedThreadId, captured.session)
+      const aside = displaced.current
+      if (
+        aside &&
+        aside.threadId === null &&
+        aside.session === captured.session &&
+        sameComposerOwner(aside.owner, captured.owner)
+      ) {
+        displaced.current = {
+          ...aside,
+          threadId: mintedThreadId,
+          origin:
+            aside.origin && aside.origin.receiver.threadId === null
+              ? {
+                  ...aside.origin,
+                  receiver: { ...aside.origin.receiver, threadId: mintedThreadId },
+                }
+              : aside.origin,
+        }
+      }
+    }
+  }, [])
+
   /** The one place an action asks "may this still be used?". */
   const guardHeld = useCallback(
     (requireInComposer: boolean): HeldAsk | 'blocked' | null => {
@@ -828,6 +1006,7 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
     // the second check: a sign-in that ended, or a scope the shell observer
     // cleared, comes back empty and nothing is restored from a stale copy.
     const taken = takeDisplacedComposerCustody(stamp.owner)
+    placements.current += 1
     displaced.current = null
     if (taken.kind !== 'held') {
       setState((prev) => (prev.kind === 'set-aside' ? { kind: 'idle' } : prev))
@@ -1006,5 +1185,6 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
     keepSetAside,
     dismiss,
     guardSend,
+    beginOwnThreadMint,
   }
 }

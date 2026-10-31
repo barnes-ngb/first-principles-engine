@@ -135,6 +135,11 @@ describe('the hand-off path writes nothing and calls nothing', () => {
     // Minting a preview is taking ownership of a resource somebody then has to
     // free, so it belongs to the one module that PLACES restored work.
     expect(users('adoptRestoredUploadPreviews')).toEqual([RECEIVER])
+    // Re-stamping which conversation an entry is in is the one write here that
+    // changes a label rather than storing one, and whether a thread creation was
+    // really this composer's OWN is only knowable where the operation's context
+    // was captured. A second caller would be a second answer to that question.
+    expect(users('advanceComposerCustodyThread')).toEqual([RECEIVER])
   })
 
   it('is read from exactly one place in the app', () => {

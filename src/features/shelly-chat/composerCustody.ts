@@ -454,6 +454,68 @@ export function takeDisplacedComposerCustody(
   return look
 }
 
+/**
+ * Move both slots' conversation stamp from the fresh, unwritten conversation
+ * onto the id the composer's OWN explicit upload just minted.
+ *
+ * The release closeout's blocker. A fresh conversation has no id until something
+ * writes one, and "Attach to my message" is one of the things that does: her
+ * explicit tap creates the thread document, so the conversation she is standing
+ * in acquires an id without her going anywhere. Everything stamped `null` — the
+ * entry's own conversation, and the receiver inside a carried
+ * {@link ComposerCustodyOrigin} — was stamped for THAT conversation, so leaving
+ * those stamps behind makes the slot disagree with the live composer about where
+ * its work is: a later restore reads the question as belonging to a conversation
+ * that is no longer open and revokes it, which is the loss this closes.
+ *
+ * Deliberately narrow, because this is the one function here that rewrites a
+ * stamp rather than storing one:
+ *
+ *  - it moves an entry only when the owner matches, the sign-in matches, and the
+ *    entry still names `fromThreadId` — so it can never re-address another
+ *    owner's work, or re-point an entry that already names a conversation;
+ *  - it moves the origin's receiver only when that receiver names the same
+ *    conversation, so a question accepted somewhere else keeps the identity it
+ *    was accepted under. Nothing is re-stamped as newly legitimate: the
+ *    receiver's family, profile, tab and child are untouched and the hand-off
+ *    payload is untouched, so every check still reads the identity she accepted.
+ *
+ * Whether the mint is really the caller's OWN is not knowable here — the slot
+ * sees two ids and no operation. That judgement belongs to the receiver, which
+ * captures its context before the upload's `await` and calls this only for the
+ * id its own creation returned; see `usePlannerAskHandoff`'s `beginOwnThreadMint`.
+ */
+export function advanceComposerCustodyThread(
+  owner: ComposerCustodyOwner,
+  fromThreadId: string | null,
+  toThreadId: string,
+  ownedSession: number = session,
+): void {
+  if (ownedSession !== session) return
+  if (fromThreadId === toThreadId) return
+
+  const movable = (entry: HeldCustody): boolean =>
+    entry.session === session &&
+    sameComposerOwner(entry.owner, owner) &&
+    entry.threadId === fromThreadId
+
+  const movedOrigin = (origin: ComposerCustodyOrigin | null): ComposerCustodyOrigin | null =>
+    origin && origin.receiver.threadId === fromThreadId
+      ? { ...origin, receiver: { ...origin.receiver, threadId: toThreadId } }
+      : origin
+
+  if (held && movable(held)) {
+    held = { ...held, threadId: toThreadId, origin: movedOrigin(held.origin) }
+  }
+  if (displacedHeld && movable(displacedHeld)) {
+    displacedHeld = {
+      ...displacedHeld,
+      threadId: toThreadId,
+      origin: movedOrigin(displacedHeld.origin),
+    }
+  }
+}
+
 /** Drop whatever is held. The scope observer and test isolation use this. */
 export function clearComposerCustody(): void {
   held = null
