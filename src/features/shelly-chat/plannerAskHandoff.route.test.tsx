@@ -211,12 +211,13 @@ import { getDownloadURL, uploadBytes } from 'firebase/storage'
 
 import type { ChatMessage } from '../../core/types'
 import { ChatMessageRole } from '../../core/types/enums'
-import { getWeekRange } from '../../core/utils/time'
+import { getPlanningWeekRange } from '../../core/utils/time'
 import PlannerChatMessages from '../planner-chat/PlannerChatMessages'
 import { withDeclinedAskCleared } from '../planner-chat/plannerRequest'
 import {
   clearPlannerAskHandoff,
   PLANNER_ASK_HANDOFF_STATE_KEY,
+  PLANNER_ASK_HANDOFF_TTL_MS,
   stagePlannerAskHandoff,
   type PlannerAskHandoffSource,
 } from '../planner-chat/plannerAskHandoff'
@@ -231,8 +232,17 @@ const IDEA_PLACEHOLDER = 'e.g., something for our reading corner'
 const LATE_QUESTIONS = {
   message: JSON.stringify({ questions: [{ question: 'What style?', options: ['Cartoon'] }] }),
 }
-/** The live planning week, so the source-week check is exercised, not bypassed. */
-const WEEK_START = getWeekRange(new Date()).start
+/**
+ * The live planning week, so the source-week check is exercised, not bypassed.
+ *
+ * The PLANNER's week, not the plain Sun–Sat one. `isPlanningWeekPast` reads the
+ * Mon–Fri body, so `getWeekRange` names a week that is already past from Friday
+ * evening on — on Sat Oct 31 every journey here refused with `week-passed`,
+ * which is a fixture that stopped exercising the check rather than a product
+ * failure. `getPlanningWeekRange` is the planner's own rolling default and is
+ * never a past week on any day.
+ */
+const WEEK_START = getPlanningWeekRange(new Date()).start
 
 const SOURCE: PlannerAskHandoffSource = {
   familyId: 'fam-1',
@@ -843,6 +853,355 @@ describe('her own unsent work survives the route', () => {
     // silently take the box.
     expect(await screen.findByText(/You were already typing something/)).toBeInTheDocument()
     expect(screen.getByText('Attach to my message')).toBeInTheDocument()
+  })
+})
+
+describe('a draft the question displaced is still hers', () => {
+  /**
+   * Round 1's P2, end to end, and the release review's correction to the first
+   * repair of it.
+   *
+   * Her work was displaced by an explicit tap and the ONLY copy of it lived in
+   * the notice's own state, so closing the notice — or sending, or leaving —
+   * took her text, her photo and her image idea with it. The first repair kept
+   * that draft by giving it the single custody slot, which then cost the OTHER
+   * draft: the question as she had edited it, and anything she attached to it,
+   * were dropped on the way out on the false premise that the planner could
+   * give them back. The planner holds the original sentence and nothing else.
+   * So both drafts are kept, each in its own home.
+   */
+  const MINE = 'mine — the one copy of this'
+
+  async function displace() {
+    renderApp()
+    fireEvent.change(composer(), { target: { value: MINE } })
+    goToPlanner()
+    tapRefusal()
+    await screen.findByText(/You were already typing something/)
+    fireEvent.click(screen.getByRole('button', { name: /Use the planner's question/ }))
+    expect(composer().value).toContain(ASK)
+    expect(screen.getByRole('button', { name: /Bring my own draft back/ })).toBeInTheDocument()
+  }
+
+  it('survives her closing the notice, and comes back on a tap', async () => {
+    await displace()
+    fireEvent.click(screen.getByRole('button', { name: /close/i }))
+
+    // The hand-off's note is gone, as a close should do. The one that says
+    // where her own work is takes its place rather than going with it.
+    expect(screen.queryByText(/From Plan My Week/)).not.toBeInTheDocument()
+    expect(screen.getByText(/set aside, unsent/)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /Bring my own draft back/ }))
+    expect(composer().value).toBe(MINE)
+    expect(chatCalls).toHaveLength(0)
+    expect(vi.mocked(addDoc)).not.toHaveBeenCalled()
+    expect(vi.mocked(updateDoc)).not.toHaveBeenCalled()
+  })
+
+  it('is not discarded by the Send that takes the question away', async () => {
+    await displace()
+    fireEvent.click(sendButton())
+    await waitFor(() => expect(chatCalls).toHaveLength(1))
+
+    // The question was sent — the composer is empty and the hand-off's note is
+    // finished — and her own unsent work is exactly where she left it.
+    expect(await screen.findByText(/set aside, unsent/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Bring my own draft back/ }))
+    expect(composer().value).toBe(MINE)
+    // The restore asked nothing and sent nothing: one call, hers.
+    expect(chatCalls).toHaveLength(1)
+    expect(chatCalls[0].messages[0].content).toContain(ASK)
+  })
+
+  it('keeps BOTH drafts across the route — her edits in the box, her original set aside', async () => {
+    // The release review's repro. She displaces her own work, then edits the
+    // question and leaves. Two drafts exist and neither is reproducible: the
+    // planner holds the sentence she typed, not the words she changed in it and
+    // not the photo or the image idea beside her original. The first repair
+    // saved the displaced one and dropped the box; the one before it saved the
+    // box and dropped the displaced one. Both come back now.
+    const { container } = renderApp()
+    fireEvent.click(screen.getByRole('button', { name: 'Generate image' }))
+    fireEvent.change(await screen.findByPlaceholderText(IDEA_PLACEHOLDER), {
+      target: { value: IDEA },
+    })
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement
+    fireEvent.change(fileInput, {
+      target: { files: [new File(['x'], 'raw.png', { type: 'image/png' })] },
+    })
+    await screen.findByText('Attach to my message')
+    fireEvent.change(composer(), { target: { value: MINE } })
+
+    goToPlanner()
+    tapRefusal()
+    await screen.findByText(/You were already typing something/)
+    // Tapped by text: her chooser and her image form are both open, so MUI has
+    // `aria-hidden` over the notice behind them — the same shape the restored
+    // chooser's tests already pin.
+    fireEvent.click(screen.getByText(/Use the planner's question/))
+    // Her work is set aside and the planner's question is in the box, where she
+    // edits it — the edit the planner can still reproduce, unlike her draft.
+    expect(composer().value).toContain(ASK)
+    fireEvent.change(composer(), { target: { value: `${composer().value} and more phonics` } })
+
+    goToPlanner()
+    tapRefusal()
+
+    // Back. The box has her EDIT of the question — the draft the old code
+    // deleted on the way out — and the new question is offered against it.
+    await screen.findByText(/You were already typing something/)
+    expect(composer().value).toContain('and more phonics')
+    expect(composer().value).toContain(ASK)
+
+    // And her original is still set aside: one tap to see the offer, one to
+    // take it, and it brings its photo and its image idea with it.
+    fireEvent.click(screen.getByRole('button', { name: /Keep what I was typing/ }))
+    fireEvent.click(screen.getByRole('button', { name: /close/i }))
+    expect(screen.getByText(/Your own draft is set aside/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Bring my own draft back/ }))
+
+    expect(composer().value).toBe(MINE)
+    expect(screen.getByText('Attach to my message')).toBeInTheDocument()
+    expect(screen.getByAltText('Selected 1')).toBeInTheDocument()
+    expect((screen.getByPlaceholderText(IDEA_PLACEHOLDER) as HTMLInputElement).value).toBe(IDEA)
+    // The preview she is shown is one this page minted, so the restored chooser
+    // is usable: a string carried from the instance that left is one its own
+    // upload failure or cancel would revoke.
+    const restoredPreview = screen.getByAltText('Selected 1').getAttribute('src')
+    expect(objectUrls.revoked).not.toContain(restoredPreview)
+
+    // And the journey back wrote nothing and asked nothing.
+    expect(chatCalls).toHaveLength(0)
+    expect(generateImageCalls).toHaveLength(0)
+    expect(vi.mocked(addDoc)).not.toHaveBeenCalled()
+    expect(vi.mocked(updateDoc)).not.toHaveBeenCalled()
+    expect(vi.mocked(uploadBytes)).not.toHaveBeenCalled()
+    expect(batchSpy.commit).not.toHaveBeenCalled()
+  })
+
+  it('stops being offered when another child’s tab is in front of her', async () => {
+    await displace()
+    fireEvent.click(screen.getByRole('tab', { name: 'London' }))
+    expect(await screen.findByText(/another child's conversation/)).toBeInTheDocument()
+
+    // Her Lincoln draft is not offered into London's composer — not now, and
+    // not by coming back, exactly as the question's own authority cannot be
+    // revived by returning to the tab it came from.
+    expect(screen.queryByRole('button', { name: /Bring my own draft back/ })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /close/i }))
+    expect(screen.queryByText(/set aside, unsent/)).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: 'Lincoln' }))
+    expect(screen.queryByRole('button', { name: /Bring my own draft back/ })).not.toBeInTheDocument()
+    expect(composer().value).toBe('')
+    expect(chatCalls).toHaveLength(0)
+    expect(vi.mocked(addDoc)).not.toHaveBeenCalled()
+  })
+
+  it('goes when she discards it, and then stays gone across the route', async () => {
+    await displace()
+    fireEvent.click(screen.getByRole('button', { name: /close/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Discard it/ }))
+    expect(screen.queryByText(/set aside, unsent/)).not.toBeInTheDocument()
+
+    // The one explicit end of its life: not restored here, and not waiting in
+    // the set-aside home to be handed back on the next visit either. The box
+    // still travels — that is the other draft, and it is hers too.
+    goToPlanner()
+    tapRefusal()
+    await screen.findByText(/From Plan My Week/)
+    expect(composer().value).toContain(ASK)
+    expect(screen.queryByText(MINE)).not.toBeInTheDocument()
+    expect(screen.queryByText(/set aside, unsent/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Bring my own draft back/ })).not.toBeInTheDocument()
+  })
+
+  it('does not let the restore quietly eat the newer work in the box', async () => {
+    // The release review's second point: restoring the old draft must not throw
+    // away the current one. It trades places with it — the box's draft becomes
+    // the set-aside one — so no tap in this feature destroys unsent work
+    // without saying so.
+    await displace()
+    fireEvent.change(composer(), { target: { value: `${composer().value} and more phonics` } })
+    fireEvent.click(screen.getByRole('button', { name: /Bring my own draft back/ }))
+    expect(composer().value).toBe(MINE)
+
+    fireEvent.click(screen.getByRole('button', { name: /close/i }))
+    expect(screen.getByText(/The planner's question is set aside/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Bring that draft back/ }))
+    expect(composer().value).toContain('and more phonics')
+
+    // Both drafts are still alive after two swaps, and the one not in the box
+    // is still named and still one tap away.
+    fireEvent.click(screen.getByRole('button', { name: /close/i }))
+    expect(screen.getByText(/Your own draft is set aside/)).toBeInTheDocument()
+    expect(chatCalls).toHaveLength(0)
+    expect(vi.mocked(addDoc)).not.toHaveBeenCalled()
+  })
+})
+
+describe('an offered draft is consumed only where it is placed', () => {
+  /**
+   * Round 1's other P2. The arrival took a cross-thread draft out of the
+   * slot with `acceptOtherThread` on EVERY hand-off visit — before the hand-off
+   * had been accepted and before the saved-conversation choice — so a refusal,
+   * an expiry or a "not now" emptied the slot and left her only copy in a local
+   * variable belonging to a function that had already returned.
+   */
+  const MINE = 'mine, and the only copy of it'
+
+  /** Mount the chat on its own, with whatever router entry a case needs. */
+  const mountChat = (entry: { pathname: string; search?: string; state?: unknown }) =>
+    render(
+      <MemoryRouter initialEntries={[entry]}>
+        <Routes>
+          <Route path="/chat" element={<ShellyChatPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+  /**
+   * Leave a draft in the slot under the SAVED conversation, then unmount.
+   *
+   * A later arrival at `/chat` — no `?thread` — is therefore a different
+   * conversation of the same tab, which is the cross-thread case: offered, never
+   * placed on sight.
+   */
+  function strandInTheSavedConversation() {
+    fixture.listenerDocs = [savedThread({ role: 'assistant' })]
+    const app = renderApp()
+    fireEvent.click(screen.getByText('Saved chat one'))
+    fireEvent.change(composer(), { target: { value: MINE } })
+    // Its own unmount is the handover; nothing has been staged yet.
+    app.unmount()
+  }
+
+  /** The same, in the FRESH conversation, for an arrival INTO a saved one. */
+  function strandInTheFreshConversation() {
+    const app = renderApp()
+    fireEvent.change(composer(), { target: { value: MINE } })
+    app.unmount()
+  }
+
+  /** Is it still in the slot? Asked by mounting the conversation that owns it. */
+  async function expectItIsStillWaiting(search: string) {
+    fixture.listenerDocs = [savedThread({ role: 'assistant' })]
+    mountChat({ pathname: '/chat', search })
+    await waitFor(() => expect(composer().value).toBe(MINE))
+  }
+
+  it('leaves it in the slot when the hand-off arrives too late to be read', async () => {
+    strandInTheSavedConversation()
+    // Staged outside the 2-minute TTL — the children read settling that slowly
+    // is the gap the TTL exists for, and the reason this refusal has a line.
+    const payload = stagePlannerAskHandoff(
+      { ...SOURCE, question: ASK, jobId: 'curriculum' },
+      Date.now() - PLANNER_ASK_HANDOFF_TTL_MS - 1,
+    )
+    const late = mountChat({
+      pathname: '/chat',
+      state: { [PLANNER_ASK_HANDOFF_STATE_KEY]: payload?.generation },
+    })
+
+    expect(await screen.findByText(/wasn't carried over/)).toBeInTheDocument()
+    expect(composer().value).toBe('')
+    late.unmount()
+
+    // The refused visit had nowhere to show her cross-conversation draft, so it
+    // never touched it. The old order consumed it before deciding, and this
+    // mount came back to an empty box.
+    await expectItIsStillWaiting('?thread=t1')
+    expect(chatCalls).toHaveLength(0)
+    expect(vi.mocked(addDoc)).not.toHaveBeenCalled()
+  })
+
+  it('leaves it in the slot when the question itself is refused', async () => {
+    strandInTheSavedConversation()
+    // A refusal that leaves the receiving identity — and therefore the owner of
+    // her draft — completely unchanged: the planner's week has finished.
+    const payload = stagePlannerAskHandoff({
+      ...SOURCE,
+      weekStart: '2026-10-11',
+      question: ASK,
+      jobId: 'curriculum',
+    })
+    const refused = mountChat({
+      pathname: '/chat',
+      state: { [PLANNER_ASK_HANDOFF_STATE_KEY]: payload?.generation },
+    })
+
+    expect(await screen.findByText(/planning week has finished/)).toBeInTheDocument()
+    refused.unmount()
+
+    await expectItIsStillWaiting('?thread=t1')
+  })
+
+  it('leaves it in the slot when she stays in the saved conversation', async () => {
+    strandInTheFreshConversation()
+    fixture.listenerDocs = [savedThread({ role: 'assistant' })]
+    const choice = renderArrival('?thread=t1')
+    await screen.findByText(/saved conversation/)
+
+    fireEvent.click(screen.getByRole('button', { name: /Not now/ }))
+    expect(screen.getByText(/still in Plan My Week/)).toBeInTheDocument()
+    choice.unmount()
+
+    // Hers was typed in the fresh conversation and that is where it still is.
+    await expectItIsStillWaiting('')
+    expect(chatCalls).toHaveLength(0)
+    expect(vi.mocked(addDoc)).not.toHaveBeenCalled()
+  })
+
+  it('places it ONCE when the new-conversation choice gives it somewhere to go', async () => {
+    // Her draft and a raw file, typed in the fresh conversation, so "ask in a
+    // new conversation" lands in the very conversation they belong to.
+    const app = renderApp()
+    fireEvent.change(composer(), { target: { value: MINE } })
+    const fileInput = app.container.querySelector('input[type="file"]') as HTMLInputElement
+    fireEvent.change(fileInput, {
+      target: { files: [new File(['x'], 'raw.png', { type: 'image/png' })] },
+    })
+    await screen.findByText('Attach to my message')
+    expect(objectUrls.minted).toHaveLength(1)
+    app.unmount()
+
+    fixture.listenerDocs = [savedThread({ role: 'assistant' })]
+    renderArrival('?thread=t1')
+    await screen.findByText(/saved conversation/)
+    // The peek mints nothing: a preview for work that is not placed is a URL
+    // nothing would ever revoke.
+    expect(objectUrls.minted).toHaveLength(1)
+
+    fireEvent.click(screen.getByRole('button', { name: /Ask in a new conversation/ }))
+
+    // Offered as the collision it is — not overwritten, not merged, and not
+    // consumed twice: one placement, one fresh view of the one preserved file.
+    expect(await screen.findByText(/You were typing this in another conversation/)).toBeInTheDocument()
+    expect(composer().value).toBe(MINE)
+    expect(screen.getByText(ASK)).toBeInTheDocument()
+    expect(screen.getByAltText('Selected 1')).toBeInTheDocument()
+    expect(objectUrls.minted).toHaveLength(2)
+    expect(chatCalls).toHaveLength(0)
+    expect(vi.mocked(addDoc)).not.toHaveBeenCalled()
+    expect(vi.mocked(uploadBytes)).not.toHaveBeenCalled()
+  })
+
+  it('never hands a draft to a tab it was not typed in, or consumes it there', async () => {
+    strandInTheSavedConversation()
+    // London's tab is a different owner, so the same conversation key is not
+    // enough: her Lincoln draft is neither shown here nor taken away.
+    identity.activeChildId = LONDON.id
+    const stranger = mountChat({ pathname: '/chat', search: '?thread=t1' })
+    await waitFor(() =>
+      expect(
+        within(screen.getByTestId('chat-transcript')).getByText(/older thread talk/),
+      ).toBeInTheDocument(),
+    )
+    expect(composer().value).toBe('')
+    stranger.unmount()
+
+    identity.activeChildId = LINCOLN.id
+    await expectItIsStillWaiting('?thread=t1')
   })
 })
 

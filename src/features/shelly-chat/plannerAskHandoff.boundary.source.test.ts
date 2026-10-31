@@ -118,6 +118,16 @@ describe('the hand-off path writes nothing and calls nothing', () => {
         .map((f) => f.path)
     expect(users('saveComposerCustody')).toEqual([RECEIVER])
     expect(users('takeComposerCustody')).toEqual([RECEIVER])
+    // Looking is the same slot and the same lifetime: the receiver peeks before
+    // it knows whether anything can be placed, so a second peeker would be a
+    // second reader of a read-once slot by another name.
+    expect(users('peekComposerCustody')).toEqual([RECEIVER])
+    // The second home — what the question displaced — has exactly the same
+    // single user. Two homes is the bound on this feature's memory, so a third
+    // module reaching into either of them is how the bound would be lost.
+    expect(users('saveDisplacedComposerCustody')).toEqual([RECEIVER])
+    expect(users('takeDisplacedComposerCustody')).toEqual([RECEIVER])
+    expect(users('peekDisplacedComposerCustody')).toEqual([RECEIVER])
     // Winding an interrupted stage back is the HANDOVER's decision and only its
     // decision: a second caller would be a second answer to what an interrupted
     // request means, applied somewhere the request may still be running.

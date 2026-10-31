@@ -9,8 +9,11 @@ import {
   EMPTY_COMPOSER_DRAFT,
   endComposerCustodySession,
   peekComposerCustody,
+  peekDisplacedComposerCustody,
   saveComposerCustody,
+  saveDisplacedComposerCustody,
   takeComposerCustody,
+  takeDisplacedComposerCustody,
   type ComposerCustodyOwner,
   type ComposerDraft,
 } from './composerCustody'
@@ -95,6 +98,25 @@ describe('the composer custody slot', () => {
     expect(peekComposerCustody(OWNER, null).kind).toBe('other-thread')
     // Only a caller that can offer it takes it.
     expect(takeComposerCustody(OWNER, null, { acceptOtherThread: true }).kind).toBe('other-thread')
+    expect(peekComposerCustody(OWNER, null)).toEqual({ kind: 'none' })
+  })
+
+  it('can be looked at as often as it takes, and is consumed by the placement only', () => {
+    // The shape the receiver was repaired into: a cross-conversation draft is
+    // PEEKED on arrival, left where it is through every early return the
+    // hand-off can make — refused, expired, or a saved conversation she stays
+    // in — and taken at the one point something PLACES it. So looking has to be
+    // free, and the take has to be once.
+    saveComposerCustody(OWNER, 'thread-7', FULL)
+    for (let i = 0; i < 3; i += 1) {
+      expect(peekComposerCustody(OWNER, null).kind, `peek ${i + 1}`).toBe('other-thread')
+    }
+
+    const placed = takeComposerCustody(OWNER, null, { acceptOtherThread: true })
+    expect(placed.kind).toBe('other-thread')
+    expect(placed.kind === 'other-thread' && placed.draft).toEqual(FULL)
+    // A second pass, a replay, a second reader: there is nothing left to place.
+    expect(takeComposerCustody(OWNER, null, { acceptOtherThread: true })).toEqual({ kind: 'none' })
     expect(peekComposerCustody(OWNER, null)).toEqual({ kind: 'none' })
   })
 
@@ -260,6 +282,114 @@ describe('the composer custody slot', () => {
     live.attachments.push({ url: 'https://example.com/b.jpg', previewUrl: 'blob:b' })
     const taken = takeComposerCustody(OWNER, null)
     expect(taken.kind === 'same-thread' && taken.draft.attachments).toHaveLength(1)
+  })
+})
+
+describe('the set-aside home, beside the box', () => {
+  /**
+   * Why there are two homes rather than one.
+   *
+   * The hand-off has two drafts in flight — the one in the box and the one the
+   * question pushed out of it — and with a single slot whichever was saved last
+   * won. Point `saveDisplacedComposerCustody` at the ordinary slot instead of
+   * this one and the first test here fails: that is the positive control for
+   * the whole pair.
+   */
+  const HERS: ComposerDraft = { ...EMPTY_COMPOSER_DRAFT, text: 'the draft she set aside' }
+  const EDITED: ComposerDraft = { ...EMPTY_COMPOSER_DRAFT, text: 'the question, as she edited it' }
+
+  it('keeps the two apart, so saving one is never what loses the other', () => {
+    saveDisplacedComposerCustody(OWNER, null, HERS, 'mine')
+    saveComposerCustody(OWNER, null, EDITED)
+
+    expect(takeComposerCustody(OWNER, null)).toEqual({ kind: 'same-thread', draft: EDITED })
+    expect(takeDisplacedComposerCustody(OWNER)).toEqual({
+      kind: 'held',
+      draft: HERS,
+      threadId: null,
+      holds: 'mine',
+    })
+  })
+
+  it('is read once, like the box’s own slot', () => {
+    saveDisplacedComposerCustody(OWNER, null, HERS, 'mine')
+    expect(peekDisplacedComposerCustody(OWNER).kind).toBe('held')
+    expect(takeDisplacedComposerCustody(OWNER).kind).toBe('held')
+    expect(takeDisplacedComposerCustody(OWNER)).toEqual({ kind: 'none' })
+  })
+
+  it('hands back the conversation it was displaced in, and does not key on it', () => {
+    // A restore is an explicit tap into the box she is looking at, and the
+    // thread of a fresh conversation moves the moment she sends — so the
+    // conversation travels as a fact rather than as a lock.
+    saveDisplacedComposerCustody(OWNER, 'thread-7', HERS, 'mine')
+    expect(peekDisplacedComposerCustody(OWNER)).toEqual({
+      kind: 'held',
+      draft: HERS,
+      threadId: 'thread-7',
+      holds: 'mine',
+    })
+  })
+
+  it('remembers WHICH draft it is holding', () => {
+    // After a restore the two have swapped and what is set aside is the
+    // question as she edited it. The note on screen names it, so the slot has
+    // to know which it has.
+    saveDisplacedComposerCustody(OWNER, null, EDITED, 'question')
+    expect(peekDisplacedComposerCustody(OWNER)).toMatchObject({ holds: 'question' })
+  })
+
+  it('tells a stranger nothing, and leaves the draft where it is', () => {
+    saveDisplacedComposerCustody(OWNER, null, HERS, 'mine')
+    for (const stranger of [
+      { ...OWNER, familyId: 'fam-2' },
+      { ...OWNER, profile: 'lincoln' },
+      { ...OWNER, chatContext: 'london' },
+      { ...OWNER, contextChildId: 'child-london' },
+    ]) {
+      expect(takeDisplacedComposerCustody(stranger)).toEqual({ kind: 'none' })
+    }
+    expect(peekDisplacedComposerCustody(OWNER).kind).toBe('held')
+  })
+
+  it('clears only its own entry when the draft it holds is emptied', () => {
+    saveComposerCustody(OWNER, null, EDITED)
+    saveDisplacedComposerCustody(OWNER, null, HERS, 'mine')
+    saveDisplacedComposerCustody(OWNER, null, EMPTY_COMPOSER_DRAFT, 'mine')
+
+    expect(peekDisplacedComposerCustody(OWNER)).toEqual({ kind: 'none' })
+    expect(peekComposerCustody(OWNER, null).kind).toBe('same-thread')
+  })
+
+  it('obeys the same sign-in and visit limits as the box', () => {
+    const session = currentComposerCustodySession()
+    saveDisplacedComposerCustody(OWNER, null, HERS, 'mine')
+    endComposerCustodySession()
+    // Emptied by the ending, and a save still in flight from it is refused.
+    expect(peekDisplacedComposerCustody(OWNER)).toEqual({ kind: 'none' })
+    saveDisplacedComposerCustody(OWNER, null, HERS, 'mine', Date.now(), session)
+    expect(peekDisplacedComposerCustody(OWNER)).toEqual({ kind: 'none' })
+
+    saveDisplacedComposerCustody(OWNER, null, HERS, 'mine', Date.now() - COMPOSER_CUSTODY_TTL_MS - 1)
+    expect(peekDisplacedComposerCustody(OWNER)).toEqual({ kind: 'none' })
+  })
+
+  it('winds an interrupted stage back on the way in, exactly as the box does', () => {
+    saveDisplacedComposerCustody(
+      OWNER,
+      null,
+      { ...FULL, imageFlowStep: 'generating' },
+      'mine',
+    )
+    const taken = takeDisplacedComposerCustody(OWNER)
+    expect(taken.kind === 'held' && taken.draft.imageFlowStep).toBe('questions')
+    expect(taken.kind === 'held' && taken.draft.uploadDialogOpen).toBe(true)
+  })
+
+  it('is dropped by the scope observer’s clear, like everything else here', () => {
+    saveDisplacedComposerCustody(OWNER, null, HERS, 'mine')
+    clearComposerCustody()
+    expect(peekDisplacedComposerCustody(OWNER)).toEqual({ kind: 'none' })
   })
 })
 

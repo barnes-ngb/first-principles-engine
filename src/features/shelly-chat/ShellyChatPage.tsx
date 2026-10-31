@@ -802,6 +802,8 @@ export default function ShellyChatPage() {
         onKeepExisting={plannerAsk.keepExisting}
         onReplace={plannerAsk.replaceWithQuestion}
         onRestoreSetAside={plannerAsk.restoreSetAside}
+        onDiscardSetAside={plannerAsk.discardSetAside}
+        onKeepSetAside={plannerAsk.keepSetAside}
         onStartFresh={plannerAsk.startFresh}
         onKeepConversation={plannerAsk.keepConversation}
         onDismiss={plannerAsk.dismiss}

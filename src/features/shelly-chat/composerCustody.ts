@@ -1,6 +1,7 @@
 // The Ask AI composer's unsent work, across the one route unmount the planner's
 // refusal link causes (UX-273). Page-session memory: no URL, no storage, no
-// Firestore, no transcript — one slot, one owner, read once.
+// Firestore, no transcript — two named slots (the box, and what the question
+// displaced from it), one owner, each read once.
 //
 // Three rules the second browser run proved are load-bearing:
 //  - a save NEVER clears another owner's entry (StrictMode's simulated unmount
@@ -88,6 +89,45 @@ interface HeldCustody {
 
 let held: HeldCustody | null = null
 
+// ── The second home: work the question DISPLACED ────────────────────────────
+//
+// A P2 from the release review, and the reason this module has TWO slots rather
+// than one: the hand-off has exactly two drafts in flight — the one in the box
+// and the one the planner's question pushed out of it — and one slot made them
+// fight. Whichever was saved last won, so either her set-aside original was
+// dropped on the way out or the edits and media she added AFTER the replacement
+// were.
+//
+// Two named homes, not a list and not a stack: `current` (above) and
+// `displaced` (here). That is the whole representation, so a third draft cannot
+// exist and the receiver has to ask her before it would need one.
+//
+// It is NOT keyed on the thread. The entry carries the conversation it was
+// displaced in — that stamp is preserved and handed back — but a restore is an
+// explicit tap putting her own words into the box she is looking at, not the
+// slot placing work unasked, and the thread of a fresh conversation moves the
+// moment she sends (`null` becomes the minted id) without any scope changing.
+// Owner and sign-in are what decide, exactly as {@link sameComposerOwner} says.
+
+/** Whose a set-aside draft is: hers, or the hand-off question's own draft. */
+export type ComposerCustodyHolder = 'mine' | 'question'
+
+interface HeldDisplaced extends HeldCustody {
+  holds: ComposerCustodyHolder
+}
+
+let displacedHeld: HeldDisplaced | null = null
+
+export type DisplacedCustodyLook =
+  | { kind: 'none' }
+  | {
+      kind: 'held'
+      draft: ComposerDraft
+      /** The conversation it was displaced in, for the record. */
+      threadId: string | null
+      holds: ComposerCustodyHolder
+    }
+
 // ── The session: whose sign-in this slot belongs to ─────────────────────────
 //
 // An owner (family / profile / tab / tab's child) is not enough to make a
@@ -119,6 +159,7 @@ export function currentComposerCustodySession(): number {
 export function endComposerCustodySession(): void {
   session += 1
   held = null
+  displacedHeld = null
 }
 
 export function composerDraftIsEmpty(draft: ComposerDraft): boolean {
@@ -308,7 +349,73 @@ export function takeComposerCustody(
   return look
 }
 
+/**
+ * Hand the draft the question DISPLACED to its own home.
+ *
+ * Same rules as the current slot and for the same reasons — a save from a
+ * sign-in that is over is refused, an empty draft clears only this owner's own
+ * entry — and deliberately a separate store, so saving one of the two drafts
+ * can never be what loses the other.
+ */
+export function saveDisplacedComposerCustody(
+  owner: ComposerCustodyOwner,
+  threadId: string | null,
+  draft: ComposerDraft,
+  holds: ComposerCustodyHolder,
+  now: number = Date.now(),
+  ownedSession: number = session,
+): void {
+  if (ownedSession !== session) return
+  if (composerDraftIsEmpty(draft)) {
+    if (displacedHeld && sameComposerOwner(displacedHeld.owner, owner)) displacedHeld = null
+    return
+  }
+  displacedHeld = {
+    owner,
+    threadId,
+    draft: normalizeInterruptedComposerDraft(copy(draft)),
+    savedAt: now,
+    session: ownedSession,
+    holds,
+  }
+}
+
+/** What is set aside for this owner, without consuming it. */
+export function peekDisplacedComposerCustody(
+  owner: ComposerCustodyOwner,
+  now: number = Date.now(),
+): DisplacedCustodyLook {
+  if (!displacedHeld) return { kind: 'none' }
+  if (displacedHeld.session !== session) {
+    displacedHeld = null
+    return { kind: 'none' }
+  }
+  if (now - displacedHeld.savedAt > COMPOSER_CUSTODY_TTL_MS) {
+    displacedHeld = null
+    return { kind: 'none' }
+  }
+  if (!sameComposerOwner(displacedHeld.owner, owner)) return { kind: 'none' }
+  return {
+    kind: 'held',
+    draft: copy(displacedHeld.draft),
+    threadId: displacedHeld.threadId,
+    holds: displacedHeld.holds,
+  }
+}
+
+/** Read and empty the set-aside home, if and only if it is this owner's. */
+export function takeDisplacedComposerCustody(
+  owner: ComposerCustodyOwner,
+  now: number = Date.now(),
+): DisplacedCustodyLook {
+  const look = peekDisplacedComposerCustody(owner, now)
+  if (look.kind === 'none') return look
+  displacedHeld = null
+  return look
+}
+
 /** Drop whatever is held. The scope observer and test isolation use this. */
 export function clearComposerCustody(): void {
   held = null
+  displacedHeld = null
 }

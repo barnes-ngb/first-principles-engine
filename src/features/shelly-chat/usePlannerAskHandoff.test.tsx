@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 
+import { getPlanningWeekRange } from '../../core/utils/time'
 import {
   clearPlannerAskHandoff,
   PLANNER_ASK_HANDOFF_STATE_KEY,
@@ -33,6 +34,17 @@ import { usePlannerAskHandoff, type PlannerAskHandoffState } from './usePlannerA
 
 const ASK = 'add TGTB Math Level 1, 30 minutes daily'
 const CHILDREN = [{ id: 'child-lincoln', name: 'Lincoln' }]
+/**
+ * The week the planner would be planning right now, for the same reason the
+ * route suite uses it: the source-week check (`isPlanningWeekPast`) is part of
+ * what is under test, so it has to be exercised rather than bypassed — and a
+ * hard-coded Sunday key silently stops exercising it and starts refusing every
+ * hand-off instead. `2026-10-25` did exactly that on Sat Oct 31, when its
+ * Mon–Fri body had ended and every test here began reading `week-passed`.
+ * `getPlanningWeekRange` is the planner's own rolling default, so this is never
+ * a past week on any day.
+ */
+const WEEK_START = getPlanningWeekRange(new Date()).start
 
 function stage(over: Partial<PlannerAskHandoffRequest> = {}, stagedAt?: number) {
   const payload = stagePlannerAskHandoff(
@@ -40,7 +52,7 @@ function stage(over: Partial<PlannerAskHandoffRequest> = {}, stagedAt?: number) 
       familyId: 'fam-1',
       childId: 'child-lincoln',
       childName: 'Lincoln',
-      weekStart: '2026-10-25',
+      weekStart: WEEK_START,
       question: ASK,
       jobId: 'curriculum',
       ...over,
@@ -56,6 +68,8 @@ interface HarnessProps {
   profile?: string | null
   activeChildId?: string
   chatContext?: string
+  /** What is already unsent in the box when the question arrives. */
+  initialDraft?: ComposerDraft
 }
 
 function Harness({
@@ -63,8 +77,9 @@ function Harness({
   profile = 'parents',
   activeChildId = 'child-lincoln',
   chatContext = 'lincoln',
+  initialDraft = EMPTY_COMPOSER_DRAFT,
 }: HarnessProps) {
-  const [draft, setDraft] = useState<ComposerDraft>(EMPTY_COMPOSER_DRAFT)
+  const [draft, setDraft] = useState<ComposerDraft>(initialDraft)
   const handoff = usePlannerAskHandoff({
     familyId: 'fam-1',
     profile,
@@ -85,6 +100,8 @@ function Harness({
         onKeepExisting={handoff.keepExisting}
         onReplace={handoff.replaceWithQuestion}
         onRestoreSetAside={handoff.restoreSetAside}
+        onDiscardSetAside={handoff.discardSetAside}
+        onKeepSetAside={handoff.keepSetAside}
         onStartFresh={handoff.startFresh}
         onKeepConversation={handoff.keepConversation}
         onDismiss={handoff.dismiss}
@@ -185,6 +202,8 @@ describe('the notice, state by state', () => {
         onKeepExisting={noop}
         onReplace={noop}
         onRestoreSetAside={noop}
+        onDiscardSetAside={noop}
+        onKeepSetAside={noop}
         onStartFresh={noop}
         onKeepConversation={noop}
         onDismiss={noop}
@@ -246,6 +265,146 @@ describe('the notice, state by state', () => {
     fireEvent.click(screen.getByRole('button', { name: /close/i }))
     expect(screen.queryByText(/From Plan My Week/)).not.toBeInTheDocument()
     // The draft stays in the box; only the note is gone.
+    expect(composer().value).toContain(ASK)
+  })
+
+  it('keeps saying where a set-aside draft is, with both exits and no close', () => {
+    show({
+      kind: 'set-aside',
+      draft: { ...mine, imageIdea: 'a reading corner poster' },
+      holds: 'mine',
+    })
+    expect(screen.getByText(/Your own draft is set aside, unsent/)).toBeInTheDocument()
+    expect(screen.getByText(/an image you were describing/)).toBeInTheDocument()
+    expect(screen.getByText('mine')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Bring my own draft back/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Discard it/ })).toBeInTheDocument()
+    // No close button: this note is the only thing on screen that says where
+    // her unsent work went, so it goes when she decides, not when she taps X.
+    expect(screen.queryByRole('button', { name: /close/i })).not.toBeInTheDocument()
+  })
+
+  it('names the question when THAT is what was swapped out', () => {
+    // After a restore the two drafts have traded places, and what is set aside
+    // is the question as she had edited it — which the planner cannot give
+    // back, so the note must not call it "your own draft" or the other way
+    // round.
+    show({ kind: 'set-aside', draft: { ...mine, text: `${ASK} and more phonics` }, holds: 'question' })
+    expect(screen.getByText(/The planner's question is set aside, unsent/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Bring that draft back/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Bring my own draft back/ })).not.toBeInTheDocument()
+  })
+
+  it('says what is set aside when the draft is media with no words in it', () => {
+    show({
+      kind: 'set-aside',
+      draft: { ...EMPTY_COMPOSER_DRAFT, uploadFiles: [new File(['x'], 'raw.png')] },
+      holds: 'mine',
+    })
+    expect(screen.getByText(/set aside, unsent \(with 1 image\)/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Bring my own draft back/ })).toBeInTheDocument()
+  })
+
+  it('asks before a third draft would have to exist, and shows the one at stake', () => {
+    show({ kind: 'displace-confirm', handoff, standing: { ...mine, text: 'set aside earlier' } })
+    expect(screen.getByText(/already have a draft set aside/)).toBeInTheDocument()
+    expect(screen.getByText('set aside earlier')).toBeInTheDocument()
+    expect(screen.getByText(/would be discarded/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Keep it/ })).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: /Discard it and use the question/ }),
+    ).toBeInTheDocument()
+  })
+})
+
+describe('a draft the question displaced', () => {
+  /** Her own unsent work, in the box when the hand-off lands. */
+  const MINE: ComposerDraft = {
+    ...EMPTY_COMPOSER_DRAFT,
+    text: 'mine — the one copy',
+    imageIdea: 'a reading corner poster',
+    imageFlowOpen: true,
+  }
+
+  function displace() {
+    const payload = stage()
+    mount(payload.generation, { initialDraft: MINE })
+    fireEvent.click(screen.getByRole('button', { name: /Use the planner's question/ }))
+    expect(composer().value).toContain(ASK)
+  }
+
+  it('survives the notice being closed, and comes back on an explicit tap', () => {
+    // Round 1's P2: `dismiss` set `idle`, and her text and her image idea went
+    // with the state the notice owned — irrecoverably, since the question had
+    // already overwritten the box.
+    displace()
+    fireEvent.click(screen.getByRole('button', { name: /close/i }))
+
+    expect(screen.queryByText(/From Plan My Week/)).not.toBeInTheDocument()
+    expect(screen.getByText(/Your own draft is set aside/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Bring my own draft back/ }))
+    expect(composer().value).toBe(MINE.text)
+  })
+
+  it('swaps rather than overwrites, so the newer work in the box survives too', () => {
+    // The release review's correction. Restoring the older draft used to apply
+    // it straight over whatever was in the box and say nothing — and what was
+    // in the box was the question as she had EDITED it, which the planner does
+    // not hold. Two homes, so the restore trades places instead of discarding.
+    displace()
+    fireEvent.change(composer(), { target: { value: `${composer().value} and more phonics` } })
+    fireEvent.click(screen.getByRole('button', { name: /close/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Bring my own draft back/ }))
+    expect(composer().value).toBe(MINE.text)
+
+    // Her edited question is now the one set aside, named as itself, and one
+    // tap from the box.
+    fireEvent.click(screen.getByRole('button', { name: /close/i }))
+    expect(screen.getByText(/The planner's question is set aside/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Bring that draft back/ }))
+    expect(composer().value).toContain('and more phonics')
+    expect(composer().value).toContain(ASK)
+  })
+
+  it('asks before taking the question would need a third home', () => {
+    displace()
+    // Restoring swaps, so now BOTH homes are full: her draft in the box, the
+    // edited question set aside. Asking for the question again cannot keep all
+    // three, so it is a decision.
+    fireEvent.click(screen.getByRole('button', { name: /Bring my own draft back/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Use the planner's question instead/ }))
+
+    expect(screen.getByText(/already have a draft set aside/)).toBeInTheDocument()
+    // Keeping it leaves every draft exactly where it was.
+    fireEvent.click(screen.getByRole('button', { name: /Keep it/ }))
+    expect(composer().value).toBe(MINE.text)
+
+    // And her explicit discard is what lets the question back into the box.
+    fireEvent.click(screen.getByRole('button', { name: /Use the planner's question instead/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Discard it and use the question/ }))
+    expect(composer().value).toContain(ASK)
+    fireEvent.click(screen.getByRole('button', { name: /Bring my own draft back/ }))
+    expect(composer().value).toBe(MINE.text)
+  })
+
+  it('is still offered after the question is sent out of the box', () => {
+    displace()
+    // What a Send leaves behind: the question gone from the composer, the
+    // hand-off's own note finished, her displaced work untouched.
+    fireEvent.change(composer(), { target: { value: '' } })
+    expect(screen.getByText(/set aside, unsent/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Bring my own draft back/ }))
+    expect(composer().value).toBe(MINE.text)
+  })
+
+  it('goes only when she says so, and then the offer goes too', () => {
+    displace()
+    fireEvent.click(screen.getByRole('button', { name: /close/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Discard it/ }))
+
+    expect(screen.queryByText(/set aside, unsent/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Bring my own draft back/ })).not.toBeInTheDocument()
+    // The box keeps the question she chose; nothing restored itself.
     expect(composer().value).toContain(ASK)
   })
 })

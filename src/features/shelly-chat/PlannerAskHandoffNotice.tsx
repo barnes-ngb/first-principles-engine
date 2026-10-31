@@ -13,10 +13,11 @@ import type { PlannerAskHandoffState } from './usePlannerAskHandoff'
 /**
  * What Ask AI says about a question handed over from the planner (UX-273).
  *
- * Three jobs: name the context that will travel with the question, never let a
+ * Four jobs: name the context that will travel with the question, never let a
  * draft be replaced or a saved conversation be joined without an explicit tap,
- * and when the question cannot be used, say so and name where it still is.
- * It renders no Send and writes nothing.
+ * when the question cannot be used say so and name where it still is, and for
+ * as long as a draft of hers is set aside, keep saying so and keep the way back
+ * to it one tap away. It renders no Send and writes nothing.
  *
  * Buttons stack on `xs` so two choices are reachable on a phone without
  * truncation, and every draft preview scrolls rather than clipping.
@@ -27,6 +28,8 @@ interface PlannerAskHandoffNoticeProps {
   onKeepExisting: () => void
   onReplace: () => void
   onRestoreSetAside: () => void
+  onDiscardSetAside: () => void
+  onKeepSetAside: () => void
   onStartFresh: () => void
   onKeepConversation: () => void
   onDismiss: () => void
@@ -71,6 +74,8 @@ export default function PlannerAskHandoffNotice({
   onKeepExisting,
   onReplace,
   onRestoreSetAside,
+  onDiscardSetAside,
+  onKeepSetAside,
   onStartFresh,
   onKeepConversation,
   onDismiss,
@@ -78,6 +83,70 @@ export default function PlannerAskHandoffNotice({
   if (state.kind === 'idle') return null
 
   const wrap = (children: ReactNode) => <Box sx={{ px: 1.5, pt: 1 }}>{children}</Box>
+
+  /**
+   * The draft that is set aside and still waiting, after the question's own
+   * note has gone — closed, sent, or the box cleared.
+   *
+   * Deliberately NOT closeable. Every other note here can be dismissed because
+   * what it says is recoverable from somewhere else; this one is the only thing
+   * on screen that says where unsent work went, so its two exits are the two
+   * decisions — bring it back, or throw it away — and both are taps she makes.
+   *
+   * It names WHICH draft it is holding rather than assuming. After a restore
+   * the two have swapped: what is set aside is then the question as she had
+   * edited it, which the planner cannot give back.
+   */
+  if (state.kind === 'set-aside') {
+    const mine = state.holds === 'mine'
+    return wrap(
+      <Alert severity="info" icon={false}>
+        <Typography variant="body2" sx={{ fontWeight: 500 }}>
+          {mine ? 'Your own draft is' : "The planner's question is"} set aside, unsent
+          {attachmentNote(state.draft)}.
+        </Typography>
+        {state.draft.text.trim() !== '' && <DraftPreview text={state.draft.text} />}
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mt: 1.5 }}>
+          <Button size="small" variant="contained" onClick={onRestoreSetAside}>
+            {mine ? 'Bring my own draft back' : 'Bring that draft back'}
+          </Button>
+          <Button size="small" variant="outlined" onClick={onDiscardSetAside}>
+            Discard it
+          </Button>
+        </Stack>
+      </Alert>,
+    )
+  }
+
+  /**
+   * Two drafts, two homes, and she has asked for a third.
+   *
+   * One of them has to go and she is the one who decides which — the draft in
+   * the box is about to become the set-aside one, so the draft already set
+   * aside is what would be lost, and it is shown here rather than described.
+   */
+  if (state.kind === 'displace-confirm') {
+    return wrap(
+      <Alert severity="warning" icon={false}>
+        <Typography variant="body2" sx={{ fontWeight: 500 }}>
+          You already have a draft set aside{attachmentNote(state.standing)}.
+        </Typography>
+        {state.standing.text.trim() !== '' && <DraftPreview text={state.standing.text} />}
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+          Using the planner&apos;s question sets aside what&apos;s in the box instead, so this one
+          would be discarded. Nothing has been sent.
+        </Typography>
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mt: 1.5 }}>
+          <Button size="small" variant="outlined" onClick={onKeepSetAside}>
+            Keep it
+          </Button>
+          <Button size="small" variant="contained" onClick={onReplace}>
+            Discard it and use the question
+          </Button>
+        </Stack>
+      </Alert>,
+    )
+  }
 
   if (state.kind === 'refused') {
     return wrap(
