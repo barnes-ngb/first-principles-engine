@@ -20,6 +20,17 @@ export interface UseActiveChildResult {
   isLoading: boolean
   /** Add a new child to the list. */
   addChild: (child: Child) => void
+  /**
+   * The children read FAILED rather than not having answered yet.
+   *
+   * Forwarded verbatim from `useChildren`, optional and additive so existing
+   * consumers and test mocks are untouched. `isLoading` stays true beside it:
+   * a failed read is not an empty family, so a surface that gates on an
+   * unsettled identity keeps gating — it can now just say so.
+   */
+  loadFailed?: boolean
+  /** Run the children read again, clearing the failure while it runs. */
+  retryLoad?: () => void
 }
 
 /**
@@ -37,6 +48,8 @@ export function useActiveChild(): UseActiveChildResult {
     setSelectedChildId,
     isLoading,
     addChild,
+    loadFailed,
+    retryLoad,
   } = useChildren()
 
   const isChildProfile =
@@ -74,5 +87,7 @@ export function useActiveChild(): UseActiveChildResult {
     isChildProfile,
     isLoading,
     addChild,
+    loadFailed,
+    retryLoad,
   }
 }
