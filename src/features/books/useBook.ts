@@ -33,9 +33,50 @@ export interface BookPageChange {
 interface UseBookResult {
   book: Book | null
   loading: boolean
+  /** The report on the DOCUMENT write. Uploads no longer speak through it. */
   saveState: SaveState
   /** When saveState is 'error', contains the actual error message for debugging. */
   saveErrorMessage: string | null
+  /**
+   * A file that did not get added, kept APART from `saveState` (UX-473).
+   * Re-writing the document cannot repair it and a document write that then
+   * succeeds must not be allowed to imply the picture or the sound arrived, so
+   * this is its own statement and a successful save does not clear it.
+   */
+  uploadErrorMessage: string | null
+  /** At least one upload is running. Uploads never move `saveState`. */
+  uploadBusy: boolean
+  /** Dismiss the upload notice. It is information, not an outstanding edit. */
+  clearUploadError: () => void
+  /**
+   * True from the moment an edit is accepted until a write ACKNOWLEDGES that
+   * same edit (UX-473). It covers all three unsaved shapes — a call still
+   * waiting on the 500 ms debounce, a write in flight, and a write that failed
+   * — so a departure guard and a Retry door read one honest answer instead of
+   * inferring one from `saveState`, which a late callback can make stale.
+   *
+   * This is React state, so it is the answer as of the last RENDER — use it to
+   * draw, and `hasOutstandingEdits` to decide.
+   */
+  hasUnsavedEdits: boolean
+  /**
+   * The same answer, read SYNCHRONOUSLY and bound to this document.
+   *
+   * A chip that mutates and navigates in one handler asks before React has
+   * re-rendered, and Chrome showed that gap letting the first edit of a session
+   * escape the departure guard. This reads a ref written during `applyUpdate`
+   * itself. It answers `false` once the hook has moved to another book, so a
+   * late callback cannot release the wrong document's guard.
+   */
+  hasOutstandingEdits: () => boolean
+  /**
+   * Re-write the LATEST draft this hook owns, for the document it is currently
+   * scoped to. A no-op when nothing is outstanding, or when the hook has moved
+   * to another book since the failure — a retry must never post one book's
+   * words to another's document (the UX-345 hazard `useDebounce` already
+   * closed for the timer path).
+   */
+  retrySave: () => void
   updatePage: (pageId: string, changes: Partial<BookPage>) => void
   /** Atomic, scoped page mutation and its actual accepted before/after pair. */
   changePage: (pageId: string, mutate: (page: BookPage) => BookPage | undefined, options?: { usedAiGeneration?: boolean }) => BookPageChange | undefined
@@ -101,6 +142,22 @@ function pushVersion(
     replacedBy,
   }
   return [entry, ...(image.previousVersions ?? []).slice(0, 4)]
+}
+
+/**
+ * What a failed upload says (UX-473).
+ *
+ * Neutral and type-appropriate, and deliberately silent about two things it
+ * cannot know: whether the file is really gone (Storage may have taken it and
+ * only the URL round-trip failed) and whether the kid's words are safe (that is
+ * the DOCUMENT's status, which has its own indicator and its own Retry). So it
+ * states only what it observed — this did not get added — and what to do.
+ */
+export function uploadNotAddedMessage(
+  kind: 'picture' | 'drawing' | 'sticker' | 'recording',
+  reason: string,
+): string {
+  return `This ${kind} wasn't added. Try adding it again. (${reason})`
 }
 
 /** Get today as YYYY-MM-DD string. */
@@ -181,6 +238,37 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
   const [saveErrorMessage, setSaveErrorMessage] = useState<string | null>(null)
   const [usedAiGeneration, setUsedAiGeneration] = useState(false)
 
+  // ── Which edit is saved, and which is not (UX-473) ────────────────────────
+  //
+  // A counter rather than a flag, because the question a failed save asks is
+  // *which* edit landed. Writes are not ordered: a rapid typist can have two
+  // `setDoc`s in flight, and the one that resolves second is not necessarily
+  // the one that was sent second. `editSeq` is the newest edit this hook has
+  // accepted; `ackedSeq` is the newest edit a write has acknowledged. So
+  // "saved" is only claimed for the newest edit, a success for an older one
+  // leaves the newer edit visibly unsaved, and a failure that arrives for an
+  // edit a later write already carried is ignored instead of alarming.
+  // Both are per-document and reset by the load effect below.
+  const editSeqRef = useRef(0)
+  const ackedSeqRef = useRef(0)
+  const [hasUnsavedEdits, setHasUnsavedEdits] = useState(false)
+  const [uploadErrorMessage, setUploadErrorMessage] = useState<string | null>(null)
+  // Upload bookkeeping, declared here with the rest of the per-document state
+  // so the load effect below can reset it. Its helpers are further down.
+  const uploadsRef = useRef<{ scope: object; active: number }>({ scope: documentScope, active: 0 })
+  const [uploadBusy, setUploadBusy] = useState(false)
+  // The same answer as `hasUnsavedEdits`, written SYNCHRONOUSLY and stamped with
+  // the document it belongs to. React state is a render behind, and a chip that
+  // edits and navigates in one handler asks the departure guard before that
+  // render happens — the gap Chrome found the first edit of a session escaping
+  // through. The scope stamp is what stops a late callback for an abandoned
+  // book from answering for the one now on screen.
+  const outstandingRef = useRef<{ scope: object; dirty: boolean }>({ scope: documentScope, dirty: false })
+  const hasOutstandingEdits = useCallback(
+    () => outstandingRef.current.scope === documentScope && outstandingRef.current.dirty,
+    [documentScope],
+  )
+
   // Session time tracking
   const sessionStartRef = useRef<number>(Date.now())
   const hoursLoggedRef = useRef(false)
@@ -198,6 +286,19 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
   useEffect(() => {
     latestBook.current = { scope: documentScope, value: null }
     setBook(null)
+    // A new document starts with nothing outstanding and no verdict. Carrying
+    // the previous book's 'error' across would claim THIS book failed to save,
+    // and carrying its unsaved flag would arm a departure guard over edits
+    // that belong to a document this hook no longer holds.
+    editSeqRef.current = 0
+    ackedSeqRef.current = 0
+    outstandingRef.current = { scope: documentScope, dirty: false }
+    setHasUnsavedEdits(false)
+    setSaveState('idle')
+    setSaveErrorMessage(null)
+    setUploadErrorMessage(null)
+    uploadsRef.current = { scope: documentScope, active: 0 }
+    setUploadBusy(false)
     if (!familyId || !bookId) { setLoading(false); return }
     setLoading(true)
     let cancelled = false
@@ -220,26 +321,62 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
   }, [familyId, bookId, documentScope])
 
   // Persist to Firestore
+  //
+  // `seq` is the edit this call carries (see the counters above). It is a second
+  // ARGUMENT rather than a closure read because `useDebounce` delivers a pending
+  // call with the function and args it was MADE with, so the seq a flushed write
+  // reports is the edit that write actually contains.
   const persist = useCallback(
-    async (updated: Book) => {
+    async (updated: Book, seq: number) => {
       if (!familyId || !bookId) return
-      setSaveState('saving')
-      setSaveErrorMessage(null)
+      // The document this call is for. Checked again after the await, so a
+      // callback that lands after the editor moved to another book cannot
+      // repaint that book's status with this one's outcome.
+      const scope = documentScope
+      const isCurrent = latestBook.current.scope === scope
+      // Already stored: a duplicate dispatch of an edit this hook has ALREADY
+      // acknowledged — a debounce flush arriving after a Retry landed the same
+      // words. Writing it again is a no-op whose 'Saving…' the settle paths
+      // below would then (correctly) refuse to resolve, leaving a spinner that
+      // never ends over a book that is in fact saved.
+      if (isCurrent && seq <= ackedSeqRef.current) return
+      // A write for a document this hook no longer shows still goes through —
+      // that edit is owed to the book it was made in — but it does not paint
+      // the status of the book now on screen.
+      if (isCurrent) {
+        setSaveState('saving')
+        setSaveErrorMessage(null)
+      }
       try {
         const docRef = doc(booksCollection(familyId), bookId)
         const { id, ...data } = updated
         void id
         const sanitized = stripUndefined(data as unknown as Record<string, unknown>) as Omit<Book, 'id'>
         await setDoc(docRef, { ...sanitized, updatedAt: new Date().toISOString() })
+        if (latestBook.current.scope !== scope) return
+        if (seq < ackedSeqRef.current) return
+        ackedSeqRef.current = seq
+        // A newer edit exists and has not been written: this book is NOT saved,
+        // whatever this call just managed to land. The write that carries the
+        // newer edit owns the verdict.
+        if (seq < editSeqRef.current) return
+        outstandingRef.current = { scope, dirty: false }
+        setHasUnsavedEdits(false)
         setSaveState('saved')
+        setSaveErrorMessage(null)
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err)
         console.error('Book save failed:', err)
+        if (latestBook.current.scope !== scope) return
+        // A later write already acknowledged this edit (a retry that landed, or
+        // a fuller write that overtook this one), so its content IS stored and
+        // reporting a failure would be a lie that re-arms the departure guard.
+        if (seq <= ackedSeqRef.current) return
         setSaveState('error')
         setSaveErrorMessage(`Save failed: ${errMsg}`)
       }
     },
-    [familyId, bookId],
+    [familyId, bookId, documentScope],
   )
 
   const debouncedPersist = useDebounce(persist, 500)
@@ -288,11 +425,71 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
       if (next === previous) return undefined
       latestBook.current = { scope: documentScope, value: next }
       setBook(next)
-      debouncedPersist(next)
+      editSeqRef.current += 1
+      // Before the state update, and before the write is even scheduled: a
+      // handler that navigates on the next line must find this already true.
+      outstandingRef.current = { scope: documentScope, dirty: true }
+      setHasUnsavedEdits(true)
+      debouncedPersist(next, editSeqRef.current)
       return { before: previous, after: next }
     },
     [debouncedPersist, documentScope],
   )
+
+  /**
+   * Explicit Retry (UX-473). It re-writes `latestBook`, not the document the
+   * failed call carried, so edits made while the error was on screen are part
+   * of what gets saved — the whole point of keeping them. Scoped: a retry after
+   * the editor moved to another book writes nothing.
+   */
+  const retrySave = useCallback(() => {
+    if (!familyId || !bookId) return
+    const current = latestBook.current
+    if (current.scope !== documentScope || !current.value) return
+    if (editSeqRef.current === ackedSeqRef.current) return
+    void persist(current.value, editSeqRef.current)
+  }, [familyId, bookId, documentScope, persist])
+
+  // ── Uploads report on THEMSELVES, never on the document (UX-473) ──────────
+  //
+  // They used to borrow `saveState`, and that produced a state the editor could
+  // not get out of: a document write that had already failed left `saveState`
+  // 'error' with the draft dirty; an upload then set 'saving'; the upload
+  // failed; and because the draft was dirty the 'saving' was kept — so the save
+  // indicator span 700 ms later with no document request in flight, the *Try
+  // again* banner (gated on 'error') had vanished, and the departure dialog
+  // believed a write was in the air and withheld its controls. Reproduced by
+  // the root against the real hook.
+  //
+  // So `saveState` now means exactly one thing — the last DOCUMENT write — and
+  // uploads carry their own `uploadBusy` / `uploadErrorMessage`. An upload's
+  // success still goes through `applyUpdate`, which schedules a real document
+  // save that moves `saveState` for real.
+  //
+  // Both helpers are bound to the document the upload was STARTED for. A photo
+  // begun on one book and rejected after the editor moved to another used to
+  // post the old book's error onto the new one's notice.
+  const beginUpload = useCallback((scope: object) => {
+    if (latestBook.current.scope !== scope) return
+    if (uploadsRef.current.scope !== scope) uploadsRef.current = { scope, active: 0 }
+    uploadsRef.current.active += 1
+    setUploadBusy(true)
+    setUploadErrorMessage(null)
+  }, [])
+
+  /** Settle one upload. `message` is its failure, if it had one. */
+  const endUpload = useCallback((scope: object, message?: string) => {
+    // A callback that lands after the editor moved on reports nothing: neither
+    // the spinner nor the error belongs to the book now on screen.
+    if (latestBook.current.scope !== scope) return
+    if (uploadsRef.current.scope === scope) {
+      uploadsRef.current.active = Math.max(0, uploadsRef.current.active - 1)
+      setUploadBusy(uploadsRef.current.active > 0)
+    }
+    if (message) setUploadErrorMessage(message)
+  }, [])
+
+  const clearUploadError = useCallback(() => setUploadErrorMessage(null), [])
 
   const changePage = useCallback((pageId: string, mutate: (page: BookPage) => BookPage | undefined, options?: { usedAiGeneration?: boolean }): BookPageChange | undefined => {
     const change = applyUpdate((previous) => {
@@ -383,6 +580,8 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
   const addImageToPage = useCallback(
     async (pageId: string, file: File, options?: { cleanBackground?: boolean }) => {
       if (!familyId || !bookId) return
+      // The document this upload belongs to, for the whole of its life.
+      const scope = documentScope
 
       // Smart overlay detection: is there already an image on this page?
       const currentPage = book?.pages.find((p) => p.id === pageId)
@@ -414,7 +613,7 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
       const storagePath = `families/${familyId}/books/${bookId}/${filename}`
       const storageRef = ref(storage, storagePath)
 
-      setSaveState('saving')
+      beginUpload(scope)
       try {
         await uploadBytes(storageRef, processedFile)
         const url = await getDownloadURL(storageRef)
@@ -442,14 +641,14 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
               : p,
           ),
         }))
+        endUpload(scope)
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err)
         console.error('Image upload failed:', err)
-        setSaveState('error')
-        setSaveErrorMessage(`Image upload failed: ${errMsg}`)
+        endUpload(scope, uploadNotAddedMessage('picture', errMsg))
       }
     },
-    [familyId, bookId, applyUpdate, book],
+    [familyId, bookId, documentScope, applyUpdate, book, beginUpload, endUpload],
   )
 
   const prepareBackgroundPhoto = useCallback(async (file: File): Promise<PageImage | undefined> => {
@@ -488,12 +687,13 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
   const uploadAudio = useCallback(
     async (pageId: string, blob: Blob) => {
       if (!familyId || !bookId) return
+      const scope = documentScope
       const ts = new Date().toISOString().replace(/[:.]/g, '-')
       const filename = `audio_${pageId}_${ts}.webm`
       const storagePath = `families/${familyId}/books/${bookId}/${filename}`
       const storageRef = ref(storage, storagePath)
 
-      setSaveState('saving')
+      beginUpload(scope)
       try {
         await uploadBytes(storageRef, blob)
         const url = await getDownloadURL(storageRef)
@@ -505,12 +705,14 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
               : p,
           ),
         }))
+        endUpload(scope)
       } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err)
         console.error('Audio upload failed:', err)
-        setSaveState('error')
+        endUpload(scope, uploadNotAddedMessage('recording', errMsg))
       }
     },
-    [familyId, bookId, applyUpdate],
+    [familyId, bookId, documentScope, applyUpdate, beginUpload, endUpload],
   )
 
   const prepareAiPageImage = useCallback((url: string, storagePath: string, prompt: string): PageImage => {
@@ -576,6 +778,7 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
   const addSketchToPage = useCallback(
     async (pageId: string, file: File): Promise<{ imageId: string; storagePath: string } | undefined> => {
       if (!familyId || !bookId) return undefined
+      const scope = documentScope
 
       const imageId = generateImageId()
       const ext = file.name.split('.').pop() ?? 'jpg'
@@ -591,7 +794,7 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
         quality: 0.85,
       })
 
-      setSaveState('saving')
+      beginUpload(scope)
       try {
         await uploadBytes(storageRef, processedSketch)
         const url = await getDownloadURL(storageRef)
@@ -635,16 +838,16 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
           void addDoc(artifactsCollection(familyId), artifact)
         }
 
+        endUpload(scope)
         return { imageId, storagePath }
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err)
         console.error('Sketch upload failed:', err)
-        setSaveState('error')
-        setSaveErrorMessage(`Sketch upload failed: ${errMsg}`)
+        endUpload(scope, uploadNotAddedMessage('drawing', errMsg))
         return undefined
       }
     },
-    [familyId, bookId, applyUpdate, book],
+    [familyId, bookId, documentScope, applyUpdate, book, beginUpload, endUpload],
   )
 
   const applySketchEnhancement = useCallback(
@@ -759,12 +962,13 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
   const addStickerFileToPage = useCallback(
     async (pageId: string, file: File, label: string) => {
       if (!familyId || !bookId) return undefined
+      const scope = documentScope
       const ts = new Date().toISOString().replace(/[:.]/g, '-')
       const ext = (file.name.split('.').pop() ?? 'png').toLowerCase()
       const filename = `sticker_${ts}.${ext}`
       const storagePath = `families/${familyId}/books/${bookId}/${filename}`
       const storageRef = ref(storage, storagePath)
-      setSaveState('saving')
+      beginUpload(scope)
       try {
         await uploadBytes(storageRef, file)
         const url = await getDownloadURL(storageRef)
@@ -786,16 +990,16 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
               : p,
           ),
         }))
+        endUpload(scope)
         return { url, storagePath }
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err)
         console.error('Sticker upload failed:', err)
-        setSaveState('error')
-        setSaveErrorMessage(`Sticker upload failed: ${errMsg}`)
+        endUpload(scope, uploadNotAddedMessage('sticker', errMsg))
         return undefined
       }
     },
-    [familyId, bookId, applyUpdate],
+    [familyId, bookId, documentScope, applyUpdate, beginUpload, endUpload],
   )
 
   return {
@@ -803,6 +1007,12 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
     loading,
     saveState,
     saveErrorMessage,
+    uploadErrorMessage,
+    uploadBusy,
+    clearUploadError,
+    hasUnsavedEdits,
+    hasOutstandingEdits,
+    retrySave,
     updatePage,
     changePage,
     addPage,

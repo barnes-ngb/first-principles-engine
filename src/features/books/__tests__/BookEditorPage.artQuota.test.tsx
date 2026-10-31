@@ -24,6 +24,9 @@ const {
 vi.mock('react-router-dom', () => ({
   useNavigate: () => vi.fn(),
   useParams: () => ({ bookId: 'book-1' }),
+  // UX-473's departure guard. Unblocked here: this suite is about the art
+  // budget, and these mocks stand in for the data router the app really has.
+  useBlocker: () => ({ state: 'unblocked' }),
 }))
 
 vi.mock('/src/core/auth/useAuth', () => ({ useFamilyId: () => 'family-1' }))

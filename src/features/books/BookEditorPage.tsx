@@ -88,6 +88,8 @@ import type { DrawingChoice, PostCleanupChoice } from './DrawingChoiceDialog'
 import { cleanSketchBackground } from './cleanSketch'
 import type { ImagePosition } from './DraggableImage'
 import { useBook } from './useBook'
+import { useUnsavedBookGuard } from './useUnsavedBookGuard'
+import UnsavedBookDialog from './UnsavedBookDialog'
 import { makeBookPdf } from './makeBookPdf'
 import PrintSettingsDialog from './PrintSettingsDialog'
 import type { PrintSettings } from './PrintSettingsDialog'
@@ -153,6 +155,12 @@ export default function BookEditorPage() {
     loading,
     saveState,
     saveErrorMessage,
+    uploadErrorMessage,
+    uploadBusy,
+    clearUploadError,
+    hasUnsavedEdits,
+    hasOutstandingEdits,
+    retrySave,
     updatePage,
     changePage,
     addPage,
@@ -172,6 +180,15 @@ export default function BookEditorPage() {
     applySketchEnhancement,
     restoreImageVersion,
   } = useBook(familyId, bookId)
+
+  // ── An unsaved edit must not be able to leave quietly (UX-473) ────────────
+  // Every in-app exit from this editor is a history change — the Back arrow and
+  // the Read / Read-it-to-me chips below, the finish redirect, and the shell's
+  // bottom nav and the device's own Back, which this page never sees — so the
+  // guard sits on the route rather than on this page's four `navigate` calls.
+  // `hasOutstandingEdits` rather than the rendered flag because a chip that
+  // edits and navigates in one handler asks before the re-render.
+  const unsavedGuard = useUnsavedBookGuard({ saveState, hasUnsavedEdits, hasOutstandingEdits })
 
   const { generateImage, loading: aiLoading, imageFailureRef } = useAI()
 
@@ -1131,7 +1148,9 @@ export default function BookEditorPage() {
       />
       {/* Row 1: Navigation + Title */}
       <Box sx={{ display: 'flex', alignItems: 'center', px: 1, py: 0.5 }}>
-        <IconButton onClick={() => navigate('/books')} sx={{ minWidth: 48, minHeight: 48 }}>
+        {/* Named, because it is the exit a kid uses most and the one UX-473's
+            guard has to be assertable on. */}
+        <IconButton aria-label="My Books" onClick={() => navigate('/books')} sx={{ minWidth: 48, minHeight: 48 }}>
           <ArrowBackIcon />
         </IconButton>
         <Box sx={{ flex: 1, minWidth: 0, mx: 1 }}>
@@ -1182,6 +1201,49 @@ export default function BookEditorPage() {
         </Box>
         <SaveIndicator state={saveState} errorMessage={saveErrorMessage} />
       </Box>
+
+      {/* The Retry door (UX-473) — the DOCUMENT's, and nothing else's. Gated on
+          an outstanding edit as well as an error, because `retrySave` re-writes
+          the book and that is the only thing it can repair. */}
+      {saveState === 'error' && hasUnsavedEdits && (
+        <Alert
+          severity="error"
+          sx={{ mx: 2, mt: 0.5 }}
+          action={
+            <Button color="inherit" size="small" onClick={retrySave} sx={{ minHeight: 44 }}>
+              Try again
+            </Button>
+          }
+        >
+          {/* "latest edits", not "words and pictures": a coincident upload
+              failure means a picture may NOT be here, and this banner speaks
+              only for the document draft. */}
+          {saveErrorMessage ?? 'Save failed'} — your latest edits are still here on this page.
+        </Alert>
+      )}
+
+      {/* A file that did not get added. Its own notice, deliberately WITHOUT a
+          Retry — re-writing the book cannot re-send a file — and deliberately
+          silent about the document: whether the words are saved is the save
+          indicator's and the banner above's to say, not this one's. The message
+          comes from `uploadNotAddedMessage` and claims neither that the file is
+          gone nor that anything else is durable. */}
+      {uploadErrorMessage && (
+        <Alert severity="warning" onClose={clearUploadError} sx={{ mx: 2, mt: 0.5 }}>
+          {uploadErrorMessage}
+        </Alert>
+      )}
+
+      {/* Upload progress, separate from the save indicator for the same reason:
+          it is not a document write and must not be drawn as one (UX-473). */}
+      {uploadBusy && (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 2, pt: 0.5 }}>
+          <CircularProgress size={14} />
+          <Typography variant="caption" color="text.secondary">
+            Adding your file…
+          </Typography>
+        </Box>
+      )}
 
       {reimagineError && (
         <Alert severity="error" onClose={() => setReimagineError(null)} sx={{ mx: 2, mt: 0.5 }}>
@@ -2428,6 +2490,16 @@ export default function BookEditorPage() {
           </Stack>
         </Box>
       )}
+
+      {/* ── Held departure: retry, stay, or discard on purpose (UX-473) ── */}
+      <UnsavedBookDialog
+        open={unsavedGuard.held}
+        saveState={saveState}
+        saveErrorMessage={saveErrorMessage}
+        onRetry={retrySave}
+        onStay={unsavedGuard.stay}
+        onLeaveAnyway={unsavedGuard.leaveAnyway}
+      />
     </Page>
   )
 }

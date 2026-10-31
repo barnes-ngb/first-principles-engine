@@ -41,6 +41,8 @@ function baseBook(overrides?: Record<string, unknown>) {
 vi.mock('react-router-dom', () => ({
   useNavigate: () => navigateMock,
   useParams: () => ({ bookId: 'book-1' }),
+  // UX-473's departure guard — unblocked; nothing here is unsaved.
+  useBlocker: () => ({ state: 'unblocked' }),
 }))
 
 vi.mock('/src/core/auth/useAuth', () => ({ useFamilyId: () => 'family-1' }))
