@@ -163,8 +163,13 @@ export interface PlannerAskHandoffResult {
   guardSend: (send: () => void) => void
   /**
    * Called by an operation that is ABOUT TO create this composer's own
-   * conversation — today only the explicit "Attach to my message" upload — to
-   * take the single-use authority for the id it is about to get.
+   * conversation to take the single-use authority for the id it is about to get.
+   *
+   * That is every creator which mints a conversation and leaves her unsent work
+   * in the box: "Attach to my message", "Analyze", "Use as reference for image
+   * creation", and the direct-generate funnel behind the image doors. Not
+   * `handleSend`, which consumes the submitted text before it mints and so has
+   * no unsent draft to protect.
    *
    * Call it BEFORE the operation's first `await`: that is the whole point. What
    * it returns closes over the identity, the sign-in and the draft generation of

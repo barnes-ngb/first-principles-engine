@@ -94,19 +94,24 @@ const inFlight: {
   holdUpload: boolean
   /** The thread document an explicit Attach creates for a fresh conversation. */
   holdThread: boolean
+  /** The compression that runs BEFORE the thread creation in two handlers. */
+  holdCompress: boolean
   /** The held upload ends in a throw, so its owner's catch runs. */
   failUpload: boolean
   releaseChat: ((value: { message: string }) => void) | null
   releaseUpload: (() => void) | null
   releaseThread: (() => void) | null
+  releaseCompress: (() => void) | null
 } = {
   holdChat: false,
   holdUpload: false,
   holdThread: false,
+  holdCompress: false,
   failUpload: false,
   releaseChat: null,
   releaseUpload: null,
   releaseThread: null,
+  releaseCompress: null,
 }
 
 vi.mock('firebase/storage', () => ({
@@ -165,7 +170,18 @@ vi.mock('../../core/firebase/firestore', () => {
 
 vi.mock('../../core/firebase/storage', () => ({ storage: {} }))
 vi.mock('../../core/utils/compressImage', () => ({
-  compressIfNeeded: vi.fn(async (f: unknown) => f),
+  // Holdable too, for the same reason the thread creation is: compression is the
+  // FIRST `await` in the analyze and reference-generate handlers, so a test that
+  // wants to prove the claim was taken before it has to be able to stand inside
+  // it. Held only when a test asks.
+  compressIfNeeded: vi.fn(async (f: unknown) => {
+    if (inFlight.holdCompress) {
+      await new Promise<void>((resolve) => {
+        inFlight.releaseCompress = () => resolve()
+      })
+    }
+    return f
+  }),
 }))
 vi.mock('../../core/auth/useAuth', () => ({
   useFamilyId: () => identity.familyId,
@@ -387,10 +403,12 @@ beforeEach(() => {
   inFlight.holdChat = false
   inFlight.holdUpload = false
   inFlight.holdThread = false
+  inFlight.holdCompress = false
   inFlight.failUpload = false
   inFlight.releaseChat = null
   inFlight.releaseUpload = null
   inFlight.releaseThread = null
+  inFlight.releaseCompress = null
   objectUrls.minted.length = 0
   objectUrls.revoked.length = 0
   clearPlannerAskHandoff()
@@ -409,9 +427,11 @@ afterEach(() => {
   // unhandled rejection charged to whichever test is running by then.
   inFlight.failUpload = false
   inFlight.holdThread = false
+  inFlight.holdCompress = false
   inFlight.releaseChat?.(LATE_QUESTIONS)
   inFlight.releaseUpload?.()
   inFlight.releaseThread?.()
+  inFlight.releaseCompress?.()
   clearPlannerAskHandoff()
   clearComposerCustody()
 })
@@ -1834,6 +1854,356 @@ describe('the conversation her own Attach creates for the question', () => {
     await waitFor(() => expect(chatCalls).toHaveLength(1))
     expect(chatCalls[0].childId).toBe(LINCOLN.id)
     expect(chatCalls[0].messages[0].content).toContain(EDIT.trim())
+  })
+})
+
+describe('the conversations her OTHER taps create for the question', () => {
+  /**
+   * External review round 2's P2, and the class behind it.
+   *
+   * "Attach to my message" was not the only handler that mints a conversation
+   * while her unsent work stays in the box. Three siblings do the same thing and
+   * none of them took the own-thread claim: "Analyze this image", "Use as
+   * reference for image creation", and `handleGenerateImageDirect` — the funnel
+   * behind every image door. So choosing "Use as reference" on a fresh
+   * conversation created a thread, the guard read `null → id` as Shelly opening a
+   * different conversation, and the edited question for Lincoln was cleared out
+   * of the composer. Her parent is the only person who ever types in that box, so
+   * what was lost was work that exists nowhere else.
+   *
+   * `handleSend` is deliberately absent from this block: it consumes the
+   * submitted text BEFORE it mints, so there is no unsent draft for a claim to
+   * protect, and the describe below pins that its behaviour did not change.
+   */
+  const MINE = 'mine — the one copy of this'
+  const EDIT = ' and more phonics'
+
+  /** Both drafts alive, the question edited, and a raw photo chosen. */
+  async function readyWithAPhoto() {
+    const app = renderApp()
+    fireEvent.change(composer(), { target: { value: MINE } })
+    goToPlanner()
+    tapRefusal()
+    await screen.findByText(/You were already typing something/)
+    fireEvent.click(screen.getByRole('button', { name: /Use the planner's question/ }))
+    fireEvent.change(composer(), { target: { value: `${composer().value}${EDIT}` } })
+
+    const fileInput = app.container.querySelector('input[type="file"]') as HTMLInputElement
+    fireEvent.change(fileInput, {
+      target: { files: [new File(['x'], 'raw.png', { type: 'image/png' })] },
+    })
+    await screen.findByText('Attach to my message')
+    return app
+  }
+
+  /** Both drafts alive and the question edited, with no file chosen. */
+  async function readyToGenerate() {
+    const app = renderApp()
+    fireEvent.change(composer(), { target: { value: MINE } })
+    goToPlanner()
+    tapRefusal()
+    await screen.findByText(/You were already typing something/)
+    fireEvent.click(screen.getByRole('button', { name: /Use the planner's question/ }))
+    fireEvent.change(composer(), { target: { value: `${composer().value}${EDIT}` } })
+    return app
+  }
+
+  /** The chooser has not merely closed — it has LEFT. See the Attach block. */
+  async function chooserHasLeft() {
+    await waitFor(() => {
+      expect(screen.queryByText('Attach to my message')).not.toBeInTheDocument()
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    })
+  }
+
+  /** Let a held creation resolve into whoever is still listening. */
+  async function releaseTheMint() {
+    const release = inFlight.releaseThread
+    inFlight.releaseThread = null
+    inFlight.holdThread = false
+    await act(async () => {
+      release?.()
+      for (let i = 0; i < 5; i++) await Promise.resolve()
+    })
+  }
+
+  it('keeps the edited question through a normal reference preparation', async () => {
+    // The reported P2, head on. Reference preparation stages the image and opens
+    // the refinement form; it asks for nothing and generates nothing.
+    await readyWithAPhoto()
+    fireEvent.click(screen.getByText('Use as reference for image creation'))
+    await screen.findByText('Using as reference')
+    await chooserHasLeft()
+
+    // The defect: this came back empty.
+    expect(composer().value).toContain(ASK)
+    expect(composer().value).toContain(EDIT)
+    expect(screen.queryByText(/wasn't added to this conversation/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/another child's conversation/)).not.toBeInTheDocument()
+
+    // One conversation, on her parent's own tab, and the photo really uploaded —
+    // but no model call and no generation, because preparing a reference is not
+    // a request.
+    expect(vi.mocked(addDoc)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(addDoc).mock.calls[0][1]).toMatchObject({
+      chatContext: 'lincoln',
+      messageCount: 0,
+    })
+    expect(vi.mocked(uploadBytes)).toHaveBeenCalledTimes(1)
+    expect(chatCalls).toHaveLength(0)
+    expect(generateImageCalls).toHaveLength(0)
+
+    // And BOTH drafts are still recoverable: the question is in the box and her
+    // own set-aside draft is behind the notice's close, exactly as after Attach.
+    fireEvent.click(screen.getByRole('button', { name: /close/i }))
+    expect(screen.getByText(/Your own draft is set aside/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Bring my own draft back/ }))
+    expect(composer().value).toBe(MINE)
+  })
+
+  it('positive control: Send after a reference preparation is one request for Lincoln', async () => {
+    await readyWithAPhoto()
+    fireEvent.click(screen.getByText('Use as reference for image creation'))
+    await screen.findByText('Using as reference')
+    await chooserHasLeft()
+
+    fireEvent.click(sendButton())
+
+    await waitFor(() => expect(chatCalls).toHaveLength(1))
+    expect(chatCalls[0].childId).toBe(LINCOLN.id)
+    expect(chatCalls[0].messages[0].content).toContain(ASK)
+    expect(chatCalls[0].messages[0].content).toContain(EDIT.trim())
+    // It sent into the conversation the reference preparation minted: no second
+    // thread document, counted by the payload only a thread document has.
+    const threadCreations = vi
+      .mocked(addDoc)
+      .mock.calls.filter(
+        (call) => typeof call[1] === 'object' && call[1] !== null && 'chatContext' in call[1],
+      )
+    expect(threadCreations).toHaveLength(1)
+    expect(screen.getByTestId('chat-search').textContent).toBe('?thread=new-thread')
+  })
+
+  it('keeps the edited question through a normal analyze', async () => {
+    await readyWithAPhoto()
+    fireEvent.click(screen.getByText('Analyze this image'))
+
+    // Analyze IS a request, and it keeps the one it already had: a single call,
+    // for the child the question was accepted for.
+    await waitFor(() => expect(chatCalls).toHaveLength(1))
+    expect(chatCalls[0].childId).toBe(LINCOLN.id)
+    await chooserHasLeft()
+
+    expect(composer().value).toContain(ASK)
+    expect(composer().value).toContain(EDIT)
+    expect(screen.queryByText(/wasn't added to this conversation/)).not.toBeInTheDocument()
+    expect(vi.mocked(uploadBytes)).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(screen.getByRole('button', { name: /close/i }))
+    expect(screen.getByText(/Your own draft is set aside/)).toBeInTheDocument()
+  })
+
+  it('keeps the edited question through a normal direct generation', async () => {
+    await readyToGenerate()
+    fireEvent.click(screen.getByRole('button', { name: 'Generate image' }))
+    fireEvent.change(await screen.findByPlaceholderText(IDEA_PLACEHOLDER), {
+      target: { value: IDEA },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Just generate' }))
+
+    await waitFor(() => expect(generateImageCalls).toHaveLength(1))
+
+    expect(composer().value).toContain(ASK)
+    expect(composer().value).toContain(EDIT)
+    expect(screen.queryByText(/wasn't added to this conversation/)).not.toBeInTheDocument()
+    expect(chatCalls).toHaveLength(0)
+  })
+
+  it('aborts a reference preparation whose mint lands after a child switch', async () => {
+    // The claim is taken at the TAP and refused when it lands in a scope nobody
+    // is in: no conversation opened, no URL rewritten, no upload, and no
+    // reference image staged into a composer that is no longer this tap's.
+    await readyWithAPhoto()
+    inFlight.holdThread = true
+    fireEvent.click(screen.getByText('Use as reference for image creation'))
+    await waitFor(() => expect(vi.mocked(addDoc)).toHaveBeenCalledTimes(1))
+    await chooserHasLeft()
+
+    fireEvent.click(screen.getByRole('tab', { name: 'London' }))
+    expect(await screen.findByText(/another child's conversation/)).toBeInTheDocument()
+    expect(composer().value).toBe('')
+
+    await releaseTheMint()
+
+    expect(screen.getByTestId('chat-search').textContent).toBe('')
+    expect(vi.mocked(uploadBytes)).not.toHaveBeenCalled()
+    expect(screen.queryByText('Using as reference')).not.toBeInTheDocument()
+    expect(screen.queryByText('Create an Image')).not.toBeInTheDocument()
+    expect(vi.mocked(addDoc)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(updateDoc)).not.toHaveBeenCalled()
+    expect(generateImageCalls).toHaveLength(0)
+    expect(chatCalls).toHaveLength(0)
+  })
+
+  it('aborts an analyze whose mint lands after she picks a saved conversation', async () => {
+    fixture.listenerDocs = [savedThread()]
+    await readyWithAPhoto()
+    inFlight.holdThread = true
+    fireEvent.click(screen.getByText('Analyze this image'))
+    await waitFor(() => expect(vi.mocked(addDoc)).toHaveBeenCalledTimes(1))
+    await chooserHasLeft()
+
+    fireEvent.click(screen.getByText('Saved chat one'))
+    expect(await screen.findByText(/wasn't added to this conversation/)).toBeInTheDocument()
+
+    await releaseTheMint()
+
+    // She is in the conversation she chose; the stale one was never opened, no
+    // byte was uploaded into it and — the part only analyze can get wrong — no
+    // model call was made under it.
+    expect(screen.getByTestId('chat-search').textContent).toBe('?thread=t1')
+    expect(vi.mocked(uploadBytes)).not.toHaveBeenCalled()
+    expect(chatCalls).toHaveLength(0)
+    expect(vi.mocked(addDoc)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(updateDoc)).not.toHaveBeenCalled()
+  })
+
+  it('aborts a direct generation whose mint lands after a route departure and return', async () => {
+    await readyToGenerate()
+    fireEvent.click(screen.getByRole('button', { name: 'Generate image' }))
+    fireEvent.change(await screen.findByPlaceholderText(IDEA_PLACEHOLDER), {
+      target: { value: IDEA },
+    })
+    inFlight.holdThread = true
+    fireEvent.click(screen.getByRole('button', { name: 'Just generate' }))
+    await waitFor(() => expect(vi.mocked(addDoc)).toHaveBeenCalledTimes(1))
+
+    goToPlanner()
+    tapRefusal()
+    await screen.findByText(/You were already typing something/)
+    fireEvent.click(screen.getByText(/Keep what I was typing/))
+    expect(composer().value).toContain(EDIT)
+
+    await releaseTheMint()
+
+    // The departed visit's generation stopped at the refusal: no paid call, so
+    // nothing was accounted for, and THIS visit's words are untouched.
+    expect(generateImageCalls).toHaveLength(0)
+    expect(composer().value).toContain(ASK)
+    expect(composer().value).toContain(EDIT)
+    expect(screen.queryByText(/wasn't added to this conversation/)).not.toBeInTheDocument()
+    expect(screen.getByTestId('chat-search').textContent).toBe('')
+    expect(vi.mocked(addDoc)).toHaveBeenCalledTimes(1)
+  })
+
+  it('takes the claim BEFORE the compression, not just before the thread write', async () => {
+    // The ordering this round turns on. Compression is the first `await` in both
+    // upload handlers, so a claim taken after it would be taken from inside a
+    // continuation: by then the tab has moved, the guard is already revoked, and
+    // `beginOwnThreadMint` would answer `null` — no claim, no refusal, and the
+    // handler would open the stale conversation and upload into it exactly as
+    // before the fix. Held at the compression, so the capture point is what is
+    // being measured and nothing else.
+    fixture.listenerDocs = [savedThread()]
+    await readyWithAPhoto()
+    inFlight.holdCompress = true
+    fireEvent.click(screen.getByText('Use as reference for image creation'))
+    await waitFor(() => expect(screen.queryByText('Use as reference for image creation')).not.toBeInTheDocument())
+    await chooserHasLeft()
+    // Nothing has been created yet: the handler is still inside the compression.
+    expect(vi.mocked(addDoc)).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByText('Saved chat one'))
+    expect(await screen.findByText(/wasn't added to this conversation/)).toBeInTheDocument()
+
+    const release = inFlight.releaseCompress
+    inFlight.releaseCompress = null
+    inFlight.holdCompress = false
+    await act(async () => {
+      release?.()
+      for (let i = 0; i < 8; i++) await Promise.resolve()
+    })
+
+    // The creation happened — this handler always creates when it has no thread —
+    // and the claim it took at the tap refused the id, so the operation stopped
+    // there: she is still in the conversation she chose, nothing was uploaded,
+    // and no reference was staged.
+    expect(screen.getByTestId('chat-search').textContent).toBe('?thread=t1')
+    expect(vi.mocked(uploadBytes)).not.toHaveBeenCalled()
+    expect(screen.queryByText('Using as reference')).not.toBeInTheDocument()
+    expect(chatCalls).toHaveLength(0)
+    expect(generateImageCalls).toHaveLength(0)
+
+    // Her own set-aside draft survived the abort and is still there to come back
+    // to — a refused claim clears its own selection and nothing of hers.
+    fireEvent.click(screen.getByRole('button', { name: /close/i }))
+    expect(screen.getByText(/Your own draft is set aside/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Bring my own draft back/ }))
+    expect(composer().value).toBe(MINE)
+  })
+
+  it('does not clear a NEWER selection when the refused tap cleans up', async () => {
+    // The cleanup half. By the time the claim is refused the restored composer
+    // holds a different chooser with previews of its own, and the departed tap's
+    // `finally` must not clear them or revoke them — that would destroy the work
+    // the refusal exists to protect.
+    await readyWithAPhoto()
+    inFlight.holdThread = true
+    fireEvent.click(screen.getByText('Analyze this image'))
+    await waitFor(() => expect(vi.mocked(addDoc)).toHaveBeenCalledTimes(1))
+    await chooserHasLeft()
+
+    // Away and back: the restore gives her the chooser with a preview this visit
+    // owns, which is the newer work the stale tap must not touch.
+    goToPlanner()
+    tapRefusal()
+    await screen.findByText(/You were already typing something/)
+    fireEvent.click(screen.getByText(/Keep what I was typing/))
+    const restoredPreview = screen.getByAltText('Selected 1').getAttribute('src')
+    expect(restoredPreview).toBeTruthy()
+
+    await releaseTheMint()
+
+    // Still selectable, still showing a live URL, and still hers to act on.
+    expect(screen.getByAltText('Selected 1').getAttribute('src')).toBe(restoredPreview)
+    expect(objectUrls.revoked).not.toContain(restoredPreview)
+    expect(screen.getByText('Attach to my message')).toBeInTheDocument()
+    expect(composer().value).toContain(EDIT)
+    expect(vi.mocked(uploadBytes)).not.toHaveBeenCalled()
+    expect(chatCalls).toHaveLength(0)
+  })
+
+  it('Send is unchanged: it consumes the question instead of claiming a thread', async () => {
+    // Verified rather than converted. Send takes the submitted text out of the
+    // box before it mints, so there is no unsent draft for a claim to protect —
+    // and a claim here would be wrong, because the question has been SENT. What
+    // must not happen is the sent text coming back, or going out twice.
+    await readyToGenerate()
+    fireEvent.click(sendButton())
+
+    await waitFor(() => expect(chatCalls).toHaveLength(1))
+    expect(chatCalls[0].childId).toBe(LINCOLN.id)
+    expect(chatCalls[0].messages[0].content).toContain(ASK)
+    expect(chatCalls[0].messages[0].content).toContain(EDIT.trim())
+
+    // The box stays empty — nothing restored it and nothing duplicated it — and
+    // the one request went into the one conversation the Send minted.
+    expect(composer().value).toBe('')
+    expect(screen.getByTestId('chat-search').textContent).toBe('?thread=new-thread')
+    const threadCreations = vi
+      .mocked(addDoc)
+      .mock.calls.filter(
+        (call) => typeof call[1] === 'object' && call[1] !== null && 'chatContext' in call[1],
+      )
+    expect(threadCreations).toHaveLength(1)
+    expect(screen.queryByText(/wasn't added to this conversation/)).not.toBeInTheDocument()
+
+    // Her own set-aside draft outlives the Send, which is the rule this feature
+    // already had: the offer replaces the question's note rather than going with
+    // it.
+    expect(await screen.findByText(/Your own draft is set aside/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Bring my own draft back/ }))
+    expect(composer().value).toBe(MINE)
   })
 })
 

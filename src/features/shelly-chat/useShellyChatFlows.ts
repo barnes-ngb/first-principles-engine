@@ -113,8 +113,17 @@ export interface ShellyChatFlowsDeps {
    */
   suppressMountWrites?: boolean
   /**
-   * Take the single-use authority for the thread THIS attach is about to create
+   * Take the single-use authority for the thread THIS tap is about to create
    * (UX-273 closeout), or `null` when there is nothing to authorise.
+   *
+   * Called by every creator that mints a conversation while leaving the
+   * composer's unsent work standing — "Attach to my message", "Analyze",
+   * "Use as reference for image creation", and `handleGenerateImageDirect`, the
+   * funnel behind all three generation doors. Round 2's P2 was that only the
+   * first of them took the claim, so the other three still read their own
+   * creation as Shelly opening a different conversation. `handleSend` is
+   * deliberately NOT one of them: it consumes the submitted text before minting,
+   * so there is no unsent draft for a claim to protect, and it is unchanged.
    *
    * Owned by `usePlannerAskHandoff` and passed in, like `currentContextScope`
    * above and for the same reason: the context an operation STARTED in has to be
@@ -633,6 +642,13 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
 
     setGeneratingImage(true)
 
+    // The own-thread claim for the one funnel every generation door reaches, and
+    // the third non-consuming creator: the prompt comes from the image form, so
+    // the composer's unsent text — her edited question for Lincoln — is still in
+    // the box while this mints a conversation. Taken here rather than in the
+    // callers because this is the function that CREATES the thread; the
+    // refinement doors' own awaits create nothing.
+    const claimOwnThread = beginOwnThreadMint?.() ?? null
     try {
       let threadId = activeThreadId
 
@@ -647,6 +663,11 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
           archived: false,
         })
         threadId = threadRef.id
+        // Refused means stale: abort before the conversation becomes the live
+        // one, before the `?thread` param, before the user message and before
+        // the paid `generateImage` call — so a refusal spends no quota and
+        // nothing is accounted for, exactly as the gate's refusal does not.
+        if (claimOwnThread && !claimOwnThread(threadId)) return
         setActiveThreadId(threadId)
         setSearchParams({ thread: threadId })
       }
@@ -734,7 +755,7 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
     } finally {
       setGeneratingImage(false)
     }
-  }, [activeThreadId, familyId, generateImage, setSearchParams, chatContext, lastErrorRef, imageFailureRef, setActiveThreadId, setGeneratingImage, isParent, artQuota])
+  }, [activeThreadId, familyId, generateImage, setSearchParams, chatContext, lastErrorRef, imageFailureRef, setActiveThreadId, setGeneratingImage, isParent, artQuota, beginOwnThreadMint])
 
   // ── Image refinement flow (Prompt 9) ───────────────────────────
 
@@ -963,6 +984,37 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
     setUploadPreviews([])
   }, [uploadPreviews, setUploadDialogOpen, setUploadFiles, setUploadPreviews])
 
+  /**
+   * Let go of the file selection a STALE tap captured — and nothing else.
+   *
+   * The cleanup half of the own-thread claim (UX-273 closeout, round 2). By the
+   * time a claim is refused the composer may already hold newer work: a restored
+   * draft comes back with raw files and `blob:` previews of its own, so clearing
+   * the live selection, or revoking its URLs, would destroy the very work the
+   * refusal exists to protect. So the clear is conditional on the selection still
+   * being the one this tap captured by identity, and the revoke happens only when
+   * the clear does.
+   *
+   * One helper rather than the same eight lines in each of the three
+   * non-consuming creators (attach, analyze, reference) — the class of handler
+   * round 2 found had been fixed in only one place.
+   */
+  const releaseStaleUploadSelection = useCallback(
+    (ownFiles: File[], ownPreviews: string[]) => {
+      let revoked = false
+      setUploadPreviews((prev) => {
+        if (prev !== ownPreviews) return prev
+        if (!revoked) {
+          revoked = true
+          ownPreviews.forEach((p) => URL.revokeObjectURL(p))
+        }
+        return []
+      })
+      setUploadFiles((prev) => (prev === ownFiles ? [] : prev))
+    },
+    [setUploadFiles, setUploadPreviews],
+  )
+
   const handleUploadContext = useCallback(async () => {
     if (!uploadFiles.length) return
 
@@ -1031,30 +1083,16 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
       uploadPreviews.forEach((p) => URL.revokeObjectURL(p))
     } finally {
       if (stale) {
-        // A stale tap clears ITS OWN selection and nothing else. By the time a
-        // claim is refused the composer may already hold newer work — a restored
-        // draft comes back with previews of its own — and clearing that, or
-        // revoking its `blob:` URLs, would destroy the very work the refusal
-        // exists to protect. So the clear is conditional on the selection still
-        // being the one this tap captured, and the revoke happens only when the
-        // clear does.
-        let revoked = false
-        setUploadPreviews((prev) => {
-          if (prev !== uploadPreviews) return prev
-          if (!revoked) {
-            revoked = true
-            uploadPreviews.forEach((p) => URL.revokeObjectURL(p))
-          }
-          return []
-        })
-        setUploadFiles((prev) => (prev === uploadFiles ? [] : prev))
+        // A stale tap clears ITS OWN selection and nothing else — see
+        // `releaseStaleUploadSelection`.
+        releaseStaleUploadSelection(uploadFiles, uploadPreviews)
       } else {
         setUploadFiles([])
         setUploadPreviews([])
       }
       setUploading(false)
     }
-  }, [uploadFiles, uploadPreviews, activeThreadId, familyId, setSearchParams, chatContext, setActiveThreadId, setPendingAttachments, setUploadDialogOpen, setUploadFiles, setUploadPreviews, setUploading, beginOwnThreadMint])
+  }, [uploadFiles, uploadPreviews, activeThreadId, familyId, setSearchParams, chatContext, setActiveThreadId, setPendingAttachments, setUploadDialogOpen, setUploadFiles, setUploadPreviews, setUploading, beginOwnThreadMint, releaseStaleUploadSelection])
 
   const handleUploadAnalyze = useCallback(async () => {
     // Single-image path — the dialog only offers Analyze when one file is chosen.
@@ -1065,6 +1103,13 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
 
     // The context this turn belongs to, captured before any await (Codex P1).
     const scope = currentContextScope()
+    // And the authority for the conversation this tap may create, taken in the
+    // same breath — BEFORE the compression `await`, not just before the thread
+    // creation. Analyze leaves the composer's unsent work standing (her edited
+    // planner question for Lincoln is still in the box), so it is a
+    // non-consuming creator and needs the same provenance Attach has.
+    const claimOwnThread = beginOwnThreadMint?.() ?? null
+    let stale = false
     try {
       const compressed = await compressIfNeeded(uploadFiles[0], 2 * 1024 * 1024, { maxWidth: 1600, maxHeight: 1600 })
 
@@ -1081,6 +1126,16 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
           archived: false,
         })
         threadId = threadRef.id
+        // Obeyed, exactly as in the attach path: a refusal means she switched
+        // tab, opened a saved conversation, signed out or left while the
+        // compression and the creation were in flight. So nothing after it runs
+        // — no active conversation, no `?thread`, no upload, no message and no
+        // model call. The empty thread document is an abandoned fresh
+        // conversation, which is all an unopened one ever is.
+        if (claimOwnThread && !claimOwnThread(threadId)) {
+          stale = true
+          return
+        }
         setActiveThreadId(threadId)
         setSearchParams({ thread: threadId })
       }
@@ -1185,13 +1240,17 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
         }).catch(() => {})
       }
     } finally {
-      uploadPreviews.forEach((p) => URL.revokeObjectURL(p))
-      setUploadFiles([])
-      setUploadPreviews([])
+      if (stale) {
+        releaseStaleUploadSelection(uploadFiles, uploadPreviews)
+      } else {
+        uploadPreviews.forEach((p) => URL.revokeObjectURL(p))
+        setUploadFiles([])
+        setUploadPreviews([])
+      }
       setUploading(false)
       setSending(false)
     }
-  }, [currentContextScope, uploadFiles, uploadPreviews, activeThreadId, familyId, messages, chat, getChildIdForContext, setSearchParams, chatContext, setActiveThreadId, setFollowUps, setSending, setUploadDialogOpen, setUploadFiles, setUploadPreviews, setUploading, stagePendingActions])
+  }, [currentContextScope, uploadFiles, uploadPreviews, activeThreadId, familyId, messages, chat, getChildIdForContext, setSearchParams, chatContext, setActiveThreadId, setFollowUps, setSending, setUploadDialogOpen, setUploadFiles, setUploadPreviews, setUploading, stagePendingActions, beginOwnThreadMint, releaseStaleUploadSelection])
 
   const handleUploadGenerate = useCallback(async () => {
     // Single-image path — reference generation uses exactly one image.
@@ -1200,6 +1259,15 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
     setUploadDialogOpen(false)
     setUploading(true)
 
+    // The own-thread claim, taken before the compression `await` (round 2's P2).
+    // "Use as reference for image creation" mints a conversation and leaves the
+    // composer's unsent work exactly where it is — her edited question for
+    // Lincoln stays in the box — so the guard saw `null → id` as Shelly opening a
+    // different conversation and cleared the text. Reference preparation itself
+    // makes no model or generation call; it only stages the image and opens the
+    // refinement form.
+    const claimOwnThread = beginOwnThreadMint?.() ?? null
+    let stale = false
     try {
       const compressed = await compressIfNeeded(uploadFiles[0], 2 * 1024 * 1024, { maxWidth: 1600, maxHeight: 1600 })
 
@@ -1216,6 +1284,14 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
           archived: false,
         })
         threadId = threadRef.id
+        // Refused means stale: stop before the conversation becomes the live one,
+        // before the `?thread` param, before a byte is uploaded, and before the
+        // reference image and the refinement form are staged into a composer that
+        // is no longer this tap's.
+        if (claimOwnThread && !claimOwnThread(threadId)) {
+          stale = true
+          return
+        }
         setActiveThreadId(threadId)
         setSearchParams({ thread: threadId })
       }
@@ -1237,11 +1313,15 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
       console.error('Failed to upload reference image:', err)
       uploadPreviews.forEach((p) => URL.revokeObjectURL(p))
     } finally {
-      setUploadFiles([])
-      setUploadPreviews([])
+      if (stale) {
+        releaseStaleUploadSelection(uploadFiles, uploadPreviews)
+      } else {
+        setUploadFiles([])
+        setUploadPreviews([])
+      }
       setUploading(false)
     }
-  }, [uploadFiles, uploadPreviews, activeThreadId, familyId, setSearchParams, chatContext, setActiveThreadId, setImageFlowOpen, setImageFlowStep, setImageIdea, setImageQuestions, setImageAnswers, setPendingReferenceImage, setUploadDialogOpen, setUploadFiles, setUploadPreviews, setUploading])
+  }, [uploadFiles, uploadPreviews, activeThreadId, familyId, setSearchParams, chatContext, setActiveThreadId, setImageFlowOpen, setImageFlowStep, setImageIdea, setImageQuestions, setImageAnswers, setPendingReferenceImage, setUploadDialogOpen, setUploadFiles, setUploadPreviews, setUploading, beginOwnThreadMint, releaseStaleUploadSelection])
 
   // ── New thread ─────────────────────────────────────────────────
   const handleNewThread = useCallback(() => {
