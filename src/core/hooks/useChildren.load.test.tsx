@@ -18,25 +18,33 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
  * either direction.
  */
 
-const reads: { reject: boolean } = { reject: false }
-const docsFor = (rows: { id: string; name: string }[]) => ({
-  docs: rows.map((r) => ({ id: r.id, data: () => ({ name: r.name }) })),
-})
-
-const getDocsMock = vi.fn(async () => {
-  if (reads.reject) throw new Error('synthetic firestore failure')
-  return docsFor([
-    { id: 'child-lincoln', name: 'Lincoln' },
-    { id: 'child-london', name: 'London' },
-  ])
+// `vi.mock` factories are hoisted above every module-scope `const`, so anything
+// a factory dereferences as it is evaluated has to be hoisted with them —
+// `vi.hoisted` is the only place these can live. The fixture children are
+// Lincoln and London; Shelly is the parent whose composer gate this read gates.
+const { reads, getDocsMock, seedMock } = vi.hoisted(() => {
+  const reads: { reject: boolean } = { reject: false }
+  const docsFor = (rows: { id: string; name: string }[]) => ({
+    docs: rows.map((r) => ({ id: r.id, data: () => ({ name: r.name }) })),
+  })
+  return {
+    reads,
+    getDocsMock: vi.fn(async () => {
+      if (reads.reject) throw new Error('synthetic firestore failure')
+      return docsFor([
+        { id: 'child-lincoln', name: 'Lincoln' },
+        { id: 'child-london', name: 'London' },
+      ])
+    }),
+    // Mocked so a failing test can never reach a real write path; both profile
+    // children exist in the fixture above, so nothing is missing and this is
+    // not called on the success path either.
+    seedMock: vi.fn(async () => [] as { id: string; name: string }[]),
+  }
 })
 
 vi.mock('firebase/firestore', () => ({ getDocs: () => getDocsMock() }))
 vi.mock('../firebase/firestore', () => ({ childrenCollection: () => ({}) }))
-// Mocked so a failing test can never reach a real write path; both profile
-// children exist in the fixture above, so nothing is missing and this is not
-// called on the success path either.
-const seedMock = vi.fn(async () => [])
 vi.mock('../firebase/seedProfileChildren', () => ({ seedProfileChildren: seedMock }))
 vi.mock('../auth/useAuth', () => ({ useFamilyId: () => 'fam-1' }))
 vi.mock('../profile/useProfile', () => ({ useProfile: () => ({ profile: 'parents' }) }))
