@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import Box from '@mui/material/Box'
+import Button from '@mui/material/Button'
 import IconButton from '@mui/material/IconButton'
 import Typography from '@mui/material/Typography'
 
@@ -25,6 +26,24 @@ interface StonebridgeVillageProps {
   currentMissionId: string
   /** Derived counters for the active mission (null if every location is repaired). */
   active: MissionComputation | null
+  /**
+   * The board is drawn from the **last known** progress for this child, not a
+   * current read (the live read failed or has not settled again after a Retry).
+   * The banners are earned and stay; the board just says the numbers are not
+   * fresh.
+   */
+  stale?: boolean
+  /** A read for this child came back as an error. */
+  readError?: boolean
+  /** A persist for this child was rejected — what is shown is NOT saved. */
+  saveError?: boolean
+  /** A Retry has re-subscribed and neither read has settled yet. */
+  retrying?: boolean
+  /**
+   * Re-subscribe. Given to the board because the board COVERS the card: while
+   * it is open, the card's own Try again cannot be tapped or focused.
+   */
+  onRetry?: () => void
 }
 
 /**
@@ -47,6 +66,11 @@ export default function StonebridgeVillage({
   raisedBanners,
   currentMissionId,
   active,
+  stale = false,
+  readError = false,
+  saveError = false,
+  retrying = false,
+  onRetry,
 }: StonebridgeVillageProps) {
   // Mission whose thank-you is being replayed (tapping a repaired tile).
   const [replayMissionId, setReplayMissionId] = useState<string | null>(null)
@@ -59,6 +83,11 @@ export default function StonebridgeVillage({
 
   return (
     <Box
+      // Named region, so the board's own controls are addressable apart from
+      // the card's identical ones underneath it (`aria-modal` is deliberately
+      // NOT claimed: nothing here traps focus).
+      role="dialog"
+      aria-label="Stonebridge Village"
       sx={{
         position: 'fixed',
         inset: 0,
@@ -94,6 +123,66 @@ export default function StonebridgeVillage({
             ✕
           </IconButton>
         </Box>
+
+        {/* ── Honest recovery, INSIDE the board ───────────────────────
+            The board is a full-screen overlay at z-index 9000, so the card's
+            notice and its Try again are behind it: a child who opened the
+            village during a failed read could read a stale label with no
+            reachable door, and a save rejected while the board was open said
+            nothing at all. Both states and the one door live here too.
+            Nothing about the art, the tiles or the Banner Hall changes — the
+            banners below are earned and are still shown. */}
+        {(stale || readError || saveError || retrying) && (
+          <Box
+            role="status"
+            sx={{
+              mb: 1.5,
+              p: 1.5,
+              borderRadius: isLincoln ? '8px' : '16px',
+              border: `1px solid ${isLincoln ? 'rgba(247,215,116,0.5)' : 'rgba(122,63,103,0.35)'}`,
+              background: isLincoln ? 'rgba(40,34,12,0.6)' : 'rgba(255,244,230,0.92)',
+            }}
+          >
+            {saveError && (
+              <Typography sx={{ fontFamily: titleFont, fontSize: isLincoln ? '9px' : '13px' }}>
+                Your village did not save.
+              </Typography>
+            )}
+            {stale && (
+              <Typography sx={{ fontFamily: titleFont, fontSize: isLincoln ? '9px' : '13px' }}>
+                Showing your last village.
+              </Typography>
+            )}
+            {retrying && (
+              <Typography sx={{ fontFamily: titleFont, fontSize: isLincoln ? '9px' : '13px' }}>
+                Trying again…
+              </Typography>
+            )}
+            {!stale && !saveError && !retrying && readError && (
+              <Typography sx={{ fontFamily: titleFont, fontSize: isLincoln ? '9px' : '13px' }}>
+                Couldn't load your village.
+              </Typography>
+            )}
+            {onRetry && (
+              <Button
+                onClick={onRetry}
+                variant="outlined"
+                size="small"
+                sx={{
+                  mt: 1,
+                  minHeight: 44,
+                  fontFamily: titleFont,
+                  fontSize: isLincoln ? '9px' : '13px',
+                  fontWeight: 700,
+                  color: isLincoln ? '#F7D774' : '#7a3f67',
+                  borderColor: isLincoln ? 'rgba(247,215,116,0.6)' : 'rgba(122,63,103,0.5)',
+                }}
+              >
+                Try again
+              </Button>
+            )}
+          </Box>
+        )}
 
         {/* Location board */}
         <Box

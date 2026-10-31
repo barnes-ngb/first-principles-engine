@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import Box from '@mui/material/Box'
+import Button from '@mui/material/Button'
 import Typography from '@mui/material/Typography'
 
 import { useStonebridgeProgress } from './useStonebridgeProgress'
@@ -30,14 +31,48 @@ export default function StonebridgeMissionCard({ familyId, childId, isLincoln }:
     justCompletedMissionId,
     clearJustCompleted,
     loading,
+    stale,
+    readError,
+    saveError,
+    retrying,
+    retry,
   } = useStonebridgeProgress(familyId, childId)
 
   const [villageOpen, setVillageOpen] = useState(false)
 
   const titleFont = isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive'
 
+  /** The one retry door, in both the no-data card and the notice below. */
+  const retryButton = (
+    <Button
+      onClick={retry}
+      variant="outlined"
+      size="small"
+      sx={{
+        mt: 1,
+        minHeight: 44,
+        fontFamily: titleFont,
+        fontSize: isLincoln ? '9px' : '13px',
+        fontWeight: 700,
+        color: isLincoln ? '#F7D774' : '#7a3f67',
+        borderColor: isLincoln ? 'rgba(247,215,116,0.6)' : 'rgba(122,63,103,0.5)',
+      }}
+    >
+      Try again
+    </Button>
+  )
+
   if (loading || !mission || !active) {
-    // Quiet placeholder while progress loads — keeps the hub layout stable.
+    // Nothing to show. Either it is still arriving (quiet placeholder, keeps the
+    // hub layout stable) or a read/persist failed and there is no earlier
+    // village to fall back on — which says so and offers the retry, rather than
+    // claiming an empty village the child never had.
+    const failed = readError || saveError
+    const sentence = retrying
+      ? 'Trying again…'
+      : failed
+        ? "Couldn't load your village."
+        : 'Loading your mission…'
     return (
       <Box
         sx={{
@@ -52,9 +87,13 @@ export default function StonebridgeMissionCard({ familyId, childId, isLincoln }:
         <Typography sx={{ fontFamily: titleFont, fontSize: isLincoln ? '12px' : '16px', fontWeight: 700 }}>
           🏰 Stonebridge
         </Typography>
-        <Typography sx={{ fontFamily: titleFont, fontSize: isLincoln ? '10px' : '13px', opacity: 0.7, mt: 1 }}>
-          Loading your mission…
+        <Typography
+          role={failed ? 'alert' : undefined}
+          sx={{ fontFamily: titleFont, fontSize: isLincoln ? '10px' : '13px', opacity: 0.7, mt: 1 }}
+        >
+          {sentence}
         </Typography>
+        {(failed || retrying) && retryButton}
       </Box>
     )
   }
@@ -155,6 +194,40 @@ export default function StonebridgeMissionCard({ familyId, childId, isLincoln }:
           {active.current} / {active.target} done
         </Typography>
 
+        {/* Honest notice over last-known or unsaved progress. The bar above is
+            the child's real earned village either way — what this says is that
+            the numbers are not fresh (stale) or not stored (saveError). It never
+            claims a save that was not acknowledged. */}
+        {(stale || saveError || retrying) && (
+          <Box
+            role="status"
+            sx={{
+              mt: 1.25,
+              p: 1,
+              borderRadius: isLincoln ? '6px' : '12px',
+              border: `1px solid ${isLincoln ? 'rgba(247,215,116,0.5)' : 'rgba(122,63,103,0.35)'}`,
+              background: isLincoln ? 'rgba(40,34,12,0.6)' : 'rgba(255,244,230,0.9)',
+            }}
+          >
+            {saveError && (
+              <Typography sx={{ fontFamily: titleFont, fontSize: isLincoln ? '9px' : '13px' }}>
+                Your village did not save.
+              </Typography>
+            )}
+            {stale && (
+              <Typography sx={{ fontFamily: titleFont, fontSize: isLincoln ? '9px' : '13px' }}>
+                Showing your last village.
+              </Typography>
+            )}
+            {retrying && (
+              <Typography sx={{ fontFamily: titleFont, fontSize: isLincoln ? '9px' : '13px' }}>
+                Trying again…
+              </Typography>
+            )}
+            {retryButton}
+          </Box>
+        )}
+
         {/* Open the full village board (all locations + Banner Hall) */}
         <Box
           onClick={() => setVillageOpen(true)}
@@ -183,6 +256,10 @@ export default function StonebridgeMissionCard({ familyId, childId, isLincoln }:
         </Box>
       </Box>
 
+      {/* The board is a full-screen overlay, so the card's own notice and its
+          Try again sit UNDER it — unreachable by tap or by keyboard while the
+          board is open. The same honest state and the same door are therefore
+          handed to the board rather than assumed to be visible behind it. */}
       <StonebridgeVillage
         open={villageOpen}
         onClose={() => setVillageOpen(false)}
@@ -191,6 +268,11 @@ export default function StonebridgeMissionCard({ familyId, childId, isLincoln }:
         raisedBanners={raisedBanners}
         currentMissionId={mission.id}
         active={active}
+        stale={stale}
+        readError={readError}
+        saveError={saveError}
+        retrying={retrying}
+        onRetry={retry}
       />
 
       <BannerRaiseCelebration
