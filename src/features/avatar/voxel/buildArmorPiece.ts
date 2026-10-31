@@ -9,6 +9,10 @@ import {
   buildStoneHelmet, buildStoneBreastplate, buildStoneBelt,
   buildStoneShoes, buildStoneShield, buildStoneSword,
 } from './armorGeometryStone'
+import {
+  buildDiamondHelmet, buildDiamondBreastplate, buildDiamondBelt,
+  buildDiamondShoes, buildDiamondShield, buildDiamondSword,
+} from './armorGeometryDiamond'
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -188,9 +192,10 @@ export const XP_THRESHOLDS: Record<VoxelArmorPieceId, number> = {
 // Uses getBodyLayout() world-unit dimensions + U for detail padding.
 // All positions in character-root space (feet at Y=0) unless attached to arm.
 //
-// Iron tier is the full knight geometry. Wood and Stone variants live in
-// armorGeometryWood.ts / armorGeometryStone.ts. Gold/Diamond/Netherite fall
-// through to Iron until Phase B.
+// Iron tier is the full knight geometry. Wood, Stone and Diamond variants
+// live in armorGeometryWood.ts / armorGeometryStone.ts /
+// armorGeometryDiamond.ts. Gold/Netherite still fall through to Iron until
+// their own Phase B pass.
 
 function buildIronHelmet(layout: BodyLayout): THREE.Group {
   const group = new THREE.Group()
@@ -808,12 +813,14 @@ function buildIronSword(layout: BodyLayout): THREE.Group {
 }
 
 // ── Tier dispatchers ────────────────────────────────────────────────
-// Gold/Diamond/Netherite currently fall through to Iron until Phase B.
+// Wood, Stone and Diamond have dedicated geometry. Gold/Netherite — and
+// any unknown or missing tier — still fall through to Iron.
 
-function normalizeTier(tier?: string): 'WOOD' | 'STONE' | 'IRON' {
+function normalizeTier(tier?: string): 'WOOD' | 'STONE' | 'DIAMOND' | 'IRON' {
   const t = tier?.toUpperCase() ?? 'IRON'
   if (t === 'WOOD') return 'WOOD'
   if (t === 'STONE') return 'STONE'
+  if (t === 'DIAMOND') return 'DIAMOND'
   return 'IRON'
 }
 
@@ -821,6 +828,7 @@ function buildHelmet(layout: BodyLayout, tier: string): THREE.Group {
   switch (normalizeTier(tier)) {
     case 'WOOD': return buildWoodHelmet(layout)
     case 'STONE': return buildStoneHelmet(layout)
+    case 'DIAMOND': return buildDiamondHelmet(layout)
     default: return buildIronHelmet(layout)
   }
 }
@@ -829,6 +837,7 @@ function buildBreastplate(layout: BodyLayout, tier: string): THREE.Group {
   switch (normalizeTier(tier)) {
     case 'WOOD': return buildWoodBreastplate(layout)
     case 'STONE': return buildStoneBreastplate(layout)
+    case 'DIAMOND': return buildDiamondBreastplate(layout)
     default: return buildIronBreastplate(layout)
   }
 }
@@ -837,6 +846,7 @@ function buildBelt(layout: BodyLayout, tier: string): THREE.Group {
   switch (normalizeTier(tier)) {
     case 'WOOD': return buildWoodBelt(layout)
     case 'STONE': return buildStoneBelt(layout)
+    case 'DIAMOND': return buildDiamondBelt(layout)
     default: return buildIronBelt(layout)
   }
 }
@@ -845,6 +855,7 @@ function buildShoes(layout: BodyLayout, tier: string): THREE.Group {
   switch (normalizeTier(tier)) {
     case 'WOOD': return buildWoodShoes(layout)
     case 'STONE': return buildStoneShoes(layout)
+    case 'DIAMOND': return buildDiamondShoes(layout)
     default: return buildIronShoes(layout)
   }
 }
@@ -853,6 +864,7 @@ function buildShield(layout: BodyLayout, tier: string): THREE.Group {
   switch (normalizeTier(tier)) {
     case 'WOOD': return buildWoodShield(layout)
     case 'STONE': return buildStoneShield(layout)
+    case 'DIAMOND': return buildDiamondShield(layout)
     default: return buildIronShield(layout)
   }
 }
@@ -870,6 +882,7 @@ function buildSword(layout: BodyLayout, tier: string): THREE.Group {
   switch (normalizeTier(tier)) {
     case 'WOOD': geom = buildWoodSword(layout); break
     case 'STONE': geom = buildStoneSword(layout); break
+    case 'DIAMOND': geom = buildDiamondSword(layout); break
     default: geom = buildIronSword(layout); break
   }
   parent.add(geom)
