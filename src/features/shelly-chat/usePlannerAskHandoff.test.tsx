@@ -193,6 +193,8 @@ describe('the notice, state by state', () => {
     stagedAt: 0,
   }
   const mine: ComposerDraft = { ...EMPTY_COMPOSER_DRAFT, text: 'mine' }
+  /** Any owner key: these render one state, they do not drive the hook. */
+  const SCOPE = 'fam-1|parents|lincoln|child-lincoln'
   const noop = () => {}
 
   const show = (state: PlannerAskHandoffState) =>
@@ -273,6 +275,7 @@ describe('the notice, state by state', () => {
       kind: 'set-aside',
       draft: { ...mine, imageIdea: 'a reading corner poster' },
       holds: 'mine',
+      scopeKey: SCOPE,
     })
     expect(screen.getByText(/Your own draft is set aside, unsent/)).toBeInTheDocument()
     expect(screen.getByText(/an image you were describing/)).toBeInTheDocument()
@@ -289,7 +292,12 @@ describe('the notice, state by state', () => {
     // is the question as she had edited it — which the planner cannot give
     // back, so the note must not call it "your own draft" or the other way
     // round.
-    show({ kind: 'set-aside', draft: { ...mine, text: `${ASK} and more phonics` }, holds: 'question' })
+    show({
+      kind: 'set-aside',
+      draft: { ...mine, text: `${ASK} and more phonics` },
+      holds: 'question',
+      scopeKey: SCOPE,
+    })
     expect(screen.getByText(/The planner's question is set aside, unsent/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Bring that draft back/ })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Bring my own draft back/ })).not.toBeInTheDocument()
@@ -300,6 +308,7 @@ describe('the notice, state by state', () => {
       kind: 'set-aside',
       draft: { ...EMPTY_COMPOSER_DRAFT, uploadFiles: [new File(['x'], 'raw.png')] },
       holds: 'mine',
+      scopeKey: SCOPE,
     })
     expect(screen.getByText(/set aside, unsent \(with 1 image\)/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Bring my own draft back/ })).toBeInTheDocument()

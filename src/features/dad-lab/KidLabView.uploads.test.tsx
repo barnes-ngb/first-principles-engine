@@ -131,6 +131,11 @@ beforeEach(() => {
 async function captureThree() {
   render(<KidLabView familyId="fam-1" child={LONDON} children={[LONDON]} />)
   await screen.findByText('Ramp Lab')
+  // The lab is on screen but the upload runner's passive effect has not settled
+  // yet; a synthetic click landing first is handled before the runner can start
+  // the uploads, and none of the three deferreds is ever created. Readiness
+  // only — nothing about the uploads themselves is waited on or relaxed.
+  await act(async () => {})
   // The younger flow renders its own PhotoCapture; fire the first.
   fireEvent.click(screen.getAllByTestId('photo')[0]!)
   await waitFor(() => expect(deferreds).toHaveLength(3))

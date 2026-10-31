@@ -1040,6 +1040,134 @@ describe('a draft the question displaced is still hers', () => {
   })
 })
 
+describe('a question restored across the route is still a GUARDED question', () => {
+  /**
+   * The release review's behavioural blocker, reproduced then closed.
+   *
+   * She edits the Lincoln question, leaves for the planner, comes back to find
+   * it restored verbatim — and the guard did not come back with it. The text
+   * was ordinary typing, so a Send from London's tab wrote a thread with
+   * `chatContext: 'london'` and called the model with London's `childId`,
+   * carrying Lincoln's name, Lincoln's week and Lincoln's question. No error,
+   * no notice: the wrong child's record, one tap from a screen she had opened
+   * for the other one.
+   *
+   * The draft and its authority travel together now. Both of these assert the
+   * SAME thing from the two directions the scope can move — the tab she sends
+   * under, and the shell's active child — and the positive control below proves
+   * the guard did not simply break Send.
+   */
+  const EDIT = ' and more phonics'
+
+  /** Edit the arrived question, leave, and come back to it. */
+  async function returnToTheEditedQuestion() {
+    renderApp()
+    goToPlanner()
+    tapRefusal()
+    await screen.findByText(/From Plan My Week/)
+    fireEvent.change(composer(), { target: { value: `${composer().value}${EDIT}` } })
+
+    goToPlanner()
+    tapRefusal()
+    // Restored verbatim, which is the behaviour the repair keeps.
+    await waitFor(() => expect(composer().value).toContain(EDIT))
+    expect(composer().value).toContain(ASK)
+    // No spy is reset here: nothing in this journey writes or calls the model,
+    // so the zero the tests below assert is the run's own total.
+    expect(chatCalls).toHaveLength(0)
+    expect(vi.mocked(addDoc)).not.toHaveBeenCalled()
+  }
+
+  it('is withdrawn, not sent, when she moves to another child’s tab', async () => {
+    await returnToTheEditedQuestion()
+
+    fireEvent.click(screen.getByRole('tab', { name: 'London' }))
+
+    // The guard came back with the draft, so this reads as a revocation: the
+    // box is emptied and the note says where her question still is.
+    expect(await screen.findByText(/another child's conversation/)).toBeInTheDocument()
+    expect(composer().value).toBe('')
+    expect(sendButton()).toBeDisabled()
+
+    fireEvent.click(sendButton())
+    await waitFor(() => expect(screen.getByText(/another child's conversation/)).toBeInTheDocument())
+    expect(chatCalls).toHaveLength(0)
+    expect(vi.mocked(addDoc)).not.toHaveBeenCalled()
+    expect(vi.mocked(updateDoc)).not.toHaveBeenCalled()
+
+    // And going back to the tab it came from does not revive it.
+    fireEvent.click(screen.getByRole('tab', { name: 'Lincoln' }))
+    expect(composer().value).toBe('')
+    expect(chatCalls).toHaveLength(0)
+    expect(vi.mocked(addDoc)).not.toHaveBeenCalled()
+  })
+
+  it('is withdrawn, not sent, when the shell changes child under it', async () => {
+    await returnToTheEditedQuestion()
+
+    // The other half of the same blocker: the tab is untouched and the shell's
+    // active child moves, which is what `activeChildId` is re-checked for.
+    identity.activeChildId = LONDON.id
+    fireEvent.change(composer(), { target: { value: `${composer().value} ` } })
+
+    expect(await screen.findByText(/active child changed/)).toBeInTheDocument()
+    expect(composer().value).toBe('')
+    fireEvent.click(sendButton())
+    await waitFor(() => expect(screen.getByText(/active child changed/)).toBeInTheDocument())
+    expect(chatCalls).toHaveLength(0)
+    expect(vi.mocked(addDoc)).not.toHaveBeenCalled()
+    expect(vi.mocked(updateDoc)).not.toHaveBeenCalled()
+  })
+
+  it('positive control: the same restored draft sends normally in its own scope', async () => {
+    // The guard is a guard, not a wall. Nothing moved, so her edited question
+    // goes — to the child it was accepted for, with her words intact.
+    await returnToTheEditedQuestion()
+
+    fireEvent.click(sendButton())
+
+    await waitFor(() => expect(chatCalls).toHaveLength(1))
+    expect(chatCalls[0].childId).toBe(LINCOLN.id)
+    expect(chatCalls[0].messages[0].content).toContain(ASK)
+    expect(chatCalls[0].messages[0].content).toContain(EDIT.trim())
+    expect(chatCalls[0].messages[0].content).toContain('Lincoln')
+  })
+
+  it('keeps the guard on a restored draft whose MEDIA she had attached to it', async () => {
+    // The same journey with a photo on the question, so the media half of the
+    // restore is covered by the guard rather than only the text.
+    const { container } = renderApp()
+    goToPlanner()
+    tapRefusal()
+    await screen.findByText(/From Plan My Week/)
+    fireEvent.change(composer(), { target: { value: `${composer().value}${EDIT}` } })
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement
+    fireEvent.change(fileInput, {
+      target: { files: [new File(['x'], 'raw.png', { type: 'image/png' })] },
+    })
+    await screen.findByText('Attach to my message')
+
+    goToPlanner()
+    tapRefusal()
+    await waitFor(() => expect(composer().value).toContain(EDIT))
+    // Her raw file came back in a chooser she can act on, as before.
+    expect(screen.getByText('Attach to my message')).toBeInTheDocument()
+    expect(screen.getByAltText('Selected 1')).toBeInTheDocument()
+
+    // The chooser is modal, so the tab is reached as the real screen allows:
+    // cancel the selection first, then switch.
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByAltText('Selected 1')).not.toBeInTheDocument())
+    fireEvent.click(await screen.findByRole('tab', { name: 'London' }))
+
+    expect(await screen.findByText(/another child's conversation/)).toBeInTheDocument()
+    expect(composer().value).toBe('')
+    expect(chatCalls).toHaveLength(0)
+    expect(vi.mocked(addDoc)).not.toHaveBeenCalled()
+    expect(vi.mocked(uploadBytes)).not.toHaveBeenCalled()
+  })
+})
+
 describe('an offered draft is consumed only where it is placed', () => {
   /**
    * Round 1's other P2. The arrival took a cross-thread draft out of the

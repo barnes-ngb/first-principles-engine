@@ -20,7 +20,38 @@
 // while one is running comes back as a form with no controls — wound back at the
 // handover instead (see {@link normalizeInterruptedComposerDraft}).
 
+import type { PlannerAskHandoff, PlannerAskReceiver } from '../planner-chat/plannerAskHandoff'
 import type { ChatAttachment, ImageFlowStep, RefinementQuestion } from './useShellyChatState'
+
+/**
+ * Where a carried draft CAME FROM, when it came from the planner hand-off.
+ *
+ * The release review's behavioural blocker, and the reason this travels at all:
+ * an accepted question is guarded for its whole unsent life, and the guard lived
+ * only in the receiving hook's memory. So a route change stripped it — the text
+ * came back verbatim and was then ordinary typing, and a Send from another
+ * child's tab wrote that conversation under the other child while the question
+ * still named the first. The draft and its authority have to travel together or
+ * neither should.
+ *
+ * Custody never INTERPRETS this. It is carried, handed back with the draft, and
+ * re-evaluated by the receiver against the scope of the moment —
+ * `evaluatePlannerAskAuthority`, the same function the live guard uses, against
+ * the ORIGINAL receiver recorded here. Nothing in here is re-stamped as newly
+ * legitimate: this is the identity the question was accepted under, not the
+ * identity it was restored under, which is what makes a scope change read as a
+ * revocation rather than as a fresh arrival.
+ *
+ * Type-only import: no runtime dependency on the planner in either direction.
+ */
+export interface ComposerCustodyOrigin {
+  /** The payload as accepted, with its generation, source week and staging time. */
+  handoff: PlannerAskHandoff
+  /** What Send would have done at the moment it was accepted. */
+  receiver: PlannerAskReceiver
+  /** The shell's active child at that moment. */
+  activeChildId: string
+}
 
 /**
  * Everything unsent the composer holds — all of it, not the three fields the
@@ -74,9 +105,9 @@ export const COMPOSER_CUSTODY_TTL_MS = 10 * 60_000
 export type ComposerCustodyLook =
   | { kind: 'none' }
   /** Typed in this very place — hand it straight back. */
-  | { kind: 'same-thread'; draft: ComposerDraft }
+  | { kind: 'same-thread'; draft: ComposerDraft; origin: ComposerCustodyOrigin | null }
   /** Typed in another conversation of the same tab — offer it, never place it. */
-  | { kind: 'other-thread'; draft: ComposerDraft }
+  | { kind: 'other-thread'; draft: ComposerDraft; origin: ComposerCustodyOrigin | null }
 
 interface HeldCustody {
   owner: ComposerCustodyOwner
@@ -85,6 +116,8 @@ interface HeldCustody {
   savedAt: number
   /** The sign-in this work was done under. See {@link endComposerCustodySession}. */
   session: number
+  /** The hand-off it came from, carried not interpreted. */
+  origin: ComposerCustodyOrigin | null
 }
 
 let held: HeldCustody | null = null
@@ -126,6 +159,8 @@ export type DisplacedCustodyLook =
       /** The conversation it was displaced in, for the record. */
       threadId: string | null
       holds: ComposerCustodyHolder
+      /** The hand-off it came from — a set-aside question keeps its guard. */
+      origin: ComposerCustodyOrigin | null
     }
 
 // ── The session: whose sign-in this slot belongs to ─────────────────────────
@@ -289,6 +324,7 @@ export function saveComposerCustody(
   draft: ComposerDraft,
   now: number = Date.now(),
   ownedSession: number = session,
+  origin: ComposerCustodyOrigin | null = null,
 ): void {
   // The sign-in this work was done under is over: its unmount cleanup, or a
   // callback that outlived the route, must not re-fill a slot the ending
@@ -304,6 +340,7 @@ export function saveComposerCustody(
     draft: normalizeInterruptedComposerDraft(copy(draft)),
     savedAt: now,
     session: ownedSession,
+    origin,
   }
 }
 
@@ -326,8 +363,8 @@ export function peekComposerCustody(
   }
   if (!sameComposerOwner(held.owner, owner)) return { kind: 'none' }
   return held.threadId === threadId
-    ? { kind: 'same-thread', draft: copy(held.draft) }
-    : { kind: 'other-thread', draft: copy(held.draft) }
+    ? { kind: 'same-thread', draft: copy(held.draft), origin: held.origin }
+    : { kind: 'other-thread', draft: copy(held.draft), origin: held.origin }
 }
 
 /**
@@ -364,6 +401,7 @@ export function saveDisplacedComposerCustody(
   holds: ComposerCustodyHolder,
   now: number = Date.now(),
   ownedSession: number = session,
+  origin: ComposerCustodyOrigin | null = null,
 ): void {
   if (ownedSession !== session) return
   if (composerDraftIsEmpty(draft)) {
@@ -377,6 +415,7 @@ export function saveDisplacedComposerCustody(
     savedAt: now,
     session: ownedSession,
     holds,
+    origin,
   }
 }
 
@@ -400,6 +439,7 @@ export function peekDisplacedComposerCustody(
     draft: copy(displacedHeld.draft),
     threadId: displacedHeld.threadId,
     holds: displacedHeld.holds,
+    origin: displacedHeld.origin,
   }
 }
 

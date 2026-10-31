@@ -62,6 +62,7 @@ import {
   takeComposerCustody,
   takeDisplacedComposerCustody,
   type ComposerCustodyHolder,
+  type ComposerCustodyOrigin,
   type ComposerCustodyOwner,
   type ComposerDraft,
 } from './composerCustody'
@@ -82,7 +83,18 @@ export type PlannerAskHandoffState =
    * notice of its own with exactly two exits, both explicit. `holds` is what is
    * in there, so the note names it rather than guessing.
    */
-  | { kind: 'set-aside'; draft: ComposerDraft; holds: ComposerCustodyHolder }
+  | {
+      kind: 'set-aside'
+      draft: ComposerDraft
+      holds: ComposerCustodyHolder
+      /**
+       * The owner it belongs to. Carried in the STATE so the offer stops being
+       * shown by a plain render-time comparison the moment the tab, the child
+       * or the sign-in moves — no effect, no second commit, and nothing for a
+       * wrong-scope render to slip through.
+       */
+      scopeKey: string
+    }
   /**
    * Taking the question would need a THIRD home: one draft is in the box and a
    * different one is already set aside. There are two homes, so this is a
@@ -190,9 +202,42 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
     [familyId, profile, chatContext, contextChildId, threadId],
   )
   const receiverKey = `${familyId}|${profile ?? ''}|${chatContext}|${contextChildId}|${threadId ?? ''}`
+  /**
+   * The custody OWNER, as a render value — no conversation in it.
+   *
+   * What a set-aside offer is keyed on, and the reason it is a string rendered
+   * from props rather than a check inside an effect: the offer has to stop being
+   * shown in the very render where the tab or the child moves, and a scope test
+   * that lives in an effect cannot be, by one commit.
+   */
+  const ownerKey = `${familyId}|${profile ?? ''}|${chatContext}|${contextChildId}`
   const childIds = useMemo(() => children.map((c) => c.id), [children])
   const draftText = draft.text
   const signature = draftSignature(draft)
+
+  /**
+   * The draft the question DISPLACED — her text, her media, her image idea —
+   * and the scope it was displaced in.
+   *
+   * A mirror of custody's second home, not the thing itself: the notice is
+   * transient (a close tap, a Send, an emptied composer all take it away) and a
+   * draft that lived inside notice state went with it. So the slot holds the
+   * work, this ref holds the label the notice renders from, and the two are the
+   * same by construction — every write reads back what custody kept.
+   *
+   * It lives until she RESTORES it or DISCARDS it, and nothing else clears it —
+   * except a scope that moves under it, which the layout effect below drops in
+   * the same commit.
+   */
+  const displaced = useRef<{
+    draft: ComposerDraft
+    owner: ComposerCustodyOwner
+    ownerKey: string
+    threadId: string | null
+    session: number
+    holds: ComposerCustodyHolder
+    origin: ComposerCustodyOrigin | null
+  } | null>(null)
 
   // Committed in a LAYOUT effect rather than written during render: a render can
   // be thrown away, and a ref written in one is a mutation that never happened.
@@ -203,7 +248,16 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
   const live = useRef({ receiver, activeChildId, isParent, draft, applyDraft, startFreshThread, childIds })
   useLayoutEffect(() => {
     live.current = { receiver, activeChildId, isParent, draft, applyDraft, startFreshThread, childIds }
-  }, [receiver, activeChildId, isParent, draft, applyDraft, startFreshThread, childIds])
+    // A set-aside draft stops being OFFERED in the same commit its scope moves.
+    // Dropping the mirror here — a ref write in the effect that already commits
+    // refs — is what keeps the actions fail-closed without an effect setting
+    // state; the note itself is suppressed by `scopeKey` during render, so the
+    // two halves agree and neither waits for the other.
+    if (displaced.current && displaced.current.ownerKey !== ownerKey) displaced.current = null
+    if (displaced.current && displaced.current.session !== currentComposerCustodySession()) {
+      displaced.current = null
+    }
+  }, [receiver, activeChildId, isParent, draft, applyDraft, startFreshThread, childIds, ownerKey])
 
   /** The held question. A ref, so an action reads it with no render in between. */
   const authority = useRef<HeldAsk | null>(null)
@@ -219,25 +273,6 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
     owner: ComposerCustodyOwner
     threadId: string | null
     session: number
-  } | null>(null)
-  /**
-   * The draft the question DISPLACED — her text, her media, her image idea —
-   * and the scope it was displaced in.
-   *
-   * A mirror of custody's second home, not the thing itself: the notice is
-   * transient (a close tap, a Send, an emptied composer all take it away) and a
-   * draft that lived inside notice state went with it. So the slot holds the
-   * work, this ref holds the label the notice renders from, and the two are the
-   * same by construction — every write reads back what custody kept.
-   *
-   * It lives until she RESTORES it or DISCARDS it, and nothing else clears it.
-   */
-  const displaced = useRef<{
-    draft: ComposerDraft
-    owner: ComposerCustodyOwner
-    threadId: string | null
-    session: number
-    holds: ComposerCustodyHolder
   } | null>(null)
   const restoreAttempted = useRef(false)
   const decidedGeneration = useRef<number | null>(null)
@@ -266,7 +301,7 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
   }, [])
 
   /**
-   * Is her displaced work still THIS composer's to offer back?
+   * Is a set-aside draft still THIS composer's to offer back?
    *
    * The owner and the sign-in, and deliberately NOT the thread. The slot keys
    * on the thread because it PLACES work without being asked, and work from
@@ -275,6 +310,9 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
    * thread of a fresh conversation moves on Send (`null` becomes the minted id)
    * without any scope changing, so reading it here would make the offer vanish
    * at the one moment she most needs it: the question has just left the box.
+   *
+   * Whether the draft may be SENT is a different question with a different
+   * answer, asked of the hand-off's own authority — see `armFromOrigin`.
    */
   const displacedIsLive = useCallback(
     (stamp: { owner: ComposerCustodyOwner; session: number }) =>
@@ -282,6 +320,50 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
       sameComposerOwner(stamp.owner, ownerOf(live.current.receiver)),
     [],
   )
+
+  /** The guard metadata to travel with a carried draft, or `null` for hers. */
+  const originOf = useCallback(
+    (held: HeldAsk | null): ComposerCustodyOrigin | null =>
+      held?.inComposer
+        ? { handoff: held.handoff, receiver: held.receiver, activeChildId: held.activeChildId }
+        : null,
+    [],
+  )
+
+  /**
+   * Put a carried question back UNDER ITS ORIGINAL GUARD.
+   *
+   * The release review's behavioural blocker in one function. A restored
+   * question used to come back as ordinary typing, so Send sent it wherever she
+   * happened to be — London's tab wrote London's conversation while the text
+   * still named Lincoln and carried Lincoln's week. The authority is rebuilt
+   * from the origin the draft travelled with, which is the identity it was
+   * ACCEPTED under: the original receiver, the original active child, the
+   * original payload with its generation, source week and staging time.
+   *
+   * Nothing is re-stamped as newly legitimate. It is deliberately NOT
+   * `acceptPlannerAskHandoff` — that is an arrival, and an arrival would read
+   * the live scope as the one it was accepted for, which is the defect. The
+   * invalidation effect and the synchronous Send guard then evaluate it exactly
+   * as they evaluate a live one, so a tab or child that moved reads as a
+   * REVOCATION: the text goes, the notice says why and names where the question
+   * still is, and Send does nothing.
+   */
+  const armFromOrigin = useCallback((origin: ComposerCustodyOrigin, text: string) => {
+    authority.current = {
+      handoff: origin.handoff,
+      receiver: origin.receiver,
+      activeChildId: origin.activeChildId,
+      inComposer: true,
+      expectedText: text,
+      // Not yet SEEN, exactly as a fresh fill is not: the placement is a state
+      // update, so the next pass can still read the pre-placement box. Calling
+      // that empty box a clear is candidate 2's P1, and it would drop the guard
+      // at the moment it is being installed. The Send guard does not wait on
+      // this — it is armed from here on.
+      observed: false,
+    }
+  }, [])
 
   /**
    * Set her work aside: into custody first, and into the ref from what custody
@@ -297,15 +379,26 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
       draft: ComposerDraft,
       receiver: PlannerAskReceiver,
       holds: ComposerCustodyHolder,
+      origin: ComposerCustodyOrigin | null,
     ): ComposerDraft | null => {
       const owner = ownerOf(receiver)
       const threadId = receiver.threadId
       const session = currentComposerCustodySession()
-      saveDisplacedComposerCustody(owner, threadId, draft, holds, Date.now(), session)
+      // The guard travels with the draft into the second home too: a question
+      // set aside by a restore is still a question, and it comes back guarded.
+      saveDisplacedComposerCustody(owner, threadId, draft, holds, Date.now(), session, origin)
       const kept = peekDisplacedComposerCustody(owner)
       displaced.current =
         kept.kind === 'held'
-          ? { draft: kept.draft, owner, threadId: kept.threadId, session, holds: kept.holds }
+          ? {
+              draft: kept.draft,
+              owner,
+              ownerKey: `${owner.familyId}|${owner.profile ?? ''}|${owner.chatContext}|${owner.contextChildId}`,
+              threadId: kept.threadId,
+              session,
+              holds: kept.holds,
+              origin: kept.origin,
+            }
           : null
       // The live box keeps its OWN stamp and its own home. That is the P2 this
       // pair of slots exists for: the box is about to hold the question, she
@@ -321,7 +414,12 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
   const noticeWithoutQuestion = useCallback((): PlannerAskHandoffState => {
     const stamp = displaced.current
     if (!stamp || !displacedIsLive(stamp)) return { kind: 'idle' }
-    return { kind: 'set-aside', draft: stamp.draft, holds: stamp.holds }
+    return {
+      kind: 'set-aside',
+      draft: stamp.draft,
+      holds: stamp.holds,
+      scopeKey: stamp.ownerKey,
+    }
   }, [displacedIsLive])
 
   const fill = useCallback(
@@ -334,10 +432,18 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
       // A set-aside draft takes its media with it; otherwise hers stays put.
       const base = setAside ? EMPTY_COMPOSER_DRAFT : live.current.draft
       const receiver = receiverOverride ?? live.current.receiver
+      // What is leaving the box: hers, or a question still under guard (the
+      // `kept` note's "use the question instead", after a restore swapped one
+      // in). Read BEFORE the authority below replaces it, so a guarded draft
+      // takes its guard with it.
+      const leaving = authority.current
+      const asideHolds: ComposerCustodyHolder = leaving?.inComposer ? 'question' : 'mine'
       // Set aside BEFORE the box is overwritten, and show what was kept: the
       // displaced draft is the only copy of that work, so it reaches its holder
       // before the composer that was holding it is replaced.
-      const kept = setAside ? setWorkAside(setAside, receiver, 'mine') : null
+      const kept = setAside
+        ? setWorkAside(setAside, receiver, asideHolds, originOf(leaving))
+        : null
       live.current.applyDraft({ ...base, text })
       authority.current = {
         handoff,
@@ -349,7 +455,7 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
       }
       setState({ kind: 'filled', handoff, setAside: kept })
     },
-    [setWorkAside],
+    [setWorkAside, originOf],
   )
 
   const hold = useCallback((handoff: PlannerAskHandoff, receiverOverride?: PlannerAskReceiver) => {
@@ -362,6 +468,25 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
       observed: false,
     }
   }, [])
+
+  /**
+   * Take the incoming question's hold — UNLESS the box is already holding a
+   * guarded one.
+   *
+   * A restored question is armed from its origin as it is placed, and a hold is
+   * `inComposer: false` by definition: writing one over the armed authority
+   * would unguard the very text she is looking at, which is the blocker the arm
+   * exists to close. The arriving question is named in the choice she is shown
+   * and only takes the box when she picks it — through `fill`, which carries
+   * the outgoing guard into the set-aside home first.
+   */
+  const holdUnlessGuarded = useCallback(
+    (handoff: PlannerAskHandoff, receiverOverride?: PlannerAskReceiver) => {
+      if (authority.current?.inComposer) return
+      hold(handoff, receiverOverride)
+    },
+    [hold],
+  )
 
   // ── The box: stamp its owner once, and release its slot when emptied ──────
   useEffect(() => {
@@ -433,7 +558,19 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
           session: currentComposerCustodySession(),
         }
         live.current.applyDraft(restored)
-      } else if (look.kind === 'other-thread' && generation !== null) {
+        // A carried question is placed back under the guard it was accepted
+        // with, BEFORE anything on this page can send it. The checks below and
+        // the Send guard then judge it against the live scope, so a tab or a
+        // child that moved while she was away revokes it instead of letting it
+        // go out as ordinary text.
+        if (look.origin) armFromOrigin(look.origin, restored.text)
+      } else if (look.kind === 'other-thread' && generation !== null && !look.origin) {
+        // A cross-conversation draft is OFFERED, which means placed in the box
+        // beside a collision choice — and a carried question can only be placed
+        // where its guard can be rebuilt with it, which is the same-thread
+        // restore above and the restore tap, not here. So one that carries an
+        // origin stays in its home, recoverable under its owner, rather than
+        // becoming ordinary text in another conversation's box.
         offered = look.draft
       }
 
@@ -445,9 +582,11 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
         displaced.current = {
           draft: waiting.draft,
           owner: ownerOf(live.current.receiver),
+          ownerKey,
           threadId: waiting.threadId,
           session: currentComposerCustodySession(),
           holds: waiting.holds,
+          origin: waiting.origin,
         }
         // Said out loud on an ordinary return, where no louder note is coming.
         // A hand-off's own states are decided below and overwrite this.
@@ -476,7 +615,7 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
     // A saved conversation is open: filling it would send this question with
     // that transcript's history. She decides; nothing is written either way.
     if (threadId !== null) {
-      hold(decision.handoff)
+      holdUnlessGuarded(decision.handoff)
       setState({ kind: 'thread-choice', handoff: decision.handoff })
       return
     }
@@ -508,7 +647,10 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
         }
         live.current.applyDraft(placed)
       }
-      hold(decision.handoff)
+      // Not a plain `hold`: the box may already be holding a question restored
+      // under its own guard this very pass, and that guard outranks a hold for
+      // one she has not chosen yet.
+      holdUnlessGuarded(decision.handoff)
       setState({ kind: 'collision', handoff: decision.handoff, mine, fromOtherThread: placed !== null })
       return
     }
@@ -523,22 +665,20 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
     activeChildId,
     isParent,
     fill,
-    hold,
+    holdUnlessGuarded,
     noticeWithoutQuestion,
+    ownerKey,
+    armFromOrigin,
   ])
 
   // ── Invalidation, and the end of an owned draft's life ──────────────────
   useEffect(() => {
-    // Her set-aside work outlives the notice, but not the scope it was typed
-    // in. The custody entry keeps its own label and is left alone — an entry
-    // that cannot be acted on is never consumed and dropped — but it stops
-    // being OFFERED, because the composer in front of her now belongs to
-    // another tab, another child or another sign-in.
-    const stamp = displaced.current
-    if (stamp && !displacedIsLive(stamp)) {
-      displaced.current = null
-      setState((prev) => (prev.kind === 'set-aside' ? { kind: 'idle' } : prev))
-    }
+    // A set-aside draft outlives the notice, but not the scope it was typed in.
+    // That invalidation is NOT done here: the mirror is dropped in the layout
+    // effect above and the note is suppressed by `scopeKey` during render, both
+    // in the commit the scope moves rather than a commit later. The custody
+    // entry itself keeps its own label and is left alone — an entry that cannot
+    // be acted on is never consumed and dropped.
     const held = authority.current
     if (!held) return
     const verdict = evaluatePlannerAskAuthority(held, authorityNow())
@@ -565,16 +705,7 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
     }
     // An edit is adopted, not disowned: edited incoming text keeps its guard.
     if (draftText !== held.expectedText) authority.current = { ...held, expectedText: draftText }
-  }, [
-    draftText,
-    receiverKey,
-    activeChildId,
-    isParent,
-    authorityNow,
-    revoke,
-    displacedIsLive,
-    noticeWithoutQuestion,
-  ])
+  }, [draftText, receiverKey, activeChildId, isParent, authorityNow, revoke, noticeWithoutQuestion])
 
   // ── On the way out: hand HER work to custody, under its own owner ───────
   useEffect(
@@ -598,9 +729,20 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
       // unmount: the scope observer ends that session in the same commit, and a
       // save carrying the session it was typed under is refused rather than
       // re-filling the slot for whoever signs in next.
-      saveComposerCustody(stamp.owner, stamp.threadId, outgoing, Date.now(), stamp.session)
+      //
+      // And the guard goes over WITH it. A carried question that came back
+      // without its authority was ordinary text in a box, which is how a
+      // Lincoln question came to be sent on London's tab.
+      saveComposerCustody(
+        stamp.owner,
+        stamp.threadId,
+        outgoing,
+        Date.now(),
+        stamp.session,
+        originOf(authority.current),
+      )
     },
-    [],
+    [originOf],
   )
 
   /** The one place an action asks "may this still be used?". */
@@ -697,13 +839,18 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
     // genuinely different draft — her edited question, the photo she attached
     // to it — and the slot it is going into has just been emptied, so both
     // drafts live and the restore is reversible. (The P2 again: this used to
-    // apply the old draft straight over the new work and say nothing.)
+    // apply the old draft straight over the new work and say nothing.) The
+    // guard of whatever leaves the box leaves with it.
     if (composerDraftIsEmpty(outgoing)) {
       displaced.current = null
     } else {
-      setWorkAside(outgoing, live.current.receiver, held?.inComposer ? 'question' : 'mine')
+      setWorkAside(
+        outgoing,
+        live.current.receiver,
+        held?.inComposer ? 'question' : 'mine',
+        originOf(held),
+      )
     }
-    if (held) authority.current = { ...held, inComposer: false, expectedText: '', observed: false }
     // Stamped with the conversation it is in NOW, not the one it was displaced
     // from: the take above used the slot's own key, but from here on this is
     // live work in the live box, which is where it would be handed over from.
@@ -717,9 +864,27 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
     // failure or cancel revokes them — so a restored chooser showing them is
     // one dead `blob:` away from the eighth browser run's blank thumbnail.
     // Deriving a view this page owns is the only way the files stay usable.
-    live.current.applyDraft(adoptRestoredUploadPreviews(taken.draft))
+    const placed = adoptRestoredUploadPreviews(taken.draft)
+    if (taken.origin) {
+      // A set-aside QUESTION comes back guarded, under the identity it was
+      // accepted with — never as ordinary text, and never re-stamped as a new
+      // arrival. If the scope has moved since, the checks revoke it on the next
+      // pass and the note says so; Send cannot carry it anywhere meanwhile.
+      armFromOrigin(taken.origin, placed.text)
+      live.current.applyDraft(placed)
+      setState({
+        kind: 'filled',
+        handoff: taken.origin.handoff,
+        setAside: displaced.current?.draft ?? null,
+      })
+      return
+    }
+    // Hers. A question still in the box steps out of it rather than being
+    // disowned, so the `kept` note can still offer it back.
+    if (held) authority.current = { ...held, inComposer: false, expectedText: '', observed: false }
+    live.current.applyDraft(placed)
     setState(held ? { kind: 'kept', handoff: held.handoff } : noticeWithoutQuestion())
-  }, [displacedIsLive, setWorkAside, noticeWithoutQuestion])
+  }, [displacedIsLive, setWorkAside, noticeWithoutQuestion, originOf, armFromOrigin])
 
   const discardSetAside = useCallback(() => {
     const stamp = displaced.current
@@ -777,7 +942,21 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
       // that wins, and the other stays in the slot rather than being merged
       // into something she never typed.
       const waiting = takeComposerCustody(ownerOf(fresh), fresh.threadId)
-      if (waiting.kind === 'same-thread') {
+      // Same rule as the arrival: a carried question is not placed anywhere its
+      // guard cannot come with it. This tap is about to hold a DIFFERENT
+      // question, so there is only one authority to be had — hers stays in its
+      // home. (A take that found one has emptied the slot, so it is put back
+      // under the owner and conversation it was saved with.)
+      if (waiting.kind === 'same-thread' && waiting.origin) {
+        saveComposerCustody(
+          ownerOf(fresh),
+          fresh.threadId,
+          waiting.draft,
+          Date.now(),
+          currentComposerCustodySession(),
+          waiting.origin,
+        )
+      } else if (waiting.kind === 'same-thread') {
         mine = adoptRestoredUploadPreviews(waiting.draft)
         fromOtherThread = true
         draftOwner.current = {
@@ -792,9 +971,9 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
       fill(handoff, null, fresh)
       return
     }
-    hold(handoff, fresh)
+    holdUnlessGuarded(handoff, fresh)
     setState({ kind: 'collision', handoff, mine, fromOtherThread })
-  }, [state, guardHeld, fill, hold])
+  }, [state, guardHeld, fill, holdUnlessGuarded])
 
   const keepConversation = useCallback(() => {
     const held = authority.current
@@ -806,8 +985,18 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
   // set-aside draft back takes the note's place instead of going with it.
   const dismiss = useCallback(() => setState(noticeWithoutQuestion()), [noticeWithoutQuestion])
 
+  /**
+   * A set-aside offer belongs to ONE owner, and the render in which that owner
+   * changes is the render it has to stop appearing in — so the suppression is
+   * rendered from props rather than written by an effect. The mirror the
+   * actions read is dropped in the same commit by the layout effect above, so
+   * what she can see and what she can do cannot disagree.
+   */
+  const visibleState: PlannerAskHandoffState =
+    state.kind === 'set-aside' && state.scopeKey !== ownerKey ? { kind: 'idle' } : state
+
   return {
-    state,
+    state: visibleState,
     keepExisting,
     replaceWithQuestion,
     restoreSetAside,
