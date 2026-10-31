@@ -280,7 +280,79 @@ describe('UX-473 counterexample 2 — leave while a retry is in flight', () => {
     expect(await screen.findByText(SHELF)).toBeInTheDocument()
   })
 
-  it('withholds the discard while that retry is in the air, and keeps Stay reachable', async () => {
+  it('keeps the deliberate leave reachable while that retry is in the air, and nothing else', async () => {
+    const user = userEvent.setup()
+    await renderHarness()
+
+    // A failed save, then a *Try again* that never comes back — which is what
+    // offline looks like: Firestore holds the promise until the backend is
+    // reachable, so this wait has no end the page can see.
+    m.setDoc.mockImplementation(async () => { throw new Error('offline') })
+    await user.click(screen.getByRole('button', { name: 'Type and leave' }))
+    await screen.findByText(/Saving your book/)
+    await runParkedSaves()
+    await screen.findByText("Your book didn't save")
+
+    const stuck = deferred()
+    m.setDoc.mockImplementation(async () => stuck.promise)
+    await user.click(within(dialog()).getByRole('button', { name: 'Try again' }))
+    await screen.findByText(/Saving your book/)
+
+    // Stay keeps her exactly where she was, with the typed words intact, and
+    // the pending navigation itself is still held on the next tap.
+    await user.click(within(dialog()).getByRole('button', { name: 'Stay here' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    stillInEditor()
+    await user.click(screen.getByRole('button', { name: 'Leave' }))
+    expect(await screen.findByText(/Saving your book/)).toBeInTheDocument()
+    expect(screen.queryByText(SHELF)).toBeNull()
+    expect(
+      (m.setDoc.mock.calls[m.setDoc.mock.calls.length - 1][1] as Book).pages[0].text,
+    ).toBe('Typed on the way out')
+
+    // Only the labelled tap lets her out, and the write is still in the air
+    // when it does — nothing timed out and nothing claimed a save.
+    await user.click(within(dialog()).getByRole('button', { name: 'Leave anyway' }))
+    expect(await screen.findByText(SHELF)).toBeInTheDocument()
+    await act(async () => { stuck.resolve() })
+  })
+})
+
+describe('UX-473 — an indefinitely pending write still has one deliberate way out (PR #1921)', () => {
+  it('lets the first save hang, holds every exit, and opens only on Leave anyway', async () => {
+    const user = userEvent.setup()
+    await renderHarness()
+    const stuck = deferred()
+    m.setDoc.mockImplementation(async () => stuck.promise)
+
+    await user.click(screen.getByRole('button', { name: 'Type and leave' }))
+    await screen.findByText(/Saving your book/)
+    await runParkedSaves()
+
+    // The quiet wait, over a write that will not settle.
+    expect(screen.getByTestId('save-state')).toHaveTextContent('saving')
+    expect(within(dialog()).queryByRole('button', { name: 'Try again' })).toBeNull()
+    expect(dialog()).toHaveTextContent(/these edits may not be saved/)
+    expect(dialog()).toHaveTextContent(/may still finish/)
+
+    // Stay is still the default, and it does not release the departure.
+    await user.click(within(dialog()).getByRole('button', { name: 'Stay here' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(screen.queryByText(SHELF)).toBeNull()
+    stillInEditor()
+    expect(screen.getByTestId('save-state')).toHaveTextContent('saving')
+
+    // And the exit is held again the next time she tries — no silent escape.
+    await user.click(screen.getByRole('button', { name: 'Leave' }))
+    expect(await screen.findByText(/Saving your book/)).toBeInTheDocument()
+    expect(screen.queryByText(SHELF)).toBeNull()
+
+    await user.click(within(dialog()).getByRole('button', { name: 'Leave anyway' }))
+    expect(await screen.findByText(SHELF)).toBeInTheDocument()
+    await act(async () => { stuck.resolve() })
+  })
+
+  it('still releases itself, with nobody asked, when the write does land', async () => {
     const user = userEvent.setup()
     await renderHarness()
     const slow = deferred()
@@ -289,9 +361,6 @@ describe('UX-473 counterexample 2 — leave while a retry is in flight', () => {
     await user.click(screen.getByRole('button', { name: 'Type and leave' }))
     await screen.findByText(/Saving your book/)
     await runParkedSaves()
-
-    expect(within(dialog()).getByRole('button', { name: 'Leave anyway' })).toBeDisabled()
-    expect(within(dialog()).getByRole('button', { name: 'Stay here' })).toBeEnabled()
 
     await act(async () => { slow.resolve() })
     expect(await screen.findByText(SHELF)).toBeInTheDocument()

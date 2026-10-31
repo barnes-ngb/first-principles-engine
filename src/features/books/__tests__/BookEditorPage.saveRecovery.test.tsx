@@ -386,7 +386,11 @@ describe('BookEditorPage — departures while a save has failed (UX-473)', () =>
     expect(await screen.findByText(SHELF)).toBeInTheDocument()
   })
 
-  it('does not offer the discard while a write is in flight, but Stay stays reachable', async () => {
+  it('still offers the discard while a write is in flight, alongside Stay', async () => {
+    // It used to be disabled here. Offline, an in-flight `setDoc` can stay
+    // pending indefinitely, so that left every guarded exit shut: Stay only
+    // dismisses the dialog and the next tap is held again. The door is open —
+    // but only as its own labelled tap (PR #1921).
     const user = userEvent.setup()
     renderEditor()
     await user.click(screen.getByRole('button', { name: 'My Books' }))
@@ -394,8 +398,21 @@ describe('BookEditorPage — departures while a save has failed (UX-473)', () =>
 
     await setSaveStatus({ saveState: 'saving', hasUnsavedEdits: true })
 
-    expect(within(dialog()).getByRole('button', { name: 'Leave anyway' })).toBeDisabled()
+    expect(within(dialog()).getByRole('button', { name: 'Leave anyway' })).toBeEnabled()
     expect(within(dialog()).getByRole('button', { name: 'Stay here' })).toBeEnabled()
+  })
+
+  it('warns, mid-write, what leaving does and does not promise', async () => {
+    const user = userEvent.setup()
+    renderEditor()
+    await user.click(screen.getByRole('button', { name: 'My Books' }))
+    await screen.findByText("Your book didn't save")
+
+    await setSaveStatus({ saveState: 'saving', hasUnsavedEdits: true })
+
+    expect(dialog()).toHaveTextContent(/these edits may not be saved/)
+    expect(dialog()).toHaveTextContent(/may still finish/)
+    expect(dialog()).not.toHaveTextContent(/are gone/)
   })
 
   it('warns that leaving may not save, and never that it erases the write', async () => {

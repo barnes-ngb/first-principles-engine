@@ -34,12 +34,18 @@ interface UnsavedBookDialogProps {
  * that FAILED it is the recovery door: the actual error, and *Try again*.
  *
  * *Stay here* is reachable in every state, including mid-write, and is also
- * what a backdrop tap and Escape mean. Leaving is reachable too — a kid who
- * cannot leave a page is stuck — but only as its own labelled tap, and it is
- * withheld while a write is actually in flight, because the one thing worse
- * than waiting is tearing the page down halfway through the write it is
- * waiting on. Buttons are full-width and 48px on a phone: these are the taps
- * that decide whether an edit survives, and they are not for mis-hitting.
+ * what a backdrop tap and Escape mean. *Leave anyway* is reachable in every
+ * state too, including mid-write, and that is a correction (PR #1921): an
+ * in-flight write is not a bounded wait. Offline, Firestore's `setDoc` promise
+ * stays pending until the backend is reachable, so withholding the leave door
+ * while `busy` left a kid with no way out at all — *Stay here* only dismisses
+ * the dialog and the next tap is held again. So the door stays open, and the
+ * dialog's own copy is what makes the choice informed rather than silent: the
+ * latest edits MAY not be saved, and a write already on its way may still
+ * finish. It is still its own labelled, deliberate tap — nothing times out,
+ * nothing escapes on its own, and the guard itself is unchanged. Buttons are
+ * full-width and 48px on a phone: these are the taps that decide whether an
+ * edit survives, and they are not for mis-hitting.
  */
 export default function UnsavedBookDialog({
   open,
@@ -90,7 +96,6 @@ export default function UnsavedBookDialog({
           <Button
             onClick={onLeaveAnyway}
             color="error"
-            disabled={notice.busy}
             fullWidth
             sx={{ minHeight: 48 }}
           >
