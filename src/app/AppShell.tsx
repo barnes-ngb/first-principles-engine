@@ -186,6 +186,11 @@ export function AppShell({ children }: AppShellProps) {
 
   const isParent = profile === UserProfile.Parents
 
+  // UX-273's hand-off scope observer used to be mounted here. It is in `App.tsx`
+  // above `AuthGate` now: the shell is inside the gate, so a logout unmounted the
+  // observer and the two page-session slots outlived the session that filled
+  // them. Nothing else about the shell changed.
+
   // Kid nav Knowledge Mine visibility mirrors the /quest route guard: only kids
   // with Mine calibration see the item (gate + nav can never disagree).
   const { snapshot: kidSnapshot, loaded: kidSnapshotLoaded } = useChildSkillSnapshot(

@@ -13,6 +13,7 @@ import Typography from '@mui/material/Typography'
 
 import type { ChatMessage } from '../../core/types'
 import PlannerChatMessages from './PlannerChatMessages'
+import type { PlannerAskHandoffSource } from './plannerAskHandoff'
 
 interface PlannerChatDrawerProps {
   messages: ChatMessage[]
@@ -22,6 +23,16 @@ interface PlannerChatDrawerProps {
   loading: boolean
   /** Used to scroll chat to bottom on new messages. If omitted, drawer maintains its own ref. */
   messagesEndRef?: RefObject<HTMLDivElement | null>
+  /**
+   * Family / child / week for a refusal's hand-off to Ask AI (UX-273). Passed
+   * straight through — the drawer holds nothing about it and decides nothing.
+   */
+  askHandoffSource?: PlannerAskHandoffSource
+  /**
+   * Re-asks at the TAP whether the transcript on screen is still this scope's
+   * (UX-273). Passed straight through, like the source beside it.
+   */
+  authorizeHandoff?: () => boolean
 }
 
 export default function PlannerChatDrawer({
@@ -31,6 +42,8 @@ export default function PlannerChatDrawer({
   onSend,
   loading,
   messagesEndRef,
+  askHandoffSource,
+  authorizeHandoff,
 }: PlannerChatDrawerProps) {
   const [open, setOpen] = useState(false)
   const internalEndRef = useRef<HTMLDivElement>(null)
@@ -82,7 +95,12 @@ export default function PlannerChatDrawer({
               Use chat for things the form above can&apos;t handle — e.g., &quot;make Wednesday lighter,&quot; &quot;add a science project on Thursday.&quot;
             </Typography>
           )}
-          <PlannerChatMessages messages={messages} messagesEndRef={endRef} />
+          <PlannerChatMessages
+            messages={messages}
+            messagesEndRef={endRef}
+            {...(askHandoffSource ? { askHandoffSource } : {})}
+            {...(authorizeHandoff ? { authorizeHandoff } : {})}
+          />
           <Stack direction="row" spacing={1} alignItems="flex-end" sx={{ mt: 1 }}>
             <TextField
               fullWidth

@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import AddIcon from '@mui/icons-material/Add'
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
@@ -44,6 +44,11 @@ import type { ChatContext } from '../../core/types'
 import { UserProfile } from '../../core/types/enums'
 import ActionConfirmCard from './ActionConfirmCard'
 import NextWeekDraftCard from './NextWeekDraftCard'
+import PlannerAskHandoffNotice from './PlannerAskHandoffNotice'
+import { usePlannerAskHandoff } from './usePlannerAskHandoff'
+import type { PlannerAskOwnThreadClaim } from './usePlannerAskHandoff'
+import type { ComposerDraft } from './composerCustody'
+import { plannerAskHandoffGenerationFromState } from '../planner-chat/plannerAskHandoff'
 import { useChatActivityConfigs } from './useChatActivityConfigs'
 import { useChatArtQuota } from './useChatArtQuota'
 import { useChatConceptArcs } from './useChatConceptArcs'
@@ -99,11 +104,55 @@ const SUGGESTIONS_BY_CONTEXT: Record<ChatContext, { greeting: string; subtitle: 
 
 export default function ShellyChatPage() {
   const familyId = useFamilyId()
-  const { activeChildId, children } = useActiveChild()
+  // `isLoading` is read for the UX-273 hand-off and nothing else: an unsettled
+  // children read must not be mistaken for "the active child changed".
+  const {
+    activeChildId,
+    children,
+    isLoading: childrenLoading,
+    // UX-273 readiness: a failed children read is not an empty family, and the
+    // gate below must not strand Shelly on a spinner for the rest of the
+    // session. `loadFailed` is the read saying so; `retryLoad` re-runs it.
+    loadFailed: childrenLoadFailed,
+    retryLoad: retryChildrenLoad,
+  } = useActiveChild()
   const { chat, generateImage, lastErrorRef, imageFailureRef } = useAI()
 
   const [searchParams, setSearchParams] = useSearchParams()
   const navigate = useNavigate()
+  const location = useLocation()
+  /**
+   * Is this visit the planner's hand-off (UX-273)?
+   *
+   * Read from router state during RENDER, so the two mount effects that write
+   * without a tap — the legacy `chatContext` migration and the pre-seeded-thread
+   * auto-send — can be suppressed before they can start. An ordinary visit
+   * carries no state and is unchanged.
+   *
+   * **LATCHED for the whole mounted visit, which the first cut got wrong.** The
+   * answer was recomputed from `location.state` every render, and this page
+   * navigates to itself: `handleSelectThread` calls `setSearchParams`, which
+   * replaces the entry and takes the hand-off state with it. So opening a saved
+   * conversation after arriving flipped the suppression back off, the pre-seeded
+   * auto-send effect saw one old user message and called the model — writing an
+   * assistant turn into a conversation she had only LOOKED at, under a notice
+   * that said "Nothing was sent." The latch covers every later transition the
+   * same way (tab, thread, query, new conversation, cancel, failure, replay),
+   * and `useShellyChatFlows` re-reads it through a ref after its own `await`, so
+   * work already begun cannot commit either.
+   *
+   * The latch is STATE adjusted during render (React's own "adjusting state when
+   * a prop changes"), not a ref written in render: the suppression has to be
+   * true on the arrival render itself, before either mount effect can run, and a
+   * ref written in a render that is then discarded is a latch that silently did
+   * not happen. `handoffArrival ||` keeps it true on the very render that sets it.
+   */
+  const handoffArrival = plannerAskHandoffGenerationFromState(location.state) !== null
+  const [handoffSeen, setHandoffSeen] = useState(handoffArrival)
+  const handoffVisit = handoffArrival || handoffSeen
+  if (handoffArrival && !handoffSeen) {
+    setHandoffSeen(true)
+  }
 
   // Copy/.md-download toast (FEAT-59). Local Snackbar per the repo pattern.
   const [snack, setSnack] = useState<string | null>(null)
@@ -124,16 +173,16 @@ export default function ShellyChatPage() {
     sending,
     drawerOpen, setDrawerOpen,
     generatingImage,
-    uploadPreviews,
-    uploadFiles,
+    uploadPreviews, setUploadPreviews,
+    uploadFiles, setUploadFiles,
     uploading,
-    uploadDialogOpen,
+    uploadDialogOpen, setUploadDialogOpen,
     pendingAttachments, setPendingAttachments,
-    pendingReferenceImage,
-    imageFlowOpen,
-    imageFlowStep,
+    pendingReferenceImage, setPendingReferenceImage,
+    imageFlowOpen, setImageFlowOpen,
+    imageFlowStep, setImageFlowStep,
     imageIdea, setImageIdea,
-    imageQuestions,
+    imageQuestions, setImageQuestions,
     imageAnswers, setImageAnswers,
     loadingQuestions,
     fileInputRef,
@@ -154,7 +203,8 @@ export default function ShellyChatPage() {
   // is offered, and give the card a name + a true old → new diff. Parent-only,
   // stated here at the component as well as in the write layer: `/chat` is
   // nav-gated, not route-gated, so neither layer assumes the other.
-  const isParent = useProfile().profile === UserProfile.Parents
+  const { profile } = useProfile()
+  const isParent = profile === UserProfile.Parents
   // UX-189 — the acting child's weekly art budget, on FEAT-175's ONE counter.
   // Inert for a parent (uncapped, no subscription, `recordGeneration` a no-op),
   // so this costs a parent nothing and exists so the chat's paid image door is
@@ -264,6 +314,18 @@ export default function ShellyChatPage() {
     onDraftNextWeek: generateNextWeek,
   })
 
+  // UX-273 closeout — the one-way channel from the explicit Attach back to the
+  // hand-off guard, through a ref because the two hooks need each other: the
+  // guard is mounted BELOW the flows hook (it takes `handleNewThread` from it),
+  // and the flows hook needs to ask the guard a question before its own
+  // `await`. A ref is the smallest thing that closes that circle without
+  // re-ordering the composition or moving any capability between them. Assigned
+  // in a layout effect, so it is in place before any tap can read it, and never
+  // during render — a ref written in a render that is thrown away is a wire
+  // that silently is not there.
+  const ownThreadMint = useRef<(() => PlannerAskOwnThreadClaim | null) | null>(null)
+  const beginOwnThreadMint = useCallback(() => ownThreadMint.current?.() ?? null, [])
+
   const {
     handleContextChange,
     handleSend,
@@ -301,7 +363,130 @@ export default function ShellyChatPage() {
     // outside the accounting.
     isParent,
     artQuota: chatArtQuota,
+    // UX-273: opt-in, explicit, and read before either mount effect can run.
+    suppressMountWrites: handoffVisit,
+    beginOwnThreadMint,
   })
+
+  // ── UX-273: a planner refusal's question, arriving as an UNSENT draft, and
+  //    this page's own unsent draft surviving the route change that fetches it.
+  //    Mounted here rather than inside `useShellyChatFlows` because it adds no
+  //    write capability: it reads a one-shot in-memory slot and a page-session
+  //    custody slot, re-checks what Send would DO, and at most puts text (and
+  //    back her own attachments) into the composer. No thread, no message, no
+  //    model call. The whole composer is handed over, not just its text, because
+  //    an unmount loses the staged attachments too.
+  const composerDraft = useMemo<ComposerDraft>(
+    () => ({
+      text: input,
+      attachments: pendingAttachments,
+      referenceImage: pendingReferenceImage,
+      uploadFiles,
+      uploadPreviews,
+      uploadDialogOpen,
+      imageFlowOpen,
+      imageFlowStep,
+      imageIdea,
+      imageQuestions,
+      imageAnswers,
+    }),
+    [
+      input, pendingAttachments, pendingReferenceImage,
+      uploadFiles, uploadPreviews, uploadDialogOpen,
+      imageFlowOpen, imageFlowStep, imageIdea, imageQuestions, imageAnswers,
+    ],
+  )
+  const applyComposerDraft = useCallback(
+    (next: ComposerDraft) => {
+      setInput(next.text)
+      setPendingAttachments(next.attachments)
+      setPendingReferenceImage(next.referenceImage)
+      setUploadFiles(next.uploadFiles)
+      setUploadPreviews(next.uploadPreviews)
+      setUploadDialogOpen(next.uploadDialogOpen)
+      setImageFlowOpen(next.imageFlowOpen)
+      setImageFlowStep(next.imageFlowStep)
+      setImageIdea(next.imageIdea)
+      setImageQuestions(next.imageQuestions)
+      setImageAnswers(next.imageAnswers)
+    },
+    [
+      setInput, setPendingAttachments, setPendingReferenceImage,
+      setUploadFiles, setUploadPreviews, setUploadDialogOpen,
+      setImageFlowOpen, setImageFlowStep, setImageIdea, setImageQuestions, setImageAnswers,
+    ],
+  )
+  const plannerAsk = usePlannerAskHandoff({
+    familyId,
+    profile,
+    isParent,
+    activeChildId,
+    childrenLoading,
+    children,
+    // The TAB and the THREAD, because they are what `handleSend` sends under.
+    chatContext,
+    threadId: activeThreadId,
+    draft: composerDraft,
+    applyDraft: applyComposerDraft,
+    startFreshThread: handleNewThread,
+  })
+  useLayoutEffect(() => {
+    ownThreadMint.current = plannerAsk.beginOwnThreadMint
+  }, [plannerAsk.beginOwnThreadMint])
+
+  /**
+   * UX-273 readiness: is the box hers to use yet?
+   *
+   * The children read settles asynchronously and the hand-off hook consumes
+   * custody in the effect after it, so there was one commit in which this page
+   * rendered an enabled, EMPTY composer with Shelly's saved draft still in the
+   * slot. Anything she typed or picked in that window was overwritten by the
+   * restore on the next commit. So the composer and every door that writes into
+   * it stay unavailable, with a short preparation line in their place, until the
+   * hook says the restore has been committed — restore first, then type.
+   *
+   * Only the composer. The toolbar, the tabs, the child/conversation drawer and
+   * the transcript are untouched: navigating away or choosing another
+   * conversation while it prepares is normal, and so is everything afterwards.
+   */
+  const composerReady = plannerAsk.composerReady
+
+  // The ONE funnel every send door reaches (UX-189's lesson, applied to a guard
+  // instead of a quota): the button and the Enter key both come through here, so
+  // a question that may no longer be sent from this tab cannot leave by the
+  // other door. The guard evaluates at CALL time; when it passes, the existing
+  // `handleSend` runs completely unchanged.
+  const guardedSend = useCallback(() => {
+    // Fail-closed at the boundary as well as in the render. No send door is
+    // rendered before readiness, so this cannot be reached from the screen
+    // today; it is here because a handler that outlives the node it came from is
+    // exactly how the one-commit window got through in the first place.
+    if (!composerReady) return
+    plannerAsk.guardSend(() => {
+      void handleSend()
+    })
+  }, [composerReady, plannerAsk, handleSend])
+
+  /**
+   * The picker's own callback, gated at the same boundary.
+   *
+   * The file input is hidden and reachable only through the photo button, which
+   * is not rendered until readiness — but the browser's chooser is the one
+   * callback in this composer that can resolve long after the tap that opened
+   * it, so it is refused rather than assumed impossible. A selection made in
+   * the preparation window is dropped, not merged into a box that is about to
+   * receive her restored draft.
+   */
+  const handleFileSelectWhenReady = useCallback(
+    (e: ChangeEvent<HTMLInputElement>) => {
+      if (!composerReady) {
+        e.target.value = ''
+        return
+      }
+      handleFileSelect(e)
+    },
+    [composerReady, handleFileSelect],
+  )
 
   const activeThread = threads.find((t) => t.id === activeThreadId)
   const showEmpty = !activeThreadId && messages.length === 0
@@ -395,6 +580,9 @@ export default function ShellyChatPage() {
                         variant="outlined"
                         size="small"
                         color="secondary"
+                        // UX-273 readiness: a suggestion writes the composer,
+                        // so it is a text door like typing and waits with it.
+                        disabled={!composerReady}
                         onClick={() => setInput(s.message)}
                         sx={{ textTransform: 'none', justifyContent: 'flex-start' }}
                       >
@@ -408,6 +596,8 @@ export default function ShellyChatPage() {
                     key={s.label}
                     variant="outlined"
                     size="small"
+                    // Same door, same wait as the data-driven ones above.
+                    disabled={!composerReady}
                     onClick={() => setInput(s.message)}
                     sx={{ textTransform: 'none', justifyContent: 'flex-start' }}
                   >
@@ -454,7 +644,12 @@ export default function ShellyChatPage() {
             )}
           </Box>
         ) : (
-          <>
+          /* The TRANSCRIPT, named so an assertion can be scoped to it. The
+             empty state above renders the saved-conversation list with its
+             last-message previews, so a page-wide text query cannot tell a
+             sidebar preview of an old conversation from one of its turns
+             leaking into the view — and those are opposite answers. */
+          <Box data-testid="chat-transcript">
             {messages.map((msg) => (
               <ChatMessageBubble
                 key={msg.id}
@@ -484,12 +679,19 @@ export default function ShellyChatPage() {
               </Box>
             )}
             <div ref={messagesEndRef} />
-          </>
+          </Box>
         )}
       </Box>
 
-      {/* Image refinement panel (Prompt 9) */}
-      {imageFlowOpen && (
+      {/* Image refinement panel (Prompt 9).
+
+          UX-273 readiness: this panel IS a composer door — "Just generate",
+          "Next" and "Generate" all read and write composer state — and a
+          restored draft can arrive with it already open (`imageFlowOpen` travels
+          in custody). So it waits for the same signal as the box: its own open
+          flag cannot be true before readiness, and when a restore brings it back
+          it appears in the commit that restored it. */}
+      {imageFlowOpen && composerReady && (
         <Paper
           elevation={4}
           sx={{
@@ -654,8 +856,9 @@ export default function ShellyChatPage() {
         onDismiss={dismissNextWeek}
       />
 
-      {/* Follow-up suggestions */}
-      {followUps.length > 0 && !sending && (
+      {/* Follow-up suggestions. A tap sets the composer's text, so this is a
+          text door too and waits for readiness with the rest. */}
+      {followUps.length > 0 && !sending && composerReady && (
         <Box sx={{ px: 1, pb: 0.5, display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
           {followUps.map((q, i) => (
             <Chip
@@ -673,8 +876,65 @@ export default function ShellyChatPage() {
         </Box>
       )}
 
-      {/* Input area */}
+      {/* Where a planner question came from, or why it didn't arrive (UX-273).
+          Directly above the composer it fills, so the sentence and the line
+          explaining it are read together. */}
+      <PlannerAskHandoffNotice
+        state={plannerAsk.state}
+        onKeepExisting={plannerAsk.keepExisting}
+        onReplace={plannerAsk.replaceWithQuestion}
+        onRestoreSetAside={plannerAsk.restoreSetAside}
+        onDiscardSetAside={plannerAsk.discardSetAside}
+        onKeepSetAside={plannerAsk.keepSetAside}
+        onStartFresh={plannerAsk.startFresh}
+        onKeepConversation={plannerAsk.keepConversation}
+        onDismiss={plannerAsk.dismiss}
+      />
+
+      {/* Input area.
+
+          UX-273 readiness: until the hand-off hook has committed whatever it
+          restores, NONE of this is rendered — not the text box, not Send, not
+          the photo picker, not the image door — and the preparation line below
+          stands in its place. Gating by absence rather than by `disabled` is
+          deliberate: `disabled` leaves a focused textarea Shelly is already
+          typing into, and the loss this fixes is exactly that typing. */}
       <Paper elevation={2} sx={{ p: 1.5, borderTop: '1px solid', borderColor: 'divider' }}>
+        {!composerReady ? (
+          <Box
+            data-testid="composer-preparing"
+            sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 0.5, py: 1 }}
+          >
+            {/* Two truthful states, never a guess between them. The read either
+                has not answered yet, or has FAILED — and a failure that keeps
+                showing a spinner is a lie that never resolves, which is what a
+                rejected children read used to do here for the rest of the
+                session. The doors stay shut in both: the identity is unknown,
+                so nothing is selected and no draft is consumed, and Shelly's
+                saved draft is still in custody waiting for an answer. The
+                message carries no error detail — there is nothing in a Firestore
+                rejection she can act on, and the action she CAN take is the
+                button beside it. */}
+            {childrenLoadFailed ? (
+              <>
+                <Typography variant="body2" color="text.secondary">
+                  Couldn't get your draft ready.
+                </Typography>
+                <Button size="small" onClick={() => retryChildrenLoad?.()}>
+                  Try again
+                </Button>
+              </>
+            ) : (
+              <>
+                <CircularProgress size={16} />
+                <Typography variant="body2" color="text.secondary">
+                  Getting your draft ready…
+                </Typography>
+              </>
+            )}
+          </Box>
+        ) : (
+        <>
         {uploading && <LinearProgress sx={{ mb: 1 }} />}
         {pendingAttachments.length > 0 && (
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1, px: 0.5, flexWrap: 'wrap' }}>
@@ -717,7 +977,7 @@ export default function ShellyChatPage() {
             type="file"
             accept="image/*"
             multiple
-            onChange={handleFileSelect}
+            onChange={handleFileSelectWhenReady}
             style={{ display: 'none' }}
           />
           <IconButton
@@ -751,12 +1011,20 @@ export default function ShellyChatPage() {
             inputRef={chatInputRef}
             value={input}
             onChange={(e) => { setInput(e.target.value); if (followUps.length) setFollowUps([]) }}
-            onKeyDown={handleKeyDown}
+            onKeyDown={(e) => {
+              // Enter is the second send door; it goes through the same guard.
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                guardedSend()
+                return
+              }
+              handleKeyDown(e)
+            }}
             disabled={isBusy}
             sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
           />
           <IconButton
-            onClick={handleSend}
+            onClick={guardedSend}
             disabled={!input.trim() || isBusy}
             color="primary"
             size="small"
@@ -765,11 +1033,20 @@ export default function ShellyChatPage() {
             <SendIcon />
           </IconButton>
         </Box>
+        </>
+        )}
       </Paper>
 
-      {/* Image upload action dialog */}
+      {/* Image upload action dialog.
+
+          The chooser's three actions — Analyze, "Use as reference for image
+          creation", "Attach to my message" — are the rest of the media doors,
+          and the last two mint this composer's conversation. Gated on the same
+          signal, so none of them can be tapped in the preparation window; a
+          chooser that comes BACK from custody with its selection opens in the
+          commit that restored it, exactly as before. */}
       <Dialog
-        open={uploadDialogOpen}
+        open={uploadDialogOpen && composerReady}
         onClose={handleUploadCancel}
         fullWidth
         maxWidth="xs"

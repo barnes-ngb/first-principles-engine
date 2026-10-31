@@ -1,0 +1,523 @@
+// The Ask AI composer's unsent work, across the one route unmount the planner's
+// refusal link causes (UX-273). Page-session memory: no URL, no storage, no
+// Firestore, no transcript — two named slots (the box, and what the question
+// displaced from it), one owner, each read once.
+//
+// Three rules the second browser run proved are load-bearing:
+//  - a save NEVER clears another owner's entry (StrictMode's simulated unmount
+//    ran a save with an empty, not-yet-settled draft and wiped the real one);
+//  - a draft is labelled with the owner it was EDITED under, never the latest
+//    identity, so a scope change while mounted cannot re-label her work;
+//  - an entry that cannot be acted on is PEEKED, never consumed and dropped.
+//
+// And a fourth, from the acceptance closeout: work carries the SIGN-IN it was
+// typed under, and a save under a sign-in that has ended is refused — because a
+// logout is itself the unmount that hands the draft over, so ordering alone
+// cannot make that safe (see {@link endComposerCustodySession}).
+//
+// And a fifth, from the third browser run: what comes back must be something she
+// can ACT on. The slot carries no in-flight request, so a stage that only exists
+// while one is running comes back as a form with no controls — wound back at the
+// handover instead (see {@link normalizeInterruptedComposerDraft}).
+
+import type { PlannerAskHandoff, PlannerAskReceiver } from '../planner-chat/plannerAskHandoff'
+import type { ChatAttachment, ImageFlowStep, RefinementQuestion } from './useShellyChatState'
+
+/**
+ * Where a carried draft CAME FROM, when it came from the planner hand-off.
+ *
+ * The release review's behavioural blocker, and the reason this travels at all:
+ * an accepted question is guarded for its whole unsent life, and the guard lived
+ * only in the receiving hook's memory. So a route change stripped it — the text
+ * came back verbatim and was then ordinary typing, and a Send from another
+ * child's tab wrote that conversation under the other child while the question
+ * still named the first. The draft and its authority have to travel together or
+ * neither should.
+ *
+ * Custody never INTERPRETS this. It is carried, handed back with the draft, and
+ * re-evaluated by the receiver against the scope of the moment —
+ * `evaluatePlannerAskAuthority`, the same function the live guard uses, against
+ * the ORIGINAL receiver recorded here. Nothing in here is re-stamped as newly
+ * legitimate: this is the identity the question was accepted under, not the
+ * identity it was restored under, which is what makes a scope change read as a
+ * revocation rather than as a fresh arrival.
+ *
+ * Type-only import: no runtime dependency on the planner in either direction.
+ */
+export interface ComposerCustodyOrigin {
+  /** The payload as accepted, with its generation, source week and staging time. */
+  handoff: PlannerAskHandoff
+  /** What Send would have done at the moment it was accepted. */
+  receiver: PlannerAskReceiver
+  /** The shell's active child at that moment. */
+  activeChildId: string
+}
+
+/**
+ * Everything unsent the composer holds — all of it, not the three fields the
+ * first cut called "everything": the raw file chooser and its previews, the
+ * upload dialog, and the image-refinement form all survive the round trip too.
+ * `loadingQuestions` and `uploading` are deliberately absent: a request that is
+ * no longer in flight must not be restored as if it were — which is why the
+ * stage it was launched from is wound back on the way in
+ * ({@link normalizeInterruptedComposerDraft}).
+ */
+export interface ComposerDraft {
+  text: string
+  attachments: ChatAttachment[]
+  referenceImage: ChatAttachment | null
+  uploadFiles: File[]
+  uploadPreviews: string[]
+  uploadDialogOpen: boolean
+  imageFlowOpen: boolean
+  imageFlowStep: ImageFlowStep
+  imageIdea: string
+  imageQuestions: RefinementQuestion[]
+  imageAnswers: Record<number, string>
+}
+
+export const EMPTY_COMPOSER_DRAFT: ComposerDraft = {
+  text: '',
+  attachments: [],
+  referenceImage: null,
+  uploadFiles: [],
+  uploadPreviews: [],
+  uploadDialogOpen: false,
+  imageFlowOpen: false,
+  imageFlowStep: 'idea',
+  imageIdea: '',
+  imageQuestions: [],
+  imageAnswers: {},
+}
+
+/** Who the draft belongs to. The thread is tracked beside it, not inside it. */
+export interface ComposerCustodyOwner {
+  familyId: string
+  profile: string | null
+  chatContext: string
+  /** The child the tab maps to — `''` when it maps to none. */
+  contextChildId: string
+}
+
+/** A courtesy bound on page-session memory, not a durability promise. */
+export const COMPOSER_CUSTODY_TTL_MS = 10 * 60_000
+
+export type ComposerCustodyLook =
+  | { kind: 'none' }
+  /** Typed in this very place — hand it straight back. */
+  | { kind: 'same-thread'; draft: ComposerDraft; origin: ComposerCustodyOrigin | null }
+  /** Typed in another conversation of the same tab — offer it, never place it. */
+  | { kind: 'other-thread'; draft: ComposerDraft; origin: ComposerCustodyOrigin | null }
+
+interface HeldCustody {
+  owner: ComposerCustodyOwner
+  threadId: string | null
+  draft: ComposerDraft
+  savedAt: number
+  /** The sign-in this work was done under. See {@link endComposerCustodySession}. */
+  session: number
+  /** The hand-off it came from, carried not interpreted. */
+  origin: ComposerCustodyOrigin | null
+}
+
+let held: HeldCustody | null = null
+
+// ── The second home: work the question DISPLACED ────────────────────────────
+//
+// A P2 from the release review, and the reason this module has TWO slots rather
+// than one: the hand-off has exactly two drafts in flight — the one in the box
+// and the one the planner's question pushed out of it — and one slot made them
+// fight. Whichever was saved last won, so either her set-aside original was
+// dropped on the way out or the edits and media she added AFTER the replacement
+// were.
+//
+// Two named homes, not a list and not a stack: `current` (above) and
+// `displaced` (here). That is the whole representation, so a third draft cannot
+// exist and the receiver has to ask her before it would need one.
+//
+// It is NOT keyed on the thread. The entry carries the conversation it was
+// displaced in — that stamp is preserved and handed back — but a restore is an
+// explicit tap putting her own words into the box she is looking at, not the
+// slot placing work unasked, and the thread of a fresh conversation moves the
+// moment she sends (`null` becomes the minted id) without any scope changing.
+// Owner and sign-in are what decide, exactly as {@link sameComposerOwner} says.
+
+/** Whose a set-aside draft is: hers, or the hand-off question's own draft. */
+export type ComposerCustodyHolder = 'mine' | 'question'
+
+interface HeldDisplaced extends HeldCustody {
+  holds: ComposerCustodyHolder
+}
+
+let displacedHeld: HeldDisplaced | null = null
+
+export type DisplacedCustodyLook =
+  | { kind: 'none' }
+  | {
+      kind: 'held'
+      draft: ComposerDraft
+      /** The conversation it was displaced in, for the record. */
+      threadId: string | null
+      holds: ComposerCustodyHolder
+      /** The hand-off it came from — a set-aside question keeps its guard. */
+      origin: ComposerCustodyOrigin | null
+    }
+
+// ── The session: whose sign-in this slot belongs to ─────────────────────────
+//
+// An owner (family / profile / tab / tab's child) is not enough to make a
+// logout safe. The composer hands its unsent work over in its UNMOUNT cleanup,
+// and a logout is exactly an unmount — so the save and the invalidation race,
+// and a save that lands afterwards would re-fill a slot the ending session had
+// just emptied. The same shape covers a callback that outlives the route.
+//
+// So the work is stamped with the sign-in it was done under, the stamp is taken
+// once (when the draft's owner is stamped, never re-taken), and a save under a
+// session that is over is REFUSED rather than written.
+
+let session = 1
+
+/** The sign-in work saved right now would belong to. */
+export function currentComposerCustodySession(): number {
+  return session
+}
+
+/**
+ * End the current sign-in: empty the slot AND refuse anything still to come
+ * from it.
+ *
+ * Called only by the scope observer, for an identity that has gone away
+ * (logout, profile exit, an authority downgraded). An ordinary scope change
+ * inside one sign-in uses {@link clearComposerCustody} instead, because her
+ * still-mounted composer must keep being able to save its own work.
+ */
+export function endComposerCustodySession(): void {
+  session += 1
+  held = null
+  displacedHeld = null
+}
+
+export function composerDraftIsEmpty(draft: ComposerDraft): boolean {
+  return (
+    draft.text.trim() === '' &&
+    draft.attachments.length === 0 &&
+    draft.referenceImage === null &&
+    draft.uploadFiles.length === 0 &&
+    draft.uploadPreviews.length === 0 &&
+    !draft.uploadDialogOpen &&
+    !draft.imageFlowOpen &&
+    draft.imageIdea.trim() === '' &&
+    draft.imageQuestions.length === 0 &&
+    Object.keys(draft.imageAnswers).length === 0
+  )
+}
+
+export function sameComposerOwner(a: ComposerCustodyOwner, b: ComposerCustodyOwner): boolean {
+  return (
+    a.familyId === b.familyId &&
+    a.profile === b.profile &&
+    a.chatContext === b.chatContext &&
+    a.contextChildId === b.contextChildId
+  )
+}
+
+function copy(draft: ComposerDraft): ComposerDraft {
+  return {
+    ...draft,
+    attachments: [...draft.attachments],
+    uploadFiles: [...draft.uploadFiles],
+    uploadPreviews: [...draft.uploadPreviews],
+    imageQuestions: [...draft.imageQuestions],
+    imageAnswers: { ...draft.imageAnswers },
+  }
+}
+
+/**
+ * Wind back work that was MID-REQUEST when the composer was handed over, to the
+ * stage that holds the controls for it.
+ *
+ * Custody deliberately carries no in-flight flag (`loadingQuestions`,
+ * `uploading`): a request that is no longer running must not come back looking
+ * as if it were. But the stage the request was launched FROM is carried, and two
+ * of those stages render nothing without their request — so a draft could come
+ * back as a form with no controls at all, whose only exit was the close button
+ * that discards it (the third browser run's blocker):
+ *
+ *  - the refinement's `questions` stage with no questions, and `generating`, are
+ *    the launch stages of a question / image request that died with the route;
+ *  - raw `uploadFiles` outside the chooser is the launch stage of an upload that
+ *    died with it.
+ *
+ * Each is returned to the stage that can render it, with the idea, the reference
+ * image, the raw files and their previews untouched, so she retries or cancels
+ * EXPLICITLY. Nothing here starts, resumes or retries anything, and a stage that
+ * can render — questions that arrived, an upload that finished — is left exactly
+ * as it was.
+ */
+export function normalizeInterruptedComposerDraft(draft: ComposerDraft): ComposerDraft {
+  let next = draft
+
+  // The chooser is the one stage that shows raw files and offers a choice for
+  // them. Never inferred from `attachments`: an earlier batch that DID finish
+  // sits there while these files are still unsent, so the raw files decide.
+  if (!next.uploadDialogOpen && (next.uploadFiles.length > 0 || next.uploadPreviews.length > 0)) {
+    next = { ...next, uploadDialogOpen: true }
+  }
+
+  if (next.imageFlowStep !== 'idea' && next.imageQuestions.length === 0) {
+    // Back to the idea, which is preserved verbatim. Answers are keyed by
+    // position in a question list that never arrived, so they can neither be
+    // shown nor be allowed to pre-select a retry's different list.
+    next = { ...next, imageFlowStep: 'idea', imageAnswers: {} }
+  } else if (next.imageFlowStep === 'generating') {
+    // Her answers are complete and renderable; only the Generate tap is gone.
+    next = { ...next, imageFlowStep: 'questions' }
+  }
+
+  return next
+}
+
+/**
+ * Give a restored raw-file selection previews THIS page owns.
+ *
+ * The slot carries `File`s, which survive anything, and the `blob:` strings the
+ * departed instance was showing them through — and those strings belong to that
+ * instance's lifetime, not to custody's. Its upload-failure cleanup revokes
+ * them, so the restored chooser can render a view of a file that no longer has
+ * one: cached it looks right, and the next explicit retry carries the dead URL
+ * into the attachment strip as a blank 40×40 (the eighth browser run's
+ * blocker).
+ *
+ * So the preserved files are the source of truth and fresh URLs are derived
+ * from them. The carried strings are dropped, never revoked: the operation that
+ * made them may still be running into the instance that owns it, and revoking
+ * another owner's view is the defect, not the fix. A preview with no file
+ * behind it cannot be re-derived, so it is dropped rather than shown dead.
+ *
+ * Call this where restored work is PLACED, exactly once per placement — not on
+ * a peek and not in a render — because every URL it mints is one the live
+ * composer's own lifecycle (Cancel, upload failure, attach, remove) is then
+ * responsible for revoking. A draft that is taken and then dropped unplaced
+ * must not pass through here at all.
+ */
+export function adoptRestoredUploadPreviews(draft: ComposerDraft): ComposerDraft {
+  if (draft.uploadFiles.length === 0) {
+    return draft.uploadPreviews.length === 0 ? draft : { ...draft, uploadPreviews: [] }
+  }
+  return { ...draft, uploadPreviews: draft.uploadFiles.map((file) => URL.createObjectURL(file)) }
+}
+
+/**
+ * Hand unsent work to custody on the way out, labelled with the owner it was
+ * made under.
+ *
+ * An empty draft clears ONLY this owner's own entry: a pass that runs before the
+ * tab has settled (or a StrictMode replay) must not wipe a draft it cannot see.
+ *
+ * What is stored is {@link normalizeInterruptedComposerDraft}'s reading of it:
+ * the handover is the moment the draft stops having a running request behind it,
+ * so it is the one place that has to decide what an interrupted stage means.
+ */
+export function saveComposerCustody(
+  owner: ComposerCustodyOwner,
+  threadId: string | null,
+  draft: ComposerDraft,
+  now: number = Date.now(),
+  ownedSession: number = session,
+  origin: ComposerCustodyOrigin | null = null,
+): void {
+  // The sign-in this work was done under is over: its unmount cleanup, or a
+  // callback that outlived the route, must not re-fill a slot the ending
+  // session emptied. Omitted means "this one", so an ordinary save is unchanged.
+  if (ownedSession !== session) return
+  if (composerDraftIsEmpty(draft)) {
+    if (held && sameComposerOwner(held.owner, owner) && held.threadId === threadId) held = null
+    return
+  }
+  held = {
+    owner,
+    threadId,
+    draft: normalizeInterruptedComposerDraft(copy(draft)),
+    savedAt: now,
+    session: ownedSession,
+    origin,
+  }
+}
+
+/** What is waiting for this caller, without consuming it. */
+export function peekComposerCustody(
+  owner: ComposerCustodyOwner,
+  threadId: string | null,
+  now: number = Date.now(),
+): ComposerCustodyLook {
+  if (!held) return { kind: 'none' }
+  // Belt for the same boundary, read-side: an entry from a sign-in that is over
+  // is never handed to the next one.
+  if (held.session !== session) {
+    held = null
+    return { kind: 'none' }
+  }
+  if (now - held.savedAt > COMPOSER_CUSTODY_TTL_MS) {
+    held = null
+    return { kind: 'none' }
+  }
+  if (!sameComposerOwner(held.owner, owner)) return { kind: 'none' }
+  return held.threadId === threadId
+    ? { kind: 'same-thread', draft: copy(held.draft), origin: held.origin }
+    : { kind: 'other-thread', draft: copy(held.draft), origin: held.origin }
+}
+
+/**
+ * Read and empty the slot, if and only if it belongs to this caller.
+ *
+ * `acceptOtherThread` is opt-in: a caller that cannot yet SHOW a cross-thread
+ * draft must leave it where it is rather than consuming and dropping it.
+ */
+export function takeComposerCustody(
+  owner: ComposerCustodyOwner,
+  threadId: string | null,
+  options: { acceptOtherThread?: boolean } = {},
+  now: number = Date.now(),
+): ComposerCustodyLook {
+  const look = peekComposerCustody(owner, threadId, now)
+  if (look.kind === 'none') return look
+  if (look.kind === 'other-thread' && !options.acceptOtherThread) return look
+  held = null
+  return look
+}
+
+/**
+ * Hand the draft the question DISPLACED to its own home.
+ *
+ * Same rules as the current slot and for the same reasons — a save from a
+ * sign-in that is over is refused, an empty draft clears only this owner's own
+ * entry — and deliberately a separate store, so saving one of the two drafts
+ * can never be what loses the other.
+ */
+export function saveDisplacedComposerCustody(
+  owner: ComposerCustodyOwner,
+  threadId: string | null,
+  draft: ComposerDraft,
+  holds: ComposerCustodyHolder,
+  now: number = Date.now(),
+  ownedSession: number = session,
+  origin: ComposerCustodyOrigin | null = null,
+): void {
+  if (ownedSession !== session) return
+  if (composerDraftIsEmpty(draft)) {
+    if (displacedHeld && sameComposerOwner(displacedHeld.owner, owner)) displacedHeld = null
+    return
+  }
+  displacedHeld = {
+    owner,
+    threadId,
+    draft: normalizeInterruptedComposerDraft(copy(draft)),
+    savedAt: now,
+    session: ownedSession,
+    holds,
+    origin,
+  }
+}
+
+/** What is set aside for this owner, without consuming it. */
+export function peekDisplacedComposerCustody(
+  owner: ComposerCustodyOwner,
+  now: number = Date.now(),
+): DisplacedCustodyLook {
+  if (!displacedHeld) return { kind: 'none' }
+  if (displacedHeld.session !== session) {
+    displacedHeld = null
+    return { kind: 'none' }
+  }
+  if (now - displacedHeld.savedAt > COMPOSER_CUSTODY_TTL_MS) {
+    displacedHeld = null
+    return { kind: 'none' }
+  }
+  if (!sameComposerOwner(displacedHeld.owner, owner)) return { kind: 'none' }
+  return {
+    kind: 'held',
+    draft: copy(displacedHeld.draft),
+    threadId: displacedHeld.threadId,
+    holds: displacedHeld.holds,
+    origin: displacedHeld.origin,
+  }
+}
+
+/** Read and empty the set-aside home, if and only if it is this owner's. */
+export function takeDisplacedComposerCustody(
+  owner: ComposerCustodyOwner,
+  now: number = Date.now(),
+): DisplacedCustodyLook {
+  const look = peekDisplacedComposerCustody(owner, now)
+  if (look.kind === 'none') return look
+  displacedHeld = null
+  return look
+}
+
+/**
+ * Move both slots' conversation stamp from the fresh, unwritten conversation
+ * onto the id the composer's OWN explicit upload just minted.
+ *
+ * The release closeout's blocker. A fresh conversation has no id until something
+ * writes one, and "Attach to my message" is one of the things that does: her
+ * explicit tap creates the thread document, so the conversation she is standing
+ * in acquires an id without her going anywhere. Everything stamped `null` — the
+ * entry's own conversation, and the receiver inside a carried
+ * {@link ComposerCustodyOrigin} — was stamped for THAT conversation, so leaving
+ * those stamps behind makes the slot disagree with the live composer about where
+ * its work is: a later restore reads the question as belonging to a conversation
+ * that is no longer open and revokes it, which is the loss this closes.
+ *
+ * Deliberately narrow, because this is the one function here that rewrites a
+ * stamp rather than storing one:
+ *
+ *  - it moves an entry only when the owner matches, the sign-in matches, and the
+ *    entry still names `fromThreadId` — so it can never re-address another
+ *    owner's work, or re-point an entry that already names a conversation;
+ *  - it moves the origin's receiver only when that receiver names the same
+ *    conversation, so a question accepted somewhere else keeps the identity it
+ *    was accepted under. Nothing is re-stamped as newly legitimate: the
+ *    receiver's family, profile, tab and child are untouched and the hand-off
+ *    payload is untouched, so every check still reads the identity she accepted.
+ *
+ * Whether the mint is really the caller's OWN is not knowable here — the slot
+ * sees two ids and no operation. That judgement belongs to the receiver, which
+ * captures its context before the upload's `await` and calls this only for the
+ * id its own creation returned; see `usePlannerAskHandoff`'s `beginOwnThreadMint`.
+ */
+export function advanceComposerCustodyThread(
+  owner: ComposerCustodyOwner,
+  fromThreadId: string | null,
+  toThreadId: string,
+  ownedSession: number = session,
+): void {
+  if (ownedSession !== session) return
+  if (fromThreadId === toThreadId) return
+
+  const movable = (entry: HeldCustody): boolean =>
+    entry.session === session &&
+    sameComposerOwner(entry.owner, owner) &&
+    entry.threadId === fromThreadId
+
+  const movedOrigin = (origin: ComposerCustodyOrigin | null): ComposerCustodyOrigin | null =>
+    origin && origin.receiver.threadId === fromThreadId
+      ? { ...origin, receiver: { ...origin.receiver, threadId: toThreadId } }
+      : origin
+
+  if (held && movable(held)) {
+    held = { ...held, threadId: toThreadId, origin: movedOrigin(held.origin) }
+  }
+  if (displacedHeld && movable(displacedHeld)) {
+    displacedHeld = {
+      ...displacedHeld,
+      threadId: toThreadId,
+      origin: movedOrigin(displacedHeld.origin),
+    }
+  }
+}
+
+/** Drop whatever is held. The scope observer and test isolation use this. */
+export function clearComposerCustody(): void {
+  held = null
+  displacedHeld = null
+}

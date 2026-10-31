@@ -101,6 +101,33 @@ export interface UseChildrenResult {
   setSelectedChildId: (id: string) => void
   isLoading: boolean
   addChild: (child: Child) => void
+  /**
+   * The read FAILED, as opposed to "has not answered yet".
+   *
+   * Optional and additive so every existing consumer and test mock is unchanged
+   * — an absent field reads as `false`, which is what they all meant. It exists
+   * because the two states were indistinguishable: a rejected `getDocs` (or a
+   * rejected seed) left `isLoading` true for the rest of the session with
+   * nothing to say so, and a surface that GATES on an unsettled read — the
+   * UX-273 composer does — would wait for an answer that is never coming.
+   *
+   * `isLoading` deliberately stays TRUE alongside it. The identity really is
+   * unknown, so every existing safety that keys on "not settled" keeps holding:
+   * nothing is selected, no custody is consumed, and no surface may treat the
+   * failure as an affirmative empty result.
+   */
+  loadFailed?: boolean
+  /**
+   * Run the same load again, and clear the failure while it runs.
+   *
+   * Optional for the same compatibility reason. It re-runs THIS hook's effect
+   * through a generation dependency rather than reaching into Firestore itself,
+   * so the retry has exactly the semantics of the first attempt — same dedupe,
+   * same seeding, same selection — and a load made obsolete by a retry, an
+   * identity change or an unmount is still discarded by that attempt's own
+   * cancellation flag.
+   */
+  retryLoad?: () => void
 }
 
 /**
@@ -127,9 +154,20 @@ export function useChildren(): UseChildrenResult {
     getActiveChildId,
   )
   const [isLoading, setIsLoading] = useState(true)
+  const [loadFailed, setLoadFailed] = useState(false)
+  /** Bumped by `retryLoad`; the effect's own dependency, so the retry IS the load. */
+  const [loadAttempt, setLoadAttempt] = useState(0)
 
   const setSelectedChildId = useCallback((id: string) => {
     setActiveChildIdShared(id)
+  }, [])
+
+  const retryLoad = useCallback(() => {
+    // Back to "waiting for an answer", which is the truthful state while the
+    // second attempt runs, and the one every gate already handles.
+    setLoadFailed(false)
+    setIsLoading(true)
+    setLoadAttempt((n) => n + 1)
   }, [])
 
   useEffect(() => {
@@ -191,13 +229,26 @@ export function useChildren(): UseChildrenResult {
       }
 
       setIsLoading(false)
+      setLoadFailed(false)
     }
 
-    load()
+    // The rejection this catch exists for was unhandled: `getDocs` and
+    // `seedProfileChildren` both reject on an offline start, a rules refusal or
+    // a transaction that cannot commit, and with no catch the effect simply
+    // stopped — `isLoading` stayed true for the rest of the session, no child
+    // was ever selected, and nothing on screen said why. The identity stays
+    // UNKNOWN here on purpose (`isLoading` is not cleared): the only thing that
+    // changes is that the failure is now sayable, and retryable.
+    load().catch(() => {
+      // A load the user has already moved past — unmounted, identity changed,
+      // or a retry started — must not report its failure over the newer one.
+      if (cancelled) return
+      setLoadFailed(true)
+    })
     return () => {
       cancelled = true
     }
-  }, [familyId, profile])
+  }, [familyId, profile, loadAttempt])
 
   const addChild = useCallback((child: Child) => {
     // Reaches every mounted consumer, not just this one.
@@ -205,5 +256,13 @@ export function useChildren(): UseChildrenResult {
     setSelectedChildId(child.id)
   }, [setSelectedChildId])
 
-  return { children, selectedChildId, setSelectedChildId, isLoading, addChild }
+  return {
+    children,
+    selectedChildId,
+    setSelectedChildId,
+    isLoading,
+    addChild,
+    loadFailed,
+    retryLoad,
+  }
 }
