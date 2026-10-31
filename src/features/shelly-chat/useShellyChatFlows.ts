@@ -644,8 +644,8 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
 
     // The own-thread claim for the one funnel every generation door reaches, and
     // the third non-consuming creator: the prompt comes from the image form, so
-    // the composer's unsent text — her edited question for Lincoln — is still in
-    // the box while this mints a conversation. Taken here rather than in the
+    // the composer's unsent text — Shelly's edited question about Lincoln — is
+    // still in the box while this mints a conversation. Taken here rather than in the
     // callers because this is the function that CREATES the thread; the
     // refinement doors' own awaits create nothing.
     const claimOwnThread = beginOwnThreadMint?.() ?? null
@@ -1105,8 +1105,8 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
     const scope = currentContextScope()
     // And the authority for the conversation this tap may create, taken in the
     // same breath — BEFORE the compression `await`, not just before the thread
-    // creation. Analyze leaves the composer's unsent work standing (her edited
-    // planner question for Lincoln is still in the box), so it is a
+    // creation. Analyze leaves the composer's unsent work standing (Shelly's
+    // edited planner question about Lincoln is still in the box), so it is a
     // non-consuming creator and needs the same provenance Attach has.
     const claimOwnThread = beginOwnThreadMint?.() ?? null
     let stale = false
@@ -1261,9 +1261,9 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
 
     // The own-thread claim, taken before the compression `await` (round 2's P2).
     // "Use as reference for image creation" mints a conversation and leaves the
-    // composer's unsent work exactly where it is — her edited question for
-    // Lincoln stays in the box — so the guard saw `null → id` as Shelly opening a
-    // different conversation and cleared the text. Reference preparation itself
+    // composer's unsent work exactly where it is — Shelly's edited question
+    // about Lincoln stays in the box — so the guard saw `null → id` as Shelly
+    // opening a different conversation and cleared the text. Reference preparation itself
     // makes no model or generation call; it only stages the image and opens the
     // refinement form.
     const claimOwnThread = beginOwnThreadMint?.() ?? null

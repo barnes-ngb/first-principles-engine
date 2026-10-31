@@ -1862,14 +1862,14 @@ describe('the conversations her OTHER taps create for the question', () => {
    * External review round 2's P2, and the class behind it.
    *
    * "Attach to my message" was not the only handler that mints a conversation
-   * while her unsent work stays in the box. Three siblings do the same thing and
+   * while unsent work stays in the box. Three siblings do the same thing and
    * none of them took the own-thread claim: "Analyze this image", "Use as
    * reference for image creation", and `handleGenerateImageDirect` — the funnel
    * behind every image door. So choosing "Use as reference" on a fresh
    * conversation created a thread, the guard read `null → id` as Shelly opening a
-   * different conversation, and the edited question for Lincoln was cleared out
-   * of the composer. Her parent is the only person who ever types in that box, so
-   * what was lost was work that exists nowhere else.
+   * different conversation, and the edited question about Lincoln was cleared
+   * out of the composer. Shelly is the only person who ever types in that box,
+   * so what was lost was work that exists nowhere else.
    *
    * `handleSend` is deliberately absent from this block: it consumes the
    * submitted text BEFORE it mints, so there is no unsent draft for a claim to
@@ -2189,7 +2189,15 @@ describe('the conversations her OTHER taps create for the question', () => {
     // The box stays empty — nothing restored it and nothing duplicated it — and
     // the one request went into the one conversation the Send minted.
     expect(composer().value).toBe('')
-    expect(screen.getByTestId('chat-search').textContent).toBe('?thread=new-thread')
+    // WAITED for rather than read once. `setSearchParams` happens inside the
+    // handler, before the model call, but the router commits a navigation as a
+    // TRANSITION — so the first tick on which `chatCalls` has its entry is not
+    // necessarily the tick on which the URL has settled. The expected value is
+    // unchanged and still exact; only the moment it is read moves, which is the
+    // same thing Shelly's screen does.
+    await waitFor(() =>
+      expect(screen.getByTestId('chat-search').textContent).toBe('?thread=new-thread'),
+    )
     const threadCreations = vi
       .mocked(addDoc)
       .mock.calls.filter(
@@ -2198,7 +2206,7 @@ describe('the conversations her OTHER taps create for the question', () => {
     expect(threadCreations).toHaveLength(1)
     expect(screen.queryByText(/wasn't added to this conversation/)).not.toBeInTheDocument()
 
-    // Her own set-aside draft outlives the Send, which is the rule this feature
+    // Shelly's own set-aside draft outlives the Send, which is the rule this feature
     // already had: the offer replaces the question's note rather than going with
     // it.
     expect(await screen.findByText(/Your own draft is set aside/)).toBeInTheDocument()
