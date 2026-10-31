@@ -16,6 +16,8 @@ const boundary = vi.hoisted(() => ({
 
 vi.mock('react-router-dom', () => ({
   useNavigate: () => vi.fn(), useParams: () => ({ bookId: 'book-test' }),
+  // UX-473's departure guard — unblocked; this suite never leaves the editor.
+  useBlocker: () => ({ state: 'unblocked' }),
 }))
 vi.mock('/src/core/auth/useAuth', () => ({ useFamilyId: () => 'family-test' }))
 vi.mock('/src/core/hooks/useActiveChild', () => ({

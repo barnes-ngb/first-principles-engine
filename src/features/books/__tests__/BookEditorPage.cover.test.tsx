@@ -10,6 +10,8 @@ const updateBookMetaMock = vi.fn()
 vi.mock('react-router-dom', () => ({
   useNavigate: () => navigateMock,
   useParams: () => ({ bookId: 'book-1' }),
+  // UX-473's departure guard — unblocked; this suite saves nothing dirty.
+  useBlocker: () => ({ state: 'unblocked' }),
 }))
 
 vi.mock('/src/core/auth/useAuth', () => ({

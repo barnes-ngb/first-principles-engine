@@ -88,6 +88,8 @@ import type { DrawingChoice, PostCleanupChoice } from './DrawingChoiceDialog'
 import { cleanSketchBackground } from './cleanSketch'
 import type { ImagePosition } from './DraggableImage'
 import { useBook } from './useBook'
+import { useUnsavedBookGuard } from './useUnsavedBookGuard'
+import UnsavedBookDialog from './UnsavedBookDialog'
 import { makeBookPdf } from './makeBookPdf'
 import PrintSettingsDialog from './PrintSettingsDialog'
 import type { PrintSettings } from './PrintSettingsDialog'
@@ -153,6 +155,11 @@ export default function BookEditorPage() {
     loading,
     saveState,
     saveErrorMessage,
+    uploadErrorMessage,
+    clearUploadError,
+    hasUnsavedEdits,
+    hasOutstandingEdits,
+    retrySave,
     updatePage,
     changePage,
     addPage,
@@ -172,6 +179,15 @@ export default function BookEditorPage() {
     applySketchEnhancement,
     restoreImageVersion,
   } = useBook(familyId, bookId)
+
+  // ── An unsaved edit must not be able to leave quietly (UX-473) ────────────
+  // Every in-app exit from this editor is a history change — the Back arrow and
+  // the Read / Read-it-to-me chips below, the finish redirect, and the shell's
+  // bottom nav and the device's own Back, which this page never sees — so the
+  // guard sits on the route rather than on this page's four `navigate` calls.
+  // `hasOutstandingEdits` rather than the rendered flag because a chip that
+  // edits and navigates in one handler asks before the re-render.
+  const unsavedGuard = useUnsavedBookGuard({ saveState, hasUnsavedEdits, hasOutstandingEdits })
 
   const { generateImage, loading: aiLoading, imageFailureRef } = useAI()
 
@@ -1131,7 +1147,9 @@ export default function BookEditorPage() {
       />
       {/* Row 1: Navigation + Title */}
       <Box sx={{ display: 'flex', alignItems: 'center', px: 1, py: 0.5 }}>
-        <IconButton onClick={() => navigate('/books')} sx={{ minWidth: 48, minHeight: 48 }}>
+        {/* Named, because it is the exit a kid uses most and the one UX-473's
+            guard has to be assertable on. */}
+        <IconButton aria-label="My Books" onClick={() => navigate('/books')} sx={{ minWidth: 48, minHeight: 48 }}>
           <ArrowBackIcon />
         </IconButton>
         <Box sx={{ flex: 1, minWidth: 0, mx: 1 }}>
@@ -1182,6 +1200,33 @@ export default function BookEditorPage() {
         </Box>
         <SaveIndicator state={saveState} errorMessage={saveErrorMessage} />
       </Box>
+
+      {/* The Retry door (UX-473) — the DOCUMENT's, and nothing else's. Gated on
+          an outstanding edit as well as an error, because `retrySave` re-writes
+          the book and that is the only thing it can repair. */}
+      {saveState === 'error' && hasUnsavedEdits && (
+        <Alert
+          severity="error"
+          sx={{ mx: 2, mt: 0.5 }}
+          action={
+            <Button color="inherit" size="small" onClick={retrySave} sx={{ minHeight: 44 }}>
+              Try again
+            </Button>
+          }
+        >
+          {saveErrorMessage ?? 'Save failed'} — your newest words and pictures are still here.
+        </Alert>
+      )}
+
+      {/* A file that never reached Storage. Its own notice, deliberately WITHOUT
+          a Retry: re-writing the book cannot bring the picture back, and the
+          separation is also what stops a document write that later succeeds
+          from implying through one shared indicator that it arrived. */}
+      {uploadErrorMessage && (
+        <Alert severity="warning" onClose={clearUploadError} sx={{ mx: 2, mt: 0.5 }}>
+          {uploadErrorMessage} — your words are safe; add the picture again when you are ready.
+        </Alert>
+      )}
 
       {reimagineError && (
         <Alert severity="error" onClose={() => setReimagineError(null)} sx={{ mx: 2, mt: 0.5 }}>
@@ -2428,6 +2473,16 @@ export default function BookEditorPage() {
           </Stack>
         </Box>
       )}
+
+      {/* ── Held departure: retry, stay, or discard on purpose (UX-473) ── */}
+      <UnsavedBookDialog
+        open={unsavedGuard.held}
+        saveState={saveState}
+        saveErrorMessage={saveErrorMessage}
+        onRetry={retrySave}
+        onStay={unsavedGuard.stay}
+        onLeaveAnyway={unsavedGuard.leaveAnyway}
+      />
     </Page>
   )
 }
