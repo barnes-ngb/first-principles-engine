@@ -107,7 +107,7 @@ export function departureNotice(
       stage,
       title: 'Saving your book…',
       detail: 'Just a moment — we are finishing the save before you go.',
-      reassurance: `Your newest words and pictures are still here, and you will go on to where you were heading as soon as the save is confirmed. ${leaving}`,
+      reassurance: `Your latest edits are still here, and you will go on to where you were heading as soon as the save is confirmed. ${leaving}`,
       busy: status.saveState === 'saving',
       retryable: false,
     }
@@ -117,7 +117,7 @@ export function departureNotice(
     stage,
     title: "Your book didn't save",
     detail: saveErrorMessage ?? 'Save failed',
-    reassurance: `Your newest words and pictures are still here on this page. Try saving again. ${leaving}`,
+    reassurance: `Your latest edits are still here on this page. Try saving again. ${leaving}`,
     busy: false,
     retryable: true,
   }

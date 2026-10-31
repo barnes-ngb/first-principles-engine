@@ -156,6 +156,7 @@ export default function BookEditorPage() {
     saveState,
     saveErrorMessage,
     uploadErrorMessage,
+    uploadBusy,
     clearUploadError,
     hasUnsavedEdits,
     hasOutstandingEdits,
@@ -1214,18 +1215,34 @@ export default function BookEditorPage() {
             </Button>
           }
         >
-          {saveErrorMessage ?? 'Save failed'} — your newest words and pictures are still here.
+          {/* "latest edits", not "words and pictures": a coincident upload
+              failure means a picture may NOT be here, and this banner speaks
+              only for the document draft. */}
+          {saveErrorMessage ?? 'Save failed'} — your latest edits are still here on this page.
         </Alert>
       )}
 
-      {/* A file that never reached Storage. Its own notice, deliberately WITHOUT
-          a Retry: re-writing the book cannot bring the picture back, and the
-          separation is also what stops a document write that later succeeds
-          from implying through one shared indicator that it arrived. */}
+      {/* A file that did not get added. Its own notice, deliberately WITHOUT a
+          Retry — re-writing the book cannot re-send a file — and deliberately
+          silent about the document: whether the words are saved is the save
+          indicator's and the banner above's to say, not this one's. The message
+          comes from `uploadNotAddedMessage` and claims neither that the file is
+          gone nor that anything else is durable. */}
       {uploadErrorMessage && (
         <Alert severity="warning" onClose={clearUploadError} sx={{ mx: 2, mt: 0.5 }}>
-          {uploadErrorMessage} — your words are safe; add the picture again when you are ready.
+          {uploadErrorMessage}
         </Alert>
+      )}
+
+      {/* Upload progress, separate from the save indicator for the same reason:
+          it is not a document write and must not be drawn as one (UX-473). */}
+      {uploadBusy && (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 2, pt: 0.5 }}>
+          <CircularProgress size={14} />
+          <Typography variant="caption" color="text.secondary">
+            Adding your file…
+          </Typography>
+        </Box>
       )}
 
       {reimagineError && (

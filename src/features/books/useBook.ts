@@ -38,12 +38,14 @@ interface UseBookResult {
   /** When saveState is 'error', contains the actual error message for debugging. */
   saveErrorMessage: string | null
   /**
-   * A file that did not reach Storage, kept APART from `saveState` (UX-473).
+   * A file that did not get added, kept APART from `saveState` (UX-473).
    * Re-writing the document cannot repair it and a document write that then
    * succeeds must not be allowed to imply the picture or the sound arrived, so
    * this is its own statement and a successful save does not clear it.
    */
   uploadErrorMessage: string | null
+  /** At least one upload is running. Uploads never move `saveState`. */
+  uploadBusy: boolean
   /** Dismiss the upload notice. It is information, not an outstanding edit. */
   clearUploadError: () => void
   /**
@@ -142,6 +144,22 @@ function pushVersion(
   return [entry, ...(image.previousVersions ?? []).slice(0, 4)]
 }
 
+/**
+ * What a failed upload says (UX-473).
+ *
+ * Neutral and type-appropriate, and deliberately silent about two things it
+ * cannot know: whether the file is really gone (Storage may have taken it and
+ * only the URL round-trip failed) and whether the kid's words are safe (that is
+ * the DOCUMENT's status, which has its own indicator and its own Retry). So it
+ * states only what it observed — this did not get added — and what to do.
+ */
+export function uploadNotAddedMessage(
+  kind: 'picture' | 'drawing' | 'sticker' | 'recording',
+  reason: string,
+): string {
+  return `This ${kind} wasn't added. Try adding it again. (${reason})`
+}
+
 /** Get today as YYYY-MM-DD string. */
 function todayStr(): string {
   return new Date().toISOString().slice(0, 10)
@@ -235,6 +253,10 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
   const ackedSeqRef = useRef(0)
   const [hasUnsavedEdits, setHasUnsavedEdits] = useState(false)
   const [uploadErrorMessage, setUploadErrorMessage] = useState<string | null>(null)
+  // Upload bookkeeping, declared here with the rest of the per-document state
+  // so the load effect below can reset it. Its helpers are further down.
+  const uploadsRef = useRef<{ scope: object; active: number }>({ scope: documentScope, active: 0 })
+  const [uploadBusy, setUploadBusy] = useState(false)
   // The same answer as `hasUnsavedEdits`, written SYNCHRONOUSLY and stamped with
   // the document it belongs to. React state is a render behind, and a chip that
   // edits and navigates in one handler asks the departure guard before that
@@ -275,6 +297,8 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
     setSaveState('idle')
     setSaveErrorMessage(null)
     setUploadErrorMessage(null)
+    uploadsRef.current = { scope: documentScope, active: 0 }
+    setUploadBusy(false)
     if (!familyId || !bookId) { setLoading(false); return }
     setLoading(true)
     let cancelled = false
@@ -426,25 +450,43 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
     void persist(current.value, editSeqRef.current)
   }, [familyId, bookId, documentScope, persist])
 
-  /**
-   * A file that never reached Storage (UX-473).
-   *
-   * It is reported SEPARATELY from `saveState` on purpose. These used to share
-   * one slot, which made the editor capable of two lies at once: a kid whose
-   * photo failed while her typing was still pending saw a *Try again* that
-   * cannot re-upload anything, and a document write that then succeeded flipped
-   * the indicator to "Saved" over a page whose picture was still missing. So
-   * this says only its own true thing, a successful save does not clear it, and
-   * the document's own status is left to the document.
-   */
-  const failUpload = useCallback((message: string) => {
-    setUploadErrorMessage(message)
-    // Hand the document's status back. A dirty draft still has its own write to
-    // report and must keep it; a clean one is simply unchanged, so the 'saving'
-    // this upload set is over and 'idle' is the honest reading.
-    setSaveState((current) =>
-      current === 'saving' && !outstandingRef.current.dirty ? 'idle' : current,
-    )
+  // ── Uploads report on THEMSELVES, never on the document (UX-473) ──────────
+  //
+  // They used to borrow `saveState`, and that produced a state the editor could
+  // not get out of: a document write that had already failed left `saveState`
+  // 'error' with the draft dirty; an upload then set 'saving'; the upload
+  // failed; and because the draft was dirty the 'saving' was kept — so the save
+  // indicator span 700 ms later with no document request in flight, the *Try
+  // again* banner (gated on 'error') had vanished, and the departure dialog
+  // believed a write was in the air and withheld its controls. Reproduced by
+  // the root against the real hook.
+  //
+  // So `saveState` now means exactly one thing — the last DOCUMENT write — and
+  // uploads carry their own `uploadBusy` / `uploadErrorMessage`. An upload's
+  // success still goes through `applyUpdate`, which schedules a real document
+  // save that moves `saveState` for real.
+  //
+  // Both helpers are bound to the document the upload was STARTED for. A photo
+  // begun on one book and rejected after the editor moved to another used to
+  // post the old book's error onto the new one's notice.
+  const beginUpload = useCallback((scope: object) => {
+    if (latestBook.current.scope !== scope) return
+    if (uploadsRef.current.scope !== scope) uploadsRef.current = { scope, active: 0 }
+    uploadsRef.current.active += 1
+    setUploadBusy(true)
+    setUploadErrorMessage(null)
+  }, [])
+
+  /** Settle one upload. `message` is its failure, if it had one. */
+  const endUpload = useCallback((scope: object, message?: string) => {
+    // A callback that lands after the editor moved on reports nothing: neither
+    // the spinner nor the error belongs to the book now on screen.
+    if (latestBook.current.scope !== scope) return
+    if (uploadsRef.current.scope === scope) {
+      uploadsRef.current.active = Math.max(0, uploadsRef.current.active - 1)
+      setUploadBusy(uploadsRef.current.active > 0)
+    }
+    if (message) setUploadErrorMessage(message)
   }, [])
 
   const clearUploadError = useCallback(() => setUploadErrorMessage(null), [])
@@ -538,6 +580,8 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
   const addImageToPage = useCallback(
     async (pageId: string, file: File, options?: { cleanBackground?: boolean }) => {
       if (!familyId || !bookId) return
+      // The document this upload belongs to, for the whole of its life.
+      const scope = documentScope
 
       // Smart overlay detection: is there already an image on this page?
       const currentPage = book?.pages.find((p) => p.id === pageId)
@@ -569,8 +613,7 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
       const storagePath = `families/${familyId}/books/${bookId}/${filename}`
       const storageRef = ref(storage, storagePath)
 
-      setSaveState('saving')
-      setUploadErrorMessage(null)
+      beginUpload(scope)
       try {
         await uploadBytes(storageRef, processedFile)
         const url = await getDownloadURL(storageRef)
@@ -598,13 +641,14 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
               : p,
           ),
         }))
+        endUpload(scope)
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err)
         console.error('Image upload failed:', err)
-        failUpload(`That picture didn't upload: ${errMsg}`)
+        endUpload(scope, uploadNotAddedMessage('picture', errMsg))
       }
     },
-    [familyId, bookId, applyUpdate, book, failUpload],
+    [familyId, bookId, documentScope, applyUpdate, book, beginUpload, endUpload],
   )
 
   const prepareBackgroundPhoto = useCallback(async (file: File): Promise<PageImage | undefined> => {
@@ -643,13 +687,13 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
   const uploadAudio = useCallback(
     async (pageId: string, blob: Blob) => {
       if (!familyId || !bookId) return
+      const scope = documentScope
       const ts = new Date().toISOString().replace(/[:.]/g, '-')
       const filename = `audio_${pageId}_${ts}.webm`
       const storagePath = `families/${familyId}/books/${bookId}/${filename}`
       const storageRef = ref(storage, storagePath)
 
-      setSaveState('saving')
-      setUploadErrorMessage(null)
+      beginUpload(scope)
       try {
         await uploadBytes(storageRef, blob)
         const url = await getDownloadURL(storageRef)
@@ -661,13 +705,14 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
               : p,
           ),
         }))
+        endUpload(scope)
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err)
         console.error('Audio upload failed:', err)
-        failUpload(`That recording didn't upload: ${errMsg}`)
+        endUpload(scope, uploadNotAddedMessage('recording', errMsg))
       }
     },
-    [familyId, bookId, applyUpdate, failUpload],
+    [familyId, bookId, documentScope, applyUpdate, beginUpload, endUpload],
   )
 
   const prepareAiPageImage = useCallback((url: string, storagePath: string, prompt: string): PageImage => {
@@ -733,6 +778,7 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
   const addSketchToPage = useCallback(
     async (pageId: string, file: File): Promise<{ imageId: string; storagePath: string } | undefined> => {
       if (!familyId || !bookId) return undefined
+      const scope = documentScope
 
       const imageId = generateImageId()
       const ext = file.name.split('.').pop() ?? 'jpg'
@@ -748,8 +794,7 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
         quality: 0.85,
       })
 
-      setSaveState('saving')
-      setUploadErrorMessage(null)
+      beginUpload(scope)
       try {
         await uploadBytes(storageRef, processedSketch)
         const url = await getDownloadURL(storageRef)
@@ -793,15 +838,16 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
           void addDoc(artifactsCollection(familyId), artifact)
         }
 
+        endUpload(scope)
         return { imageId, storagePath }
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err)
         console.error('Sketch upload failed:', err)
-        failUpload(`That drawing didn't upload: ${errMsg}`)
+        endUpload(scope, uploadNotAddedMessage('drawing', errMsg))
         return undefined
       }
     },
-    [familyId, bookId, applyUpdate, book, failUpload],
+    [familyId, bookId, documentScope, applyUpdate, book, beginUpload, endUpload],
   )
 
   const applySketchEnhancement = useCallback(
@@ -916,13 +962,13 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
   const addStickerFileToPage = useCallback(
     async (pageId: string, file: File, label: string) => {
       if (!familyId || !bookId) return undefined
+      const scope = documentScope
       const ts = new Date().toISOString().replace(/[:.]/g, '-')
       const ext = (file.name.split('.').pop() ?? 'png').toLowerCase()
       const filename = `sticker_${ts}.${ext}`
       const storagePath = `families/${familyId}/books/${bookId}/${filename}`
       const storageRef = ref(storage, storagePath)
-      setSaveState('saving')
-      setUploadErrorMessage(null)
+      beginUpload(scope)
       try {
         await uploadBytes(storageRef, file)
         const url = await getDownloadURL(storageRef)
@@ -944,15 +990,16 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
               : p,
           ),
         }))
+        endUpload(scope)
         return { url, storagePath }
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err)
         console.error('Sticker upload failed:', err)
-        failUpload(`That sticker didn't upload: ${errMsg}`)
+        endUpload(scope, uploadNotAddedMessage('sticker', errMsg))
         return undefined
       }
     },
-    [familyId, bookId, applyUpdate, failUpload],
+    [familyId, bookId, documentScope, applyUpdate, beginUpload, endUpload],
   )
 
   return {
@@ -961,6 +1008,7 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
     saveState,
     saveErrorMessage,
     uploadErrorMessage,
+    uploadBusy,
     clearUploadError,
     hasUnsavedEdits,
     hasOutstandingEdits,

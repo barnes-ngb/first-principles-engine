@@ -19,6 +19,7 @@ const control = vi.hoisted(() => ({
   saveErrorMessage: 'Save failed: permission-denied' as string | null,
   hasUnsavedEdits: true,
   uploadErrorMessage: null as string | null,
+  uploadBusy: false,
   retrySave: vi.fn(),
   clearUploadError: vi.fn(),
   /** Re-render the editor after this test changes the save status. */
@@ -89,6 +90,7 @@ vi.mock('../useBook', async () => {
         saveState: control.saveState,
         saveErrorMessage: control.saveErrorMessage,
         uploadErrorMessage: control.uploadErrorMessage,
+        uploadBusy: control.uploadBusy,
         clearUploadError: control.clearUploadError,
         hasUnsavedEdits: control.hasUnsavedEdits,
         // The real hook answers from a synchronously-written ref; here the
@@ -139,6 +141,8 @@ import BookEditorPage from '../BookEditorPage'
 const SHELF = 'My bookshelf'
 const READER = 'Reading view'
 const ELSEWHERE = 'Today page'
+/** Exactly what `uploadNotAddedMessage` produces, copied so the UI pins it. */
+const UPLOAD_NOTICE = "This picture wasn't added. Try adding it again. (storage is down)"
 
 function renderEditor() {
   const router = createMemoryRouter(
@@ -189,12 +193,13 @@ const dialog = () => screen.getByRole('dialog')
 const stillOnEditor = () => expect(screen.getByText('My Book')).toBeInTheDocument()
 /** The in-page error banner, found by its own words rather than by `role=alert`,
  *  which this page can legitimately have more than one of. */
-const retryBanner = () => screen.getByText(/your newest words and pictures are still here/)
+const retryBanner = () => screen.getByText(/your latest edits are still here/)
 
 beforeEach(() => {
   control.saveState = 'error'
   control.saveErrorMessage = 'Save failed: permission-denied'
   control.uploadErrorMessage = null
+  control.uploadBusy = false
   control.hasUnsavedEdits = true
   control.retrySave.mockReset()
   control.clearUploadError.mockReset()
@@ -223,24 +228,53 @@ describe('BookEditorPage — recovering a failed save in place (UX-473)', () => 
     control.saveState = 'idle'
     control.saveErrorMessage = null
     control.hasUnsavedEdits = false
-    control.uploadErrorMessage = "That picture didn't upload: storage is down"
+    control.uploadErrorMessage = UPLOAD_NOTICE
     renderEditor()
 
-    expect(screen.getByText(/That picture didn't upload/)).toBeInTheDocument()
+    expect(screen.getByText(UPLOAD_NOTICE)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
+  })
+
+  it('says nothing about the document in the upload notice — not even reassurance', async () => {
+    // It used to append "your words are safe", which was a claim about a
+    // different subsystem and was false whenever the document was itself dirty
+    // or failed. The upload notice now speaks only for the file.
+    control.saveState = 'error'
+    control.saveErrorMessage = 'Save failed: permission-denied'
+    control.hasUnsavedEdits = true
+    control.uploadErrorMessage = UPLOAD_NOTICE
+    renderEditor()
+
+    const notice = screen.getByText(UPLOAD_NOTICE)
+    expect(notice).toHaveTextContent(UPLOAD_NOTICE)
+    expect(notice).not.toHaveTextContent(/words are safe|words are saved|file is gone/)
+
+    // And the document's own failure is still reported, separately, with its
+    // Retry — the state the root found unreachable.
+    expect(retryBanner()).toHaveTextContent('Save failed: permission-denied')
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
   })
 
   it('keeps the upload notice up while the document reports itself saved', async () => {
     // The two statements the editor used to conflate into one indicator: the
-    // words landed, the picture did not, and both are true at once.
+    // words landed, the file did not, and both are true at once.
     control.saveState = 'saved'
     control.saveErrorMessage = null
     control.hasUnsavedEdits = false
-    control.uploadErrorMessage = "That picture didn't upload: storage is down"
+    control.uploadErrorMessage = UPLOAD_NOTICE
     renderEditor()
 
-    expect(screen.getByText(/That picture didn't upload/)).toBeInTheDocument()
-    expect(screen.getByText(/your words are safe/)).toBeInTheDocument()
+    expect(screen.getByText(UPLOAD_NOTICE)).toBeInTheDocument()
+  })
+
+  it('draws upload progress apart from the save indicator', async () => {
+    control.saveState = 'idle'
+    control.saveErrorMessage = null
+    control.hasUnsavedEdits = false
+    control.uploadBusy = true
+    renderEditor()
+
+    expect(screen.getByText(/Adding your file/)).toBeInTheDocument()
   })
 })
 

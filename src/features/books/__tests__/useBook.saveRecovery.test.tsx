@@ -315,12 +315,15 @@ describe('useBook — a failed save keeps the latest draft retryable (UX-473)', 
 
     await act(async () => { await result.current.uploadAudio('page', new Blob()) })
 
-    expect(result.current.uploadErrorMessage).toBe("That recording didn't upload: storage is down")
+    expect(result.current.uploadErrorMessage).toBe(
+      "This recording wasn't added. Try adding it again. (storage is down)",
+    )
     // The DOCUMENT is unchanged and matches what is stored, so it must not be
     // reported as failed — and there is nothing outstanding to re-save, which
     // is what keeps the editor's Retry door (gated on the flag) shut.
     expect(result.current.saveState).toBe('idle')
     expect(result.current.saveErrorMessage).toBeNull()
+    expect(result.current.uploadBusy).toBe(false)
     expect(result.current.hasUnsavedEdits).toBe(false)
     expect(result.current.hasOutstandingEdits()).toBe(false)
     const before = storedCalls().length
@@ -333,16 +336,17 @@ describe('useBook — a failed save keeps the latest draft retryable (UX-473)', 
     await waitFor(() => expect(result.current.book).not.toBeNull())
 
     // The coincidence that used to produce two lies at once: words typed, and
-    // a picture that never reached Storage.
+    // a picture that never got added.
     act(() => result.current.updatePage('page', { text: 'Words and a picture' }))
     m.uploadBytes.mockImplementation(async () => { throw new Error('storage is down') })
     await act(async () => { await result.current.addImageToPage('page', new File([''], 'p.jpg')) })
 
-    expect(result.current.uploadErrorMessage).toBe("That picture didn't upload: storage is down")
+    const notice = "This picture wasn't added. Try adding it again. (storage is down)"
+    expect(result.current.uploadErrorMessage).toBe(notice)
     // The pending text edit still owns the document's status — the upload did
     // not seize it, and did not clear the edit either.
     expect(result.current.hasUnsavedEdits).toBe(true)
-    expect(result.current.saveState).not.toBe('error')
+    expect(result.current.saveState).toBe('idle')
 
     m.setDoc.mockImplementation(async () => undefined)
     await runParkedSaves()
@@ -351,9 +355,160 @@ describe('useBook — a failed save keeps the latest draft retryable (UX-473)', 
     // The words are saved. The picture is still missing, and the notice that
     // says so SURVIVES the save that had nothing to do with it.
     expect(lastStored().pages[0].text).toBe('Words and a picture')
-    expect(result.current.uploadErrorMessage).toBe("That picture didn't upload: storage is down")
+    expect(result.current.uploadErrorMessage).toBe(notice)
 
     act(() => result.current.clearUploadError())
+    expect(result.current.uploadErrorMessage).toBeNull()
+  })
+})
+
+describe('useBook — uploads never speak for the document (UX-473)', () => {
+  /**
+   * The root's reproduction against the real hook: a consumed debounce write
+   * failed, then an upload started and ALSO failed, and because the draft was
+   * dirty the upload's borrowed 'saving' was kept — so the indicator span with
+   * no document request in flight, the *Try again* banner (gated on 'error')
+   * disappeared, and the departure dialog believed a write was in the air.
+   */
+  it('leaves a FAILED document save failed, and its Retry reachable, across an upload', async () => {
+    const { result } = renderHook(() => useBook('family', 'book'))
+    await waitFor(() => expect(result.current.book).not.toBeNull())
+    m.setDoc.mockImplementation(async () => { throw new Error('permission-denied') })
+
+    act(() => result.current.updatePage('page', { text: 'Words worth keeping' }))
+    await runParkedSaves()
+    expect(result.current.saveState).toBe('error')
+
+    const upload = deferred()
+    m.uploadBytes.mockImplementation(async () => upload.promise)
+    let pending!: Promise<void>
+    await act(async () => { pending = result.current.uploadAudio('page', new Blob()) })
+
+    // DURING the upload: the document's verdict is untouched, so the banner and
+    // the dialog both still read 'error' rather than a write that is not there.
+    expect(result.current.saveState).toBe('error')
+    expect(result.current.saveErrorMessage).toBe('Save failed: permission-denied')
+    expect(result.current.uploadBusy).toBe(true)
+
+    await act(async () => { upload.reject(new Error('storage is down')); await pending })
+
+    // AFTER it fails: still 'error', still dirty, Retry still the way out.
+    expect(result.current.saveState).toBe('error')
+    expect(result.current.hasUnsavedEdits).toBe(true)
+    expect(result.current.uploadBusy).toBe(false)
+    expect(result.current.uploadErrorMessage).toBe(
+      "This recording wasn't added. Try adding it again. (storage is down)",
+    )
+
+    m.setDoc.mockImplementation(async () => undefined)
+    await act(async () => { result.current.retrySave() })
+    await waitFor(() => expect(result.current.saveState).toBe('saved'))
+    expect(lastStored().pages[0].text).toBe('Words worth keeping')
+  })
+
+  const entryPoints = [
+    {
+      kind: 'picture',
+      run: (api: ReturnType<typeof useBook>) => api.addImageToPage('page', new File([''], 'p.jpg')),
+    },
+    {
+      kind: 'drawing',
+      run: (api: ReturnType<typeof useBook>) => api.addSketchToPage('page', new File([''], 's.jpg')),
+    },
+    {
+      kind: 'sticker',
+      run: (api: ReturnType<typeof useBook>) => api.addStickerFileToPage('page', new File([''], 'k.png'), 'Star'),
+    },
+    {
+      kind: 'recording',
+      run: (api: ReturnType<typeof useBook>) => api.uploadAudio('page', new Blob()),
+    },
+  ] as const
+
+  // The audio case was only the counterexample that happened to be reported.
+  for (const { kind, run } of entryPoints) {
+    it(`never moves saveState for a ${kind}, failing or succeeding`, async () => {
+      // Every RENDERED value, which is what the editor would actually draw —
+      // so a 'saving' flicker inside the upload cannot hide between samples.
+      const seen: string[] = []
+      const { result } = renderHook(() => {
+        const api = useBook('family', 'book')
+        if (seen[seen.length - 1] !== api.saveState) seen.push(api.saveState)
+        return api
+      })
+      await waitFor(() => expect(result.current.book).not.toBeNull())
+
+      m.uploadBytes.mockImplementation(async () => { throw new Error('nope') })
+      await act(async () => { await run(result.current) })
+
+      expect(result.current.uploadErrorMessage).toBe(
+        `This ${kind} wasn't added. Try adding it again. (nope)`,
+      )
+      // No document write was attempted and none is pretended: 'idle' start to
+      // finish, with no 'saving' flicker and no borrowed 'error'.
+      expect(seen).toEqual(['idle'])
+      expect(result.current.uploadBusy).toBe(false)
+
+      // A SUCCESS still goes through applyUpdate, which schedules a real write.
+      m.uploadBytes.mockImplementation(async () => undefined)
+      await act(async () => { await run(result.current) })
+      expect(result.current.uploadErrorMessage).toBeNull()
+      expect(result.current.hasUnsavedEdits).toBe(true)
+      expect(m.queue).not.toHaveLength(0)
+      await runParkedSaves()
+      await waitFor(() => expect(result.current.saveState).toBe('saved'))
+    })
+  }
+
+  it("does not post one family's upload failure onto the book that replaced it", async () => {
+    const { result, rerender } = renderHook(({ family, id }) => useBook(family, id), {
+      initialProps: { family: 'family', id: 'book' },
+    })
+    await waitFor(() => expect(result.current.book).not.toBeNull())
+
+    const upload = deferred()
+    m.uploadBytes.mockImplementation(async () => upload.promise)
+    let pending!: Promise<void>
+    await act(async () => { pending = result.current.uploadAudio('page', new Blob()) })
+    expect(result.current.uploadBusy).toBe(true)
+
+    m.getDoc.mockImplementation(async () => snapshotOf(other()))
+    rerender({ family: 'second-family', id: 'other' })
+    await waitFor(() => expect(result.current.book?.id).toBe('other'))
+    expect(result.current.uploadBusy).toBe(false)
+
+    await act(async () => { upload.reject(new Error('old family failure')); await pending })
+
+    // The rejection belongs to a book nobody is looking at. It must not appear
+    // on this one — the leak the root reproduced.
+    expect(result.current.uploadErrorMessage).toBeNull()
+    expect(result.current.uploadBusy).toBe(false)
+    expect(result.current.saveState).toBe('idle')
+  })
+
+  it('does not let a late upload SUCCESS write into the book that replaced it', async () => {
+    const { result, rerender } = renderHook(({ family, id }) => useBook(family, id), {
+      initialProps: { family: 'family', id: 'book' },
+    })
+    await waitFor(() => expect(result.current.book).not.toBeNull())
+
+    const upload = deferred()
+    m.uploadBytes.mockImplementation(async () => upload.promise)
+    let pending!: Promise<void>
+    await act(async () => { pending = result.current.uploadAudio('page', new Blob()) })
+
+    m.getDoc.mockImplementation(async () => snapshotOf(other()))
+    rerender({ family: 'second-family', id: 'other' })
+    await waitFor(() => expect(result.current.book?.id).toBe('other'))
+
+    m.queue.length = 0
+    await act(async () => { upload.resolve(); await pending })
+
+    // `applyUpdate`'s existing scope check is what refuses it; nothing is
+    // scheduled and the new book stays clean.
+    expect(m.queue).toHaveLength(0)
+    expect(result.current.hasUnsavedEdits).toBe(false)
+    expect(result.current.hasOutstandingEdits()).toBe(false)
     expect(result.current.uploadErrorMessage).toBeNull()
   })
 })
