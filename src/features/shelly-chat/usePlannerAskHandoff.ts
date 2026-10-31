@@ -1037,10 +1037,15 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
     // drafts live and the restore is reversible. (The P2 again: this used to
     // apply the old draft straight over the new work and say nothing.) The
     // guard of whatever leaves the box leaves with it.
+    // Held as the SAVE's own answer rather than re-read off the ref below: the
+    // save is what decides whether anything is actually set aside (a slot that
+    // refuses leaves no offer standing), and the value it returns is the draft
+    // the notice should offer back.
+    let nowSetAside: ComposerDraft | null = null
     if (composerDraftIsEmpty(outgoing)) {
       displaced.current = null
     } else {
-      setWorkAside(
+      nowSetAside = setWorkAside(
         outgoing,
         live.current.receiver,
         held?.inComposer ? 'question' : 'mine',
@@ -1071,7 +1076,7 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
       setState({
         kind: 'filled',
         handoff: taken.origin.handoff,
-        setAside: displaced.current?.draft ?? null,
+        setAside: nowSetAside,
       })
       return
     }
