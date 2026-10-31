@@ -1,6 +1,6 @@
 import { createRef } from 'react'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { Link, MemoryRouter, Route, Routes } from 'react-router-dom'
+import { Link, MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 /**
@@ -298,10 +298,22 @@ function PlannerRoute({ ask }: { ask?: string }) {
   )
 }
 
+/**
+ * The query string, on screen, so "which conversation is she in?" is assertable
+ * from the rendered page rather than from a mock. Only the search part, which is
+ * empty on every ordinary journey here — a `?thread=` appearing in it is the
+ * page opening a conversation, which is exactly what a stale operation must not
+ * be able to do.
+ */
+function LocationProbe() {
+  return <span data-testid="chat-search">{useLocation().search}</span>
+}
+
 function renderApp(entry = '/chat', ask?: string) {
   return render(
     <MemoryRouter initialEntries={[entry]}>
       <Link to="/planner">to-planner</Link>
+      <LocationProbe />
       <Routes>
         <Route path="/chat" element={<ShellyChatPage />} />
         <Route path="/planner" element={<PlannerRoute ask={ask} />} />
@@ -1530,10 +1542,27 @@ describe('the conversation her own Attach creates for the question', () => {
     return app
   }
 
+  /**
+   * The chooser has not merely closed — it has LEFT.
+   *
+   * MUI keeps the dialog mounted through its exit transition and marks the rest
+   * of the page `aria-hidden` while it is there, so a tab, Send or a notice's
+   * close button is unreachable by role even though its text is on screen. Her
+   * next tap in the real workflow happens after the dialog has gone, so the
+   * tests wait for the same thing instead of reaching past it.
+   */
+  async function chooserHasLeft() {
+    await waitFor(() => {
+      expect(screen.queryByText('Attach to my message')).not.toBeInTheDocument()
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    })
+  }
+
   /** Her explicit tap, run to completion. */
   async function attach() {
     fireEvent.click(screen.getByText('Attach to my message'))
     await screen.findByText(/Image attached/)
+    await chooserHasLeft()
   }
 
   it('keeps the edited question, and mints the conversation under the same child', async () => {
@@ -1668,18 +1697,29 @@ describe('the conversation her own Attach creates for the question', () => {
     inFlight.holdThread = true
     fireEvent.click(screen.getByText('Attach to my message'))
     await waitFor(() => expect(vi.mocked(addDoc)).toHaveBeenCalledTimes(1))
-    await waitFor(() => expect(screen.queryByText('Attach to my message')).not.toBeInTheDocument())
+    await chooserHasLeft()
   }
 
-  /** Let the held creation resolve into whoever is still listening. */
-  async function releaseTheMint() {
+  /**
+   * Let the held creation resolve into whoever is still listening.
+   *
+   * `expectUpload` is the point rather than a convenience: a claim the guard
+   * REFUSES aborts the operation before a byte is uploaded, so a helper that
+   * always waits for `uploadBytes` would be asserting the stale upload it is
+   * supposed to prevent. The rejected cases wait for the continuation to run
+   * out instead, and then assert that it uploaded nothing.
+   */
+  async function releaseTheMint({ expectUpload }: { expectUpload: boolean }) {
     const release = inFlight.releaseThread
     inFlight.releaseThread = null
     inFlight.holdThread = false
     await act(async () => {
       release?.()
+      // Enough turns for the continuation to reach either its abort or its
+      // first upload — it is all microtasks from the resolve onwards.
+      for (let i = 0; i < 5; i++) await Promise.resolve()
     })
-    await waitFor(() => expect(vi.mocked(uploadBytes)).toHaveBeenCalled())
+    if (expectUpload) await waitFor(() => expect(vi.mocked(uploadBytes)).toHaveBeenCalled())
   }
 
   it('cannot re-arm a revoked question when the mint lands after a tab switch', async () => {
@@ -1695,7 +1735,17 @@ describe('the conversation her own Attach creates for the question', () => {
     expect(await screen.findByText(/another child's conversation/)).toBeInTheDocument()
     expect(composer().value).toBe('')
 
-    await releaseTheMint()
+    await releaseTheMint({ expectUpload: false })
+
+    // The refusal ABORTS the operation it came back to, so the conversation
+    // that id names is never opened and her photo never goes into it: the URL
+    // stays on the tab she switched to and nothing was uploaded.
+    expect(screen.getByTestId('chat-search').textContent).toBe('')
+    expect(vi.mocked(uploadBytes)).not.toHaveBeenCalled()
+    // One thread document, created by her own explicit tap before the switch —
+    // and no second write of any kind afterwards.
+    expect(vi.mocked(addDoc)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(updateDoc)).not.toHaveBeenCalled()
 
     // Nothing was put back, nothing was re-armed, and nothing was sent.
     expect(composer().value).toBe('')
@@ -1705,6 +1755,43 @@ describe('the conversation her own Attach creates for the question', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Lincoln' }))
     expect(composer().value).toBe('')
     expect(chatCalls).toHaveLength(0)
+  })
+
+  it('does not open the stale conversation when she picks a saved one mid-mint', async () => {
+    // The release review's blocker, in the shape it was reproduced in. The
+    // refusal was silent: the guard returned early and said nothing, so the
+    // handler that asked went on to make the id it had just minted the live
+    // conversation, rewrite the URL to it, and upload her photo into it — a
+    // conversation she had moved off while it was being created. The refusal is
+    // now an answer, and the answer stops the operation dead.
+    fixture.listenerDocs = [savedThread()]
+    await readyToAttach()
+    await attachWithTheMintHeld()
+
+    fireEvent.click(screen.getByText('Saved chat one'))
+    expect(await screen.findByText(/wasn't added to this conversation/)).toBeInTheDocument()
+
+    await releaseTheMint({ expectUpload: false })
+
+    // She is in the conversation she chose, and the stale one was never opened.
+    expect(screen.getByTestId('chat-search').textContent).toBe('?thread=t1')
+    await waitFor(() =>
+      expect(
+        within(screen.getByTestId('chat-transcript')).getByText(/older thread talk/),
+      ).toBeInTheDocument(),
+    )
+    // Nothing was uploaded, nothing was sent, and the one thread document is the
+    // one her own explicit tap created before she moved — no second write.
+    expect(vi.mocked(uploadBytes)).not.toHaveBeenCalled()
+    expect(chatCalls).toHaveLength(0)
+    expect(vi.mocked(addDoc)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(updateDoc)).not.toHaveBeenCalled()
+
+    // The question stays withdrawn — a refused claim re-arms nothing — and her
+    // own set-aside draft is still there to come back to.
+    expect(composer().value).toBe('')
+    fireEvent.click(screen.getByRole('button', { name: /close/i }))
+    expect(screen.getByText(/Your own draft is set aside/)).toBeInTheDocument()
   })
 
   it('cannot reach the next visit’s draft when the mint lands after she leaves and returns', async () => {
@@ -1722,18 +1809,27 @@ describe('the conversation her own Attach creates for the question', () => {
     expect(composer().value).toContain(EDIT)
     fireEvent.click(screen.getByText(/Keep what I was typing/))
 
-    await releaseTheMint()
+    await releaseTheMint({ expectUpload: false })
 
     // This visit's words are untouched and its guard is its own: still the fresh
     // conversation, so nothing has been revoked.
     expect(composer().value).toContain(ASK)
     expect(composer().value).toContain(EDIT)
     expect(screen.queryByText(/wasn't added to this conversation/)).not.toBeInTheDocument()
+    // And the departed visit's operation stopped at the refusal: this visit was
+    // not dragged into the conversation that id names, and her photo — which
+    // belongs to the chooser in front of her, unsent — was not uploaded into it.
+    expect(screen.getByTestId('chat-search').textContent).toBe('')
+    expect(vi.mocked(uploadBytes)).not.toHaveBeenCalled()
+    expect(vi.mocked(addDoc)).toHaveBeenCalledTimes(1)
 
     // Positive control, through the chooser the restore gave her back: cancel the
-    // selection she has already seen attached once, then send.
+    // selection she has already seen, then send. The dialog has to be gone
+    // before Send is reachable by role — its own exit transition `aria-hidden`s
+    // the page it is leaving, exactly as it does for her.
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     await waitFor(() => expect(screen.queryByAltText('Selected 1')).not.toBeInTheDocument())
+    await chooserHasLeft()
     fireEvent.click(sendButton())
     await waitFor(() => expect(chatCalls).toHaveLength(1))
     expect(chatCalls[0].childId).toBe(LINCOLN.id)

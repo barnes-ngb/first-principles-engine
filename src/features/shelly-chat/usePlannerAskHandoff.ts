@@ -127,8 +127,18 @@ export interface PlannerAskHandoffDeps {
  * {@link PlannerAskHandoffResult.beginOwnThreadMint} may call it. Calling it
  * neither creates nor opens anything: it hands the guard the one id that is
  * allowed to become its conversation, and the guard still decides.
+ *
+ * The decision is RETURNED, because the caller has to act on it. `true` means
+ * the id was honoured and the operation may go on to make that conversation the
+ * live one; `false` means the claim was refused — she has moved, signed out,
+ * left the route, opened another conversation, or had a different draft placed
+ * since the tap — and the operation it belonged to is stale. A refused claim
+ * must abort before it changes the active conversation, the URL, or uploads
+ * anything: a `void` refusal left the caller carrying on regardless, which is
+ * how a switch to another tab still ended up opening the old conversation and
+ * putting her photo in it.
  */
-export type PlannerAskOwnThreadClaim = (mintedThreadId: string) => void
+export type PlannerAskOwnThreadClaim = (mintedThreadId: string) => boolean
 
 export interface PlannerAskHandoffResult {
   state: PlannerAskHandoffState
@@ -838,8 +848,9 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
   //    placed draft, same held question, and the live conversation still the
   //    fresh one. A result arriving after a tab switch, a logout, a departure,
   //    or a swap that moved the draft cannot re-arm anything or address a draft
-  //    it was not started for; it is simply dropped, and the ordinary
-  //    revocation stands.
+  //    it was not started for; it is REFUSED OUT LOUD — the claim answers
+  //    `false` so the operation that holds it aborts before it opens anything or
+  //    uploads anything — and the ordinary revocation stands.
   //
   // Nothing here creates, opens, writes or sends: the thread already exists by
   // the time this is told about it, and what moves is a stamp.
@@ -862,22 +873,27 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
       placements: placements.current,
     }
     let spent = false
-    return (mintedThreadId: string) => {
-      if (spent) return
+    // Every refusal below answers `false`, and the caller's contract is to
+    // abort the operation on it: the id was minted for a moment that has passed,
+    // so nothing downstream of it — the active conversation, the `?thread`
+    // param, the upload — is addressed to the composer she is actually looking
+    // at. The ordinary revocation stands, exactly as before.
+    return (mintedThreadId: string): boolean => {
+      if (spent) return false
       spent = true
-      if (!mintedThreadId) return
-      if (!onThisVisit.current) return
-      if (currentComposerCustodySession() !== captured.session) return
-      if (placements.current !== captured.placements) return
+      if (!mintedThreadId) return false
+      if (!onThisVisit.current) return false
+      if (currentComposerCustodySession() !== captured.session) return false
+      if (placements.current !== captured.placements) return false
       const now = live.current.receiver
       // She has opened a conversation in the meantime, so this id is not the
       // conversation she is in and the thread check's answer is the right one.
-      if (now.threadId !== null) return
-      if (ownerKeyOf(ownerOf(now)) !== captured.ownerKey) return
-      if (live.current.activeChildId !== captured.activeChildId) return
+      if (now.threadId !== null) return false
+      if (ownerKeyOf(ownerOf(now)) !== captured.ownerKey) return false
+      if (live.current.activeChildId !== captured.activeChildId) return false
       const still = authority.current
-      if (!still || still.handoff !== captured.handoff) return
-      if (still.receiver.threadId !== null) return
+      if (!still || still.handoff !== captured.handoff) return false
+      if (still.receiver.threadId !== null) return false
 
       // The guard's conversation, and nothing else about its identity.
       authority.current = {
@@ -920,6 +936,7 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
               : aside.origin,
         }
       }
+      return true
     }
   }, [])
 

@@ -128,8 +128,13 @@ export interface ShellyChatFlowsDeps {
    * exactly as before, and all the callback does is report the id it got.
    * Optional, so an ordinary mount — and every existing test harness — is
    * unchanged.
+   *
+   * The claim it hands back answers whether the id was HONOURED. `false` means
+   * the tap is stale — another tab, another conversation, a logout, a departure,
+   * a different draft — and this handler aborts on it, before the conversation
+   * it just created becomes the live one and before a byte is uploaded into it.
    */
-  beginOwnThreadMint?: () => ((mintedThreadId: string) => void) | null
+  beginOwnThreadMint?: () => ((mintedThreadId: string) => boolean) | null
 }
 
 /**
@@ -970,6 +975,10 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
     // because the condition that matters is the one at the TAP: reading it later
     // would be reading it from a continuation.
     const claimOwnThread = beginOwnThreadMint?.() ?? null
+    // Set by a REFUSED claim: this tap's conversation is not the one she is in
+    // any more, so nothing after the refusal may run and the cleanup below has
+    // to be careful about work that is not this tap's.
+    let stale = false
     try {
       let threadId = activeThreadId
 
@@ -988,7 +997,18 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
         // already owns this id by the time the render that changes it happens.
         // Only THIS id, and only once: whether it may be honoured is the
         // guard's own decision, made against the context it captured.
-        claimOwnThread?.(threadId)
+        //
+        // And the decision is OBEYED. A refusal means she switched tab, picked a
+        // saved conversation, signed out or left while the creation was in
+        // flight, so opening this id and uploading into it would drag her back
+        // into a conversation she had moved on from. We stop here instead — the
+        // created-but-unopened thread document is an empty one nobody is in,
+        // which is what an abandoned fresh conversation always is, and no
+        // further write is made.
+        if (claimOwnThread && !claimOwnThread(threadId)) {
+          stale = true
+          return
+        }
         setActiveThreadId(threadId)
         setSearchParams({ thread: threadId })
       }
@@ -1010,8 +1030,28 @@ export function useShellyChatFlows(state: ShellyChatState, deps: ShellyChatFlows
       console.error('Failed to upload image(s) for attachment:', err)
       uploadPreviews.forEach((p) => URL.revokeObjectURL(p))
     } finally {
-      setUploadFiles([])
-      setUploadPreviews([])
+      if (stale) {
+        // A stale tap clears ITS OWN selection and nothing else. By the time a
+        // claim is refused the composer may already hold newer work — a restored
+        // draft comes back with previews of its own — and clearing that, or
+        // revoking its `blob:` URLs, would destroy the very work the refusal
+        // exists to protect. So the clear is conditional on the selection still
+        // being the one this tap captured, and the revoke happens only when the
+        // clear does.
+        let revoked = false
+        setUploadPreviews((prev) => {
+          if (prev !== uploadPreviews) return prev
+          if (!revoked) {
+            revoked = true
+            uploadPreviews.forEach((p) => URL.revokeObjectURL(p))
+          }
+          return []
+        })
+        setUploadFiles((prev) => (prev === uploadFiles ? [] : prev))
+      } else {
+        setUploadFiles([])
+        setUploadPreviews([])
+      }
       setUploading(false)
     }
   }, [uploadFiles, uploadPreviews, activeThreadId, familyId, setSearchParams, chatContext, setActiveThreadId, setPendingAttachments, setUploadDialogOpen, setUploadFiles, setUploadPreviews, setUploading, beginOwnThreadMint])
