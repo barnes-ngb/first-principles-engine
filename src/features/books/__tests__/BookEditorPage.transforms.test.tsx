@@ -4,7 +4,9 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import type { Book, BookPage } from '../../../core/types'
 
 const m = vi.hoisted(() => ({ source: null as unknown as Book, persist: vi.fn(), getDoc: vi.fn(), bookId: 'synthetic-book', atLimit: true, generate: vi.fn(), api: null as ReturnType<typeof import('../useBook').useBook> | null }))
-vi.mock('react-router-dom', () => ({ useNavigate: () => vi.fn(), useParams: () => ({ bookId: m.bookId }) }))
+// `useBlocker` is UX-473's departure guard; unblocked here, since this suite
+// exercises transforms inside the editor and never leaves it.
+vi.mock('react-router-dom', () => ({ useNavigate: () => vi.fn(), useParams: () => ({ bookId: m.bookId }), useBlocker: () => ({ state: 'unblocked' }) }))
 vi.mock('/src/core/auth/useAuth', () => ({ useFamilyId: () => 'synthetic-family' }))
 vi.mock('/src/core/hooks/useActiveChild', () => ({ useActiveChild: () => ({ activeChild: { id: 'synthetic-child', name: 'Test Child' }, children: [{ id: 'synthetic-child', name: 'Test Child' }], isChildProfile: true }) }))
 vi.mock('/src/core/profile/useProfile', () => ({ useProfile: () => ({ profile: 'child', themeMode: 'family', canEdit: true }) }))
