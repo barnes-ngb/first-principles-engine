@@ -773,7 +773,12 @@ const VoxelCharacter = forwardRef<VoxelCharacterHandle, VoxelCharacterProps>(fun
       const tierTintKey = getTierTint(effectiveTier('helmet'))
       const tierMatRef = TIER_MATERIALS[tierTintKey] ?? TIER_MATERIALS.wood
       const crestColor = tierMatRef.accent
-      const crest = buildHelmetCrest(crestType, U, crestColor)
+      // A helmet whose crown rises past the legacy open-face dome top
+      // publishes the head-local Y its crest should stand on, so the crest
+      // is not buried inside it (Diamond's stepped crown). Every other tier
+      // publishes nothing and keeps its exact current crest placement.
+      const crestBaseY = helmetGroup.userData.crestBaseY as number | undefined
+      const crest = buildHelmetCrest(crestType, U, crestColor, undefined, crestBaseY)
       if (crest) helmetGroup.add(crest)
     }
 
