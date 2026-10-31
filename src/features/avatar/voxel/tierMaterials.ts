@@ -72,7 +72,10 @@ export const TIER_MATERIALS: Record<string, TierMaterials> = {
     colorJitter: 0.03,      // very subtle variation
     edgeOpacity: 0.25,
   },
-  // Gold/Diamond/Netherite — Phase B redesign. Keep functional placeholders.
+  // Gold/Netherite — Phase B redesign. Keep functional placeholders.
+  // `diamond` below is no longer a placeholder: it is the palette the
+  // dedicated Diamond geometry (armorGeometryDiamond.ts) is designed
+  // against, so its values are load-bearing. Unchanged by that work.
   gold: {
     primary: 0xF4C430,
     secondary: 0x4A2871,

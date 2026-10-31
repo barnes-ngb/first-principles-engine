@@ -10,6 +10,10 @@ import type { HelmetCrest } from '../../../core/types'
  * @param U - One Minecraft pixel unit (0.125 * scale)
  * @param color - Crest color (hex number)
  * @param headPx - Head size in pixels (default 9 for Legends proportions)
+ * @param baseYOverride - Head-local Y the crest should stand on, for a helmet
+ *   whose crown rises past the legacy open-face dome top. Omitted (or
+ *   `undefined`) keeps the historical base exactly, which is what every tier
+ *   but Diamond passes.
  * @returns Group or null if type is 'none'
  */
 export function buildHelmetCrest(
@@ -17,6 +21,7 @@ export function buildHelmetCrest(
   U: number,
   color: number,
   headPx = 9,
+  baseYOverride?: number,
 ): THREE.Group | null {
   if (type === 'none') return null
 
@@ -28,7 +33,7 @@ export function buildHelmetCrest(
   // Base Y: top of open-face helmet dome.
   // Dome height = headPx * 0.45, dome center Y = headPx * 0.08 + domeH/2
   // Dome top = headPx * (0.08 + 0.45) = headPx * 0.53
-  const baseY = U * (headPx * 0.53)
+  const baseY = baseYOverride ?? U * (headPx * 0.53)
 
   switch (type) {
     case 'fin': {

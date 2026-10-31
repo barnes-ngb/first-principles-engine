@@ -8,6 +8,7 @@
 
 | Document | Status | Notes |
 |---|---|---|
+| `review/DIAMOND_ARMOR_GEOMETRY.md` | **CURRENT** (2026-10-31) | `AV-01` — the Diamond tier's dedicated voxel geometry (the Stonebridge Guardian set): the one "cut, not cast" design rule and its six pieces, what is preserved by construction (body proportions, equip poses/pivots, attachment metadata, material roles, the tier palette, the Gold/Netherite/unknown fallback to Iron), the canonical validation contract, the round-1 render findings and their repairs, and the stated limits. Local build; no merge or release. |
 | `review/BEFORE_WORK_PAGE_CHECK.md` | **CURRENT** (2026-10-16) | The prospective before-work page check: the no-learning-record contract, why nothing is persisted (no `scans` document, no Storage object), the dedicated `pageCheck` task that fails closed through a release skew, the native-picker staleness rules, the separate prospective prompt, and the stated limits (heuristic prose filter, unproven unsupported-task copy). |
 | `review/STICKER_RESULT_IDENTITY_2026-09.md` | **CURRENT** (2026-09-17) | FIX-252 — completed sticker identity, failed redo preservation and save/generation exclusion; validation boundaries. |
 | `review/STICKER_CLEANUP_LAYOUT_2026-09.md` | **CURRENT** (2026-09-17) | FIX-251 — explicit large-image preview/consent and responsive cleanup layout; candidate validation boundaries. |
