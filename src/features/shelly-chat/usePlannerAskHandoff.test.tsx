@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { StrictMode, useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
@@ -16,6 +16,7 @@ import {
 import {
   clearComposerCustody,
   EMPTY_COMPOSER_DRAFT,
+  saveComposerCustody,
   type ComposerDraft,
 } from './composerCustody'
 import PlannerAskHandoffNotice from './PlannerAskHandoffNotice'
@@ -63,6 +64,9 @@ function stage(over: Partial<PlannerAskHandoffRequest> = {}, stagedAt?: number) 
   return payload
 }
 
+/** See the note in `Harness`: one entry per render, as `ready|text`. */
+const renderLog: string[] = []
+
 interface HarnessProps {
   childrenLoading?: boolean
   profile?: string | null
@@ -93,8 +97,14 @@ function Harness({
     applyDraft: (next) => setDraft({ ...draft, ...next }),
     startFreshThread: () => {},
   })
+  // Every render of the hook's host, as `ready|text`. The readiness contract is
+  // about a COMMIT, not an end state — "was the box ever offered to Shelly
+  // empty while a draft was still waiting?" — and only the sequence can answer
+  // that. Pushed from the render body on purpose; this is a probe, not product.
+  renderLog.push(`${String(handoff.composerReady)}|${draft.text}`)
   return (
     <>
+      <span data-testid="composer-ready">{String(handoff.composerReady)}</span>
       <PlannerAskHandoffNotice
         state={handoff.state}
         onKeepExisting={handoff.keepExisting}
@@ -124,8 +134,10 @@ function mount(generation: number | null, props: HarnessProps = {}) {
 }
 
 const composer = () => screen.getByLabelText('composer') as HTMLTextAreaElement
+const isReady = () => screen.getByTestId('composer-ready').textContent === 'true'
 
 beforeEach(() => {
+  renderLog.length = 0
   clearPlannerAskHandoff()
   clearComposerCustody()
 })
@@ -178,6 +190,144 @@ describe('an identity that has not settled', () => {
     mount(null)
     expect(composer().value).toBe('')
     expect(takePlannerAskHandoff()?.generation).toBe(payload.generation)
+  })
+})
+
+describe('the composer waits for its own draft (readiness)', () => {
+  /**
+   * The promotion blocker, at the signal rather than at the screen.
+   *
+   * The children read settles asynchronously and the arrival pass that consumes
+   * custody runs in the effect after it, so there was one commit in which the
+   * composer was usable, empty, and about to be overwritten by the restore.
+   * Shelly types while a page is loading — the box was enabled — and her words
+   * went. `composerReady` is what the page gates every text and media door on,
+   * so what has to hold is: false until the restore is committed, true in the
+   * SAME commit as the restore, and never false again afterwards.
+   *
+   * The screen half of it — which controls are actually unavailable, and the
+   * preparation line in their place — is in `plannerAskHandoff.route.test.tsx`,
+   * where the real page renders them.
+   */
+  const OWNER = {
+    familyId: 'fam-1',
+    profile: 'parents',
+    chatContext: 'lincoln',
+    contextChildId: 'child-lincoln',
+  }
+  const SAVED = 'what Shelly had typed before she left'
+
+  /** Her unsent draft, waiting in the slot for Lincoln's fresh conversation. */
+  const strand = (text = SAVED) =>
+    saveComposerCustody(OWNER, null, { ...EMPTY_COMPOSER_DRAFT, text })
+
+  const settledTree = (generation: number | null) => (
+    <MemoryRouter
+      initialEntries={[
+        generation === null
+          ? { pathname: '/chat' }
+          : { pathname: '/chat', state: { [PLANNER_ASK_HANDOFF_STATE_KEY]: generation } },
+      ]}
+    >
+      <Harness />
+    </MemoryRouter>
+  )
+
+  it('is not ready while the children read is in flight', () => {
+    strand()
+    mount(null, { childrenLoading: true, activeChildId: '' })
+    expect(isReady()).toBe(false)
+    // And nothing has been placed yet, which is the point: the slot still holds
+    // her only copy, so the box must not be hers to type in.
+    expect(composer().value).toBe('')
+  })
+
+  it('becomes ready in the SAME commit that restores her draft', () => {
+    strand()
+    const { rerender } = mount(null, { childrenLoading: true, activeChildId: '' })
+    rerender(settledTree(null))
+
+    expect(isReady()).toBe(true)
+    expect(composer().value).toBe(SAVED)
+    // The no-gap claim, asserted on the sequence rather than the end state: no
+    // render ever offered a ready composer with an empty box while that draft
+    // was waiting. A one-render gap between the read settling and the restore
+    // applying would put exactly one `true|` in here.
+    expect(renderLog).not.toContain('true|')
+  })
+
+  it('is ready on an ordinary visit with nothing waiting', () => {
+    mount(null)
+    expect(isReady()).toBe(true)
+    expect(composer().value).toBe('')
+  })
+
+  it('is ready after the hand-off itself is refused', () => {
+    // A refusal is a finished arrival, not a reason to keep the box shut: she
+    // can still ask her own question on this visit.
+    const payload = stage({}, Date.now() - PLANNER_ASK_HANDOFF_TTL_MS - 1)
+    mount(payload.generation)
+    expect(screen.getByText(PLANNER_ASK_HANDOFF_REFUSAL_LINES.expired)).toBeInTheDocument()
+    expect(isReady()).toBe(true)
+  })
+
+  it('is ready when the read settles having found no child at all', () => {
+    // The failed/empty read. It settles, so the arrival pass runs and refuses
+    // with a reason — and the composer opens, rather than staying shut for good.
+    mount(null, { activeChildId: '' })
+    expect(isReady()).toBe(true)
+  })
+
+  it('is ready with the question in the box on a normal hand-off', () => {
+    const payload = stage()
+    mount(payload.generation)
+    expect(composer().value).toContain(ASK)
+    expect(isReady()).toBe(true)
+  })
+
+  it('does not shut the box again if the read goes back in flight', () => {
+    strand()
+    const { rerender } = mount(null)
+    expect(isReady()).toBe(true)
+    fireEvent.change(composer(), { target: { value: `${SAVED}, and more` } })
+
+    // A later re-read is not a reason to take the box away from her
+    // mid-sentence: the restore has already happened and cannot happen twice.
+    rerender(
+      <MemoryRouter initialEntries={[{ pathname: '/chat' }]}>
+        <Harness childrenLoading />
+      </MemoryRouter>,
+    )
+    expect(isReady()).toBe(true)
+    expect(composer().value).toBe(`${SAVED}, and more`)
+  })
+
+  it('restores once, and is ready, under StrictMode', () => {
+    strand()
+    render(
+      <StrictMode>
+        <MemoryRouter initialEntries={[{ pathname: '/chat' }]}>
+          <Harness />
+        </MemoryRouter>
+      </StrictMode>,
+    )
+    expect(isReady()).toBe(true)
+    // Once: the double-invoked effect's second pass finds the slot consumed, so
+    // the text is her draft exactly, not it twice and not an empty box.
+    expect(composer().value).toBe(SAVED)
+    expect(renderLog).not.toContain('true|')
+  })
+
+  it('is ready while a set-aside draft is being offered back', () => {
+    // The pending-hand-off shape: a draft was displaced on an earlier visit and
+    // is still set aside. The offer and the readiness arrive together, so the
+    // note and the box she would restore into appear in the same commit.
+    const payload = stage()
+    mount(payload.generation, { initialDraft: { ...EMPTY_COMPOSER_DRAFT, text: 'mine' } })
+    fireEvent.click(screen.getByRole('button', { name: /Use the planner's question/ }))
+    fireEvent.click(screen.getByRole('button', { name: /close/i }))
+    expect(screen.getByText(/Your own draft is set aside/)).toBeInTheDocument()
+    expect(isReady()).toBe(true)
   })
 })
 

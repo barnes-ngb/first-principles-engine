@@ -32,6 +32,20 @@
 //     move that would need one asks first.
 //  5. Nothing here writes: no thread, no message, no model call, no domain data
 //     (pinned by `plannerAskHandoff.boundary.source.test.ts`).
+//  6. The composer is NOT HERS TO USE until the restore above has happened.
+//     `composerReady` is that signal, and the host keeps the box and every one
+//     of its media doors visibly unavailable until it is true. The children read
+//     settles asynchronously, and the arrival pass that consumes custody runs in
+//     the effect AFTER it — so for one commit the page was enabled with an empty
+//     box and a draft still in the slot. Anything Shelly typed or picked in that
+//     window was overwritten by the restore a moment later, and skipping the
+//     restore instead would have thrown away the custody draft on unmount: both
+//     halves are a silent loss, which is why the fix is to not offer the box yet.
+//     The flag is STATE set in the same effect pass as the placement, so the
+//     commit that enables typing is the commit that already holds her draft —
+//     there is no render in between. It is monotonic for the mounted visit: a
+//     refusal, an empty slot, a failed read and an ordinary visit all reach it,
+//     and nothing takes it away again once typing is allowed.
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
@@ -142,6 +156,22 @@ export type PlannerAskOwnThreadClaim = (mintedThreadId: string) => boolean
 
 export interface PlannerAskHandoffResult {
   state: PlannerAskHandoffState
+  /**
+   * May the composer be used yet?
+   *
+   * `false` from the first render of the visit until the arrival pass has read
+   * both custody homes and COMMITTED whatever it restores. The host's contract
+   * is that while it is false the composer and every entry point that writes
+   * into the composer — typing, Enter, Send, the photo picker and its chooser
+   * actions, the image door and the refinement controls — are not offered, and a
+   * short preparation line is shown in their place. Restore first, then type.
+   *
+   * It is not a permission check and it is not scope-aware: the scope guards are
+   * the authority above and are unchanged. It answers one question — "could a
+   * restore still land on top of her?" — and once it is true it stays true for
+   * the mounted visit, including when nothing was restored at all.
+   */
+  composerReady: boolean
   keepExisting: () => void
   replaceWithQuestion: () => void
   restoreSetAside: () => void
@@ -359,6 +389,16 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
   // One extra pass before believing "this tab maps to no child": the chat
   // initialises its tab in its own mount effect, which runs in this same flush.
   const [contextSettlePass, setContextSettlePass] = useState(0)
+  /**
+   * Has the arrival pass finished putting things in the box?
+   *
+   * The readiness signal behind {@link PlannerAskHandoffResult.composerReady},
+   * and deliberately STATE rather than a ref: the host renders from it, so the
+   * one commit in which it becomes true has to be a commit React performs — and
+   * it is the same batched commit as the `applyDraft` that restores her draft,
+   * because both are set from one pass of the effect below.
+   */
+  const [restoreSettled, setRestoreSettled] = useState(false)
 
   const authorityNow = useCallback(
     () => ({
@@ -674,6 +714,22 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
         setState(noticeWithoutQuestion())
       }
     }
+
+    // ── The readiness commit ────────────────────────────────────────────────
+    //
+    // Here, and nowhere earlier. Everything above this line either placed a
+    // restored draft or decided there was none to place, so from the host's next
+    // render the box is hers. It is set BEFORE the hand-off decision below on
+    // purpose: that decision is part of the same batched pass (`fill`, the
+    // collision, a refusal all call `setState` from right here), so the commit
+    // that enables typing already carries whichever of them ran — while the
+    // early returns below (no hand-off at all, a generation already decided)
+    // must not leave the composer gated for the rest of the visit.
+    //
+    // Idempotent, so the StrictMode double-invoke and every later pass of this
+    // effect are no-ops: React bails out of a set to the value it already holds.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the readiness signal itself; see the note above
+    setRestoreSettled(true)
 
     if (generation === null) return
     if (decidedGeneration.current === generation) return
@@ -1203,6 +1259,7 @@ export function usePlannerAskHandoff(deps: PlannerAskHandoffDeps): PlannerAskHan
 
   return {
     state: visibleState,
+    composerReady: restoreSettled,
     keepExisting,
     replaceWithQuestion,
     restoreSetAside,

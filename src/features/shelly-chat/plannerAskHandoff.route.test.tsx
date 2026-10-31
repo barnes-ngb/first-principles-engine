@@ -2248,3 +2248,283 @@ describe('the ordinary visit is unchanged', () => {
     expect(vi.mocked(addDoc)).not.toHaveBeenCalled()
   })
 })
+
+describe('the composer is not offered until her draft is back', () => {
+  /**
+   * The promotion blocker, on the real page.
+   *
+   * The children read settles asynchronously and the arrival pass that consumes
+   * custody runs in the effect after it, so for one commit this page rendered an
+   * ENABLED, EMPTY composer with Shelly's saved draft still in the slot. She
+   * types while a page is loading — nothing said not to — and the restore
+   * overwrote her new words a moment later. Not restoring instead would have
+   * been the same loss from the other end: the slot's draft would have been
+   * overwritten by the unmount save and gone silently.
+   *
+   * So the box and every door that writes into it — typing, Enter, Send, the
+   * photo picker, its chooser's three actions, the image door and the refinement
+   * controls — are not rendered until the restore is committed, and a
+   * preparation line stands in their place. Restore first, then type.
+   *
+   * These tests never force a disabled control: a door that is not on screen is
+   * asserted to be absent, and every tap happens after readiness, which is the
+   * only state in which Shelly could make one.
+   */
+  const SAVED = 'what Shelly had typed before she left'
+
+  /** The chat alone, as an element, so a rerender can change the shell's answers. */
+  const chatOnly = () => (
+    <MemoryRouter initialEntries={[{ pathname: '/chat' }]}>
+      <LocationProbe />
+      <Routes>
+        <Route path="/chat" element={<ShellyChatPage />} />
+      </Routes>
+    </MemoryRouter>
+  )
+
+  /** Leave her unsent draft in custody for Lincoln's fresh conversation. */
+  function strandADraft(text = SAVED) {
+    const app = renderApp()
+    fireEvent.change(composer(), { target: { value: text } })
+    app.unmount()
+  }
+
+  /** Every door the composer has, by the name it is reachable under. */
+  const preparing = () => screen.queryByTestId('composer-preparing')
+  const photoButton = () => screen.queryByRole('button', { name: 'Upload image' })
+  const imageButton = () => screen.queryByRole('button', { name: 'Generate image' })
+
+  function expectEveryComposerDoorShut(container: HTMLElement) {
+    expect(preparing()).toBeInTheDocument()
+    expect(screen.getByText('Getting your draft ready…')).toBeInTheDocument()
+    // Text: the box itself, which is also the Enter door.
+    expect(screen.queryByPlaceholderText('Ask AI…')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Send message' })).not.toBeInTheDocument()
+    // Media: the picker, its hidden input, the image door, the refinement panel
+    // and the chooser the picker opens.
+    expect(photoButton()).not.toBeInTheDocument()
+    expect(imageButton()).not.toBeInTheDocument()
+    expect(container.querySelector('input[type="file"]')).toBeNull()
+    expect(screen.queryByText('Create an Image')).not.toBeInTheDocument()
+    expect(screen.queryByText('Attach to my message')).not.toBeInTheDocument()
+    expect(screen.queryByText('Analyze this image')).not.toBeInTheDocument()
+    expect(screen.queryByText('Use as reference for image creation')).not.toBeInTheDocument()
+  }
+
+  function expectEveryComposerDoorOpen(container: HTMLElement) {
+    expect(preparing()).not.toBeInTheDocument()
+    expect(composer()).toBeEnabled()
+    expect(photoButton()).toBeEnabled()
+    expect(imageButton()).toBeEnabled()
+    expect(container.querySelector('input[type="file"]')).not.toBeNull()
+  }
+
+  /** Nothing in this feature writes, and nothing navigates on its own. */
+  function expectNothingWasWritten() {
+    expect(vi.mocked(addDoc)).not.toHaveBeenCalled()
+    expect(vi.mocked(updateDoc)).not.toHaveBeenCalled()
+    expect(vi.mocked(uploadBytes)).not.toHaveBeenCalled()
+    expect(batchSpy.commit).not.toHaveBeenCalled()
+    expect(chatCalls).toHaveLength(0)
+    expect(generateImageCalls).toHaveLength(0)
+    expect(screen.getByTestId('chat-search').textContent).toBe('')
+  }
+
+  it('shuts every door while the read is in flight, and opens them with her draft in the box', async () => {
+    strandADraft()
+
+    identity.isLoading = true
+    const back = render(chatOnly())
+    expectEveryComposerDoorShut(back.container)
+    // Global navigation is deliberately untouched: moving away, opening the
+    // drawer or choosing another child while it prepares is ordinary.
+    expect(screen.getByRole('button', { name: 'All conversations' })).toBeEnabled()
+    expect(screen.getByRole('tab', { name: 'London' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'New' })).toBeEnabled()
+
+    identity.isLoading = false
+    back.rerender(chatOnly())
+
+    // Her draft is intact and the doors are open — in that order, which is the
+    // whole contract. The old behaviour had this box open and empty one commit
+    // earlier, and anything typed into it was overwritten by this restore.
+    expect(composer().value).toBe(SAVED)
+    expectEveryComposerDoorOpen(back.container)
+    expectNothingWasWritten()
+  })
+
+  it('lets her edit normally afterwards, and those edits survive the next departure', async () => {
+    strandADraft()
+
+    identity.isLoading = true
+    const back = render(chatOnly())
+    expect(preparing()).toBeInTheDocument()
+    identity.isLoading = false
+    back.rerender(chatOnly())
+
+    // The ordinary journey, resumed: typing, the photo picker's chooser, and the
+    // image door all work exactly as before.
+    fireEvent.change(composer(), { target: { value: `${SAVED}, and the newer edit` } })
+    const fileInput = back.container.querySelector('input[type="file"]') as HTMLInputElement
+    fireEvent.change(fileInput, {
+      target: { files: [new File(['x'], 'raw.png', { type: 'image/png' })] },
+    })
+    await screen.findByText('Attach to my message')
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    back.unmount()
+
+    const again = render(chatOnly())
+    await waitFor(() => expect(composer().value).toBe(`${SAVED}, and the newer edit`))
+    expect(preparing()).not.toBeInTheDocument()
+    again.unmount()
+  })
+
+  it('sends normally once it is ready, in one request for the reviewed child', async () => {
+    // The positive control for the gate: it delays the doors, it does not
+    // change what they do.
+    strandADraft()
+    identity.isLoading = true
+    const back = render(chatOnly())
+    expect(preparing()).toBeInTheDocument()
+    identity.isLoading = false
+    back.rerender(chatOnly())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }))
+    await waitFor(() => expect(chatCalls).toHaveLength(1))
+    expect(chatCalls[0].childId).toBe(LINCOLN.id)
+    expect(chatCalls[0].messages[0].content).toBe(SAVED)
+  })
+
+  it('opens the box with nothing in it when there was nothing waiting', async () => {
+    // Initially empty. The gate is one preparation commit, not a state the page
+    // can be stuck in.
+    identity.isLoading = true
+    const back = render(chatOnly())
+    expect(preparing()).toBeInTheDocument()
+    identity.isLoading = false
+    back.rerender(chatOnly())
+
+    expect(composer().value).toBe('')
+    expectEveryComposerDoorOpen(back.container)
+  })
+
+  it('opens the box after a hand-off that the slow read made too late to read', async () => {
+    // A refusal is a finished arrival. The question is not carried over, it says
+    // so, and the composer opens anyway — this must not disable it for the visit.
+    const payload = stagePlannerAskHandoff(
+      { ...SOURCE, question: ASK, jobId: 'curriculum' },
+      Date.now() - PLANNER_ASK_HANDOFF_TTL_MS - 1,
+    )
+    identity.isLoading = true
+    const tree = (
+      <MemoryRouter
+        initialEntries={[
+          { pathname: '/chat', state: { [PLANNER_ASK_HANDOFF_STATE_KEY]: payload?.generation } },
+        ]}
+      >
+        <LocationProbe />
+        <Routes>
+          <Route path="/chat" element={<ShellyChatPage />} />
+        </Routes>
+      </MemoryRouter>
+    )
+    const back = render(tree)
+    expectEveryComposerDoorShut(back.container)
+    expect(screen.queryByText(/wasn't carried over/)).not.toBeInTheDocument()
+
+    identity.isLoading = false
+    back.rerender(tree)
+
+    expect(await screen.findByText(/wasn't carried over/)).toBeInTheDocument()
+    expect(composer().value).toBe('')
+    expectEveryComposerDoorOpen(back.container)
+    expectNothingWasWritten()
+  })
+
+  it('carries the planner question into a box that was shut while the read ran', async () => {
+    // The pending hand-off, arriving before the read settles: the question is
+    // placed by the same pass that opens the doors, so the first composer Shelly
+    // ever sees already holds it.
+    const payload = stagePlannerAskHandoff({ ...SOURCE, question: ASK, jobId: 'curriculum' })
+    identity.isLoading = true
+    const tree = (
+      <MemoryRouter
+        initialEntries={[
+          { pathname: '/chat', state: { [PLANNER_ASK_HANDOFF_STATE_KEY]: payload?.generation } },
+        ]}
+      >
+        <LocationProbe />
+        <Routes>
+          <Route path="/chat" element={<ShellyChatPage />} />
+        </Routes>
+      </MemoryRouter>
+    )
+    const back = render(tree)
+    expectEveryComposerDoorShut(back.container)
+
+    identity.isLoading = false
+    back.rerender(tree)
+
+    expect(composer().value).toContain(ASK)
+    expect(screen.getByText(/From Plan My Week — Lincoln/)).toBeInTheDocument()
+    expectEveryComposerDoorOpen(back.container)
+    expect(chatCalls).toHaveLength(0)
+    expect(vi.mocked(addDoc)).not.toHaveBeenCalled()
+  })
+
+  it('offers a draft set aside on an earlier visit, and opens the box with it', async () => {
+    // Saved CURRENT plus DISPLACED: the question took the box on an earlier
+    // visit and her own draft went to the second home. Coming back through a
+    // slow read, BOTH are intact and both arrive with the doors — the question
+    // in the box under its own guard, hers still offered beside it.
+    const first = renderApp()
+    fireEvent.change(composer(), { target: { value: SAVED } })
+    goToPlanner()
+    tapRefusal()
+    await screen.findByText(/You were already typing something/)
+    fireEvent.click(screen.getByRole('button', { name: /Use the planner's question/ }))
+    expect(composer().value).toContain(ASK)
+    first.unmount()
+
+    identity.isLoading = true
+    const back = render(chatOnly())
+    expectEveryComposerDoorShut(back.container)
+    // Neither draft is spoken about before either is back.
+    expect(screen.queryByText(/set aside, unsent/)).not.toBeInTheDocument()
+
+    identity.isLoading = false
+    back.rerender(chatOnly())
+
+    expect(composer().value).toContain(ASK)
+    expect(screen.getByText(/set aside, unsent/)).toBeInTheDocument()
+    expectEveryComposerDoorOpen(back.container)
+    fireEvent.click(screen.getByRole('button', { name: /Bring my own draft back/ }))
+    expect(composer().value).toBe(SAVED)
+    expect(chatCalls).toHaveLength(0)
+  })
+
+  it('does not hand her draft to a tab she switched to while it was preparing', async () => {
+    // A child change DURING the preparation window. The tab is global and stays
+    // available, and the draft belongs to the tab it was typed in: London's box
+    // opens empty, and Lincoln's draft is left in the slot rather than placed
+    // where it was never typed.
+    strandADraft()
+
+    identity.isLoading = true
+    const back = render(chatOnly())
+    expect(preparing()).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: 'London' }))
+
+    identity.isLoading = false
+    back.rerender(chatOnly())
+
+    expect(composer().value).toBe('')
+    expectEveryComposerDoorOpen(back.container)
+    back.unmount()
+
+    // Still waiting where it was typed.
+    render(chatOnly())
+    await waitFor(() => expect(composer().value).toBe(SAVED))
+    expectNothingWasWritten()
+  })
+})

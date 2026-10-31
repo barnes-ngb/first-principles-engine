@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import AddIcon from '@mui/icons-material/Add'
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate'
@@ -425,16 +425,59 @@ export default function ShellyChatPage() {
     ownThreadMint.current = plannerAsk.beginOwnThreadMint
   }, [plannerAsk.beginOwnThreadMint])
 
+  /**
+   * UX-273 readiness: is the box hers to use yet?
+   *
+   * The children read settles asynchronously and the hand-off hook consumes
+   * custody in the effect after it, so there was one commit in which this page
+   * rendered an enabled, EMPTY composer with Shelly's saved draft still in the
+   * slot. Anything she typed or picked in that window was overwritten by the
+   * restore on the next commit. So the composer and every door that writes into
+   * it stay unavailable, with a short preparation line in their place, until the
+   * hook says the restore has been committed — restore first, then type.
+   *
+   * Only the composer. The toolbar, the tabs, the child/conversation drawer and
+   * the transcript are untouched: navigating away or choosing another
+   * conversation while it prepares is normal, and so is everything afterwards.
+   */
+  const composerReady = plannerAsk.composerReady
+
   // The ONE funnel every send door reaches (UX-189's lesson, applied to a guard
   // instead of a quota): the button and the Enter key both come through here, so
   // a question that may no longer be sent from this tab cannot leave by the
   // other door. The guard evaluates at CALL time; when it passes, the existing
   // `handleSend` runs completely unchanged.
   const guardedSend = useCallback(() => {
+    // Fail-closed at the boundary as well as in the render. No send door is
+    // rendered before readiness, so this cannot be reached from the screen
+    // today; it is here because a handler that outlives the node it came from is
+    // exactly how the one-commit window got through in the first place.
+    if (!composerReady) return
     plannerAsk.guardSend(() => {
       void handleSend()
     })
-  }, [plannerAsk, handleSend])
+  }, [composerReady, plannerAsk, handleSend])
+
+  /**
+   * The picker's own callback, gated at the same boundary.
+   *
+   * The file input is hidden and reachable only through the photo button, which
+   * is not rendered until readiness — but the browser's chooser is the one
+   * callback in this composer that can resolve long after the tap that opened
+   * it, so it is refused rather than assumed impossible. A selection made in
+   * the preparation window is dropped, not merged into a box that is about to
+   * receive her restored draft.
+   */
+  const handleFileSelectWhenReady = useCallback(
+    (e: ChangeEvent<HTMLInputElement>) => {
+      if (!composerReady) {
+        e.target.value = ''
+        return
+      }
+      handleFileSelect(e)
+    },
+    [composerReady, handleFileSelect],
+  )
 
   const activeThread = threads.find((t) => t.id === activeThreadId)
   const showEmpty = !activeThreadId && messages.length === 0
@@ -528,6 +571,9 @@ export default function ShellyChatPage() {
                         variant="outlined"
                         size="small"
                         color="secondary"
+                        // UX-273 readiness: a suggestion writes the composer,
+                        // so it is a text door like typing and waits with it.
+                        disabled={!composerReady}
                         onClick={() => setInput(s.message)}
                         sx={{ textTransform: 'none', justifyContent: 'flex-start' }}
                       >
@@ -541,6 +587,8 @@ export default function ShellyChatPage() {
                     key={s.label}
                     variant="outlined"
                     size="small"
+                    // Same door, same wait as the data-driven ones above.
+                    disabled={!composerReady}
                     onClick={() => setInput(s.message)}
                     sx={{ textTransform: 'none', justifyContent: 'flex-start' }}
                   >
@@ -626,8 +674,15 @@ export default function ShellyChatPage() {
         )}
       </Box>
 
-      {/* Image refinement panel (Prompt 9) */}
-      {imageFlowOpen && (
+      {/* Image refinement panel (Prompt 9).
+
+          UX-273 readiness: this panel IS a composer door — "Just generate",
+          "Next" and "Generate" all read and write composer state — and a
+          restored draft can arrive with it already open (`imageFlowOpen` travels
+          in custody). So it waits for the same signal as the box: its own open
+          flag cannot be true before readiness, and when a restore brings it back
+          it appears in the commit that restored it. */}
+      {imageFlowOpen && composerReady && (
         <Paper
           elevation={4}
           sx={{
@@ -792,8 +847,9 @@ export default function ShellyChatPage() {
         onDismiss={dismissNextWeek}
       />
 
-      {/* Follow-up suggestions */}
-      {followUps.length > 0 && !sending && (
+      {/* Follow-up suggestions. A tap sets the composer's text, so this is a
+          text door too and waits for readiness with the rest. */}
+      {followUps.length > 0 && !sending && composerReady && (
         <Box sx={{ px: 1, pb: 0.5, display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
           {followUps.map((q, i) => (
             <Chip
@@ -826,8 +882,27 @@ export default function ShellyChatPage() {
         onDismiss={plannerAsk.dismiss}
       />
 
-      {/* Input area */}
+      {/* Input area.
+
+          UX-273 readiness: until the hand-off hook has committed whatever it
+          restores, NONE of this is rendered — not the text box, not Send, not
+          the photo picker, not the image door — and the preparation line below
+          stands in its place. Gating by absence rather than by `disabled` is
+          deliberate: `disabled` leaves a focused textarea Shelly is already
+          typing into, and the loss this fixes is exactly that typing. */}
       <Paper elevation={2} sx={{ p: 1.5, borderTop: '1px solid', borderColor: 'divider' }}>
+        {!composerReady ? (
+          <Box
+            data-testid="composer-preparing"
+            sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 0.5, py: 1 }}
+          >
+            <CircularProgress size={16} />
+            <Typography variant="body2" color="text.secondary">
+              Getting your draft ready…
+            </Typography>
+          </Box>
+        ) : (
+        <>
         {uploading && <LinearProgress sx={{ mb: 1 }} />}
         {pendingAttachments.length > 0 && (
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1, px: 0.5, flexWrap: 'wrap' }}>
@@ -870,7 +945,7 @@ export default function ShellyChatPage() {
             type="file"
             accept="image/*"
             multiple
-            onChange={handleFileSelect}
+            onChange={handleFileSelectWhenReady}
             style={{ display: 'none' }}
           />
           <IconButton
@@ -926,11 +1001,20 @@ export default function ShellyChatPage() {
             <SendIcon />
           </IconButton>
         </Box>
+        </>
+        )}
       </Paper>
 
-      {/* Image upload action dialog */}
+      {/* Image upload action dialog.
+
+          The chooser's three actions — Analyze, "Use as reference for image
+          creation", "Attach to my message" — are the rest of the media doors,
+          and the last two mint this composer's conversation. Gated on the same
+          signal, so none of them can be tapped in the preparation window; a
+          chooser that comes BACK from custody with its selection opens in the
+          commit that restored it, exactly as before. */}
       <Dialog
-        open={uploadDialogOpen}
+        open={uploadDialogOpen && composerReady}
         onClose={handleUploadCancel}
         fullWidth
         maxWidth="xs"
