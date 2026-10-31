@@ -198,6 +198,10 @@ const identity = {
   profile: 'parents' as string | null,
   activeChildId: LINCOLN.id,
   isLoading: false,
+  /** The children read rejected rather than not having answered yet. */
+  loadFailed: false,
+  /** How many times the page asked for it to be run again. */
+  retries: 0,
 }
 
 vi.mock('../../core/hooks/useActiveChild', () => ({
@@ -206,6 +210,13 @@ vi.mock('../../core/hooks/useActiveChild', () => ({
     activeChild: CHILDREN.find((c) => c.id === identity.activeChildId),
     children: CHILDREN,
     isLoading: identity.isLoading,
+    // The read's own failure, and the way back from it. `isLoading` stays true
+    // beside `loadFailed` here exactly as the real hook leaves it: a rejected
+    // read is not an empty family.
+    loadFailed: identity.loadFailed,
+    retryLoad: () => {
+      identity.retries += 1
+    },
   }),
 }))
 vi.mock('../../core/profile/useProfile', () => ({
@@ -396,6 +407,8 @@ beforeEach(() => {
   identity.profile = 'parents'
   identity.activeChildId = LINCOLN.id
   identity.isLoading = false
+  identity.loadFailed = false
+  identity.retries = 0
   fixture.listenerDocs = []
   fixture.legacyThreads = []
   chatCalls.length = 0
@@ -2282,7 +2295,26 @@ describe('the composer is not offered until her draft is back', () => {
     </MemoryRouter>
   )
 
-  /** Leave her unsent draft in custody for Lincoln's fresh conversation. */
+  /**
+   * The same, arriving on the hand-off, as a FACTORY for the same reason
+   * `chatOnly` is one: `rerender` with the identical element object is a
+   * no-op — React bails out of a subtree whose element is referentially
+   * unchanged — so a stored tree would never re-read the shell's new answers
+   * and the page would still be preparing. A fresh element per call is what
+   * makes "the read has settled" reach the page at all.
+   */
+  const arrivalTree = (generation: number | undefined) => (
+    <MemoryRouter
+      initialEntries={[{ pathname: '/chat', state: { [PLANNER_ASK_HANDOFF_STATE_KEY]: generation } }]}
+    >
+      <LocationProbe />
+      <Routes>
+        <Route path="/chat" element={<ShellyChatPage />} />
+      </Routes>
+    </MemoryRouter>
+  )
+
+  /** Leave Shelly's unsent draft in custody for Lincoln's fresh conversation. */
   function strandADraft(text = SAVED) {
     const app = renderApp()
     fireEvent.change(composer(), { target: { value: text } })
@@ -2294,9 +2326,22 @@ describe('the composer is not offered until her draft is back', () => {
   const photoButton = () => screen.queryByRole('button', { name: 'Upload image' })
   const imageButton = () => screen.queryByRole('button', { name: 'Generate image' })
 
-  function expectEveryComposerDoorShut(container: HTMLElement) {
+  /**
+   * Every door shut, and the status line that stands in their place.
+   *
+   * The status is a parameter because there are exactly two truthful ones and
+   * the doors are shut in both: the read has not answered yet, or it FAILED.
+   * Asserted as the status box's whole text, so a message carrying a raw error
+   * detail would fail here rather than pass a loose substring match.
+   */
+  function expectEveryComposerDoorShut(
+    container: HTMLElement,
+    status: 'preparing' | 'failed' = 'preparing',
+  ) {
     expect(preparing()).toBeInTheDocument()
-    expect(screen.getByText('Getting your draft ready…')).toBeInTheDocument()
+    expect(preparing()?.textContent).toBe(
+      status === 'failed' ? "Couldn't get your draft ready.Try again" : 'Getting your draft ready…',
+    )
     // Text: the box itself, which is also the Enter door.
     expect(screen.queryByPlaceholderText('Ask AI…')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Send message' })).not.toBeInTheDocument()
@@ -2416,24 +2461,12 @@ describe('the composer is not offered until her draft is back', () => {
       Date.now() - PLANNER_ASK_HANDOFF_TTL_MS - 1,
     )
     identity.isLoading = true
-    const tree = (
-      <MemoryRouter
-        initialEntries={[
-          { pathname: '/chat', state: { [PLANNER_ASK_HANDOFF_STATE_KEY]: payload?.generation } },
-        ]}
-      >
-        <LocationProbe />
-        <Routes>
-          <Route path="/chat" element={<ShellyChatPage />} />
-        </Routes>
-      </MemoryRouter>
-    )
-    const back = render(tree)
+    const back = render(arrivalTree(payload?.generation))
     expectEveryComposerDoorShut(back.container)
     expect(screen.queryByText(/wasn't carried over/)).not.toBeInTheDocument()
 
     identity.isLoading = false
-    back.rerender(tree)
+    back.rerender(arrivalTree(payload?.generation))
 
     expect(await screen.findByText(/wasn't carried over/)).toBeInTheDocument()
     expect(composer().value).toBe('')
@@ -2447,25 +2480,16 @@ describe('the composer is not offered until her draft is back', () => {
     // ever sees already holds it.
     const payload = stagePlannerAskHandoff({ ...SOURCE, question: ASK, jobId: 'curriculum' })
     identity.isLoading = true
-    const tree = (
-      <MemoryRouter
-        initialEntries={[
-          { pathname: '/chat', state: { [PLANNER_ASK_HANDOFF_STATE_KEY]: payload?.generation } },
-        ]}
-      >
-        <LocationProbe />
-        <Routes>
-          <Route path="/chat" element={<ShellyChatPage />} />
-        </Routes>
-      </MemoryRouter>
-    )
-    const back = render(tree)
+    const back = render(arrivalTree(payload?.generation))
     expectEveryComposerDoorShut(back.container)
 
     identity.isLoading = false
-    back.rerender(tree)
+    back.rerender(arrivalTree(payload?.generation))
 
-    expect(composer().value).toContain(ASK)
+    // Awaited, not weakened: the arrival takes one extra commit to settle its
+    // tab before it may read the slot, so this waits for the composer to EXIST
+    // and then asserts the full question is in it.
+    await waitFor(() => expect(composer().value).toContain(ASK))
     expect(screen.getByText(/From Plan My Week — Lincoln/)).toBeInTheDocument()
     expectEveryComposerDoorOpen(back.container)
     expect(chatCalls).toHaveLength(0)
@@ -2525,6 +2549,37 @@ describe('the composer is not offered until her draft is back', () => {
     // Still waiting where it was typed.
     render(chatOnly())
     await waitFor(() => expect(composer().value).toBe(SAVED))
+    expectNothingWasWritten()
+  })
+
+  it('says it could not get the draft ready when the read FAILED, and offers a retry', async () => {
+    // The gate must not strand Shelly on a spinner that never resolves. A
+    // rejected children read leaves the identity unknown — so the doors stay
+    // shut and her draft stays in custody, untouched — but the page says so in
+    // her words, with no error detail in it, and the one action she can take.
+    strandADraft()
+
+    identity.isLoading = true
+    identity.loadFailed = true
+    const back = render(chatOnly())
+
+    expectEveryComposerDoorShut(back.container, 'failed')
+    expect(screen.queryByText(/Getting your draft ready/)).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(identity.retries).toBe(1)
+
+    // The retry is running: back to the honest waiting state, still gated.
+    identity.loadFailed = false
+    back.rerender(chatOnly())
+    expectEveryComposerDoorShut(back.container)
+
+    // And it succeeds: her draft is restored intact by the same pass that opens
+    // the doors, so the failure cost her nothing.
+    identity.isLoading = false
+    back.rerender(chatOnly())
+    await waitFor(() => expect(composer().value).toBe(SAVED))
+    expectEveryComposerDoorOpen(back.container)
     expectNothingWasWritten()
   })
 })

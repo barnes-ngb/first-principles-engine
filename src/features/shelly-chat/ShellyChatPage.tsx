@@ -106,7 +106,16 @@ export default function ShellyChatPage() {
   const familyId = useFamilyId()
   // `isLoading` is read for the UX-273 hand-off and nothing else: an unsettled
   // children read must not be mistaken for "the active child changed".
-  const { activeChildId, children, isLoading: childrenLoading } = useActiveChild()
+  const {
+    activeChildId,
+    children,
+    isLoading: childrenLoading,
+    // UX-273 readiness: a failed children read is not an empty family, and the
+    // gate below must not strand Shelly on a spinner for the rest of the
+    // session. `loadFailed` is the read saying so; `retryLoad` re-runs it.
+    loadFailed: childrenLoadFailed,
+    retryLoad: retryChildrenLoad,
+  } = useActiveChild()
   const { chat, generateImage, lastErrorRef, imageFailureRef } = useAI()
 
   const [searchParams, setSearchParams] = useSearchParams()
@@ -896,10 +905,33 @@ export default function ShellyChatPage() {
             data-testid="composer-preparing"
             sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 0.5, py: 1 }}
           >
-            <CircularProgress size={16} />
-            <Typography variant="body2" color="text.secondary">
-              Getting your draft ready…
-            </Typography>
+            {/* Two truthful states, never a guess between them. The read either
+                has not answered yet, or has FAILED — and a failure that keeps
+                showing a spinner is a lie that never resolves, which is what a
+                rejected children read used to do here for the rest of the
+                session. The doors stay shut in both: the identity is unknown,
+                so nothing is selected and no draft is consumed, and Shelly's
+                saved draft is still in custody waiting for an answer. The
+                message carries no error detail — there is nothing in a Firestore
+                rejection she can act on, and the action she CAN take is the
+                button beside it. */}
+            {childrenLoadFailed ? (
+              <>
+                <Typography variant="body2" color="text.secondary">
+                  Couldn't get your draft ready.
+                </Typography>
+                <Button size="small" onClick={() => retryChildrenLoad?.()}>
+                  Try again
+                </Button>
+              </>
+            ) : (
+              <>
+                <CircularProgress size={16} />
+                <Typography variant="body2" color="text.secondary">
+                  Getting your draft ready…
+                </Typography>
+              </>
+            )}
           </Box>
         ) : (
         <>

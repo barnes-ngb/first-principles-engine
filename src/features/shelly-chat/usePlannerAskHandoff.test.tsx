@@ -217,7 +217,7 @@ describe('the composer waits for its own draft (readiness)', () => {
   }
   const SAVED = 'what Shelly had typed before she left'
 
-  /** Her unsent draft, waiting in the slot for Lincoln's fresh conversation. */
+  /** Shelly's unsent draft, waiting in the slot for Lincoln's fresh conversation. */
   const strand = (text = SAVED) =>
     saveComposerCustody(OWNER, null, { ...EMPTY_COMPOSER_DRAFT, text })
 
