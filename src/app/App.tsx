@@ -14,6 +14,34 @@ import { AppRouter } from './router'
 import LoginPage from '../features/auth/LoginPage'
 import ProfileSelectPage from '../features/login/ProfileSelectPage'
 import ErrorReporterSync from '../core/observability/ErrorReporterSync'
+import {
+  handoffScopeIdentity,
+  useHandoffScopeWatch,
+} from '../features/shelly-chat/useHandoffScopeWatch'
+
+/**
+ * UX-273's scope observer, mounted ABOVE `AuthGate` and outside the error
+ * boundary on purpose.
+ *
+ * The hand-off keeps two page-session slots (one staged question, one unsent
+ * composer) that live in module scope, so the thing that drops them has to
+ * outlive every screen that can fill them. Inside the gate — where it started,
+ * in `AppShell` — a logout unmounted it and the slots survived: sign back into
+ * the same account and Ask AI handed the previous session's private draft back.
+ * Here nothing unmounts it, so logout and profile exit are observable.
+ *
+ * The identity it watches is the one the GATE grants, through
+ * `handoffScopeIdentity` — `AuthGate` closes for an anonymous user and
+ * `familyId` is the uid, which an anonymous user has, so the uid alone would
+ * read a shut gate as an open one. It renders nothing, reads the scope, holds no
+ * credential, and never sets a selection.
+ */
+function HandoffScopeObserver() {
+  const { user, loading, familyId } = useAuth()
+  const { profile } = useProfile()
+  useHandoffScopeWatch(handoffScopeIdentity({ loading, user, familyId }), profile)
+  return null
+}
 
 function AuthGate() {
   const { user, loading } = useAuth()
@@ -61,6 +89,7 @@ function ThemedApp() {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
+      <HandoffScopeObserver />
       <ErrorBoundary>
         <AuthGate />
       </ErrorBoundary>

@@ -8,13 +8,42 @@ import type { ChatMessage } from '../../core/types'
 import { ChatMessageRole } from '../../core/types/enums'
 import { fixUnicodeEscapes } from '../../core/utils/format'
 import PlannerBoundaryLink from './PlannerBoundaryLink'
+import {
+  resolvePlannerAskHandoffQuestion,
+  type PlannerAskHandoffSource,
+} from './plannerAskHandoff'
 
 interface PlannerChatMessagesProps {
   messages: ChatMessage[]
   messagesEndRef: RefObject<HTMLDivElement | null>
+  /**
+   * Where this transcript's questions were asked — family, child, week (UX-273).
+   *
+   * Passed down from the page because it is the page that knows which week is on
+   * screen; this component resolves WHICH sentence belongs to which refusal, and
+   * never invents either half. Omitted (a test harness, or a surface that does
+   * not want the hand-off) means every link behaves exactly as UX-269 shipped.
+   */
+  askHandoffSource?: PlannerAskHandoffSource
+  /**
+   * Asked again at the TAP: is the transcript below still the live scope's?
+   * (UX-273's source rail.)
+   *
+   * Render proved it once, but a tap can land on a render the shell has already
+   * superseded — a queued click, a slow frame — so the owner is re-asked at
+   * activation and the button falls back to UX-269's plain navigation when it
+   * cannot be proven. Omitted means "nothing to re-ask", which is the harness
+   * and pre-UX-273 behaviour.
+   */
+  authorizeHandoff?: () => boolean
 }
 
-export default function PlannerChatMessages({ messages, messagesEndRef }: PlannerChatMessagesProps) {
+export default function PlannerChatMessages({
+  messages,
+  messagesEndRef,
+  askHandoffSource,
+  authorizeHandoff,
+}: PlannerChatMessagesProps) {
   if (messages.length === 0) return null
 
   return (
@@ -30,7 +59,7 @@ export default function PlannerChatMessages({ messages, messagesEndRef }: Planne
       }}
     >
       <Stack spacing={1.5}>
-        {messages.map((msg) => {
+        {messages.map((msg, index) => {
           // The strip runs here as well as at parse time — the SAME function,
           // called twice, not a second stripper. FEAT-135's shape was a block
           // stripped in one path while a second path rendered the raw reply, so
@@ -43,6 +72,15 @@ export default function PlannerChatMessages({ messages, messagesEndRef }: Planne
           // worse failure than the one this guards.
           const isAssistant = msg.role === ChatMessageRole.Assistant
           const text = !msg.text ? '' : isAssistant ? stripPlannerBoundaryMarkers(msg.text) : msg.text
+          // UX-273 — the sentence this particular refusal declined, resolved from
+          // the turn above it by position rather than by search, so a transcript
+          // holding three refusals gives each button its own question. `null` for
+          // every other turn, and for every refusal whose destination is a screen
+          // rather than Ask AI.
+          const askQuestion =
+            askHandoffSource && msg.boundaryJobId
+              ? resolvePlannerAskHandoffQuestion(messages, index)
+              : null
           return (
             <Box
               key={msg.id}
@@ -64,7 +102,21 @@ export default function PlannerChatMessages({ messages, messagesEndRef }: Planne
               )}
               {/* The offer follows the refusal (FEAT-195's rule): a boundary that
                   names only what it can't do reads as a wall. */}
-              {msg.boundaryJobId && <PlannerBoundaryLink jobId={msg.boundaryJobId} />}
+              {msg.boundaryJobId && (
+                <PlannerBoundaryLink
+                  jobId={msg.boundaryJobId}
+                  {...(askHandoffSource && askQuestion
+                    ? {
+                        handoff: {
+                          ...askHandoffSource,
+                          question: askQuestion,
+                          jobId: msg.boundaryJobId,
+                        },
+                        ...(authorizeHandoff ? { authorizeHandoff } : {}),
+                      }
+                    : {})}
+                />
+              )}
               {msg.photoLabels && msg.photoLabels.length > 0 && (
                 <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 0.5 }}>
                   {msg.photoLabels.map((label, i) => (
