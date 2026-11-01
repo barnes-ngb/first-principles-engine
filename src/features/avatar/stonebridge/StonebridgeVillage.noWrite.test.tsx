@@ -20,8 +20,13 @@ import StonebridgeMissionCard from './StonebridgeMissionCard'
  * the board, visits locations, replays a thank-you and closes, and the count is
  * the same number afterwards.
  *
- * Every `setDoc` is deferred, exactly as in the hook's own recovery suite, so a
- * write completion lands where the test puts it.
+ * Every write is deferred, exactly as in the hook's own recovery suite, so a
+ * write completion lands where the test puts it — and, like that suite, the
+ * persist is modelled as the TRANSACTION it is: a modelled datastore the
+ * transaction reads (the listener speaks for it), a staged write counted by
+ * `fx.setDoc`, and a commit acknowledgement the test hands over. A no-write
+ * claim has to be made against the real writer to mean anything, and the real
+ * writer is now create-if-absent / compare-and-set.
  *
  * The celebration overlay is NOT stubbed here either: the replay is one of the
  * interactions being claimed to be free, and a stub of it would make that claim
@@ -36,7 +41,9 @@ type Listener = {
 }
 
 type PendingWrite = {
+  path: string
   payload: StonebridgeProgress
+  /** Acknowledge the commit: it lands in `fx.stored`, as a real one would. */
   resolve: () => void
   reject: (err: unknown) => void
 }
@@ -45,39 +52,91 @@ const fx = vi.hoisted(() => ({
   reading: [] as Listener[],
   progress: [] as Listener[],
   writes: [] as PendingWrite[],
+  /** The modelled datastore, keyed by document path. */
+  stored: new Map<string, StonebridgeProgress>(),
   setDoc: vi.fn(),
 }))
 
-vi.mock('firebase/firestore', () => ({
-  doc: (col: { kind: string; familyId: string }, id: string) => ({
-    kind: 'doc',
-    path: `${col.familyId}/${col.kind}/${id}`,
-  }),
-  query: (col: { kind: string; familyId: string }) => ({
-    kind: 'query',
-    path: `${col.familyId}/${col.kind}`,
-  }),
-  where: (field: string, op: string, value: unknown) => ({ field, op, value }),
-  onSnapshot: (
-    target: { kind: string; path: string },
-    next: (snap: unknown) => void,
-    error: (err: unknown) => void,
-  ) => {
-    const entry: Listener = { next, error, closed: false, path: target.path }
-    ;(target.kind === 'query' ? fx.reading : fx.progress).push(entry)
-    return () => {
-      entry.closed = true
-    }
-  },
-  setDoc: (ref: { path: string }, payload: StonebridgeProgress) => {
-    fx.setDoc(ref, payload)
-    return new Promise<void>((resolve, reject) => {
-      fx.writes.push({ payload, resolve, reject })
-    })
-  },
-}))
+vi.mock('firebase/firestore', () => {
+  type Snapshot = { exists: () => boolean; data: () => StonebridgeProgress | null }
+  /** Here the listener always speaks for the server. */
+  const mirror = (path: string, snap: unknown) => {
+    const delivered = snap as Snapshot
+    const data = delivered.exists() ? delivered.data() : null
+    if (data) fx.stored.set(path, data)
+    else fx.stored.delete(path)
+  }
+  return {
+    doc: (col: { kind: string; familyId: string }, id: string) => ({
+      kind: 'doc',
+      path: `${col.familyId}/${col.kind}/${id}`,
+    }),
+    query: (col: { kind: string; familyId: string }) => ({
+      kind: 'query',
+      path: `${col.familyId}/${col.kind}`,
+    }),
+    where: (field: string, op: string, value: unknown) => ({ field, op, value }),
+    onSnapshot: (
+      target: { kind: string; path: string },
+      next: (snap: unknown) => void,
+      error: (err: unknown) => void,
+    ) => {
+      const entry: Listener = {
+        next: (snap: unknown) => {
+          if (target.kind === 'doc') mirror(target.path, snap)
+          next(snap)
+        },
+        error,
+        closed: false,
+        path: target.path,
+      }
+      ;(target.kind === 'query' ? fx.reading : fx.progress).push(entry)
+      return () => {
+        entry.closed = true
+      }
+    },
+    runTransaction: async (
+      _db: unknown,
+      update: (tx: {
+        get: (ref: { path: string }) => Promise<{
+          exists: () => boolean
+          data: () => StonebridgeProgress | undefined
+        }>
+        set: (ref: { path: string }, payload: StonebridgeProgress) => void
+      }) => Promise<unknown>,
+    ) => {
+      const staged: { path: string; payload: StonebridgeProgress }[] = []
+      const result = await update({
+        get: async (ref: { path: string }) => {
+          await Promise.resolve()
+          const stored = fx.stored.get(ref.path)
+          return { exists: () => stored !== undefined, data: () => stored }
+        },
+        set: (ref: { path: string }, payload: StonebridgeProgress) => {
+          staged.push({ path: ref.path, payload })
+        },
+      })
+      // Refused: nothing staged, nothing to acknowledge.
+      if (staged.length === 0) return result
+      const write = staged[staged.length - 1]
+      fx.setDoc({ path: write.path }, write.payload)
+      return new Promise((resolve, reject) => {
+        fx.writes.push({
+          path: write.path,
+          payload: write.payload,
+          resolve: () => {
+            fx.stored.set(write.path, write.payload)
+            resolve(result)
+          },
+          reject,
+        })
+      })
+    },
+  }
+})
 
 vi.mock('../../../core/firebase/firestore', () => ({
+  db: { kind: 'db' },
   xpLedgerCollection: (familyId: string) => ({ kind: 'xpLedger', familyId }),
   stonebridgeProgressCollection: (familyId: string) => ({ kind: 'stonebridgeProgress', familyId }),
 }))
@@ -111,11 +170,14 @@ function progressSnapshot(docData: StonebridgeProgress | null) {
   return { exists: () => docData !== null, data: () => docData }
 }
 
+/**
+ * Settle the listeners, the transaction's deferred read and its decision. More
+ * ticks than before, because the write is a transaction now and its read
+ * resolves on its own tick; spare microtasks cost nothing.
+ */
 async function flush() {
   await act(async () => {
-    await Promise.resolve()
-    await Promise.resolve()
-    await Promise.resolve()
+    for (let tick = 0; tick < 10; tick += 1) await Promise.resolve()
   })
 }
 
@@ -147,6 +209,7 @@ beforeEach(() => {
   fx.reading.length = 0
   fx.progress.length = 0
   fx.writes.length = 0
+  fx.stored.clear()
   fx.setDoc.mockClear()
   emulateReducedMotion()
   vi.spyOn(console, 'warn').mockImplementation(() => {})

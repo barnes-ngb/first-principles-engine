@@ -34,9 +34,33 @@ import { useStonebridgeProgress } from './useStonebridgeProgress'
  *  • make the reading error callback `{ phase: 'ready', count: 0 }` → *"a
  *    reading error is not zero"* fails on a create baselined at 0.
  *
- * Every `setDoc` here is DEFERRED — the mock resolves nothing on its own — so
+ * Every write here is DEFERRED — the mock acknowledges nothing on its own — so
  * the tests can land a write completion in the visit it belongs to, in a later
  * visit, or after the child changed, which is where the remaining hazards live.
+ *
+ * ── The write is a transaction, and the mock models one ──────────────────────
+ *
+ * The persist is no longer an unconditional `setDoc`: it is a create-if-absent
+ * or a compare-and-set inside one transaction (`stonebridgeProgressWrite.ts`),
+ * because the blocker that reopened this file was a race between two CLIENTS
+ * and no per-mount guard can see another client. So the mock carries a modelled
+ * datastore (`fx.stored`) that the transaction reads, and three things are now
+ * separate where they used to be one:
+ *
+ *  • what the SUBSCRIPTION reported — delivered by hand, as before;
+ *  • what the DATASTORE holds at the moment the transaction reads it;
+ *  • the commit ACKNOWLEDGEMENT, still deferred to `fx.writes[n].resolve()`.
+ *
+ * Delivering a progress snapshot also mirrors it into the datastore, because in
+ * almost every test below the listener is simply speaking for the server. The
+ * concurrency suite at the bottom moves the two apart on purpose with
+ * {@link setStored} — which is exactly what an independent client is — and the
+ * transaction's read resolves on a later tick so it can.
+ *
+ * `fx.setDoc` keeps its name: it counts the document write a transaction
+ * STAGED and sent, which is the same count every assertion in this file was
+ * written against. A refused create-if-absent or compare-and-set stages
+ * nothing, so it does not move it.
  */
 
 type Listener = {
@@ -46,9 +70,11 @@ type Listener = {
   path: string
 }
 
+/** A staged write whose commit has been sent and not yet acknowledged. */
 type PendingWrite = {
   path: string
   payload: StonebridgeProgress
+  /** Acknowledge the commit: it lands in `fx.stored`, as a real one would. */
   resolve: () => void
   reject: (err: unknown) => void
 }
@@ -57,39 +83,98 @@ const fx = vi.hoisted(() => ({
   reading: [] as Listener[],
   progress: [] as Listener[],
   writes: [] as PendingWrite[],
+  /** The modelled datastore, keyed by document path. */
+  stored: new Map<string, StonebridgeProgress>(),
+  /** Transactions opened. A no-op that spun would show up here and nowhere else. */
+  transactions: 0,
   setDoc: vi.fn(),
 }))
 
-vi.mock('firebase/firestore', () => ({
-  doc: (col: { kind: string; familyId: string }, id: string) => ({
-    kind: 'doc',
-    path: `${col.familyId}/${col.kind}/${id}`,
-  }),
-  query: (col: { kind: string; familyId: string }) => ({
-    kind: 'query',
-    path: `${col.familyId}/${col.kind}`,
-  }),
-  where: (field: string, op: string, value: unknown) => ({ field, op, value }),
-  onSnapshot: (
-    target: { kind: string; path: string },
-    next: (snap: unknown) => void,
-    error: (err: unknown) => void,
-  ) => {
-    const entry: Listener = { next, error, closed: false, path: target.path }
-    ;(target.kind === 'query' ? fx.reading : fx.progress).push(entry)
-    return () => {
-      entry.closed = true
-    }
-  },
-  setDoc: (ref: { path: string }, payload: StonebridgeProgress) => {
-    fx.setDoc(ref, payload)
-    return new Promise<void>((resolve, reject) => {
-      fx.writes.push({ path: ref.path, payload, resolve, reject })
-    })
-  },
-}))
+vi.mock('firebase/firestore', () => {
+  type Snapshot = { exists: () => boolean; data: () => StonebridgeProgress | null }
+  /** The listener speaks for the server unless a test says otherwise. */
+  const mirror = (path: string, snap: unknown) => {
+    const delivered = snap as Snapshot
+    const data = delivered.exists() ? delivered.data() : null
+    if (data) fx.stored.set(path, data)
+    else fx.stored.delete(path)
+  }
+  return {
+    doc: (col: { kind: string; familyId: string }, id: string) => ({
+      kind: 'doc',
+      path: `${col.familyId}/${col.kind}/${id}`,
+    }),
+    query: (col: { kind: string; familyId: string }) => ({
+      kind: 'query',
+      path: `${col.familyId}/${col.kind}`,
+    }),
+    where: (field: string, op: string, value: unknown) => ({ field, op, value }),
+    onSnapshot: (
+      target: { kind: string; path: string },
+      next: (snap: unknown) => void,
+      error: (err: unknown) => void,
+    ) => {
+      const entry: Listener = {
+        next: (snap: unknown) => {
+          if (target.kind === 'doc') mirror(target.path, snap)
+          next(snap)
+        },
+        error,
+        closed: false,
+        path: target.path,
+      }
+      ;(target.kind === 'query' ? fx.reading : fx.progress).push(entry)
+      return () => {
+        entry.closed = true
+      }
+    },
+    runTransaction: async (
+      _db: unknown,
+      update: (tx: {
+        get: (ref: { path: string }) => Promise<{
+          exists: () => boolean
+          data: () => StonebridgeProgress | undefined
+        }>
+        set: (ref: { path: string }, payload: StonebridgeProgress) => void
+      }) => Promise<unknown>,
+    ) => {
+      fx.transactions += 1
+      const staged: { path: string; payload: StonebridgeProgress }[] = []
+      const result = await update({
+        // The read resolves on a LATER TICK, and reads the store then — so a
+        // test can model another client writing between this mount's snapshot
+        // and this transaction's read, which is the whole lost-progress race.
+        get: async (ref: { path: string }) => {
+          await Promise.resolve()
+          const stored = fx.stored.get(ref.path)
+          return { exists: () => stored !== undefined, data: () => stored }
+        },
+        set: (ref: { path: string }, payload: StonebridgeProgress) => {
+          staged.push({ path: ref.path, payload })
+        },
+      })
+      // A transaction that staged nothing wrote nothing: it settles at once,
+      // with the answer its callback returned.
+      if (staged.length === 0) return result
+      const write = staged[staged.length - 1]
+      fx.setDoc({ path: write.path }, write.payload)
+      return new Promise((resolve, reject) => {
+        fx.writes.push({
+          path: write.path,
+          payload: write.payload,
+          resolve: () => {
+            fx.stored.set(write.path, write.payload)
+            resolve(result)
+          },
+          reject,
+        })
+      })
+    },
+  }
+})
 
 vi.mock('../../../core/firebase/firestore', () => ({
+  db: { kind: 'db' },
   xpLedgerCollection: (familyId: string) => ({ kind: 'xpLedger', familyId }),
   stonebridgeProgressCollection: (familyId: string) => ({ kind: 'stonebridgeProgress', familyId }),
 }))
@@ -97,6 +182,26 @@ vi.mock('../../../core/firebase/firestore', () => ({
 const FAM = 'fam-1'
 const LINCOLN = 'lincoln'
 const LONDON = 'london'
+
+/** Where a child's progress document lives in the modelled datastore. */
+function progressPath(childId: string, familyId = FAM) {
+  return `${familyId}/stonebridgeProgress/${childId}`
+}
+
+/**
+ * Another client wrote. Called between delivering this mount's snapshot and
+ * flushing — which is the real ordering: the subscription reported one thing,
+ * somebody else's write landed, and only then does this client's transaction
+ * read the document it is about to write.
+ */
+function setStored(childId: string, state: StonebridgeProgress, familyId = FAM) {
+  fx.stored.set(progressPath(childId, familyId), state)
+}
+
+/** Another client (or a console) deleted it. */
+function clearStored(childId: string, familyId = FAM) {
+  fx.stored.delete(progressPath(childId, familyId))
+}
 
 /** A reading-activity query result — `count` BOOK_READ events, nothing else. */
 function readingSnapshot(count: number) {
@@ -135,11 +240,18 @@ const LONDON_SAVED: StonebridgeProgress = {
   updatedAt: '2026-10-22T09:00:00.000Z',
 }
 
+/**
+ * Settle everything queued: the listeners' dispatches, the transaction's
+ * deferred read, its decision, and the reconcile the decision triggers.
+ *
+ * It takes more ticks than it used to because a write is now a transaction —
+ * the read resolves on its own tick before anything is staged. These are
+ * microtasks, so an unused one costs nothing; too few would make a positive
+ * assertion flaky.
+ */
 async function flush() {
   await act(async () => {
-    await Promise.resolve()
-    await Promise.resolve()
-    await Promise.resolve()
+    for (let tick = 0; tick < 10; tick += 1) await Promise.resolve()
   })
 }
 
@@ -155,6 +267,8 @@ beforeEach(() => {
   fx.reading.length = 0
   fx.progress.length = 0
   fx.writes.length = 0
+  fx.stored.clear()
+  fx.transactions = 0
   fx.setDoc.mockClear()
   vi.spyOn(console, 'warn').mockImplementation(() => {})
 })
@@ -168,6 +282,9 @@ describe('a failed read is not an empty village', () => {
       fx.progress[0].error(new Error('permission-denied'))
       fx.reading[0].error(new Error('permission-denied'))
     })
+    // Settled, so "wrote nothing" is a statement about a finished turn rather
+    // than about a transaction that had not got as far as its write yet.
+    await flush()
 
     expect(result.current.readError).toBe(true)
     expect(result.current.loading).toBe(false)
@@ -193,9 +310,11 @@ describe('a failed read is not an empty village', () => {
     act(() => {
       fx.progress[0].error(new Error('unavailable'))
     })
+    await flush()
 
-    // THE INVERTED REPRODUCTION: the fresh `setDoc` that erased the lists.
+    // THE INVERTED REPRODUCTION: the fresh write that erased the lists.
     expect(fx.setDoc).not.toHaveBeenCalled()
+    expect(fx.transactions).toBe(0)
     // And the village the child rebuilt is still on screen, labelled honestly.
     expect(result.current.completedMissions).toEqual(['old_bridge', 'watchtower'])
     expect(result.current.raisedBanners).toEqual(['old_bridge', 'watchtower'])
@@ -217,9 +336,11 @@ describe('a failed read is not an empty village', () => {
     act(() => {
       fx.reading[0].error(new Error('unavailable'))
     })
+    await flush()
 
     // The old code counted 0 and persisted an activeProgress of 0 / 8.
     expect(fx.setDoc).not.toHaveBeenCalled()
+    expect(fx.transactions).toBe(0)
     expect(result.current.active).toMatchObject({ missionId: 'library_hut', current: 3 })
     expect(result.current.totalReadingActions).toBe(14)
     expect(result.current.stale).toBe(true)
@@ -270,6 +391,7 @@ describe('Retry', () => {
     act(() => {
       result.current.retry()
     })
+    await flush()
 
     // A second pair of listeners, the first pair closed.
     expect(fx.progress).toHaveLength(2)
@@ -340,6 +462,7 @@ describe('Retry', () => {
       fx.progress[0].error(new Error('unavailable'))
       fx.reading[0].error(new Error('unavailable'))
     })
+    await flush()
     expect(fx.setDoc).not.toHaveBeenCalled()
 
     act(() => {
@@ -1313,6 +1436,701 @@ describe('an old visit’s acknowledgement cannot celebrate in a new one', () =>
       result.current.clearJustCompleted()
     })
     expect(result.current.justCompletedMissionId).toBeNull()
+    expect(fx.setDoc).toHaveBeenCalledTimes(1)
+  })
+})
+
+/**
+ * THE RELEASE BLOCKER: the document has more than one writer.
+ *
+ * Everything above this line is about ONE mount — its visits, its lane, its
+ * signatures, its celebrations. The lost-progress defect the independent review
+ * reproduced is not in that space at all. Two clients are ordinary here (a
+ * phone and a tablet, a second tab, the same village open twice), and:
+ *
+ *  • an earlier client whose subscription still said `missing` held an
+ *    unconditional `setDoc`; a newer client created the village and repaired
+ *    the bridge; the earlier create then committed and erased the completion,
+ *    the banner and the baselines;
+ *  • an earlier client's first-mission advance, computed before the newer
+ *    client's completion, overwrote that completion the same way.
+ *
+ * No lane, signature or visit id can see another client, so none of them can
+ * protect the document. The decision has to be made where the document is: one
+ * transaction, create only while absent, advance only while the stored document
+ * still equals the one the proposal was computed from.
+ *
+ * Each test below delivers this mount's snapshot FIRST and then has the other
+ * client write, before flushing — which is the real ordering, and the reason
+ * the modelled transaction reads on a later tick.
+ *
+ * POSITIVE CONTROL. Replace either transaction with the `setDoc` it replaced —
+ * or drop the compare and keep the transaction — and the first two tests fail
+ * on a datastore whose `completedMissions` is `[]`.
+ */
+describe('the datastore decides, because the document has another writer', () => {
+  /** What another client built while this mount still saw no village at all. */
+  const BUILT_BY_ANOTHER_CLIENT: StonebridgeProgress = {
+    childId: LINCOLN,
+    currentMissionId: 'watchtower',
+    activeProgress: { missionId: 'watchtower', current: 2, target: 6 },
+    completedMissions: ['old_bridge'],
+    raisedBanners: ['old_bridge'],
+    missionBaselines: { old_bridge: 0, watchtower: 5 },
+    updatedAt: '2026-10-28T08:00:00.000Z',
+  }
+
+  /**
+   * London, further along than this mount's own proposal would take him.
+   *
+   * The other client's reading subscription was ahead (19 actions where this
+   * one has seen 11), so it legitimately finished Watchtower *and* the Library
+   * Hut and queued the Forge. Nothing here may be rolled back to the village
+   * this mount computed from an older count.
+   */
+  const LONDON_AHEAD: StonebridgeProgress = {
+    childId: LONDON,
+    currentMissionId: 'the_forge',
+    activeProgress: { missionId: 'the_forge', current: 0, target: 10 },
+    completedMissions: ['old_bridge', 'watchtower', 'library_hut'],
+    raisedBanners: ['old_bridge', 'watchtower', 'library_hut'],
+    missionBaselines: { old_bridge: 0, watchtower: 5, library_hut: 11, the_forge: 19 },
+    updatedAt: '2026-10-28T09:00:00.000Z',
+  }
+
+  it('refuses the delayed create of a village another client has already built', async () => {
+    const { result } = mount()
+    // Truthful as of its own snapshot: this client has not been told about any
+    // village for Lincoln, and it has a real count of 7 to baseline from.
+    act(() => {
+      fx.reading[0].next(readingSnapshot(7))
+      fx.progress[0].next(progressSnapshot(null))
+    })
+    // …and in that window the other client creates the village and repairs the
+    // Old Bridge.
+    setStored(LINCOLN, BUILT_BY_ANOTHER_CLIENT)
+    await flush()
+
+    // THE REPRODUCTION, inverted: the create is refused at the document.
+    expect(fx.setDoc).not.toHaveBeenCalled()
+    expect(fx.writes).toHaveLength(0)
+    expect(fx.stored.get(progressPath(LINCOLN))).toEqual(BUILT_BY_ANOTHER_CLIENT)
+
+    // The completion, the banner and the baselines are all still there, and
+    // they are what this mount now shows — adopted, not argued with.
+    expect(result.current.completedMissions).toEqual(['old_bridge'])
+    expect(result.current.raisedBanners).toEqual(['old_bridge'])
+    expect(result.current.mission?.id).toBe('watchtower')
+    expect(result.current.active).toMatchObject({ missionId: 'watchtower', current: 2, target: 6 })
+    // A refused write is not a completion: no banner-raise for somebody else's
+    // repair, and nothing claims to have saved.
+    expect(result.current.justCompletedMissionId).toBeNull()
+    expect(result.current.saveError).toBe(false)
+    // One attempt, refused, and then nothing: a no-op must not spin.
+    expect(fx.transactions).toBe(1)
+  })
+
+  it('refuses an advance computed before another client took him further', async () => {
+    const { result } = mount({ childId: LONDON })
+    // His 11th reading action finishes Watchtower, as far as this client knows.
+    act(() => {
+      fx.reading[0].next(readingSnapshot(11))
+      fx.progress[0].next(progressSnapshot(LONDON_SAVED))
+    })
+    setStored(LONDON, LONDON_AHEAD)
+    await flush()
+
+    // THE SECOND REPRODUCTION: the advance that overwrote a newer completion.
+    expect(fx.setDoc).not.toHaveBeenCalled()
+    expect(fx.stored.get(progressPath(LONDON))).toEqual(LONDON_AHEAD)
+    // The attempt carried `watchtower` as a completion and still celebrates
+    // nothing: the write did not happen.
+    expect(result.current.justCompletedMissionId).toBeNull()
+    // What is on screen is the authoritative village, not the one this client
+    // proposed — three banners, not two, and the Forge queued.
+    expect(result.current.completedMissions).toEqual([
+      'old_bridge',
+      'watchtower',
+      'library_hut',
+    ])
+    expect(result.current.raisedBanners).toHaveLength(3)
+    expect(result.current.mission?.id).toBe('the_forge')
+    expect(result.current.stale).toBe(false)
+    // Adopting it finds nothing left to do, so nothing is written and nothing
+    // reattempts. (`advanceMissions` is unchanged and still monotonic here.)
+    expect(fx.transactions).toBe(1)
+  })
+
+  it('commits while the stored village is still exactly the one it read', async () => {
+    const { result } = mount()
+    act(() => {
+      fx.reading[0].next(readingSnapshot(19))
+      fx.progress[0].next(progressSnapshot(SAVED))
+    })
+    await flush()
+
+    // The compare is against the SOURCE, so an unchanged document commits the
+    // proposal exactly as `advanceMissions` returned it.
+    expect(fx.setDoc).toHaveBeenCalledTimes(1)
+    expect(fx.writes[0].payload).toMatchObject({
+      currentMissionId: 'the_forge',
+      completedMissions: ['old_bridge', 'watchtower', 'library_hut'],
+      raisedBanners: ['old_bridge', 'watchtower', 'library_hut'],
+    })
+    expect(result.current.justCompletedMissionId).toBeNull()
+
+    await act(async () => {
+      fx.writes[0].resolve()
+      await Promise.resolve()
+    })
+    await flush()
+
+    // Acknowledged: it is in the datastore, and the banner it earned is raised.
+    expect(fx.stored.get(progressPath(LINCOLN))).toEqual(fx.writes[0].payload)
+    expect(result.current.justCompletedMissionId).toBe('library_hut')
+    expect(fx.transactions).toBe(1)
+  })
+
+  it('initialises an absent village once, with the baseline unchanged', async () => {
+    mount()
+    act(() => {
+      fx.reading[0].next(readingSnapshot(7))
+      fx.progress[0].next(progressSnapshot(null))
+    })
+    await flush()
+
+    expect(fx.setDoc).toHaveBeenCalledTimes(1)
+    // The same baseline `initialStonebridgeProgress` has always written: at the
+    // count this client actually read, so existing lifetime reading does not
+    // auto-complete the opening mission.
+    expect(fx.writes[0].payload).toMatchObject({
+      childId: LINCOLN,
+      currentMissionId: 'old_bridge',
+      completedMissions: [],
+      raisedBanners: [],
+      missionBaselines: { old_bridge: 7 },
+    })
+
+    await act(async () => {
+      fx.writes[0].resolve()
+      await Promise.resolve()
+    })
+    await flush()
+    expect(fx.stored.get(progressPath(LINCOLN))).toEqual(fx.writes[0].payload)
+    expect(fx.setDoc).toHaveBeenCalledTimes(1)
+  })
+
+  /**
+   * A conflict must not be a dead end either.
+   *
+   * The signature that dedups an attempt now includes the SOURCE document, for
+   * exactly this: a refused write is a write that did not happen, so the same
+   * proposal against a different authoritative document is legitimate later
+   * work. Here another client touches the document without changing what it
+   * says (a stamp refresh), the compare refuses, and the completion the child
+   * really earned still lands — in one further attempt, not a spin.
+   *
+   * POSITIVE CONTROL. Take the source back out of `advanceSignature` and this
+   * fails on a write count of 0: the re-issue is deduped against the attempt
+   * that was refused, and the completion is suppressed for the life of the
+   * mount.
+   */
+  it('re-reads after a conflict and still completes the work the child earned', async () => {
+    const touched: StonebridgeProgress = { ...SAVED, updatedAt: '2026-10-28T10:00:00.000Z' }
+    const { result } = mount()
+    act(() => {
+      fx.reading[0].next(readingSnapshot(19))
+      fx.progress[0].next(progressSnapshot(SAVED))
+    })
+    setStored(LINCOLN, touched)
+    await flush()
+
+    // The first attempt was refused, and the second — against the document it
+    // adopted — committed.
+    expect(fx.transactions).toBe(2)
+    expect(fx.setDoc).toHaveBeenCalledTimes(1)
+    expect(fx.writes[0].payload).toMatchObject({
+      currentMissionId: 'the_forge',
+      completedMissions: ['old_bridge', 'watchtower', 'library_hut'],
+    })
+    expect(result.current.justCompletedMissionId).toBeNull()
+
+    await act(async () => {
+      fx.writes[0].resolve()
+      await Promise.resolve()
+    })
+    await flush()
+
+    expect(result.current.justCompletedMissionId).toBe('library_hut')
+    // And it stops there: no third transaction, no second write.
+    expect(fx.transactions).toBe(2)
+    expect(fx.setDoc).toHaveBeenCalledTimes(1)
+  })
+
+  it('lands no refused-write answer on the visit or the child that replaced it', async () => {
+    const { result, rerender } = mount()
+    act(() => {
+      fx.reading[0].next(readingSnapshot(19))
+      fx.progress[0].next(progressSnapshot(SAVED))
+    })
+    // Another client is ahead, so Lincoln's attempt will be refused…
+    setStored(LINCOLN, { ...SAVED, updatedAt: '2026-10-28T11:00:00.000Z' })
+    // …and the parent switches child before it resolves.
+    rerender({ familyId: FAM, childId: LONDON })
+    await flush()
+
+    // London's visit is told nothing by Lincoln's refusal: no village, no
+    // banner, no error of his brother's.
+    expect(result.current.loading).toBe(true)
+    expect(result.current.completedMissions).toEqual([])
+    expect(result.current.totalReadingActions).toBeNull()
+    expect(result.current.justCompletedMissionId).toBeNull()
+    expect(result.current.saveError).toBe(false)
+    // Nothing was written for Lincoln either — the refusal stands.
+    expect(fx.setDoc).not.toHaveBeenCalled()
+
+    // London's own first visit is unaffected and creates his village.
+    act(() => {
+      fx.reading[1].next(readingSnapshot(3))
+      fx.progress[1].next(progressSnapshot(null))
+    })
+    await flush()
+    expect(fx.setDoc).toHaveBeenCalledTimes(1)
+    expect(fx.writes[0].path).toBe(progressPath(LONDON))
+    expect(fx.writes[0].payload.missionBaselines).toEqual({ old_bridge: 3 })
+  })
+})
+
+/**
+ * A village that is GONE is not a village that was never there.
+ *
+ * Sol's refusal nuance, and the one case where `missing` must not authorise the
+ * create it has always authorised: once this mount has seen a child's village
+ * exist, a later `missing` — from a subscription or from the transaction's own
+ * read — is a document that has disappeared. Writing a fresh baseline over it
+ * would be a silent reset wearing a first visit's clothes, and the lists it
+ * erased are the whole of the child's history.
+ *
+ * So nothing is written for him, and the hook reports it honestly instead: his
+ * last known village, labelled as not fresh, with the one Retry door. The
+ * refusal is per CHILD and survives a Retry and a switch away and back, because
+ * it is a fact about the document. An authoritative existing document is the
+ * only thing that clears it.
+ *
+ * THE LIMIT, stated rather than papered over: a completely fresh mount cannot
+ * tell a deleted document from one that was never created — both are a
+ * successful `missing`. Telling them apart needs a stored tombstone, which is a
+ * schema change and is deliberately not made. The guarantee is bounded to a
+ * mount that has watched the village exist.
+ */
+describe('missing where a village was is a recovery state, not a first visit', () => {
+  it('never re-creates a village that vanished while this mount watched it', async () => {
+    const { result, rerender } = mount()
+    act(() => {
+      fx.reading[0].next(readingSnapshot(14))
+      fx.progress[0].next(progressSnapshot(SAVED))
+    })
+    await flush()
+    expect(result.current.completedMissions).toEqual(['old_bridge', 'watchtower'])
+
+    // The document is deleted out from under the app. The subscription reports
+    // it, truthfully, as a successful snapshot with no document.
+    act(() => {
+      fx.progress[0].next(progressSnapshot(null))
+    })
+    await flush()
+
+    // NOT a first visit: no create, no baseline, no reset — and no attempt.
+    expect(fx.setDoc).not.toHaveBeenCalled()
+    expect(fx.transactions).toBe(0)
+    expect(fx.stored.has(progressPath(LINCOLN))).toBe(false)
+    // The honest report: his earned village, said to be last-known, with the
+    // door. Not an empty village, and not a claim that anything saved.
+    expect(result.current.completedMissions).toEqual(['old_bridge', 'watchtower'])
+    expect(result.current.raisedBanners).toEqual(['old_bridge', 'watchtower'])
+    expect(result.current.stale).toBe(true)
+    // A read that did not produce his village — the sentence every surface
+    // already has for that, and the reason the door is reachable.
+    expect(result.current.readError).toBe(true)
+    expect(result.current.saveError).toBe(false)
+    expect(typeof result.current.retry).toBe('function')
+
+    // A Retry re-reads and refuses again: `missing` a second time is still not
+    // permission.
+    act(() => {
+      result.current.retry()
+    })
+    act(() => {
+      fx.reading[1].next(readingSnapshot(14))
+      fx.progress[1].next(progressSnapshot(null))
+    })
+    await flush()
+    expect(fx.setDoc).not.toHaveBeenCalled()
+    expect(fx.transactions).toBe(0)
+
+    // Away and back is not permission either — the refusal is the child's, not
+    // the visit's — and it is still SAID, with nothing of his left on screen to
+    // label: the switch took the last-known pair and left the refusal.
+    rerender({ familyId: FAM, childId: LONDON })
+    rerender({ familyId: FAM, childId: LINCOLN })
+    act(() => {
+      fx.reading[3].next(readingSnapshot(14))
+      fx.progress[3].next(progressSnapshot(null))
+    })
+    await flush()
+    expect(fx.setDoc).not.toHaveBeenCalled()
+    expect(fx.transactions).toBe(0)
+    expect(result.current.readError).toBe(true)
+    expect(result.current.loading).toBe(false)
+    expect(result.current.saveError).toBe(false)
+
+    // An authoritative existing document is the one way out, and it clears the
+    // refusal without having written anything in the meantime.
+    act(() => {
+      fx.progress[3].next(progressSnapshot(SAVED))
+    })
+    await flush()
+    expect(result.current.completedMissions).toEqual(['old_bridge', 'watchtower'])
+    expect(result.current.stale).toBe(false)
+    expect(result.current.readError).toBe(false)
+    expect(fx.setDoc).not.toHaveBeenCalled()
+  })
+
+  it('reports a village that vanished under an advance, and recreates nothing', async () => {
+    const { result } = mount()
+    // His 19th action completes the Library Hut, so there is a real advance to
+    // write — and the document is deleted before the transaction reads it.
+    act(() => {
+      fx.reading[0].next(readingSnapshot(19))
+      fx.progress[0].next(progressSnapshot(SAVED))
+    })
+    clearStored(LINCOLN)
+    await flush()
+
+    // The transaction found nothing where this mount had seen a village. That
+    // is not permission to write the proposal as a fresh document.
+    expect(fx.setDoc).not.toHaveBeenCalled()
+    expect(fx.stored.has(progressPath(LINCOLN))).toBe(false)
+    // No completion is claimed off a write that did not happen.
+    expect(result.current.justCompletedMissionId).toBeNull()
+    // The subscription still reports the village it last read, and the hook
+    // keeps showing it — labelled, because the document behind it is gone.
+    expect(result.current.completedMissions).toEqual(['old_bridge', 'watchtower'])
+    expect(result.current.stale).toBe(true)
+    expect(result.current.saveError).toBe(false)
+    // The transaction's own read is a read that did not produce his village,
+    // even though the listener is still reporting one.
+    expect(result.current.readError).toBe(true)
+    // One attempt, and then it waits for a real read rather than spinning
+    // against the hole.
+    expect(fx.transactions).toBe(1)
+  })
+})
+
+/**
+ * THE LIFECYCLE CASES Sol's independent review reproduced against the real
+ * hook and the real card, where the first cut of this repair was still wrong.
+ *
+ * All five are the same shape: a transaction's answer and a subscription's
+ * answer arriving in an order nobody chose, across a switch between brothers.
+ * What they establish:
+ *
+ *  • a fact about a child's DOCUMENT (it exists) outlives the visit that
+ *    learned it, while the DATA that came with it does not;
+ *  • a refusal must be SAID, not just obeyed — including in a visit that has
+ *    no last-known village of its own to label;
+ *  • whether a delayed answer may speak for the screen is a question about
+ *    which OBSERVATION is on screen, never about what the answer contains: two
+ *    successive `missing` reads carry equal values and are different
+ *    observations, and `ready → missing` is newer information;
+ *  • releasing a lane is a state change, and the visit that was waiting behind
+ *    it gets exactly one reconsideration.
+ *
+ * POSITIVE CONTROLS, one per test, named in each.
+ */
+describe('a transaction’s answer outliving its visit', () => {
+  /** What another client built while this mount still saw no village. */
+  const BUILT_ELSEWHERE: StonebridgeProgress = {
+    childId: LINCOLN,
+    currentMissionId: 'watchtower',
+    activeProgress: { missionId: 'watchtower', current: 2, target: 6 },
+    completedMissions: ['old_bridge'],
+    raisedBanners: ['old_bridge'],
+    missionBaselines: { old_bridge: 0, watchtower: 5 },
+    updatedAt: '2026-10-28T08:00:00.000Z',
+  }
+
+  /** The same child, taken further by a client whose ledger read was ahead. */
+  const AHEAD_ELSEWHERE: StonebridgeProgress = {
+    ...SAVED,
+    currentMissionId: 'the_forge',
+    activeProgress: { missionId: 'the_forge', current: 0, target: 10 },
+    completedMissions: ['old_bridge', 'watchtower', 'library_hut'],
+    raisedBanners: ['old_bridge', 'watchtower', 'library_hut'],
+    missionBaselines: { ...SAVED.missionBaselines, the_forge: 19 },
+    updatedAt: '2026-10-28T09:00:00.000Z',
+  }
+
+  /**
+   * POSITIVE CONTROL: drop the recovery state out of `readError` and this fails
+   * on `loading` — the card then renders *"Loading your mission…"* with no door
+   * at all, which is what Sol's card test found.
+   */
+  it('says so on returning to a child whose village has gone, with no last-known data', async () => {
+    const { result, rerender } = mount()
+    act(() => {
+      fx.reading[0].next(readingSnapshot(14))
+      fx.progress[0].next(progressSnapshot(SAVED))
+    })
+    await flush()
+    expect(result.current.completedMissions).toEqual(['old_bridge', 'watchtower'])
+
+    // The brother, with a village of his own that changes nothing.
+    rerender({ familyId: FAM, childId: LONDON })
+    act(() => {
+      fx.reading[1].next(readingSnapshot(9))
+      fx.progress[1].next(progressSnapshot(LONDON_SAVED))
+    })
+    await flush()
+
+    // Back to A, whose document has been deleted in the meantime. The switch
+    // took his last-known pair with it, so there is nothing of his on screen
+    // to label — and this is the case that used to say nothing at all.
+    rerender({ familyId: FAM, childId: LINCOLN })
+    act(() => {
+      fx.reading[2].next(readingSnapshot(14))
+      fx.progress[2].next(progressSnapshot(null))
+    })
+    await flush()
+
+    expect(fx.setDoc).not.toHaveBeenCalled()
+    expect(fx.transactions).toBe(0)
+    expect(fx.stored.has(progressPath(LINCOLN))).toBe(false)
+    // Visible, with the one door — not a spinner, and not a claimed save.
+    expect(result.current.readError).toBe(true)
+    expect(result.current.loading).toBe(false)
+    expect(result.current.saveError).toBe(false)
+    expect(typeof result.current.retry).toBe('function')
+
+    // The door re-reads, and `missing` a second time is still not permission.
+    act(() => {
+      result.current.retry()
+    })
+    act(() => {
+      fx.reading[3].next(readingSnapshot(14))
+      fx.progress[3].next(progressSnapshot(null))
+    })
+    await flush()
+    expect(fx.setDoc).not.toHaveBeenCalled()
+    expect(result.current.readError).toBe(true)
+
+    // An authoritative existing document is the one thing that clears it, and
+    // clearing it writes nothing.
+    act(() => {
+      fx.progress[3].next(progressSnapshot(SAVED))
+    })
+    await flush()
+    expect(result.current.readError).toBe(false)
+    expect(result.current.completedMissions).toEqual(['old_bridge', 'watchtower'])
+    expect(fx.setDoc).not.toHaveBeenCalled()
+  })
+
+  /**
+   * POSITIVE CONTROL: gate the `exists` fact on the visit (as the first cut
+   * did, by carrying it only through `adopt`) and this fails on a second
+   * create — a fresh baseline over the village another client had built.
+   */
+  it('keeps a brother-time answer that A’s village exists, and refuses on return', async () => {
+    const { result, rerender } = mount()
+    // A's first visit truthfully sees no village, and its create goes away.
+    act(() => {
+      fx.reading[0].next(readingSnapshot(7))
+      fx.progress[0].next(progressSnapshot(null))
+    })
+    // Another client builds it in that window…
+    setStored(LINCOLN, BUILT_ELSEWHERE)
+    // …and the parent is looking at the brother when the answer lands.
+    rerender({ familyId: FAM, childId: LONDON })
+    await flush()
+
+    // Nothing written, and nothing of A's on B's screen: the fact is kept, the
+    // document is not adopted here, and nobody celebrates.
+    expect(fx.setDoc).not.toHaveBeenCalled()
+    expect(fx.stored.get(progressPath(LINCOLN))).toEqual(BUILT_ELSEWHERE)
+    expect(result.current.completedMissions).toEqual([])
+    expect(result.current.loading).toBe(true)
+    expect(result.current.readError).toBe(false)
+    expect(result.current.justCompletedMissionId).toBeNull()
+
+    // Back to A, whose listener still has not caught up and says `missing`.
+    rerender({ familyId: FAM, childId: LINCOLN })
+    act(() => {
+      fx.reading[2].next(readingSnapshot(7))
+      fx.progress[2].next(progressSnapshot(null))
+    })
+    await flush()
+
+    // A refusal, not a first visit — and said out loud.
+    expect(fx.setDoc).not.toHaveBeenCalled()
+    expect(fx.transactions).toBe(1)
+    expect(result.current.readError).toBe(true)
+    expect(result.current.loading).toBe(false)
+  })
+
+  /**
+   * POSITIVE CONTROL: the same gating mistake for a create that SUCCEEDED —
+   * without the fact, the return visit's `missing` is an ordinary first visit
+   * and the only thing standing between it and a reset baseline is a dedup
+   * signature that a Retry is allowed to release.
+   */
+  it('keeps a brother-time answer that A’s own create landed, and refuses on return', async () => {
+    const { result, rerender } = mount()
+    act(() => {
+      fx.reading[0].next(readingSnapshot(7))
+      fx.progress[0].next(progressSnapshot(null))
+    })
+    await flush()
+    expect(fx.setDoc).toHaveBeenCalledTimes(1)
+
+    // The parent switches away, and only then does the create commit.
+    rerender({ familyId: FAM, childId: LONDON })
+    await act(async () => {
+      fx.writes[0].resolve()
+      await Promise.resolve()
+    })
+    await flush()
+    expect(result.current.loading).toBe(true)
+    expect(result.current.readError).toBe(false)
+    expect(result.current.justCompletedMissionId).toBeNull()
+
+    // Back to A. His listener has not caught up, so it says `missing` — but his
+    // village demonstrably exists, because this mount is what created it. A
+    // second create here would baseline him at the NEW count.
+    rerender({ familyId: FAM, childId: LINCOLN })
+    act(() => {
+      fx.reading[2].next(readingSnapshot(9))
+      fx.progress[2].next(progressSnapshot(null))
+    })
+    await flush()
+
+    expect(fx.setDoc).toHaveBeenCalledTimes(1)
+    expect(result.current.readError).toBe(true)
+    expect(result.current.loading).toBe(false)
+  })
+
+  /**
+   * POSITIVE CONTROL: decide ownership by comparing the answer's document to
+   * what is on screen (the first cut's `answersForScreen`, which accepted any
+   * `missing`) and this fails on three banners — the delayed conflict adopts
+   * its village over a newer read that said there is none, and clears the
+   * refusal with it.
+   */
+  it('lets no delayed conflict answer talk over a newer missing read', async () => {
+    const { result } = mount()
+    act(() => {
+      fx.reading[0].next(readingSnapshot(19))
+      fx.progress[0].next(progressSnapshot(SAVED))
+    })
+    // The advance is away; then the listener reports — NEWER — that the
+    // document is gone.
+    act(() => {
+      fx.progress[0].next(progressSnapshot(null))
+    })
+    // And the datastore holds a village another client moved on, so the
+    // in-flight attempt will come back a conflict carrying it.
+    setStored(LINCOLN, AHEAD_ELSEWHERE)
+    await flush()
+
+    expect(fx.setDoc).not.toHaveBeenCalled()
+    // Last-known, not the conflict's document: two banners, not three.
+    expect(result.current.completedMissions).toEqual(['old_bridge', 'watchtower'])
+    expect(result.current.raisedBanners).toHaveLength(2)
+    // The newer refusal stands, and nothing celebrates.
+    expect(result.current.readError).toBe(true)
+    expect(result.current.stale).toBe(true)
+    expect(result.current.justCompletedMissionId).toBeNull()
+  })
+
+  /**
+   * The same rule where the two observations carry EQUAL values — which is why
+   * it cannot be a comparison of documents.
+   *
+   * POSITIVE CONTROL: accept the answer whenever the screen says `missing` and
+   * this fails on an adopted village appearing in an observation that never
+   * asked for it.
+   */
+  it('lets no delayed create answer talk over a newer missing read of equal value', async () => {
+    const { result } = mount()
+    act(() => {
+      fx.reading[0].next(readingSnapshot(7))
+      fx.progress[0].next(progressSnapshot(null))
+    })
+    // A second `missing`: the same value, a different observation.
+    act(() => {
+      fx.progress[0].next(progressSnapshot(null))
+    })
+    setStored(LINCOLN, BUILT_ELSEWHERE)
+    await flush()
+
+    expect(fx.setDoc).not.toHaveBeenCalled()
+    // Not adopted into the newer observation…
+    expect(result.current.completedMissions).toEqual([])
+    expect(result.current.mission).toBeNull()
+    expect(result.current.justCompletedMissionId).toBeNull()
+    // …and still a refusal, because the document is known to be there.
+    expect(result.current.readError).toBe(true)
+    expect(result.current.loading).toBe(false)
+    expect(fx.stored.get(progressPath(LINCOLN))).toEqual(BUILT_ELSEWHERE)
+  })
+
+  /**
+   * POSITIVE CONTROL: bump the reconsideration only for a write that landed
+   * (the first cut) and this fails on a write count of 0 — the completion the
+   * child earned in the visit he is in sits unwritten behind a lane that has
+   * already been freed.
+   */
+  it('wakes the live visit when a no-op frees the lane it was waiting behind', async () => {
+    const touched: StonebridgeProgress = { ...SAVED, updatedAt: '2026-10-28T12:00:00.000Z' }
+    const { result, rerender } = mount()
+    act(() => {
+      fx.reading[0].next(readingSnapshot(19))
+      fx.progress[0].next(progressSnapshot(SAVED))
+    })
+    // Another client touches the document, so this attempt will be refused…
+    setStored(LINCOLN, touched)
+    // …and the parent goes to the brother and back while it is still away.
+    rerender({ familyId: FAM, childId: LONDON })
+    rerender({ familyId: FAM, childId: LINCOLN })
+
+    // The new visit has a complete, current read of its own and real work to
+    // do — and is held only by the lane the earlier attempt still owns.
+    act(() => {
+      fx.reading[2].next(readingSnapshot(19))
+      fx.progress[2].next(progressSnapshot(touched))
+    })
+    expect(fx.setDoc).not.toHaveBeenCalled()
+
+    // The old attempt resolves as a no-op and frees the lane.
+    await flush()
+
+    expect(fx.transactions).toBe(2)
+    expect(fx.setDoc).toHaveBeenCalledTimes(1)
+    expect(fx.writes[0].payload).toMatchObject({
+      currentMissionId: 'the_forge',
+      completedMissions: ['old_bridge', 'watchtower', 'library_hut'],
+      raisedBanners: ['old_bridge', 'watchtower', 'library_hut'],
+    })
+
+    await act(async () => {
+      fx.writes[0].resolve()
+      await Promise.resolve()
+    })
+    await flush()
+
+    // It is THIS visit's completion, so this visit is the one that celebrates.
+    expect(result.current.justCompletedMissionId).toBe('library_hut')
+    // And it stops there: one wake-up, not a loop.
+    expect(fx.transactions).toBe(2)
     expect(fx.setDoc).toHaveBeenCalledTimes(1)
   })
 })
