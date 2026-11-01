@@ -81,6 +81,11 @@ import { dayLogDocId } from '../today/daylog.model'
 import HeroMissionCard, { type HeroMission } from './HeroMissionCard'
 import HeroLauncherTiles from './HeroLauncherTiles'
 import StonebridgeMissionCard from './stonebridge/StonebridgeMissionCard'
+import {
+  FORGE_GALLERY_ANCHOR_ID,
+  STONEBRIDGE_BOOKS_PATH,
+  focusForgeGallery,
+} from './stonebridge/stonebridgeDestinations'
 import { kidPalette } from '../../app/tokens'
 
 type NextRecommendedAction =
@@ -1448,7 +1453,21 @@ export default function MyAvatarPage() {
             context comes first; armor is one pillar of the hub, not the whole page. */}
         <HeroMissionCard mission={mission} isLincoln={isLincoln} />
         {childId && (
-          <StonebridgeMissionCard familyId={familyId} childId={childId} isLincoln={isLincoln} />
+          <StonebridgeMissionCard
+            familyId={familyId}
+            childId={childId}
+            isLincoln={isLincoln}
+            // Open My Books is a navigation and nothing else: it does not set
+            // the active child, touch completion logic, or claim a particular
+            // book is ready to read — the shelf is where that is chosen, the
+            // same as from the My Books launcher tile.
+            onOpenBooks={() => navigate(STONEBRIDGE_BOOKS_PATH)}
+            // The Forge visit moves to the gallery already mounted below. It
+            // is deliberately NOT a route and NOT a second copy of forge
+            // state: the one gallery keeps its own progress and cost rules,
+            // nothing is selected for the child, and no diamonds are spent.
+            onVisitForge={() => focusForgeGallery()}
+          />
         )}
 
         {/* ── 3D Character Display ─────────────────────────────── */}
@@ -1582,19 +1601,31 @@ export default function MyAvatarPage() {
 
         {/* ── Armor Piece Cards (horizontal scroll) ────────────── */}
         <SectionErrorBoundary section="armor gallery">
-          <ArmorPieceGallery
-            profile={profile}
-            appliedPieces={appliedPieces}
-            selectedPiece={selectedPiece}
-            activeForgeTier={getActiveForgeTier(profile)}
-            unlockedTiers={deriveUnlockedTiersFromForged(profile)}
-            isLincoln={isLincoln}
-            accentColor={accentColor}
-            textColor={textColor}
-            bgColor={bgColor}
-            onPieceTap={handlePieceTap}
-            onViewingTierChange={setPreviewTier}
-          />
+          {/* The real destination of a Stonebridge Forge visit. `tabIndex={-1}`
+              makes the wrapper focusable programmatically but keeps it out of
+              the tab order, so the jump can put the keyboard focus here (and
+              the next Tab lands inside the gallery) without adding a stop
+              nobody asked for. There is one of these, around the one gallery —
+              no duplicate forge state anywhere. */}
+          <Box
+            id={FORGE_GALLERY_ANCHOR_ID}
+            tabIndex={-1}
+            sx={{ scrollMarginTop: 12, '&:focus': { outline: 'none' } }}
+          >
+            <ArmorPieceGallery
+              profile={profile}
+              appliedPieces={appliedPieces}
+              selectedPiece={selectedPiece}
+              activeForgeTier={getActiveForgeTier(profile)}
+              unlockedTiers={deriveUnlockedTiersFromForged(profile)}
+              isLincoln={isLincoln}
+              accentColor={accentColor}
+              textColor={textColor}
+              bgColor={bgColor}
+              onPieceTap={handlePieceTap}
+              onViewingTierChange={setPreviewTier}
+            />
+          </Box>
         </SectionErrorBoundary>
 
         {/* ── Verse Card (for selected piece) ──────────────────── */}
