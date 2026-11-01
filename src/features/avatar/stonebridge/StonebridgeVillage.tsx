@@ -9,6 +9,7 @@ import StonebridgeLocationArt from './StonebridgeLocationArt'
 import StonebridgeLocationDialog from './StonebridgeLocationDialog'
 import StonebridgeRecoveryNotice, { type StonebridgeRecoveryState } from './StonebridgeRecoveryNotice'
 import BannerRaiseCelebration from './BannerRaiseCelebration'
+import VillageScene from './VillageScene'
 import { getMission } from './missions'
 import {
   deriveVillageBoard,
@@ -79,7 +80,7 @@ interface VillageView {
  * Full-screen Stonebridge village board, opened from the Hero-Hub mission card.
  *
  * Shows every Bible location with state derived read-only from progress:
- *  • Repaired → lit art + raised banner; the visit replays that character's thank-you.
+ *  • Repaired → repaired structure + raised banner; the visit replays that character's thank-you.
  *  • Active   → highlighted with its progress bar; the visit offers the real bookshelf.
  *  • Upcoming → shown muted as anticipation (one active mission at a time).
  *
@@ -87,6 +88,16 @@ interface VillageView {
  * rebuilt" payoff — and says so plainly once every location is fixed. The board
  * never reads or writes the XP / forge / diamond economy: opening it, visiting a
  * location and replaying a thank-you all write nothing.
+ *
+ * ── The overview, and the list under it ──────────────────────────────────────
+ *
+ * The board opens with `VillageScene` — the seven locations drawn once, in one
+ * landscape, with the Square and the roads that join them — and the plain list
+ * of places underneath. The picture is **noninteractive** (see that file for the
+ * enlarged-text finding that settled it), so the list is the one and only way
+ * into a location: one control per place, each a full-size target naming its
+ * place and its condition, and the focus comes back to the exact tile a visit
+ * was opened from.
  *
  * ── Why this is a Dialog and the tiles are buttons ───────────────────────────
  *
@@ -392,7 +403,26 @@ export default function StonebridgeVillage({
               and are still shown. */}
           <StonebridgeRecoveryNotice isLincoln={isLincoln} {...recovery} />
 
-          {/* Location board */}
+          {/* ── The village, as one place ───────────────────────────────
+              At the top of the board, because this is what a child came to
+              see: the Square, the river, the roads, and every location in the
+              same landscape. It sits BELOW the recovery notice only because a
+              failure a child has to scroll past is a failure they do not find.
+
+              A picture and nothing more — no hotspot, no label, no control (see
+              `VillageScene`). It is not a second source of truth either:
+              `board` is the same derived value the list renders from. */}
+          <VillageScene board={board} isLincoln={isLincoln} />
+
+          {/* ── The readable list — the whole way around the village ───
+              The plain list of places with the condition of each one written
+              out, and the one set of controls: full-size targets, named
+              dialogs, and the focus handed back to the exact tile. */}
+          <Typography
+            sx={{ fontFamily: titleFont, fontSize: isLincoln ? '12px' : '17px', fontWeight: 700, mb: 1 }}
+          >
+            🏘️ Each Place
+          </Typography>
           <Box
             sx={{
               display: 'grid',

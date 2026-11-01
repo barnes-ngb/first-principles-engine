@@ -152,8 +152,20 @@ function boardRegion() {
   return within(screen.getByRole('dialog', { name: 'Stonebridge Village' }))
 }
 
+/** The place's control in the readable list under the map. */
 function tile(mission: { locationName: string }) {
   return boardRegion().getByRole('button', { name: new RegExp(`^Visit ${mission.locationName}\\.`) })
+}
+
+/**
+ * The connected overview at the top of the board.
+ *
+ * Scoped, because the overview and the list tiles draw the SAME structures —
+ * that is the point of one shared vocabulary — so a `structure-…` id is on the
+ * board twice and an unscoped query would be ambiguous rather than wrong.
+ */
+function overview() {
+  return within(boardRegion().getByRole('img', { name: /^Stonebridge village:/ }))
 }
 
 /**
@@ -222,7 +234,9 @@ describe('the board at the start, part-way and finished', () => {
     expect(screen.queryByText('18 / 18 done')).not.toBeInTheDocument()
     expect(screen.queryByText(BANNER_HALL.framing)).not.toBeInTheDocument()
     expect(
-      screen.getByRole('img', { name: 'Banner Hall: fixed, with its banner raised.' }),
+      screen.getByRole('img', {
+        name: 'Banner Hall: an unbroken roof over a full row of banners, with its own banner raised.',
+      }),
     ).toBeInTheDocument()
 
     openBoard()
@@ -243,7 +257,9 @@ describe('the board at the start, part-way and finished', () => {
     expect(screen.getByText('0 / 6 done')).toBeInTheDocument()
     expect(screen.queryByText('You fixed each place.')).not.toBeInTheDocument()
     expect(
-      screen.getByRole('img', { name: 'The Watchtower: still waiting to be fixed.' }),
+      screen.getByRole('img', {
+        name: 'The Watchtower: the bells still hang at the top, the upper stair stops short, and there is no balcony.',
+      }),
     ).toBeInTheDocument()
 
     openBoard()
@@ -299,7 +315,11 @@ describe('a visit says what is true of the place', () => {
     expect(visit.queryByRole('button', { name: 'Hear the thank you' })).not.toBeInTheDocument()
     expect(visit.queryByText(/\d+ \/ \d+ done/)).not.toBeInTheDocument()
     // And it is reachable and readable rather than an inert tile.
-    expect(visit.getByRole('img', { name: 'Banner Hall: still waiting to be fixed.' })).toBeInTheDocument()
+    expect(
+      visit.getByRole('img', {
+        name: 'Banner Hall: a gap in the roof, two banners hanging, and the rest of the hooks empty.',
+      }),
+    ).toBeInTheDocument()
     expect(visit.getByRole('button', { name: 'Close' })).toBeInTheDocument()
   })
 })
@@ -531,6 +551,107 @@ describe('a reduced-motion preference loses no state', () => {
   })
 })
 
+describe('the overview is the village, and the list is the way around it', () => {
+  it('shows the connected place above the list, with nothing on it to tap', () => {
+    fx.data = PARTIAL
+    renderCard()
+    openBoard()
+    const board = boardRegion()
+
+    // The picture, and the sentence that says where the way in is.
+    expect(board.getByText('🗺️ Your Village')).toBeInTheDocument()
+    expect(board.getByText('Pick a place from the list.')).toBeInTheDocument()
+    expect(board.getByText('🏘️ Each Place')).toBeInTheDocument()
+    expect(overview().getByTestId('village-roads')).toBeInTheDocument()
+    expect(overview().getByTestId('village-river')).toBeInTheDocument()
+    expect(overview().getByTestId('square-fountain-water')).toBeInTheDocument()
+
+    // Exactly one control per place, and it is the list's — the hotspot grid
+    // this replaced covered the buildings with its own labels at enlarged text.
+    for (const mission of STONEBRIDGE_MISSIONS) {
+      expect(board.getAllByRole('button', { name: new RegExp(`${mission.locationName}\\.`) })).toHaveLength(1)
+    }
+    expect(board.queryByRole('button', { name: /village map/ })).not.toBeInTheDocument()
+  })
+
+  it('draws each place in the state the list says it is in', () => {
+    fx.data = PARTIAL
+    renderCard()
+    openBoard()
+
+    // Fixed in the list, repaired in the picture — one derived value, two
+    // renderings of it, and no second source of truth.
+    expect(boardRegion().getByRole('button', { name: 'Visit The Old Bridge. Fixed.' })).toBeInTheDocument()
+    expect(overview().getByTestId('structure-old_bridge-repaired')).toBeInTheDocument()
+    expect(boardRegion().getByRole('button', { name: 'Visit The Library Hut. Being fixed now.' })).toBeInTheDocument()
+    expect(overview().getByTestId('structure-library_hut-damaged')).toBeInTheDocument()
+    // And the whole village is named in the picture's one description.
+    const description = boardRegion()
+      .getByRole('img', { name: /^Stonebridge village:/ })
+      .getAttribute('aria-label')
+    expect(description).toContain('Fixed so far: The Old Bridge, The Watchtower.')
+  })
+
+  it('finished: the picture and the list both read fixed, with nothing in hand', () => {
+    fx.data = FINAL
+    renderCard()
+    openBoard()
+    const board = boardRegion()
+
+    expect(board.getAllByRole('button', { name: /^Visit .+\. Fixed\.$/ })).toHaveLength(
+      STONEBRIDGE_MISSIONS.length,
+    )
+    expect(board.queryByRole('button', { name: /Being fixed now/ })).not.toBeInTheDocument()
+    for (const mission of STONEBRIDGE_MISSIONS) {
+      expect(overview().getByTestId(`structure-${mission.id}-repaired`)).toBeInTheDocument()
+      expect(overview().queryByTestId(`structure-${mission.id}-damaged`)).not.toBeInTheDocument()
+    }
+  })
+
+  it('a reduced-motion preference loses neither the picture nor what it says', () => {
+    emulateReducedMotion(true)
+    fx.data = PARTIAL
+    renderCard()
+    openBoard()
+
+    expect(boardRegion().getByText('🗺️ Your Village')).toBeInTheDocument()
+    expect(overview().getByTestId('village-roads')).toBeInTheDocument()
+    expect(overview().getByTestId('structure-watchtower-repaired')).toBeInTheDocument()
+    // The drawing is static, so there is nothing for the preference to turn
+    // off — and nothing is withheld from someone who asked for less motion.
+    expect(overview().getByTestId('village-land').querySelectorAll('animate')).toHaveLength(0)
+    expect(boardRegion().getByRole('button', { name: 'Visit The Watchtower. Fixed.' })).toBeInTheDocument()
+  })
+
+  it('a child switch leaves the next child a clean board and picture', async () => {
+    emulateReducedMotion(true)
+    const { rerender } = renderCard('lincoln')
+    openBoard()
+    fireEvent.click(tile(OLD_BRIDGE))
+    expect(screen.getByText('You are fixing this now.')).toBeInTheDocument()
+
+    rerender(
+      <StonebridgeMissionCard
+        familyId="fam-1"
+        childId="london"
+        isLincoln
+        onOpenBooks={fx.books}
+        onVisitForge={fx.forge}
+      />,
+    )
+
+    // The previous child's board and visit are gone, and nothing from them
+    // sends the brother anywhere.
+    await expectEverythingClosed()
+    expect(fx.books).not.toHaveBeenCalled()
+    expect(fx.forge).not.toHaveBeenCalled()
+
+    openBoard()
+    expect(overview().getByTestId('village-land')).toBeInTheDocument()
+    expect(screen.queryByText('You are fixing this now.')).not.toBeInTheDocument()
+  })
+})
+
 describe('the new copy holds the kid readability bar', () => {
   it('every sentence a child reads in a visit', () => {
     expectKidLine('You fixed this place.', 'Stonebridge visit · repaired')
@@ -544,6 +665,16 @@ describe('the new copy holds the kid readability bar', () => {
     expectKidLine('You fixed each place.', 'Stonebridge · rally finished')
     expectKidLine('Your banners are all up.', 'Stonebridge · banners all raised')
     expectKidLine('Each banner is up. Well done.', 'Stonebridge · Banner Hall done')
+    expectKidLine('Pick a place from the list.', 'Stonebridge overview · where to go')
+  })
+
+  it('and the two headings over the picture and the list', () => {
+    // Headings, so no full stop is demanded of them — but the words still have
+    // to be words a six-year-old reads. "Each Place" rather than "Every
+    // place": the proxy counts e·ver·y as three syllables, which is the bar
+    // doing its job.
+    expectKidWording('🗺️ Your Village', 'Stonebridge · overview heading')
+    expectKidWording('🏘️ Each Place', 'Stonebridge · list heading')
   })
 
   it('and every label on a control', () => {
@@ -560,6 +691,8 @@ describe('the new copy holds the kid readability bar', () => {
     for (const file of [
       'src/features/avatar/stonebridge/StonebridgeVillage.tsx',
       'src/features/avatar/stonebridge/StonebridgeMissionCard.tsx',
+      // The map carries kid copy of its own now, so it is held to the same bar.
+      'src/features/avatar/stonebridge/VillageScene.tsx',
     ]) {
       expect(readRendered(file)).not.toContain('every place')
       expect(readRendered(file)).not.toContain('Every banner')

@@ -240,6 +240,52 @@ describe('visiting the village is free', () => {
     // Not one write beyond the reconcile that was already owed.
     expect(fx.setDoc).toHaveBeenCalledTimes(baseline)
   })
+
+  /**
+   * The connected overview is a picture, and looking at it is free too.
+   *
+   * It is drawn from the same derived board the list is, with no state and no
+   * reader of its own — so this walks the real hook past it and asserts that
+   * the drawing of a repaired village costs nothing, and that the one way in
+   * still hands the focus back to the exact tile it came from.
+   */
+  it('shows the connected village, and visiting from the list still writes nothing', async () => {
+    const baseline = await mountSettled()
+
+    fireEvent.click(screen.getByText('🏰 Open Stonebridge'))
+    const board = await boardRegion()
+
+    // The picture: one name for the whole drawing, and no control on it.
+    const picture = board.getByRole('img', { name: /^Stonebridge village:/ })
+    expect(picture.getAttribute('aria-label')).toContain('Fixed so far: The Old Bridge, The Watchtower.')
+    expect(within(picture).queryAllByRole('button')).toHaveLength(0)
+    expect(within(picture).getByTestId('structure-old_bridge-repaired')).toBeInTheDocument()
+    expect(within(picture).getByTestId('structure-library_hut-damaged')).toBeInTheDocument()
+
+    // The list is the way in, and it is the exact tile the focus returns to.
+    const listTile = board.getByRole('button', { name: 'Visit The Old Bridge. Fixed.' })
+    listTile.focus()
+    fireEvent.click(listTile)
+    const visit = within(screen.getByRole('dialog', { name: 'The Old Bridge' }))
+    expect(visit.getByText('You fixed this place.')).toBeInTheDocument()
+    fireEvent.click(visit.getByRole('button', { name: 'Close' }))
+    await waitFor(() => {
+      expect(screen.queryByText('You fixed this place.')).not.toBeInTheDocument()
+    })
+    const after = await boardRegion()
+    await waitFor(() =>
+      expect(after.getByRole('button', { name: 'Visit The Old Bridge. Fixed.' })).toHaveFocus(),
+    )
+
+    fireEvent.click(after.getByRole('button', { name: 'Close Stonebridge village' }))
+    await waitFor(() => {
+      expect(screen.queryByText('🎌 Banner Hall')).not.toBeInTheDocument()
+    })
+    await flush()
+
+    // Not one write beyond the reconcile that was already owed.
+    expect(fx.setDoc).toHaveBeenCalledTimes(baseline)
+  })
 })
 
 describe('a failure while a visit is open keeps the one door reachable', () => {

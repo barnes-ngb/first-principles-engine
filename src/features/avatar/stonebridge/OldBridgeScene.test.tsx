@@ -134,9 +134,30 @@ describe('the picture has words', () => {
   })
 })
 
-describe('every other location keeps the art it had', () => {
-  it('draws the emoji motif, chosen by mission id and never by emoji', () => {
-    const { container } = render(
+describe('the Old Bridge keeps its own scene', () => {
+  /**
+   * Every other location is drawn from the shared vocabulary in
+   * `LocationScenes` now (its own suite proves those). This is the seam: the
+   * router is still keyed by **mission id and never by emoji**, and the one id
+   * that maps to this file still gets THIS drawing — the bridge a child has
+   * already learned to read, rather than a redraw of it.
+   */
+  it('routes by mission id: the bridge here, the shared vocabulary elsewhere', () => {
+    const { unmount } = render(
+      <StonebridgeLocationArt
+        missionId={OLD_BRIDGE.id}
+        art={OLD_BRIDGE.art}
+        state="damaged"
+        isLincoln
+        height={96}
+      />,
+    )
+    expect(screen.getByTestId('old-bridge-deck-gapped')).toBeInTheDocument()
+    // Not the compact bridge the village map draws — that one has its own ids.
+    expect(screen.queryByTestId('bridge-deck-gapped')).not.toBeInTheDocument()
+    unmount()
+
+    render(
       <StonebridgeLocationArt
         missionId={WATCHTOWER.id}
         art={WATCHTOWER.art}
@@ -145,11 +166,10 @@ describe('every other location keeps the art it had', () => {
         height={96}
       />,
     )
-
-    expect(container.querySelector('svg')).toBeNull()
-    expect(screen.getByText(WATCHTOWER.art.emoji)).toBeInTheDocument()
-    expect(
-      screen.getByRole('img', { name: 'The Watchtower: still waiting to be fixed.' }),
-    ).toBeInTheDocument()
+    expect(screen.queryByTestId('old-bridge-deck-gapped')).not.toBeInTheDocument()
+    expect(screen.getByTestId('structure-watchtower-damaged')).toBeInTheDocument()
+    // The emoji motif this replaced is gone: two states that differed only by a
+    // greyscale filter and a glow were one picture, twice.
+    expect(screen.queryByText(WATCHTOWER.art.emoji)).not.toBeInTheDocument()
   })
 })
