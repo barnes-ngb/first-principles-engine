@@ -32,8 +32,9 @@ import StonebridgeMissionCard from './StonebridgeMissionCard'
  * not the board under it, the way out and the recovery door are outside the
  * scrolling region, and the focus comes back to the exact tile the replay came
  * from. The component is NOT stubbed — stubbing the thing under repair would
- * assert nothing. Only the Web Audio fanfare is mocked, as a spy, so the
- * fanfare can be proven to still play.
+ * assert nothing. Only the two things jsdom does not have are mocked, both as
+ * spies rather than as stubs: the Web Audio fanfare and the speech, so each can
+ * be proven to still happen.
  *
  * ── What this file cannot prove ─────────────────────────────────────────────
  *
@@ -45,6 +46,7 @@ import StonebridgeMissionCard from './StonebridgeMissionCard'
 
 const fx = vi.hoisted(() => ({
   fanfare: vi.fn(),
+  speak: vi.fn(),
   retry: vi.fn(),
   data: null as unknown as StonebridgeProgressData,
 }))
@@ -56,6 +58,13 @@ vi.mock('./useStonebridgeProgress', () => ({
 // Web Audio only. The overlay itself is the real one.
 vi.mock('./bannerRaiseSound', () => ({
   playBannerRaiseFanfare: () => fx.fanfare(),
+}))
+
+// The same for the speech: jsdom has no `speechSynthesis`, so the only way to
+// see whether the thank-you was ASKED to be read is to spy on the one call that
+// asks for it. `speakStatus` is the only export this tree uses.
+vi.mock('../speakVerse', () => ({
+  speakStatus: (message: string) => fx.speak(message),
 }))
 
 const OLD_BRIDGE = getMission('old_bridge')!
@@ -149,6 +158,7 @@ function modalOf(paper: HTMLElement): HTMLElement {
 
 beforeEach(() => {
   fx.fanfare.mockClear()
+  fx.speak.mockClear()
   fx.retry.mockClear()
   fx.data = PARTIAL
   emulateMedia()
@@ -268,6 +278,65 @@ describe('the replayed thank-you is a named view you can get out of', () => {
 
     await replayView()
     expect(fx.fanfare).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('a thank-you the child asked to HEAR is spoken (promotion round 1)', () => {
+  /**
+   * The defect: the board rendered the celebration without `speak`, which
+   * defaults to `false`, so *Hear the thank you* raised the banner, played the
+   * fanfare — and said nothing. The one control whose whole promise is that the
+   * words are read out was the one that did not read them, and for a child who
+   * cannot yet read that paragraph the replay had no content at all.
+   *
+   * POSITIVE CONTROL: take `speak` back off the village's
+   * `BannerRaiseCelebration` and the first case here fails on the call count.
+   */
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('reads the mission thank-you aloud, once, on a manual replay', async () => {
+    await replayOldBridge()
+
+    // Real timers: the beat between the fanfare and the words is the
+    // component's own, and this waits for it rather than asserting its length.
+    await waitFor(() => expect(fx.speak).toHaveBeenCalledTimes(1), { timeout: 2000 })
+    expect(fx.speak).toHaveBeenCalledWith(OLD_BRIDGE.thankYou.line)
+    // The fanfare is unchanged — the speech is in addition to it, not instead.
+    expect(fx.fanfare).toHaveBeenCalledTimes(1)
+  })
+
+  it('cannot speak a replay the child has already been switched away from', async () => {
+    // The words are on a pending delay, so the question is what happens to that
+    // delay when the replay it belongs to is dropped mid-beat. The timers are
+    // taken over BEFORE the replay opens and the switch happens with nothing
+    // awaited in between, so the beat provably has not elapsed yet.
+    const { rerender } = renderCard('lincoln')
+    fireEvent.click(screen.getByText('🏰 Open Stonebridge'))
+    fireEvent.click((await boardRegion()).getByRole('button', { name: OLD_BRIDGE_TILE }))
+    const visit = await screen.findByRole('dialog', { name: 'The Old Bridge' })
+
+    vi.useFakeTimers()
+    fireEvent.click(within(visit).getByRole('button', { name: 'Hear the thank you' }))
+    rerender(<StonebridgeMissionCard familyId="fam-1" childId="london" isLincoln />)
+    vi.advanceTimersByTime(5000)
+
+    // London's screen never hears Lincoln's replay.
+    expect(fx.speak).not.toHaveBeenCalled()
+  })
+
+  it('leaves the automatic completion celebration silent, as it was', () => {
+    // The default is unchanged: a celebration that arrives on its own was not
+    // asked to be read aloud, and still is not.
+    vi.useFakeTimers()
+    fx.data = { ...PARTIAL, justCompletedMissionId: 'watchtower', clearJustCompleted: vi.fn() }
+    renderCard()
+
+    vi.advanceTimersByTime(5000)
+
+    expect(fx.fanfare).toHaveBeenCalledTimes(1)
+    expect(fx.speak).not.toHaveBeenCalled()
   })
 })
 

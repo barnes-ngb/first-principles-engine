@@ -625,6 +625,12 @@ export default function StonebridgeVillage({
         <BannerRaiseCelebration
           missionId={live?.replay ?? null}
           isLincoln={isLincoln}
+          // Read aloud, because here it was ASKED for: the only way this view
+          // opens is *Hear the thank you* on a repaired location, and a child
+          // who cannot yet read that paragraph tapped the control that says it
+          // will be read. The prop defaults to `false` for the automatic
+          // completion celebration, which nobody asked to be spoken.
+          speak
           onDismiss={dismissReplay}
           onExited={handleReplayExited}
           {...recovery}
