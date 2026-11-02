@@ -12,16 +12,16 @@ Homeschool management app for the Barnes family: Shelly (parent, fibromyalgia), 
 
 **Tech:** React + TypeScript + Vite, Firebase (Auth/Firestore/Storage/Functions/Hosting), MUI, Claude + OpenAI image stack.
 
-**Scale (historical snapshot at 12ad312b1586437979a6a46cf9d91eb0288aa74b, 2026-09-28):**
+**Scale (snapshot at f5db79179cc37c8b169c1f3d2c8055ab17043c2c, 2026-11-02):**
 | Metric | Value |
 | --- | ---: |
-| TypeScript lines (src and functions/src) | 382731 |
-| Commits reachable from pinned revision | 3783 |
-| Test source files in those roots | 724 |
-| Unique CURRENT Markdown documents | 74 |
-| CURRENT documents last touched more than 30 days earlier | 42 |
+| TypeScript lines (src and functions/src) | 452648 |
+| Commits reachable from pinned revision | 4091 |
+| Test source files in those roots | 826 |
+| Unique CURRENT Markdown documents | 81 |
+| CURRENT documents last touched more than 30 days earlier | 65 |
 
-Derived by `node scripts/health-census.mjs --rev=12ad312b1586437979a6a46cf9d91eb0288aa74b --as-of=2026-09-28`. See HEALTH_REPORT.md for counting scope and limitations.
+Derived by `node scripts/health-census.mjs --rev=f5db79179cc37c8b169c1f3d2c8055ab17043c2c --as-of=2026-11-02`. See HEALTH_REPORT.md for counting scope and limitations.
 
 ## Navigation
 **Parent:** Today, Plan My Week, Curriculum, Review (Week · Month tabs, replacing the former standalone Weekly Review nav entry and absorbing the Progress tab's former Monthly Books tab — `ProgressPage`'s `?tab=monthly-books` now redirects to Review's Month view), Progress (**Foundations** · Learning Map · Curriculum · Skill Snapshot · Word Wall — Foundations is index 0, absorbing the former Learning Profile tab with dispositions as a section, FEAT-65), Records, Books, **Watch Library** (FEAT-132 — its own top-level parent entry at `/watch`, moved out of Settings), **Barnes Bros**, Game Workshop, Dad Lab, Settings, Ask AI  

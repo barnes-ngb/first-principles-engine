@@ -1,71 +1,71 @@
-# Code Health Report — 2026-09-28
+# Code Health Report — 2026-11-02
 
-## Reproducible historical snapshot
+## Reproducible snapshot
 
-Corrected October 5 under owner-authorized maintenance. Revision **12ad312b1586437979a6a46cf9d91eb0288aa74b**; as-of **2026-09-28** at UTC midnight. This is a historical survey, not the present app size or a new family assessment.
-
-Run from the repository using Node 22:
+Revision **f5db79179cc37c8b169c1f3d2c8055ab17043c2c**; as-of **2026-11-02**. Derived by:
 
 ```text
-node scripts/health-census.mjs --rev=12ad312b1586437979a6a46cf9d91eb0288aa74b --as-of=2026-09-28
-npx vitest run scripts/health-census.test.mjs
+node scripts/health-census.mjs --rev=f5db79179cc37c8b169c1f3d2c8055ab17043c2c --as-of=2026-11-02
 ```
 
-Tracked .ts/.tsx under src and functions/src; Git blob LF lines; .test/.spec test filenames. CURRENT Markdown rows deduplicated by path; age from last reachable commit timestamp, UTC midnight; age is not proof of staleness. Full Git history is required; missing indexed documents are reported explicitly. Working-tree edits, generated output and dependencies do not affect the snapshot. Commit count includes only history reachable from the named revision, so later audit commits do not shift it.
+Counting scope is unchanged from the 2026-09-28 report (tracked .ts/.tsx under src and functions/src; Git blob LF lines; CURRENT docs deduplicated; age is not proof of staleness).
 
 | Metric | Value |
 | --- | ---: |
-| TypeScript lines (src and functions/src) | 382731 |
-| Commits reachable from pinned revision | 3783 |
-| Test source files in those roots | 724 |
-| Unique CURRENT Markdown documents | 74 |
-| CURRENT documents last touched more than 30 days earlier | 42 |
+| TypeScript lines (src and functions/src) | 452648 |
+| Commits reachable from pinned revision | 4091 |
+| Test source files in those roots | 826 |
+| Unique CURRENT Markdown documents | 81 |
+| CURRENT documents last touched more than 30 days earlier | 65 |
 
-The previous ad-hoc survey is superseded. Root Vitest's executed file total below includes its own configured scope and is not identical to the source-root filename census. Cross-cycle growth percentages and unpinned route/export counts have been removed instead of implying comparability. Existing architecture census and documentation checks remain the tools for their respective counts.
+## Build status (this run, at the pinned revision)
 
-### Largest TypeScript files, including tests
+| Check | Status | Notes |
+| --- | --- | --- |
+| Build | PASS | `npm run build`; main chunk 4,478.82 kB (1,340.13 kB gzip) |
+| Lint | 0 errors, 5 warnings | not auto-fixable (1 reported fixable by `--fix`; not applied, timer/hook semantics need review) |
+| Tests (root) | PASS | 12,242 passing, 1 skipped, 825 test files |
+| `check-docs-alignment` | PASS | all HARD checks; 11 SOFT warnings (remote-timeout-finally, image-downscale, others) |
+
+## Largest TypeScript files over 1,900 lines (tests included)
 
 | File | Lines |
 | --- | ---: |
-| `src/features/planner-chat/PlannerChatPage.tsx` | 3942 |
-| `functions/src/ai/chat.ts` | 3108 |
+| `src/features/planner-chat/PlannerChatPage.tsx` | 4049 |
+| `functions/src/ai/chat.ts` | 3131 |
 | `src/features/records/records.logic.test.ts` | 3027 |
 | `src/features/shelly-chat/useShellyChatActions.logic.test.ts` | 2936 |
-| `src/features/books/BookEditorPage.tsx` | 2433 |
+| `src/features/shelly-chat/plannerAskHandoff.route.test.tsx` | 2585 |
+| `src/features/books/BookEditorPage.tsx` | 2505 |
 | `src/features/planner-chat/chatPlanner.logic.test.ts` | 2350 |
 | `functions/src/ai/tasks/shellyChat.test.ts` | 2296 |
 | `src/features/quest/useQuestSession.ts` | 2275 |
+| `src/features/avatar/stonebridge/useStonebridgeProgress.recovery.test.ts` | 2136 |
 | `functions/src/ai/evaluate.ts` | 2106 |
-| `src/features/today/TodayPage.tsx` | 1952 |
+| `src/features/records/dataReviewExport.logic.ts` | 1966 |
+| `src/features/today/TodayPage.tsx` | 1945 |
 | `src/features/workshop/WorkshopPage.tsx` | 1928 |
-| `functions/src/ai/tasks/shellyChat.ts` | 1919 |
-| `src/features/avatar/MyAvatarPage.tsx` | 1897 |
-| `src/features/progress/CurriculumTab.tsx` | 1857 |
-| `src/features/today/TodayChecklist.tsx` | 1841 |
+| `src/features/avatar/MyAvatarPage.tsx` | 1928 |
 
-### Oldest indexed CURRENT documents
+Since 2026-09-28: PlannerChatPage +107, BookEditorPage +72, chat.ts +23. `dataReviewExport.logic.ts` (1966) is newly in the list.
 
-Age measures the last reachable commit timestamp, not content accuracy or product relevance. The list is a review aid; stable reference documents may appropriately remain untouched.
+## Issues found
 
-| Document | Age in whole days |
-| --- | ---: |
-| `ENGINE_V2.md` | 208 |
-| `KNOWLEDGE_MINE_BRIEF.md` | 189 |
-| `WEEKLY_CONUNDRUM_ARC.md` | 183 |
-| `first-principles-system-review.md` | 173 |
-| `HERO_HUB_ANIMATION_TUNING.md` | 173 |
-| `STONEBRIDGE_BIBLE.md` | 173 |
-| `WORKBOOK_ACTIVITYCONFIG_BACKFILL.md` | 173 |
-| `SCRIPT_CONVENTIONS.md` | 169 |
-| `investigations/backend-reliability-assessment.md` | 168 |
-| `DESIGN_SKIP_SYSTEM_V2_2026-04-09.md` | 159 |
-| `EVALUATION_METHODOLOGY_2026-04.md` | 134 |
-| `EVALUATION_SYSTEM_FULL_SWEEP_2026-05.md` | 133 |
-| `PROFILE_LIMITS_AUDIT.md` | 125 |
-| `DESIGN_MONTHLY_REVIEW_BOOK.md` | 124 |
-| `design-pass-v1/copy-pass-audit.md` | 124 |
+### Auto-fixed
+- `docs/MASTER_OUTLINE.md` scale table refreshed to the pinned census above.
+- `npm audit fix` (non-breaking, lockfile only): production vulnerabilities 7 (1 moderate, 5 high, 1 critical) -> 4 high. Build, lint and tests re-run after the change.
 
-## Historical build observations
+### Needs human attention
+- 4 high production vulnerabilities remain (`@grpc/grpc-js` and others); fix needs `npm audit fix --force` (breaking). Decide on the upgrade.
+- 65 of 81 CURRENT docs untouched for 30+ days: review content before retiring; age alone does not show staleness.
+- 5 lint warnings (react-hooks/exhaustive-deps, timer semantics) need review.
+- 11 SOFT docs-check warnings persist (see `node scripts/check-docs-alignment.mjs`).
+- Main chunk 4.48 MB; route-level code splitting (Three.js) is an architectural decision (ARCH-08).
+- Frontend features with zero test files: auth, login, not-found, planner, ui-preview.
+- Dead-export, charter-alignment and task-registry scans were not rerun in this cycle.
+- The earlier note that CLAUDE.md references `today/captureRowWrite.ts` (implementation is `dayChecklistRowWrite.ts`) was not re-verified; CLAUDE.md is not auto-fixed.
+
+## Historical build observations (2026-09-28, not rerun)
 
 The following results are retained from the original September 28 audit at the pinned revision. They were reported by that audit, not rerun by this documentation correction. Current PR checks are separate.
 
