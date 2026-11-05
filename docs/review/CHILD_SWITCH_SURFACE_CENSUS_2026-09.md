@@ -450,11 +450,14 @@ make it true, on the `StonebridgeMissionCard` reading — the view it holds is s
 
 **The last Library phase missed `AppShell.tsx`'s classification and that is not repeated here**: the
 page is derived by the existing heuristic exactly as written, and the row below is the factual answer
-rather than a narrowing of the rule. Its three new siblings are **not** candidates and that is checked
-rather than assumed: `forgeFocusHandoff.ts` and `libraryReturnFlow.ts` hold no React state (module
-memory, no `useState`), and `StonebridgeVillage.tsx` — which this slice gives a page presentation —
-still declares no `childId` prop and still performs no write, so the heuristic derives the same answer
-for it as before. No row is re-classified and none is removed.
+rather than a narrowing of the rule. Its new siblings are **not** candidates and that is checked
+rather than assumed: `forgeFocusHandoff.ts` holds its one request in module memory and exports a route
+watch that sets no state (no `useState`, so the first predicate is never met — the identity boundary it
+enforces is the shared epoch, not a record of its own); `libraryReturnFlow.ts` is module memory for the
+same reason; `villageSurface.ts` is a pure cosmetic lookup with no state, no child and no write; and
+`StonebridgeVillage.tsx` — which this slice gives a page presentation — still declares no `childId`
+prop and still performs no write, so the heuristic derives the same answer for it as before. No row is
+re-classified and none is removed.
 
 The run that built it had **no shell authorisation**, so `npm run census:child-switch` was not run and
 no number here was re-derived. Per `CLAUDE.md`'s derived-numbers rule the qualifier is written instead

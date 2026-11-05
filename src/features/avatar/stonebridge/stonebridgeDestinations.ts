@@ -3,8 +3,9 @@
  * else.
  *
  * Two destinations, both of which already exist. This module is the contract
- * between the village (which offers them) and `MyAvatarPage` (which performs
- * them), kept in one place so the two halves cannot drift and so the route the
+ * between the village (which offers them) and the HOST that performs them —
+ * `MyAvatarPage` for the Hero Hub's board, `StonebridgePage` for the canonical
+ * town page — kept in one place so the halves cannot drift and so the route the
  * village points at is **assertable against the app's own route table** rather
  * than against a hand-written string in a component.
  *
@@ -17,13 +18,16 @@
  *     flow needs to bring the child back to the right tile — see
  *     `libraryReturnFlow`.
  *
- *   • **See your armor** → the ArmorPieceGallery already mounted further down
- *     `MyAvatarPage`. There is **no `/forge` route**; inventing one, or drawing
- *     a second copy of forge state in the village, would be two sources of
- *     truth for the same armor. So the village closes and the page moves to the
- *     real gallery, under the gallery's own existing rules: nothing is
- *     purchased, no piece is auto-selected, no diamonds are spent, and the
- *     narrative Forge mission stays independent of armor eligibility.
+ *   • **See your armor** → the ONE `ArmorPieceGallery`, which is mounted
+ *     further down `MyAvatarPage`. There is **no `/forge` route**; inventing
+ *     one, or drawing a second copy of forge state in the village, would be two
+ *     sources of truth for the same armor. From the Hero Hub the board closes
+ *     and the page moves to the gallery in place; from the town page the gallery
+ *     is not on screen at all, so the host navigates to the hub and the same
+ *     jump runs there once its DOM is up (`forgeFocusHandoff`). Either way it is
+ *     the gallery's own existing rules that apply: nothing is purchased, no
+ *     piece is auto-selected, no diamonds are spent, and the narrative Forge
+ *     mission stays independent of armor eligibility.
  */
 
 import { prefersReducedMotion, scrollBehaviourFor } from '../../today/logWorkJump'
@@ -74,8 +78,21 @@ export interface StonebridgeDestinations {
    * and everything the child can reach there are identical either way.
    */
   onOpenBooks?: (fromMissionId: string, observedEpoch: number) => void
-  /** Move to the existing armor gallery on this page. */
-  onVisitForge?: () => void
+  /**
+   * Go to the real armor.
+   *
+   * Handed the identity epoch observed at the TAP, for the same reason the
+   * Books door is: the visit takes time to close, and the host may have to
+   * navigate before it can act, so a departure whose identity moved in between
+   * must be refused rather than performed for whoever is there now. The village
+   * refuses it before this is called at all; the epoch is passed on because a
+   * host that carries the request across a route (the town page) must stamp the
+   * request with the TAP's epoch and not with a fresh reading of its own.
+   *
+   * A host that performs the jump in place (the Hero Hub, whose gallery is
+   * already mounted below the card) has nothing to carry and ignores it.
+   */
+  onVisitForge?: (observedEpoch: number) => void
 }
 
 /**

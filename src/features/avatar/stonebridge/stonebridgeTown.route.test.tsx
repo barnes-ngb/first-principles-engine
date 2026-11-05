@@ -5,7 +5,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { setActiveChildIdShared } from '../../../core/hooks/activeChildStore'
 import { getMission } from './missions'
 import { LIBRARY_RETURN_LABEL, LIBRARY_RETURN_LINE } from './libraryReturnCopy'
-import { clearForgeFocusRequest, consumeForgeFocus } from './forgeFocusHandoff'
+import {
+  clearForgeFocusRequest,
+  consumeForgeFocus,
+  useForgeFocusRouteWatch,
+} from './forgeFocusHandoff'
 import {
   STONEBRIDGE_TOWN_PATH,
   STONEBRIDGE_BOOKS_PATH,
@@ -125,12 +129,14 @@ function emulateReducedMotion(reduce = true) {
 
 const realMatchMedia = window.matchMedia
 
-/** The layout route, carrying the two watches `AppShell` carries. */
+/** The layout route, carrying the three watches `AppShell` carries. */
 function Shell() {
   const location = useLocation()
   const navigate = useNavigate()
   useLibraryReturnRouteWatch(location.pathname)
   useLibraryReturnReadinessWatch(fx.childrenLoading, fx.childrenLoadFailed)
+  // The armor request's route bound, mounted where the shell mounts it.
+  useForgeFocusRouteWatch(location.pathname)
   return (
     <div>
       <span data-testid="where">{location.pathname}</span>
@@ -487,6 +493,97 @@ describe('a return the town cannot serve yet', () => {
     expect(getLibraryReturnFlow()).toBeNull()
   })
 
+  it('retires an unserved focus when the journey expires under a HELD read', async () => {
+    // The blocker. The page adopts the request in the render phase, but the
+    // village is only rendered once the read has produced a board — and in that
+    // window the module journey can end: a raw same-tick `A → B → A`, an
+    // unsettled children read, a failed one. The LOCAL request used to outlive
+    // it, so the recovered read rendered the board and the Library tile took the
+    // focus for a journey that was already over. The generation guard on
+    // `serveLibraryReturn` cannot prevent that: it refuses the consume AFTER the
+    // focus has happened.
+    fx.data = { ...LIBRARY_REPAIRED, loading: true, mission: null, active: null }
+    const { router } = renderTown('/books')
+    act(() => {
+      requestLibraryReturn(begin()!.generation)
+    })
+    await act(async () => {
+      await router.navigate(STONEBRIDGE_TOWN_PATH)
+    })
+    // Adopted, with nothing on screen yet to serve it.
+    await screen.findByText('Loading your village…')
+
+    act(() => {
+      setActiveChildIdShared('london')
+      setActiveChildIdShared('lincoln')
+    })
+    expect(getLibraryReturnFlow()).toBeNull()
+
+    // The read lands. Re-entered at the SAME path deliberately: going away and
+    // coming back would unmount this page and reset its state, which is exactly
+    // what hid the defect.
+    fx.data = LIBRARY_REPAIRED
+    await act(async () => {
+      await router.navigate(STONEBRIDGE_TOWN_PATH)
+    })
+    await screen.findByRole('region', { name: 'Stonebridge Village' })
+    expect(tile(LIBRARY)).not.toHaveFocus()
+    expect(getLibraryReturnFlow()).toBeNull()
+  })
+
+  it('and the same holds when the children read goes unknown instead', async () => {
+    fx.data = { ...LIBRARY_REPAIRED, loading: true, mission: null, active: null }
+    const { router } = renderTown('/books')
+    act(() => {
+      requestLibraryReturn(begin()!.generation)
+    })
+    await act(async () => {
+      await router.navigate(STONEBRIDGE_TOWN_PATH)
+    })
+    await screen.findByText('Loading your village…')
+
+    // The shell's own read fails under the page: the identity is unknown, so the
+    // journey is over even though the selected child never changed.
+    fx.childrenLoading = true
+    fx.childrenLoadFailed = true
+    await act(async () => {
+      await router.navigate(STONEBRIDGE_TOWN_PATH)
+    })
+    expect(getLibraryReturnFlow()).toBeNull()
+
+    fx.childrenLoading = false
+    fx.childrenLoadFailed = false
+    fx.data = LIBRARY_REPAIRED
+    await act(async () => {
+      await router.navigate(STONEBRIDGE_TOWN_PATH)
+    })
+    await screen.findByRole('region', { name: 'Stonebridge Village' })
+    expect(tile(LIBRARY)).not.toHaveFocus()
+  })
+
+  it('but a held read that simply RECOVERS still serves the return', async () => {
+    // The control that matters most: what is retired is an expired journey, not
+    // the feature. Nothing moves here, so the request waits for the read and is
+    // served when it lands.
+    fx.data = { ...LIBRARY_REPAIRED, loading: true, mission: null, active: null }
+    const { router } = renderTown('/books')
+    act(() => {
+      requestLibraryReturn(begin()!.generation)
+    })
+    await act(async () => {
+      await router.navigate(STONEBRIDGE_TOWN_PATH)
+    })
+    await screen.findByText('Loading your village…')
+    expect(getLibraryReturnFlow()?.phase).toBe(LibraryReturnPhase.Returning)
+
+    fx.data = LIBRARY_REPAIRED
+    await act(async () => {
+      await router.navigate(STONEBRIDGE_TOWN_PATH)
+    })
+    await waitFor(() => expect(tile(LIBRARY)).toHaveFocus())
+    expect(getLibraryReturnFlow()).toBeNull()
+  })
+
   it('a place that is not on the board consumes the request and takes no focus', async () => {
     renderTown('/books')
     act(() => {
@@ -642,6 +739,73 @@ describe('the town’s armor door reaches the real hub', () => {
     expect(consumeForgeFocus({ familyId: 'fam-1', childId: 'lincoln' })).toBe(true)
     // It is not a journey: nothing on the shelf is owed a way back.
     expect(getLibraryReturnFlow()).toBeNull()
+  })
+
+  it('refuses the ARMOR departure when the identity moved during the close', async () => {
+    // The blocker this test exists for. The armor door used to be the ONE
+    // departure the epoch did not guard: the village called a no-argument
+    // callback and the page then sampled a fresh epoch of its own AFTER the
+    // visit had closed, so a raw same-tick `A → B → A` inside that transition
+    // left the scope string reading Lincoln, the fresh reading matched, and the
+    // tap still reached `/avatar` with a request stamped for whoever was there.
+    emulateReducedMotion(false)
+    renderTown()
+    fireEvent.click(tile(FORGE))
+    fireEvent.click(
+      within(screen.getByRole('dialog', { name: 'The Forge' })).getByRole('button', {
+        name: 'See your armor',
+      }),
+    )
+
+    act(() => {
+      setActiveChildIdShared('london')
+      setActiveChildIdShared('lincoln')
+    })
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'The Forge' })).not.toBeInTheDocument()
+    })
+    // No navigation…
+    expect(screen.getByTestId('where')).toHaveTextContent(STONEBRIDGE_TOWN_PATH)
+    expect(screen.queryByRole('heading', { name: 'Hero Hub' })).not.toBeInTheDocument()
+    // …and no new intent: nothing is left for the hub to serve later.
+    expect(consumeForgeFocus({ familyId: 'fam-1', childId: 'lincoln' })).toBe(false)
+    expect(consumeForgeFocus({ familyId: 'fam-1', childId: 'london' })).toBe(false)
+    // The refusal still owes the focus, and pays it to this page.
+    const town = screen.getByRole('region', { name: 'Stonebridge Village' })
+    expect(document.activeElement).not.toBe(document.body)
+    expect(document.activeElement?.contains(town)).toBe(true)
+  })
+
+  it('and the request it does make carries the TAP’s epoch, not a later one', async () => {
+    // The positive control for the test above, and the half a fresh reading got
+    // wrong: with nothing moving, the same real close departs and the hub
+    // accepts the request — which it can only do if the epoch travelled with it.
+    emulateReducedMotion(false)
+    renderTown()
+    fireEvent.click(tile(FORGE))
+    fireEvent.click(
+      within(screen.getByRole('dialog', { name: 'The Forge' })).getByRole('button', {
+        name: 'See your armor',
+      }),
+    )
+    await screen.findByRole('heading', { name: 'Hero Hub' })
+    expect(consumeForgeFocus({ familyId: 'fam-1', childId: 'lincoln' })).toBe(true)
+  })
+
+  it('and an unserved request is retired by leaving the hub', async () => {
+    // The hub stand-in has no gallery, which is the real page's state until its
+    // profile read lands: the request arrives and waits. Leaving before it is
+    // served retires it, so a later ordinary visit to the hub is ordinary.
+    const { router } = renderTown()
+    fireEvent.click(screen.getByRole('button', { name: 'My armor' }))
+    await screen.findByRole('heading', { name: 'Hero Hub' })
+
+    await act(async () => {
+      await router.navigate(STONEBRIDGE_TODAY_PATH)
+    })
+    await screen.findByRole('heading', { name: 'Today' })
+    expect(consumeForgeFocus({ familyId: 'fam-1', childId: 'lincoln' })).toBe(false)
   })
 
   it('and a child switch on the way makes the hub refuse it', async () => {

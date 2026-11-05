@@ -18,6 +18,7 @@ import {
   type MissionComputation,
 } from './computeStonebridgeProgress'
 import type { StonebridgeDestinations } from './stonebridgeDestinations'
+import { villageSurface } from './villageSurface'
 import { kidPalette } from '../../../app/tokens'
 
 /**
@@ -115,12 +116,13 @@ type PendingLeave = {
   /**
    * The observed identity epoch at the moment of the TAP.
    *
-   * The scope string alone cannot answer this boundary: the board takes time to
-   * close, the journey is created only once it has, and an `A → B → A` inside
-   * that window leaves `scopeKey` reading `A` again with the shelf underneath
-   * having re-read for someone else and back. There is no flow yet for the
-   * store subscription to cancel, so the tap carries a monotonic token instead
-   * and the departure is refused if it moved.
+   * The scope string alone cannot answer this boundary: the view takes time to
+   * close, whatever the departure creates is created only once it has, and an
+   * `A → B → A` inside that window leaves `scopeKey` reading `A` again with the
+   * reads underneath having gone to someone else and back. There is nothing yet
+   * for a store subscription to cancel, so the tap carries a monotonic token
+   * instead and the departure is refused if it moved — for BOTH destinations,
+   * and the token is then handed to the host rather than re-read there.
    */
   identityEpoch: number
 }
@@ -292,6 +294,20 @@ export default function StonebridgeVillage({
   const titleFont = isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive'
   /** …and everything else is plain and at least 14px (12px for small print). */
   const bodyFont = isLincoln ? undefined : '"Fredoka", cursive'
+
+  /**
+   * The frame's background AND its foreground, from one definition.
+   *
+   * Most of the text below names no colour and inherits — the subtitle, *Your
+   * Village*, *Pick a place from the list.*, *Each Place*, every tile's
+   * condition and counter, the Banner Hall body, each banner's name. Inheriting
+   * meant inheriting the APP THEME's text colour onto a panel chosen by the
+   * CHILD's look, which is black on black for a parent's light theme over the
+   * retro board. `villageSurface` is where that pair is decided, for both looks
+   * and both presentations; nothing that already names a colour is touched.
+   */
+  const frame = villageSurface(isLincoln, 'board')
+
   const board = deriveVillageBoard(completedMissions, currentMissionId)
   const bannerCount = raisedBanners.length
   /**
@@ -364,30 +380,54 @@ export default function StonebridgeVillage({
    * transition to finish, because until one is over its focus trap owns the
    * focus and MUI still has the rest of the page `aria-hidden` — a
    * scroll-and-focus run then is both taken back and invisible).
+   *
+   * ── The boundary both destinations are held to ─────────────────────────────
+   *
+   * The tap and the arrival are different moments, and BOTH checks are about the
+   * gap between them:
+   *
+   *   • the **scope** the view was rendered for must still be the scope on
+   *     screen — a tap from a view that has since been replaced sends nobody
+   *     anywhere;
+   *   • the **identity epoch observed at the tap** must not have moved. The
+   *     scope string alone cannot answer this: a raw `A → B → A` inside the
+   *     closing transition leaves `scopeKey` reading `A` again while the reads
+   *     underneath went to the brother and back.
+   *
+   * The epoch check used to be applied to the Books departure only, on the
+   * reasoning that the Forge "starts nothing". That was wrong for the canonical
+   * town page, whose armor door is a NAVIGATION carrying a scoped request — and
+   * it sampled a fresh epoch of its own after the close, so the moved identity
+   * was invisible to it and a non-reduced-motion `A → B → A` still reached
+   * `/avatar`. Both destinations are guarded here, at the one moment that knows
+   * what was tapped, and the tap's epoch is handed to the host so a host that
+   * has to carry the departure across a route stamps it with the TAP's reading
+   * rather than with a later one.
+   *
+   * A refusal moves nothing but the focus: no navigation, no request, no journey
+   * — `refuseLeave` hands the keyboard back to the caller's own connected anchor
+   * exactly as a dismissal does.
    */
   const performPendingLeave = () => {
     const pending = pendingLeaveRef.current
     pendingLeaveRef.current = null
     if (!pending) return
-    // A tap from a view that has since been replaced sends nobody anywhere.
+    // A tap from a view that has since been replaced sends nobody anywhere…
     if (pending.scopeKey !== scopeKey) {
       refuseLeave()
       return
     }
+    // …and neither does one whose identity moved while the view closed, even
+    // where the scope string has come back to what it was.
+    if (pending.identityEpoch !== getLibraryIdentityEpoch()) {
+      refuseLeave()
+      return
+    }
     if (pending.destination === 'books') {
-      // …and neither does one whose identity moved while the view closed, even
-      // where the scope string has come back to what it was. Applied to the
-      // Books departure, which is the one that creates a journey; the Forge
-      // keeps its existing behaviour exactly — the host performs it under the
-      // destination's own rules and starts nothing.
-      if (pending.identityEpoch !== getLibraryIdentityEpoch()) {
-        refuseLeave()
-        return
-      }
       onOpenBooks?.(pending.missionId, pending.identityEpoch)
       return
     }
-    onVisitForge?.()
+    onVisitForge?.(pending.identityEpoch)
   }
 
   const closeLocation = () => {
@@ -897,7 +937,9 @@ export default function StonebridgeVillage({
           role="region"
           aria-label="Stonebridge Village"
           sx={{
-            bgcolor: isLincoln ? 'rgba(6,10,16,0.97)' : 'rgba(255,247,252,0.98)',
+            bgcolor: frame.bg,
+            // Stated, not inherited — see `villageSurface`.
+            color: frame.fg,
             borderRadius: isLincoln ? '8px' : '16px',
           }}
         >
@@ -920,7 +962,11 @@ export default function StonebridgeVillage({
               'aria-label': 'Stonebridge Village',
               sx: {
                 backgroundImage: 'none',
-                bgcolor: isLincoln ? 'rgba(6,10,16,0.97)' : 'rgba(255,247,252,0.98)',
+                bgcolor: frame.bg,
+                // A Paper carries the THEME's text colour by default, which is
+                // the half a dark board on a light theme got wrong. The same
+                // pair as the page frame, from the same definition.
+                color: frame.fg,
               },
             },
           }}

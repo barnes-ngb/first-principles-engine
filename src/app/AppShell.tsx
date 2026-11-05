@@ -14,6 +14,7 @@ import { useChildSkillSnapshot } from '../core/hooks/useChildSkillSnapshot'
 import { useProfile } from '../core/profile/useProfile'
 import { UserProfile } from '../core/types/enums'
 import AvatarThumbnail from '../features/avatar/AvatarThumbnail'
+import { useForgeFocusRouteWatch } from '../features/avatar/stonebridge/forgeFocusHandoff'
 import {
   useLibraryReturnReadinessWatch,
   useLibraryReturnRouteWatch,
@@ -239,6 +240,14 @@ export function AppShell({ children }: AppShellProps) {
   // mounted across the hub — including the window in which the village board is
   // closing on its way to a departure that has not been created yet.
   useLibraryReturnReadinessWatch(childrenLoading, childrenLoadFailed)
+
+  // The town page's armor door is the same shape of module memory: a request to
+  // focus the hub's one gallery, made on a page that is about to be left. It
+  // lives only while the app is AT the hub, and the layout route is the one
+  // thing mounted across every move between them — so, like the journey above,
+  // its route transitions are watched here rather than in a component whose
+  // unmount would also fire on StrictMode's simulated remount.
+  useForgeFocusRouteWatch(location.pathname)
 
   const closeDrawer = useCallback(() => setDrawerOpen(false), [])
 

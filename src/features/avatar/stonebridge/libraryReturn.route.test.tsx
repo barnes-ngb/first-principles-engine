@@ -65,6 +65,15 @@ const fx = vi.hoisted(() => ({
    */
   childrenLoading: false,
   childrenLoadFailed: false,
+  /**
+   * How many times the hub's in-page Forge jump was actually performed.
+   *
+   * The real `MyAvatarPage` passes `focusForgeGallery`, which scrolls and
+   * focuses the one gallery mounted below the card. Counting the CALL is what
+   * lets this file assert that a departure the village refused performs nothing
+   * at all, without mounting a 1,900-line host to watch a scroll.
+   */
+  forgeVisits: 0,
 }))
 
 vi.mock('./useStonebridgeProgress', () => ({
@@ -180,7 +189,9 @@ function VillageRoute() {
         })
         navigate(STONEBRIDGE_BOOKS_PATH)
       }}
-      onVisitForge={() => {}}
+      onVisitForge={() => {
+        fx.forgeVisits += 1
+      }}
     />
   )
 }
@@ -325,6 +336,7 @@ beforeEach(() => {
   fx.activeChild = { id: 'lincoln', name: 'Lincoln' }
   fx.childrenLoading = false
   fx.childrenLoadFailed = false
+  fx.forgeVisits = 0
   setActiveChildIdShared('lincoln')
   endLibraryReturnFlow()
 })
@@ -630,6 +642,100 @@ describe('an abandoned return does not fire later', () => {
     expect(screen.queryByRole('dialog', { name: 'Stonebridge Village' })).not.toBeInTheDocument()
     expect(screen.getByText('🏰 Open Stonebridge')).toBeInTheDocument()
   })
+
+  it('and a journey that expires under a HELD read does not open the board later', async () => {
+    // The card adopts a waiting return in the render phase — `open: true` plus
+    // the tile to focus — but while the village read is held it renders its
+    // loading branch, so there is a window in which the board is "open" in state
+    // with nothing on screen. If the module journey ends in that window, the
+    // cached request used to outlive it: the read recovered and the board opened
+    // itself and focused the tile for a journey that was over. The generation
+    // guard on `serveLibraryReturn` cannot prevent that — it refuses the consume
+    // after the open and the focus have already happened.
+    fx.data = { ...LIBRARY_REPAIRED, loading: true, mission: null, active: null }
+    const { router } = renderJourney('/books')
+    act(() => {
+      requestLibraryReturn(begin()!.generation)
+    })
+    await act(async () => {
+      await router.navigate(LIBRARY_RETURN_VILLAGE_PATH)
+    })
+    await screen.findByText('Loading your mission…')
+
+    // A raw same-tick A → B → A: the selected child reads Lincoln again, so the
+    // card's scope never moved and only the module knows the journey is over.
+    act(() => {
+      setActiveChildIdShared('london')
+      setActiveChildIdShared('lincoln')
+    })
+    expect(getLibraryReturnFlow()).toBeNull()
+
+    // The read lands. Re-entered at the SAME path on purpose: going away and
+    // coming back would remount the card and reset its state, which is what hid
+    // this defect.
+    fx.data = LIBRARY_REPAIRED
+    await act(async () => {
+      await router.navigate(LIBRARY_RETURN_VILLAGE_PATH)
+    })
+    // The ordinary hub: the board did not open itself, and its own way in is
+    // where it always is.
+    expect(screen.queryByRole('dialog', { name: 'Stonebridge Village' })).not.toBeInTheDocument()
+    expect(screen.getByText('🏰 Open Stonebridge')).toBeInTheDocument()
+  })
+
+  it('but a held read that simply RECOVERS still opens the board and focuses the tile', async () => {
+    // The control that matters most: what is retired is an expired journey, not
+    // the feature.
+    fx.data = { ...LIBRARY_REPAIRED, loading: true, mission: null, active: null }
+    const { router } = renderJourney('/books')
+    act(() => {
+      requestLibraryReturn(begin()!.generation)
+    })
+    await act(async () => {
+      await router.navigate(LIBRARY_RETURN_VILLAGE_PATH)
+    })
+    await screen.findByText('Loading your mission…')
+    expect(getLibraryReturnFlow()?.phase).toBe(LibraryReturnPhase.Returning)
+
+    fx.data = LIBRARY_REPAIRED
+    await act(async () => {
+      await router.navigate(LIBRARY_RETURN_VILLAGE_PATH)
+    })
+    await waitFor(() => expect(tile(LIBRARY)).toHaveFocus())
+    expect(getLibraryReturnFlow()).toBeNull()
+  })
+
+  it('and a board the child opened BY HAND is never closed by an expiry', async () => {
+    // The other half of the rule: the retirement keys on an unserved return
+    // request, so a board with no request behind it is not its business.
+    renderJourney()
+    fireEvent.click(screen.getByText('🏰 Open Stonebridge'))
+    await screen.findByRole('dialog', { name: 'Stonebridge Village' })
+
+    act(() => {
+      setActiveChildIdShared('london')
+      setActiveChildIdShared('lincoln')
+    })
+    expect(screen.getByRole('dialog', { name: 'Stonebridge Village' })).toBeInTheDocument()
+  })
+
+  it('and an already-SERVED return keeps its open board and its focus', async () => {
+    // Nor does it undo an ordinary post-consumption state: the journey ended by
+    // being served, and what it left behind is the child looking at the place
+    // they asked to come back to.
+    renderJourney()
+    await leaveFromLocation(LIBRARY)
+    fireEvent.click(screen.getByRole('button', { name: LIBRARY_RETURN_LABEL }))
+    await waitFor(() => expect(tile(LIBRARY)).toHaveFocus())
+    expect(getLibraryReturnFlow()).toBeNull()
+
+    act(() => {
+      setActiveChildIdShared('london')
+      setActiveChildIdShared('lincoln')
+    })
+    expect(screen.getByRole('dialog', { name: 'Stonebridge Village' })).toBeInTheDocument()
+    expect(tile(LIBRARY)).toHaveFocus()
+  })
 })
 
 describe('a scope change ends it under an open shelf', () => {
@@ -824,6 +930,11 @@ describe('an unknown children read ENDS it, rather than only hiding the way back
         familyId: 'fam-1',
         childId: 'lincoln',
         missionId: 'library_hut',
+        // The departure this stands for was tapped on the HUB's board, which is
+        // the entry this whole file drives — named rather than defaulted,
+        // because an origin with a default would be an origin a caller can
+        // forget to think about.
+        origin: LibraryReturnOrigin.Hub,
         observedEpoch: tapped,
       }),
     ).toBeNull()
@@ -880,6 +991,56 @@ describe('an unknown children read ENDS it, rather than only hiding the way back
     fireEvent.click(screen.getByRole('button', { name: 'My Books' }))
     await screen.findByRole('heading', { name: 'My Books' })
     expect(screen.getByRole('button', { name: LIBRARY_RETURN_LABEL })).toBeInTheDocument()
+  })
+})
+
+describe('the hub’s own armor door is held to the same boundary', () => {
+  it('refuses the jump when the identity moved while the board closed', async () => {
+    // The epoch used to guard the Books departure only, on the reasoning that
+    // the Forge "starts nothing". It is a departure like any other: the scope
+    // string reads Lincoln again by the time the board has gone, and only the
+    // epoch captured at the tap knows the reads underneath went to the brother
+    // and back.
+    emulateReducedMotion(false)
+    renderJourney()
+    const opener = screen.getByText('🏰 Open Stonebridge')
+    fireEvent.click(opener)
+    fireEvent.click(tile(FORGE))
+    fireEvent.click(
+      within(screen.getByRole('dialog', { name: 'The Forge' })).getByRole('button', {
+        name: 'See your armor',
+      }),
+    )
+
+    act(() => {
+      setActiveChildIdShared('london')
+      setActiveChildIdShared('lincoln')
+    })
+
+    await waitFor(() => {
+      expect(screen.queryByText('🎌 Banner Hall')).not.toBeInTheDocument()
+    })
+    // The jump never ran — no scroll, no focus, nothing granted.
+    expect(fx.forgeVisits).toBe(0)
+    // And the refusal still pays what it owes: the focus goes back to the
+    // control that opened the board, exactly as a dismissal leaves it.
+    await waitFor(() => expect(opener).toHaveFocus())
+    expect(document.activeElement).not.toBe(document.body)
+  })
+
+  it('but performs it when nothing moved at all', async () => {
+    // The positive control: the ordinary armor door still works.
+    renderJourney()
+    fireEvent.click(screen.getByText('🏰 Open Stonebridge'))
+    fireEvent.click(tile(FORGE))
+    fireEvent.click(
+      within(screen.getByRole('dialog', { name: 'The Forge' })).getByRole('button', {
+        name: 'See your armor',
+      }),
+    )
+    await waitFor(() => expect(fx.forgeVisits).toBe(1))
+    // It is a jump on this page, not a journey: nothing is owed a way back.
+    expect(getLibraryReturnFlow()).toBeNull()
   })
 })
 

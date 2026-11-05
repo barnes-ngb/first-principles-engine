@@ -44,6 +44,21 @@ import {
  */
 
 const read = (rel: string) => readFileSync(resolve(process.cwd(), rel), 'utf8')
+
+/**
+ * The same file with its comments removed — the CODE, for any claim about what a
+ * module imports, renders or calls.
+ *
+ * A structural claim asked of the raw text is answered by the prose that
+ * explains the structure, which is how the first draft of the block below
+ * reported "the page renders the mission card" against the sentence saying it
+ * deliberately does not.
+ */
+const readCode = (rel: string) =>
+  read(rel)
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '')
+
 const AVATAR_PAGE = 'src/features/avatar/MyAvatarPage.tsx'
 
 interface RouteNode {
@@ -161,18 +176,69 @@ describe('the canonical town route is the page the app really mounts', () => {
     expect(source).toContain('navigate(STONEBRIDGE_BOOKS_PATH)')
     expect(source).toContain('navigate(STONEBRIDGE_TODAY_PATH)')
     expect(source).toContain('navigate(FORGE_HOST_PATH)')
-    // No invented armor route, and no second gallery drawn on the new page.
-    expect(source).not.toMatch(/['"]\/forge['"]/)
-    expect(source).not.toMatch(/ArmorPieceGallery|FORGE_GALLERY_ANCHOR_ID/)
     // And it never selects a child.
     expect(source).not.toMatch(/setActiveChild/)
-    // Nor does it carry the hub's 3D character onto a page that is about the
-    // village: the town is the existing 2D scene and its location list.
-    expect(source).not.toMatch(/VoxelCharacter|AvatarCharacterDisplay|from 'three'/)
-    // One progress owner per rendered journey: the page reads the hook itself
-    // and must not also render the card, which reads it again.
-    expect(source).toContain('useStonebridgeProgress(familyId, childId)')
-    expect(source).not.toMatch(/StonebridgeMissionCard/)
+  })
+
+  /**
+   * "One progress owner, one gallery, no 3D" — asked of what the module USES,
+   * not of what it says.
+   *
+   * The first version of this block matched the raw file for
+   * `StonebridgeMissionCard` and failed on the sentence in the page's own header
+   * explaining that it deliberately does not render one — a guard that reads
+   * prose reports a defect for an explanation, and the fix for that is never to
+   * delete the explanation. So the oracle is the module's import list and its
+   * rendered elements, taken from the source with comments removed: what a file
+   * imports and what it puts on screen is what it does.
+   *
+   * The behavioural half is where it belongs — `stonebridgeTown.route.test.tsx`
+   * renders the real page and asserts the card's own control (*🏰 Open
+   * Stonebridge*) is nowhere on it.
+   */
+  describe('what the town page actually imports and renders', () => {
+    const PAGE = 'src/features/avatar/stonebridge/StonebridgePage.tsx'
+
+    /** Module specifiers this file imports from. */
+    const imports = (code: string): string[] =>
+      [...code.matchAll(/\bfrom\s+['"]([^'"]+)['"]/g)].map((m) => m[1])
+
+    /** Component names this file renders as JSX. */
+    const rendered = (code: string): string[] =>
+      [...code.matchAll(/<([A-Z][A-Za-z0-9_]*)/g)].map((m) => m[1])
+
+    it('does not import or render the mission card — one hook owner per journey', () => {
+      const code = readCode(PAGE)
+      // The page owns the read itself…
+      expect(imports(code)).toContain('./useStonebridgeProgress')
+      expect(code).toContain('useStonebridgeProgress(familyId, childId)')
+      // …and the card, which would read it a second time, is neither imported
+      // nor rendered.
+      expect(imports(code).filter((s) => /StonebridgeMissionCard/.test(s))).toEqual([])
+      expect(rendered(code)).not.toContain('StonebridgeMissionCard')
+      // It renders the shared board directly instead.
+      expect(rendered(code)).toContain('StonebridgeVillage')
+    })
+
+    it('does not import or render the hub’s 3D character or its gallery', () => {
+      const code = readCode(PAGE)
+      for (const forbidden of ['VoxelCharacter', 'AvatarCharacterDisplay', 'ArmorPieceGallery']) {
+        expect(
+          rendered(code),
+          `the town page renders ${forbidden}`,
+        ).not.toContain(forbidden)
+        expect(
+          imports(code).filter((s) => s.includes(forbidden)),
+          `the town page imports ${forbidden}`,
+        ).toEqual([])
+      }
+      expect(imports(code)).not.toContain('three')
+      // The anchor id belongs to the hub's one gallery; the page points at the
+      // hub's PATH and never at a copy of its anchor.
+      expect(code).not.toContain('FORGE_GALLERY_ANCHOR_ID')
+      // No invented armor route either.
+      expect(code).not.toMatch(/['"]\/forge['"]/)
+    })
   })
 })
 

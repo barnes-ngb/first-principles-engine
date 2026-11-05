@@ -12,6 +12,7 @@ import StonebridgeLocationArt from './StonebridgeLocationArt'
 import StonebridgeRecoveryNotice, { type StonebridgeRecoveryState } from './StonebridgeRecoveryNotice'
 import { VillageLocationState, type MissionComputation } from './computeStonebridgeProgress'
 import { LIBRARY_MISSION_ID, offersBooksDoor } from './stonebridgeDestinations'
+import { villageSurface } from './villageSurface'
 import type { StonebridgeMission } from './missions'
 
 /** The one location whose visit offers the armor gallery (the Forge). */
@@ -95,6 +96,8 @@ export default function StonebridgeLocationDialog({
 }: StonebridgeLocationDialogProps) {
   const titleId = useId()
   const isPhone = useMediaQuery('(max-width:599.95px)')
+  /** This view's background and the foreground that is readable on it. */
+  const surface = villageSurface(isLincoln, 'visit')
 
   /** Short headings keep the pixel theme… */
   const titleFont = isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive'
@@ -157,7 +160,13 @@ export default function StonebridgeLocationDialog({
       slotProps={{
         paper: {
           sx: {
-            bgcolor: isLincoln ? 'rgba(10,16,24,0.98)' : 'rgba(255,250,253,0.99)',
+            bgcolor: surface.bg,
+            // Stated for the same reason the board's frame states it: a Paper
+            // carries the THEME's text colour, so a dark visit under a parent's
+            // light theme inherited near-black on near-black for anything that
+            // does not name a colour of its own. Every line below does name one;
+            // this is the frame refusing to depend on that staying true.
+            color: surface.fg,
             backgroundImage: 'none',
             border: `1px solid ${accent}55`,
             borderRadius: isPhone ? 0 : isLincoln ? '10px' : '18px',

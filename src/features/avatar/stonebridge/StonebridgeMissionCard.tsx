@@ -116,6 +116,38 @@ export default function StonebridgeMissionCard({
       focusMissionId: pendingReturn.missionId,
       servedGeneration: pendingReturn.generation,
     })
+  } else if (board.focusMissionId !== null && pendingReturn?.generation !== board.servedGeneration) {
+    /**
+     * The journey this board was opened for is no longer live — so the board it
+     * opened goes with it.
+     *
+     * Adoption happens in the render phase, and while the village read is held
+     * this card renders its loading branch: the board is "open" in state with
+     * nothing on screen yet. If the module ends the journey in that window — a
+     * raw same-tick `A → B → A`, an unsettled children read, a failed one — the
+     * cached request used to outlive it, and the recovered read then opened the
+     * board and focused the tile for a journey that was over. The generation
+     * guard on `serveLibraryReturn` cannot prevent that: it refuses the consume
+     * AFTER the open and the focus have already happened.
+     *
+     * `focusMissionId !== null` is exactly "opened to serve a return, not yet
+     * served", which is what makes this safe to do: a board the child opened by
+     * hand carries no focus request and is never touched, and a request already
+     * served has set it to null, so neither the open board nor the focus it
+     * landed is undone afterwards. `servedGeneration` is kept, so a journey
+     * already answered cannot be adopted again.
+     *
+     * A served return cannot be mistaken for an expired one, and that rests on
+     * `onFocusServed` consuming the flow and clearing this marker in two
+     * ADJACENT synchronous statements: no render can land between them, so any
+     * render that reads the flow as gone has the cleared marker queued with it.
+     */
+    setBoard({
+      scopeKey,
+      open: false,
+      focusMissionId: null,
+      servedGeneration: board.servedGeneration,
+    })
   }
   const villageOpen = board.scopeKey === scopeKey && board.open
 

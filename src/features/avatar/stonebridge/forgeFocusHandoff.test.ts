@@ -1,12 +1,13 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { setActiveChildIdShared } from '../../../core/hooks/activeChildStore'
 import {
   FORGE_HOST_PATH,
   clearForgeFocusRequest,
   consumeForgeFocus,
+  reconcileForgeFocusPath,
   requestForgeFocus,
 } from './forgeFocusHandoff'
 import {
@@ -22,10 +23,11 @@ import {
  * The town page's armor door, as a rule rather than as a screen.
  *
  * What makes it safe is invisible in a screenshot: that the request belongs to
- * one child, that it dies with an identity movement, that it is spent on the
- * first ask, and that the thing it finally does is the SAME scroll-and-focus the
- * Hero Hub's own Forge visit does — a scroll with no focus being the defect
- * `FIX-267` exists for.
+ * one child, that it dies with an identity movement, that it is **retired by
+ * leaving the host** rather than waiting indefinitely for a page that may never
+ * come back, that it is spent on the first ask, and that the thing it finally
+ * does is the SAME scroll-and-focus the Hero Hub's own Forge visit does — a
+ * scroll with no focus being the defect `FIX-267` exists for.
  *
  * The journey over a real router is in `stonebridgeTown.route.test.tsx`; the
  * hub's half of the hand-off is wiring in `MyAvatarPage`, read here as source for
@@ -161,11 +163,100 @@ describe('an identity movement between the tap and the arrival', () => {
   })
 })
 
+describe('an unserved request is retired by leaving the host', () => {
+  it('survives arriving at the hub, however long the read takes', () => {
+    // The valid delayed arrival, which is the thing the bound must not break:
+    // the gallery does not exist until the profile read lands, and the request
+    // waits for it while the child is standing on the page.
+    request()
+    reconcileForgeFocusPath(FORGE_HOST_PATH)
+    reconcileForgeFocusPath(FORGE_HOST_PATH)
+    expect(consumeForgeFocus({ familyId: FAM, childId: LINCOLN })).toBe(true)
+  })
+
+  it('and survives the host path with a query or a hash on it', () => {
+    request()
+    reconcileForgeFocusPath(`${FORGE_HOST_PATH}?heroDebug=1`)
+    reconcileForgeFocusPath(`${FORGE_HOST_PATH}/`)
+    reconcileForgeFocusPath(`${FORGE_HOST_PATH}#armor`)
+    expect(consumeForgeFocus({ familyId: FAM, childId: LINCOLN })).toBe(true)
+  })
+
+  it('but leaving the hub before the gallery exists ends it', () => {
+    // The reproduction: hold the profile read, take the armor door, leave for
+    // Settings before the anchor is ever in the document, then let the read
+    // land. The next ordinary visit to the hub used to scroll and focus the
+    // gallery nobody had asked for.
+    request()
+    reconcileForgeFocusPath(FORGE_HOST_PATH)
+    reconcileForgeFocusPath('/settings')
+    expect(consumeForgeFocus({ familyId: FAM, childId: LINCOLN })).toBe(false)
+  })
+
+  it('and so does never getting there at all', () => {
+    request()
+    reconcileForgeFocusPath('/today')
+    expect(consumeForgeFocus({ familyId: FAM, childId: LINCOLN })).toBe(false)
+  })
+
+  it('a later ORDINARY arrival at the hub is an ordinary arrival', () => {
+    // The whole point, stated as the thing a child would see.
+    request()
+    reconcileForgeFocusPath(FORGE_HOST_PATH)
+    reconcileForgeFocusPath('/settings')
+    reconcileForgeFocusPath(FORGE_HOST_PATH)
+    expect(consumeForgeFocus({ familyId: FAM, childId: LINCOLN })).toBe(false)
+  })
+
+  it('is idempotent, and silent with nothing in hand', () => {
+    // It is reported from a location change, so it is called on every
+    // navigation in the app, with or without a request.
+    expect(() => {
+      reconcileForgeFocusPath('/today')
+      reconcileForgeFocusPath('/today')
+      reconcileForgeFocusPath(FORGE_HOST_PATH)
+    }).not.toThrow()
+    request()
+    reconcileForgeFocusPath(FORGE_HOST_PATH)
+    reconcileForgeFocusPath(FORGE_HOST_PATH)
+    expect(consumeForgeFocus({ familyId: FAM, childId: LINCOLN })).toBe(true)
+  })
+
+  it('and the boundary is the ROUTE, not a component unmount', () => {
+    // Why it is not an unmount cleanup: StrictMode mounts, runs effects, tears
+    // them down and runs them again. A cleanup that retired the request would
+    // retire it between those two runs — on the very page that was about to
+    // serve it. Asserted as source, because the absence of a caller is the
+    // claim: `clearForgeFocusRequest` is reached from the reconciliation and
+    // from tests, and from no component lifecycle.
+    const handoff = read('src/features/avatar/stonebridge/forgeFocusHandoff.ts')
+    expect(handoff).toContain('export function reconcileForgeFocusPath')
+    expect(handoff).toContain('export function useForgeFocusRouteWatch')
+    const shell = read('src/app/AppShell.tsx')
+    expect(shell).toContain('useForgeFocusRouteWatch(location.pathname)')
+    for (const file of [
+      'src/features/avatar/MyAvatarPage.tsx',
+      'src/features/avatar/stonebridge/StonebridgePage.tsx',
+    ]) {
+      expect(read(file), `${file} retires the request from a lifecycle`).not.toContain(
+        'clearForgeFocusRequest',
+      )
+    }
+  })
+})
+
 describe('what the hub does once it has accepted one', () => {
   it('scrolls to the real anchor and leaves the keyboard ON it', () => {
     const gallery = document.createElement('div')
     gallery.id = FORGE_GALLERY_ANCHOR_ID
     gallery.tabIndex = -1
+    // `scrollIntoView` is a layout API jsdom does not implement at all, so it is
+    // stubbed AS the browser boundary and then asserted — the same shape
+    // `stonebridgeDestinations.test.tsx` uses. Production is not bent to suit
+    // the environment: a real browser has this method and the reduced-motion
+    // argument is what the preference turns into.
+    const scrollIntoView = vi.fn()
+    gallery.scrollIntoView = scrollIntoView
     document.body.appendChild(gallery)
     try {
       request()
@@ -175,6 +266,31 @@ describe('what the hub does once it has accepted one', () => {
       expect(document.activeElement).toBe(gallery)
       expect(gallery.isConnected).toBe(true)
       expect(gallery.closest('[aria-hidden="true"]')).toBeNull()
+      // And the scroll really happened, once, on the way to the focus.
+      expect(scrollIntoView).toHaveBeenCalledTimes(1)
+      expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' })
+    } finally {
+      gallery.remove()
+    }
+  })
+
+  it('honours a reduced-motion preference on the arrival jump too', () => {
+    const gallery = document.createElement('div')
+    gallery.id = FORGE_GALLERY_ANCHOR_ID
+    gallery.tabIndex = -1
+    const scrollIntoView = vi.fn()
+    gallery.scrollIntoView = scrollIntoView
+    document.body.appendChild(gallery)
+    const reducedView = {
+      matchMedia: (q: string) => ({ matches: q.includes('prefers-reduced-motion') }),
+    } as unknown as Window
+    try {
+      request()
+      expect(consumeForgeFocus({ familyId: FAM, childId: LINCOLN })).toBe(true)
+      expect(focusForgeGallery(document, reducedView)).toBe(true)
+      expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'auto', block: 'start' })
+      // The preference removes the animation, never the focus.
+      expect(document.activeElement).toBe(gallery)
     } finally {
       gallery.remove()
     }

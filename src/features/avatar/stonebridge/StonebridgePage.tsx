@@ -149,6 +149,32 @@ export default function StonebridgePage() {
       focusMissionId: pendingReturn.missionId,
       servedGeneration: pendingReturn.generation,
     })
+  } else if (town.focusMissionId !== null && pendingReturn?.generation !== town.servedGeneration) {
+    /**
+     * The journey this focus was adopted for is no longer live — so the focus is
+     * retired with it.
+     *
+     * Adoption happens in the render phase, and the village is only rendered
+     * once the progress read has produced a board. While that read is held there
+     * is a window in which this page holds an UNSERVED request and the module
+     * has already ended the journey — a raw same-tick `A → B → A`, an unsettled
+     * children read, a failed one. The generation guard on `serveLibraryReturn`
+     * cannot help: it refuses the consume, but the focus would already have been
+     * performed by then. So the request is dropped here instead, before the
+     * recovered read can hand it to a board.
+     *
+     * `focusMissionId !== null` is exactly "adopted and not yet served", which is
+     * why nothing else is undone: a focus that HAS been served already set it to
+     * null, so the ordinary post-consumption state is never reverted, and this
+     * page has no board to close — it is the board. `servedGeneration` is kept,
+     * so a journey already answered cannot be adopted a second time.
+     *
+     * A served return cannot be mistaken for an expired one, and that rests on
+     * `onFocusServed` consuming the flow and clearing this marker in two
+     * ADJACENT synchronous statements: no render can land between them, so any
+     * render that reads the flow as gone has the cleared marker queued with it.
+     */
+    setTown({ scopeKey, focusMissionId: null, servedGeneration: town.servedGeneration })
   }
 
   /**
@@ -205,6 +231,11 @@ export default function StonebridgePage() {
           // scoped, epoch-stamped request and the hub performs the same
           // reduced-motion scroll-and-focus its own Forge visit does, once its
           // DOM is there. A stale request is refused rather than served.
+          //
+          // Read HERE because here IS the tap: this door is a plain control on
+          // the page with no view closing between the press and the navigation.
+          // The village-mediated door below is the one that must be handed the
+          // tap's reading instead of taking its own.
           requestForgeFocus({ familyId, childId, epoch: getLibraryIdentityEpoch() })
           navigate(FORGE_HOST_PATH)
         }}
@@ -311,8 +342,15 @@ export default function StonebridgePage() {
             })
             navigate(STONEBRIDGE_BOOKS_PATH)
           }}
-          onVisitForge={() => {
-            requestForgeFocus({ familyId, childId, epoch: getLibraryIdentityEpoch() })
+          // The epoch is the one observed at the TAP, handed over by the village
+          // — never re-read here. Sampling it after the visit had closed was
+          // exactly the hole: an `A → B → A` inside that transition left the
+          // scope string unchanged, the fresh reading matched the moved epoch,
+          // and the departure went through. The village now refuses it before
+          // this is called at all, and the request this stamps carries the tap's
+          // reading so the hub can refuse a stale arrival too.
+          onVisitForge={(observedEpoch) => {
+            requestForgeFocus({ familyId, childId, epoch: observedEpoch })
             navigate(FORGE_HOST_PATH)
           }}
           focusMissionId={town.focusMissionId}
