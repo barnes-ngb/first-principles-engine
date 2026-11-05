@@ -2,7 +2,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-import { pathKeepsLibraryReturnFlow } from './libraryReturnFlow'
+import { isBooksAreaPath } from './libraryReturnFlow'
 
 /**
  * Every way out of the Books area, inventoried from the source.
@@ -25,9 +25,13 @@ import { pathKeepsLibraryReturnFlow } from './libraryReturnFlow'
  * because a guard that passes on what it could not read is worse than no guard.
  *
  * What a failure means is a decision, not a bug: either the new exit belongs in
- * the journey (add it to `pathKeepsLibraryReturnFlow`) or it deliberately ends
+ * the journey (add the route shape to `isBooksAreaPath`) or it deliberately ends
  * it (name it in `EXITS_THE_JOURNEY`, with the reason). Both are fine; being
  * silent is not.
+ *
+ * It is a route-shape check, not a behaviour check, and says so: whether the
+ * real pages' own guards hold their exits is the route and harness suites' job.
+ * What this adds is closure over files no render test visits.
  */
 
 const BOOKS_DIR = resolve(process.cwd(), 'src/features/books')
@@ -164,7 +168,7 @@ describe('the Books area’s own exits', () => {
     const leaks: string[] = []
     for (const call of CALLS) {
       for (const target of call.targets) {
-        if (pathKeepsLibraryReturnFlow(target)) continue
+        if (isBooksAreaPath(target)) continue
         if (target in EXITS_THE_JOURNEY) continue
         leaks.push(`${call.file}:${call.line} — navigate('${target}')`)
       }

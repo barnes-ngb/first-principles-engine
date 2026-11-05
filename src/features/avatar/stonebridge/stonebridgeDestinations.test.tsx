@@ -91,9 +91,14 @@ describe('Open My Books lands on the app’s real bookshelf', () => {
     // The destination is unchanged; what is added is in-memory only. Read as
     // source for the same reason the rest of this suite is: mounting a
     // 1,900-line host with Three.js behind it would make this a suite about
-    // mocking.
+    // mocking. The note's BEHAVIOUR — scope, epoch, expiry — is asserted
+    // against the real module in `libraryReturnFlow.test.ts` and through a real
+    // router in `libraryReturn.route.test.tsx`; this is only the wiring.
     const source = read(AVATAR_PAGE)
-    expect(source).toContain('beginLibraryReturnFlow({ familyId, childId, missionId: fromMissionId })')
+    expect(source).toContain('onOpenBooks={(fromMissionId, observedEpoch) => {')
+    // The epoch observed at the tap is forwarded, not re-read here: re-reading
+    // it would defeat the boundary it exists to guard.
+    expect(source).toMatch(/beginLibraryReturnFlow\(\{[^}]*observedEpoch,/)
     // One call site for the Books destination, so there is no second place that
     // could navigate without the note or leave a note without navigating.
     expect(source.match(/STONEBRIDGE_BOOKS_PATH/g)).toHaveLength(2) // the import + the one call

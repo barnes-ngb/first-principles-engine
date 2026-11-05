@@ -9,10 +9,12 @@ import {
   LibraryReturnPhase,
   beginLibraryReturnFlow,
   endLibraryReturnFlow,
+  getLibraryIdentityEpoch,
   getLibraryReturnFlow,
+  isBooksAreaPath,
   liveLibraryReturnFlow,
-  pathKeepsLibraryReturnFlow,
-  reconcileLibraryReturnFlow,
+  observeLibraryReturnIdentity,
+  reconcileLibraryReturnFlowPath,
   requestLibraryReturn,
   serveLibraryReturn,
   subscribeLibraryReturnFlow,
@@ -21,18 +23,16 @@ import {
 /**
  * The temporary way back, as a rule rather than as a screen.
  *
- * ── What this file is for ────────────────────────────────────────────────────
+ * What makes the journey safe is invisible in a screenshot: that a scope change
+ * ends it permanently, that a stale callback cannot act on it, that a delayed
+ * callback captured before it existed cannot create it, and that leaving the
+ * journey ends it. Those are asserted here against the real module — including
+ * the two cases a rendered test cannot reach at all: a synchronous `A → B → A`
+ * (React batches it into one render still reading `A`) and a logout, which
+ * unmounts every screen that could have watched for it.
  *
- * The three things that make the flow safe are all invisible in a rendered
- * screenshot: that a scope change ends it **permanently**, that a stale callback
- * cannot act on it, and that nothing anywhere can bring it back. So they are
- * asserted here, against the real module — including the one case a rendered
- * test cannot reach at all: a synchronous `A → B → A`, which React batches into
- * a single render that still reads `A`. This file drives the shared
- * `activeChildStore` directly, which is where the switch really happens.
- *
- * The companion `libraryReturn.route.test.tsx` drives the same module through a
- * real router and the real components.
+ * `libraryReturn.route.test.tsx` drives the same module through a real router
+ * and the real village components.
  */
 
 const LINCOLN = 'lincoln'
@@ -40,11 +40,28 @@ const LONDON = 'london'
 const FAM = 'fam-1'
 const ORIGIN = { familyId: FAM, childId: LINCOLN, missionId: 'library_hut' }
 
+/** Begin against the epoch the module has actually observed. */
+function begin(origin: Partial<typeof ORIGIN> = {}) {
+  return beginLibraryReturnFlow({
+    ...ORIGIN,
+    ...origin,
+    observedEpoch: getLibraryIdentityEpoch(),
+  })
+}
+
+/** A live journey that has already stepped into the Books area. */
+function beginOnTheShelf() {
+  const flow = begin()!
+  reconcileLibraryReturnFlowPath('/books')
+  return flow
+}
+
 beforeEach(() => {
   localStorage.clear()
-  // The store is module-level, so each test starts from a known child and a
-  // known empty flow — exactly as a fresh page load would.
   setActiveChildIdShared(LINCOLN)
+  // A settled identity, so `''` below reads as a session ENDING rather than as
+  // a page that has not loaded yet.
+  observeLibraryReturnIdentity(`${FAM}|parents|${LINCOLN}`)
   endLibraryReturnFlow()
 })
 
@@ -54,7 +71,7 @@ afterEach(() => {
 
 describe('beginning a journey', () => {
   it('records the family, the child and the place, away from the village', () => {
-    const flow = beginLibraryReturnFlow(ORIGIN)
+    const flow = begin()
     expect(flow).toMatchObject({
       familyId: FAM,
       childId: LINCOLN,
@@ -65,60 +82,99 @@ describe('beginning a journey', () => {
   })
 
   it('refuses an unsettled scope rather than binding to nobody', () => {
-    // A failed or still-loading children read is not an affirmative answer, and
-    // a flow bound to an empty id would match whoever arrived next.
-    expect(beginLibraryReturnFlow({ ...ORIGIN, childId: '' })).toBeNull()
-    expect(beginLibraryReturnFlow({ ...ORIGIN, familyId: '' })).toBeNull()
+    expect(begin({ childId: '' })).toBeNull()
+    expect(begin({ familyId: '' })).toBeNull()
     expect(getLibraryReturnFlow()).toBeNull()
   })
 
   it('persists nothing — a reload has no journey to resume', () => {
-    beginLibraryReturnFlow(ORIGIN)
-    // The active child IS persisted by its own store; the journey is not.
+    begin()
     const keys = Object.keys(localStorage).filter((k) => k !== 'fpe_active_child_id')
     expect(keys).toEqual([])
     expect(JSON.stringify(localStorage)).not.toContain('library_hut')
   })
 
   it('gives every journey a generation that is never reused', () => {
-    const first = beginLibraryReturnFlow(ORIGIN)!
-    const second = beginLibraryReturnFlow(ORIGIN)!
+    const first = begin()!
+    const second = begin()!
     expect(second.generation).toBeGreaterThan(first.generation)
     endLibraryReturnFlow()
-    const third = beginLibraryReturnFlow(ORIGIN)!
-    expect(third.generation).toBeGreaterThan(second.generation)
+    expect(begin()!.generation).toBeGreaterThan(second.generation)
   })
 
   it('notifies subscribers, so a mounted shelf sees it without polling', () => {
     const seen = vi.fn()
     const unsubscribe = subscribeLibraryReturnFlow(seen)
-    beginLibraryReturnFlow(ORIGIN)
+    begin()
     expect(seen).toHaveBeenCalledTimes(1)
     endLibraryReturnFlow()
     expect(seen).toHaveBeenCalledTimes(2)
     unsubscribe()
-    beginLibraryReturnFlow(ORIGIN)
+    begin()
     expect(seen).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('the tap-to-close boundary', () => {
+  it('refuses a departure whose identity moved after the tap', () => {
+    // The village captures the epoch when the Books door is tapped; the journey
+    // is created only once the board has finished closing. Nothing exists in
+    // between for the store subscription to cancel, so the token is the guard.
+    const tapped = getLibraryIdentityEpoch()
+    setActiveChildIdShared(LONDON)
+    expect(
+      beginLibraryReturnFlow({ ...ORIGIN, childId: LONDON, observedEpoch: tapped }),
+    ).toBeNull()
+    expect(getLibraryReturnFlow()).toBeNull()
+  })
+
+  it('refuses it after a same-tick A → B → A, with the scope string restored', () => {
+    // The exact case a scope-string comparison passes: by the time the board
+    // has closed the selected child is `A` again, so `scopeKey` matches — while
+    // the shelf underneath re-read for `B` and back.
+    const tapped = getLibraryIdentityEpoch()
+    setActiveChildIdShared(LONDON)
+    setActiveChildIdShared(LINCOLN)
+    expect(getActiveChildId()).toBe(LINCOLN)
+    expect(getLibraryIdentityEpoch()).toBeGreaterThan(tapped)
+    expect(beginLibraryReturnFlow({ ...ORIGIN, observedEpoch: tapped })).toBeNull()
+  })
+
+  it('and after a resolved profile round trip that never touched the store', () => {
+    const tapped = getLibraryIdentityEpoch()
+    observeLibraryReturnIdentity(`${FAM}|london|${LINCOLN}`)
+    observeLibraryReturnIdentity(`${FAM}|parents|${LINCOLN}`)
+    expect(getActiveChildId()).toBe(LINCOLN)
+    expect(beginLibraryReturnFlow({ ...ORIGIN, observedEpoch: tapped })).toBeNull()
+  })
+
+  it('accepts one whose identity held still', () => {
+    const tapped = getLibraryIdentityEpoch()
+    observeLibraryReturnIdentity(`${FAM}|parents|${LINCOLN}`)
+    setActiveChildIdShared(LINCOLN)
+    expect(
+      beginLibraryReturnFlow({ ...ORIGIN, observedEpoch: tapped }),
+    ).not.toBeNull()
   })
 })
 
 describe('whose journey it is', () => {
   it('is live only for the family AND child it was begun for', () => {
-    const flow = beginLibraryReturnFlow(ORIGIN)
+    const flow = begin()
     expect(liveLibraryReturnFlow(flow, { familyId: FAM, childId: LINCOLN })).toBe(flow)
     expect(liveLibraryReturnFlow(flow, { familyId: FAM, childId: LONDON })).toBeNull()
     expect(liveLibraryReturnFlow(flow, { familyId: 'fam-2', childId: LINCOLN })).toBeNull()
   })
 
   it('is never live for an unsettled scope', () => {
-    const flow = beginLibraryReturnFlow(ORIGIN)
+    const flow = begin()
     expect(liveLibraryReturnFlow(flow, { familyId: FAM, childId: '' })).toBeNull()
     expect(liveLibraryReturnFlow(flow, { familyId: '', childId: LINCOLN })).toBeNull()
     expect(liveLibraryReturnFlow(null, { familyId: FAM, childId: LINCOLN })).toBeNull()
   })
 
   it('answers about the phase that was asked about', () => {
-    const flow = beginLibraryReturnFlow(ORIGIN)
+    const flow = begin()
     const scope = { familyId: FAM, childId: LINCOLN }
     expect(liveLibraryReturnFlow(flow, scope, LibraryReturnPhase.Returning)).toBeNull()
     const returning = requestLibraryReturn(flow!.generation)
@@ -127,111 +183,174 @@ describe('whose journey it is', () => {
   })
 })
 
-describe('a child switch ends it permanently', () => {
+describe('an identity movement ends it permanently', () => {
   it('ends it the moment the shared store changes', () => {
-    beginLibraryReturnFlow(ORIGIN)
+    begin()
     setActiveChildIdShared(LONDON)
     expect(getLibraryReturnFlow()).toBeNull()
   })
 
   it('and a same-tick A → B → A does not bring it back', () => {
-    // The case a rendered comparison cannot see: both writes land in one tick,
-    // React batches them into a single render, and that render reads `A` — the
-    // child the flow belongs to. The store saw two writes, and the first of them
-    // already ended the journey.
-    const flow = beginLibraryReturnFlow(ORIGIN)!
+    const flow = begin()!
     setActiveChildIdShared(LONDON)
     setActiveChildIdShared(LINCOLN)
     expect(getActiveChildId()).toBe(LINCOLN)
     expect(getLibraryReturnFlow()).toBeNull()
-    // And the generation it was holding cannot be used to revive it.
     expect(requestLibraryReturn(flow.generation)).toBeNull()
+  })
+
+  it('ends it on a resolved profile change with no store write at all', () => {
+    // `useActiveChild` locks a kid profile to its own child and leaves a valid
+    // raw selection alone, so parents→London→parents moves the RESOLVED
+    // identity while the raw store never changes. The observed key carries the
+    // profile term for exactly this.
+    begin()
+    observeLibraryReturnIdentity(`${FAM}|london|${LINCOLN}`)
+    expect(getLibraryReturnFlow()).toBeNull()
+    observeLibraryReturnIdentity(`${FAM}|parents|${LINCOLN}`)
     expect(getLibraryReturnFlow()).toBeNull()
   })
 
-  it('even while the child is switched to the draft’s own owner', () => {
-    // `BookshelfPage.handleResumeDraft` legitimately switches to a draft's child
-    // before the chat mounts (FEAT-188). That resume is untouched — the flow
-    // neither blocks it nor adds a question to it — and it ends the journey like
-    // any other switch, because the shelf underneath has re-read for someone
-    // else.
-    beginLibraryReturnFlow(ORIGIN)
-    setActiveChildIdShared(LONDON)
+  it('ends it on a family change', () => {
+    begin()
+    observeLibraryReturnIdentity(`fam-2|parents|${LINCOLN}`)
     expect(getLibraryReturnFlow()).toBeNull()
-    expect(getActiveChildId()).toBe(LONDON)
   })
 
-  it('does nothing on a write that does not change the child', () => {
-    const flow = beginLibraryReturnFlow(ORIGIN)
+  it('does nothing when the identity is observed again unchanged', () => {
+    const flow = begin()
+    observeLibraryReturnIdentity(`${FAM}|parents|${LINCOLN}`)
+    observeLibraryReturnIdentity(`${FAM}|parents|${LINCOLN}`)
+    expect(getLibraryReturnFlow()).toBe(flow)
     setActiveChildIdShared(LINCOLN)
     expect(getLibraryReturnFlow()).toBe(flow)
   })
 
   it('holds with nothing mounted at all', () => {
-    // The subscription lives in the module, not in a component, so the rule
-    // cannot be evaded by a switch that happens while the shelf is unmounting.
-    beginLibraryReturnFlow(ORIGIN)
-    expect(getLibraryReturnFlow()).not.toBeNull()
+    // The store channel is subscribed in the module, so the rule cannot be
+    // evaded by a switch that lands while the shelf is unmounting.
+    begin()
     setActiveChildIdShared(LONDON)
     expect(getLibraryReturnFlow()).toBeNull()
   })
 })
 
-describe('a family change or leaving the journey ends it', () => {
-  it('ends on a different family, and on a logout', () => {
-    beginLibraryReturnFlow(ORIGIN)
-    reconcileLibraryReturnFlow({ familyId: 'fam-2', pathname: '/books' })
-    expect(getLibraryReturnFlow()).toBeNull()
-
-    beginLibraryReturnFlow(ORIGIN)
-    reconcileLibraryReturnFlow({ familyId: '', pathname: '/books' })
+describe('the gate closing ends it, and signing back in does not restore it', () => {
+  it('a logout or profile exit ends the journey', () => {
+    begin()
+    observeLibraryReturnIdentity('')
     expect(getLibraryReturnFlow()).toBeNull()
   })
 
-  it('survives every place the shelf leads', () => {
+  it('the SAME account and profile signing straight back in gets nothing', () => {
+    // The module-memory failure this observer exists for: the routed shell is
+    // unmounted by the gates, so only something above them can see the closure.
+    begin()
+    observeLibraryReturnIdentity('')
+    observeLibraryReturnIdentity(`${FAM}|parents|${LINCOLN}`)
+    expect(getLibraryReturnFlow()).toBeNull()
+  })
+
+  it('and a departure tapped before the logout cannot create one after it', () => {
+    const tapped = getLibraryIdentityEpoch()
+    observeLibraryReturnIdentity('')
+    observeLibraryReturnIdentity(`${FAM}|parents|${LINCOLN}`)
+    expect(beginLibraryReturnFlow({ ...ORIGIN, observedEpoch: tapped })).toBeNull()
+  })
+
+  it('an unknown identity BEFORE anything resolved is a page still loading', () => {
+    // Asserted at the module's own boundary: with nothing observed yet, an
+    // empty identity must not count as a session ending, or a brand-new
+    // arrival would be discarded. (The first `observeLibraryReturnIdentity('')`
+    // here follows a resolved one, so the pair below is the real control.)
+    observeLibraryReturnIdentity('')
+    const before = getLibraryIdentityEpoch()
+    observeLibraryReturnIdentity('')
+    expect(getLibraryIdentityEpoch()).toBe(before)
+  })
+})
+
+describe('the routes the journey actually lives on', () => {
+  it('recognises every Books-area route the app mounts', () => {
     for (const path of [
-      LIBRARY_RETURN_VILLAGE_PATH,
       '/books',
       '/books/',
       '/books/book-1',
       '/books/book-1/read',
+      '/books/book-1/read?call=1',
       '/books/book-1/review',
       '/books/create-story',
       '/books/sight-words',
       '/books/story-guide',
       '/stickers',
     ]) {
-      expect(pathKeepsLibraryReturnFlow(path), path).toBe(true)
-      beginLibraryReturnFlow(ORIGIN)
-      reconcileLibraryReturnFlow({ familyId: FAM, pathname: path })
-      expect(getLibraryReturnFlow(), path).not.toBeNull()
+      expect(isBooksAreaPath(path), path).toBe(true)
     }
   })
 
-  it('ends anywhere else — including the shelf’s look-alikes', () => {
+  it('and nothing that merely looks like one', () => {
     for (const path of [
-      '/today',
-      '/quest',
-      '/workshop',
-      '/business',
-      '/settings',
-      // A different feature with a different shelf: the monthly-review reader.
+      // Renders NotFound: a journey surviving it would offer a way back from a
+      // page that is not in the journey.
+      '/books/book-1/extra',
+      '/books/book-1/read/extra',
+      // A different feature with a different shelf.
       '/books-about-me',
       '/books-about-me/review-1',
       '/booksomething',
+      LIBRARY_RETURN_VILLAGE_PATH,
+      '/today',
+      '/quest',
       '/',
     ]) {
-      expect(pathKeepsLibraryReturnFlow(path), path).toBe(false)
-      beginLibraryReturnFlow(ORIGIN)
-      reconcileLibraryReturnFlow({ familyId: FAM, pathname: path })
+      expect(isBooksAreaPath(path), path).toBe(false)
+    }
+  })
+})
+
+describe('leaving the journey ends it', () => {
+  it('survives every page the shelf opens', () => {
+    for (const path of ['/books', '/books/b1', '/books/b1/read', '/books/b1/review', '/stickers']) {
+      begin()
+      reconcileLibraryReturnFlowPath(path)
+      expect(getLibraryReturnFlow(), path).not.toBeNull()
+      endLibraryReturnFlow()
+    }
+  })
+
+  it('stands still on the hub it was begun from, before the first step', () => {
+    // The flow is created while the child is at the hub, so arriving there is
+    // not yet a departure.
+    begin()
+    reconcileLibraryReturnFlowPath(LIBRARY_RETURN_VILLAGE_PATH)
+    expect(getLibraryReturnFlow()).not.toBeNull()
+  })
+
+  it('but ordinary navigation BACK to the hub ends it', () => {
+    beginOnTheShelf()
+    reconcileLibraryReturnFlowPath(LIBRARY_RETURN_VILLAGE_PATH)
+    expect(getLibraryReturnFlow()).toBeNull()
+  })
+
+  it('so Library → Books → hub → Books offers nothing', () => {
+    beginOnTheShelf()
+    reconcileLibraryReturnFlowPath(LIBRARY_RETURN_VILLAGE_PATH)
+    reconcileLibraryReturnFlowPath('/books')
+    expect(getLibraryReturnFlow()).toBeNull()
+  })
+
+  it('ends on anywhere else, including an unsupported Books URL', () => {
+    for (const path of ['/today', '/quest', '/books-about-me', '/books/b1/extra', '/']) {
+      beginOnTheShelf()
+      reconcileLibraryReturnFlowPath(path)
       expect(getLibraryReturnFlow(), path).toBeNull()
     }
   })
 
-  it('reconciling with no journey in hand does nothing', () => {
+  it('reconciling with no journey in hand notifies nobody', () => {
     const seen = vi.fn()
     const unsubscribe = subscribeLibraryReturnFlow(seen)
-    reconcileLibraryReturnFlow({ familyId: FAM, pathname: '/today' })
+    reconcileLibraryReturnFlowPath('/today')
     expect(seen).not.toHaveBeenCalled()
     unsubscribe()
   })
@@ -239,29 +358,27 @@ describe('a family change or leaving the journey ends it', () => {
 
 describe('taking the way back', () => {
   it('moves to returning, and only on the generation that was offered', () => {
-    const flow = beginLibraryReturnFlow(ORIGIN)!
+    const flow = begin()!
     expect(requestLibraryReturn(flow.generation + 1)).toBeNull()
     expect(getLibraryReturnFlow()?.phase).toBe(LibraryReturnPhase.Away)
     expect(requestLibraryReturn(flow.generation)?.phase).toBe(LibraryReturnPhase.Returning)
   })
 
   it('cannot be asked for twice', () => {
-    const flow = beginLibraryReturnFlow(ORIGIN)!
+    const flow = begin()!
     expect(requestLibraryReturn(flow.generation)).not.toBeNull()
     expect(requestLibraryReturn(flow.generation)).toBeNull()
   })
 
   it('a tap that lands after a switch sends nobody anywhere', () => {
-    // The stale-callback case: a handler rendered for Lincoln, tapped after the
-    // header moved. The request is refused, so the caller never navigates.
-    const flow = beginLibraryReturnFlow(ORIGIN)!
+    const flow = begin()!
     setActiveChildIdShared(LONDON)
     expect(requestLibraryReturn(flow.generation)).toBeNull()
   })
 
   it('a tap that lands after the journey was replaced is refused too', () => {
-    const first = beginLibraryReturnFlow(ORIGIN)!
-    beginLibraryReturnFlow({ ...ORIGIN, missionId: 'the_forge' })
+    const first = begin()!
+    begin({ missionId: 'the_forge' })
     expect(requestLibraryReturn(first.generation)).toBeNull()
     expect(getLibraryReturnFlow()?.missionId).toBe('the_forge')
   })
@@ -269,7 +386,7 @@ describe('taking the way back', () => {
 
 describe('serving the return exactly once', () => {
   it('consumes the request and leaves no journey behind', () => {
-    const flow = beginLibraryReturnFlow(ORIGIN)!
+    const flow = begin()!
     requestLibraryReturn(flow.generation)
     expect(serveLibraryReturn(flow.generation)).toBe(true)
     expect(getLibraryReturnFlow()).toBeNull()
@@ -277,38 +394,50 @@ describe('serving the return exactly once', () => {
   })
 
   it('refuses to serve a request that was never made', () => {
-    const flow = beginLibraryReturnFlow(ORIGIN)!
+    const flow = begin()!
     expect(serveLibraryReturn(flow.generation)).toBe(false)
     expect(getLibraryReturnFlow()?.phase).toBe(LibraryReturnPhase.Away)
   })
 
   it('refuses a generation that is not the one in hand', () => {
-    const flow = beginLibraryReturnFlow(ORIGIN)!
+    const flow = begin()!
     requestLibraryReturn(flow.generation)
     expect(serveLibraryReturn(flow.generation - 1)).toBe(false)
     expect(getLibraryReturnFlow()?.phase).toBe(LibraryReturnPhase.Returning)
   })
 
-  it('keeps the request while a village read has not answered', () => {
-    // The board cannot open yet, so nothing is served and nothing is faked: the
-    // existing recovery notice and its Try again still own that moment.
-    const flow = beginLibraryReturnFlow(ORIGIN)!
+  it('keeps the request while the village read has not answered', () => {
+    // No board to open yet, so nothing is served and nothing is faked: the
+    // existing recovery notice and its Try again own that moment.
+    const flow = begin()!
     requestLibraryReturn(flow.generation)
-    reconcileLibraryReturnFlow({ familyId: FAM, pathname: LIBRARY_RETURN_VILLAGE_PATH })
+    reconcileLibraryReturnFlowPath(LIBRARY_RETURN_VILLAGE_PATH)
     expect(getLibraryReturnFlow()?.phase).toBe(LibraryReturnPhase.Returning)
   })
 
-  it('but a held request does not survive leaving the journey', () => {
-    const flow = beginLibraryReturnFlow(ORIGIN)!
+  it('but an ABANDONED return expires instead of waiting to fire', () => {
+    // The village read failed, the child went back to the shelf. The request
+    // must not sit there and open the board on some later ordinary hub visit.
+    const flow = begin()!
     requestLibraryReturn(flow.generation)
-    reconcileLibraryReturnFlow({ familyId: FAM, pathname: '/today' })
+    reconcileLibraryReturnFlowPath(LIBRARY_RETURN_VILLAGE_PATH)
+    reconcileLibraryReturnFlowPath('/books')
+    expect(getLibraryReturnFlow()).toBeNull()
+    reconcileLibraryReturnFlowPath(LIBRARY_RETURN_VILLAGE_PATH)
     expect(getLibraryReturnFlow()).toBeNull()
   })
 
-  it('or a child switch while the departure is still in the air', () => {
-    const flow = beginLibraryReturnFlow(ORIGIN)!
+  it('and so does a child switch while the departure is still in the air', () => {
+    const flow = begin()!
     requestLibraryReturn(flow.generation)
     setActiveChildIdShared(LONDON)
+    expect(getLibraryReturnFlow()).toBeNull()
+  })
+
+  it('and a logout while it is in the air', () => {
+    const flow = begin()!
+    requestLibraryReturn(flow.generation)
+    observeLibraryReturnIdentity('')
     expect(getLibraryReturnFlow()).toBeNull()
   })
 })

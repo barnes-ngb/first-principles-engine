@@ -14,7 +14,7 @@ import { useChildSkillSnapshot } from '../core/hooks/useChildSkillSnapshot'
 import { useProfile } from '../core/profile/useProfile'
 import { UserProfile } from '../core/types/enums'
 import AvatarThumbnail from '../features/avatar/AvatarThumbnail'
-import { useLibraryReturnScopeWatch } from '../features/avatar/stonebridge/useLibraryReturnScopeWatch'
+import { useLibraryReturnRouteWatch } from '../features/avatar/stonebridge/useLibraryReturnScopeWatch'
 import { useAvatarProfile } from '../features/avatar/useAvatarProfile'
 import { isArmorComplete } from '../features/avatar/armorGate'
 import { canAccessKnowledgeMine } from '../features/quest/knowledgeMineAccess'
@@ -203,14 +203,13 @@ export function AppShell({ children }: AppShellProps) {
 
   const armorReady = !isParent && avatarProfile ? isArmorComplete(avatarProfile) : undefined
 
-  // The Stonebridge → My Books journey is the one piece of state that has to
-  // outlive each page in it and nothing more, so it is watched HERE: the layout
-  // route is the only thing mounted across every transition the shelf, the
-  // reader and the editor make between them. Leaving the journey, or changing
-  // family, ends it; a child switch is caught at the shared active-child store
-  // instead, where a same-tick A→B→A is still two writes. Called before the
-  // call-mode return below, because a hook is not optional.
-  useLibraryReturnScopeWatch({ familyId: familyId ?? '', pathname: location.pathname })
+  // The Stonebridge → My Books journey outlives each page in it, so its route
+  // transitions are watched HERE: the layout route is the one thing mounted
+  // across every move the shelf, the reader and the editor make between them.
+  // Identity (account, profile, child) is watched above the gates in `App.tsx`,
+  // because this shell unmounts on logout. Called before the call-mode return
+  // below, because a hook is not optional.
+  useLibraryReturnRouteWatch(location.pathname)
 
   const closeDrawer = useCallback(() => setDrawerOpen(false), [])
 

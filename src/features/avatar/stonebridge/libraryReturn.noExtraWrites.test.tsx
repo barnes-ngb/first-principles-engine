@@ -69,10 +69,19 @@ import { SubjectBucket } from '../../../core/types/enums'
 import {
   beginLibraryReturnFlow,
   endLibraryReturnFlow,
+  getLibraryIdentityEpoch,
   getLibraryReturnFlow,
 } from './libraryReturnFlow'
 
-const JOURNEY = { familyId: 'fam-1', childId: LINCOLN.id, missionId: 'library_hut' }
+/** A live journey, begun against the epoch the module has observed. */
+function beginJourney() {
+  return beginLibraryReturnFlow({
+    familyId: 'fam-1',
+    childId: LINCOLN.id,
+    missionId: 'library_hut',
+    observedEpoch: getLibraryIdentityEpoch(),
+  })
+}
 
 /** A source file with its prose removed — what the code actually does. */
 const readCode = (rel: string) =>
@@ -113,7 +122,7 @@ beforeEach(() => {
 
 describe('an eligible session writes the same row either way', () => {
   it('through the village: 27 minutes, rounded up to 30, for the right child', async () => {
-    beginLibraryReturnFlow(JOURNEY)
+    beginJourney()
     const unmount = await runTimerFor(27)
 
     await waitFor(() => expect(m.addDoc).toHaveBeenCalledTimes(1))
@@ -130,7 +139,7 @@ describe('an eligible session writes the same row either way', () => {
   })
 
   it('and the same row, field for field, with no journey at all', async () => {
-    beginLibraryReturnFlow(JOURNEY)
+    beginJourney()
     const first = await runTimerFor(27)
     await waitFor(() => expect(m.addDoc).toHaveBeenCalledTimes(1))
     const throughTheVillage = m.addDoc.mock.calls[0][1]
@@ -149,7 +158,7 @@ describe('an eligible session writes the same row either way', () => {
   })
 
   it('writes exactly one row, and touches no other rail', async () => {
-    beginLibraryReturnFlow(JOURNEY)
+    beginJourney()
     const unmount = await runTimerFor(27)
     await waitFor(() => expect(m.addDoc).toHaveBeenCalledTimes(1))
     // No duplicate event, and nothing on any other write path.
@@ -162,7 +171,7 @@ describe('an eligible session writes the same row either way', () => {
 
 describe('the five-minute floor is the real floor, journey or not', () => {
   it('writes nothing under it with a journey in hand', async () => {
-    beginLibraryReturnFlow(JOURNEY)
+    beginJourney()
     const unmount = await runTimerFor(4)
     await screen.findByText(/Keep creating/)
     expect(m.addDoc).not.toHaveBeenCalled()

@@ -1465,12 +1465,20 @@ export default function MyAvatarPage() {
             //
             // It now also leaves a temporary in-memory note that the shelf was
             // opened from this village location, so the shelf can offer one way
-            // back (`libraryReturnFlow`). The note is bound to the family and
-            // child this card is already rendering for — it is never written
-            // anywhere, never put in the URL, and selects nobody: a scope that
-            // moves ends it permanently.
-            onOpenBooks={(fromMissionId) => {
-              beginLibraryReturnFlow({ familyId, childId, missionId: fromMissionId })
+            // back (`libraryReturnFlow`). Bound to the family and child this
+            // card is already rendering for, and to the identity epoch observed
+            // at the tap — never written anywhere, never in the URL, and it
+            // selects nobody. A departure whose identity moved while the board
+            // closed never reaches here — the board refuses it — and a note
+            // refused here still leaves the door working: the shelf opens, with
+            // no way back offered, which is ordinary navigation.
+            onOpenBooks={(fromMissionId, observedEpoch) => {
+              beginLibraryReturnFlow({
+                familyId,
+                childId,
+                missionId: fromMissionId,
+                observedEpoch,
+              })
               navigate(STONEBRIDGE_BOOKS_PATH)
             }}
             // The Forge visit moves to the gallery already mounted below. It

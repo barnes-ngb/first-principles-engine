@@ -1,44 +1,55 @@
-import { useEffect } from 'react'
+import { useEffect, useSyncExternalStore } from 'react'
 
-import { reconcileLibraryReturnFlow } from './libraryReturnFlow'
+import {
+  getActiveChildId,
+  subscribeActiveChildId,
+} from '../../../core/hooks/activeChildStore'
+import {
+  observeLibraryReturnIdentity,
+  reconcileLibraryReturnFlowPath,
+} from './libraryReturnFlow'
 
 /**
- * Keep the Library return flow honest about where the child actually is.
- *
- * Mounted in `AppShell`, which is the layout route — the one component that
- * stays mounted ACROSS every route transition the shelf, the reader and the
- * editor make between them. That placement is the whole reason the flow can be
- * temporary in-memory state instead of something written into the URL: the
- * journey outlives each page in it, but nothing about it outlives the shell.
- *
- * Two things end a flow here:
- *
- *   • **the family changed** — a different family, or a logout, which arrives as
- *     an empty id. Conservative on purpose: the worst a false end can do is
- *     leave the child with the ordinary nav, while the worst a missed one can do
- *     is offer one family's journey to another's.
- *   • **the location left the journey** — see `pathKeepsLibraryReturnFlow`.
- *     Because this runs on each CHANGE, Back and Forward are ordinary changes:
- *     stepping out of the journey ends the flow, and stepping back in with the
- *     browser's history finds it already gone. History can replay a URL; it
- *     cannot replay this.
- *
- * The child-switch half is deliberately NOT here — it is subscribed at the
- * shared active-child store inside `libraryReturnFlow`, so it holds whether or
- * not anything is mounted, and it sees a same-tick `A → B → A` that no render
- * comparison can. See that module's header.
- *
- * Takes its scope as plain values rather than reading the auth and router hooks
- * itself, so it is the shell's existing reads that feed it — one source for the
- * family and the location, not a second pair that could disagree with the
- * header rendered beside it.
+ * The route half, mounted in `AppShell` — the layout route, which stays mounted
+ * across every transition the shelf, the reader and the editor make between
+ * them. It reports each location change and nothing else; whose journey it is
+ * belongs to the identity half below, so there is one definition of each.
  */
-export function useLibraryReturnScopeWatch(scope: {
-  familyId: string
-  pathname: string
-}): void {
-  const { familyId, pathname } = scope
+export function useLibraryReturnRouteWatch(pathname: string): void {
   useEffect(() => {
-    reconcileLibraryReturnFlow({ familyId, pathname })
-  }, [familyId, pathname])
+    reconcileLibraryReturnFlowPath(pathname)
+  }, [pathname])
+}
+
+/**
+ * The identity half, mounted ABOVE the auth and profile gates in `App.tsx` —
+ * the `useHandoffScopeWatch` precedent, for the same reason it moved there.
+ * `AuthGate`/`ProfileGate` unmount the routed shell on loading, logout and
+ * profile exit, so a watcher inside the shell cannot observe the closure that
+ * ends the scope, while the flow it should have ended survives in module memory.
+ * Sign back into the same account and the old return would be offered.
+ *
+ * The key is `family | profile | selected child`, read from the shared store
+ * rather than through `useActiveChild`: an observer that outlives the login
+ * screen must not cost a Firestore read. The `profile` term is what makes a
+ * resolved-child change visible — `useActiveChild` locks a kid profile to its
+ * own child without touching the raw selection, so a parent→kid→parent round
+ * trip moves this key even though the raw store never changed.
+ *
+ * It is an observer: it reads, never sets, holds no state, and writes no record.
+ * There is deliberately no unmount cleanup — nothing above the gates unmounts in
+ * ordinary use, and a cleanup that ended the flow would end it on StrictMode's
+ * simulated remount and on any ordinary re-parent. Closure is observed as an
+ * empty identity instead.
+ */
+export function useLibraryReturnIdentityWatch(
+  familyId: string,
+  profile: string | null,
+): void {
+  const activeChildId = useSyncExternalStore(subscribeActiveChildId, getActiveChildId)
+  const resolved = Boolean(familyId) && profile !== null && Boolean(activeChildId)
+  const identity = resolved ? `${familyId}|${profile}|${activeChildId}` : ''
+  useEffect(() => {
+    observeLibraryReturnIdentity(identity)
+  }, [identity])
 }

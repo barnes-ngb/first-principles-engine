@@ -11,6 +11,7 @@ import StonebridgeRecoveryNotice, { type StonebridgeRecoveryState } from './Ston
 import BannerRaiseCelebration from './BannerRaiseCelebration'
 import VillageScene from './VillageScene'
 import { getMission } from './missions'
+import { getLibraryIdentityEpoch } from './libraryReturnFlow'
 import {
   deriveVillageBoard,
   VillageLocationState,
@@ -80,6 +81,17 @@ type PendingLeave = {
   destination: 'books' | 'forge'
   /** The location the child was looking at when they left it. */
   missionId: string
+  /**
+   * The observed identity epoch at the moment of the TAP.
+   *
+   * The scope string alone cannot answer this boundary: the board takes time to
+   * close, the journey is created only once it has, and an `A → B → A` inside
+   * that window leaves `scopeKey` reading `A` again with the shelf underneath
+   * having re-read for someone else and back. There is no flow yet for the
+   * store subscription to cancel, so the tap carries a monotonic token instead
+   * and the departure is refused if it moved.
+   */
+  identityEpoch: number
 }
 
 /**
@@ -334,7 +346,12 @@ export default function StonebridgeVillage({
    */
   const leaveFor = (destination: 'books' | 'forge') => {
     if (!live?.selected) return
-    pendingLeaveRef.current = { scopeKey, destination, missionId: live.selected }
+    pendingLeaveRef.current = {
+      scopeKey,
+      destination,
+      missionId: live.selected,
+      identityEpoch: getLibraryIdentityEpoch(),
+    }
     pendingDismissRef.current = false
     tileToFocusRef.current = null
     setView({ ...live, selected: null, replay: null })
@@ -357,8 +374,15 @@ export default function StonebridgeVillage({
     if (pending) {
       // A tap from a view that has since been replaced sends nobody anywhere.
       if (pending.scopeKey !== scopeKey) return
-      if (pending.destination === 'books') onOpenBooks?.(pending.missionId)
-      else onVisitForge?.()
+      if (pending.destination === 'books') {
+        // …and neither does one whose identity moved while the board closed,
+        // even where the scope string has come back to what it was. Applied to
+        // the Books departure, which is the one that creates a journey; the
+        // Forge keeps its existing behaviour exactly — it focuses a gallery on
+        // this page under the gallery's own rules and starts nothing.
+        if (pending.identityEpoch !== getLibraryIdentityEpoch()) return
+        onOpenBooks?.(pending.missionId, pending.identityEpoch)
+      } else onVisitForge?.()
       return
     }
     if (dismissed) onReturnFocus?.()

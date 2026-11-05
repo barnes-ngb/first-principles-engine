@@ -43,12 +43,13 @@ export interface StonebridgeDestinations {
   /**
    * Navigate to the existing bookshelf. No active-child write.
    *
-   * Handed the id of the location the tap came from, so the shelf's temporary
-   * way back knows which tile to return to. It is a fact about the journey, not
-   * a permission: the destination, the shelf's contents and everything the child
-   * can reach there are identical whichever location offered it.
+   * Handed the id of the location the tap came from — so the shelf's temporary
+   * way back knows which tile to return to — and the identity epoch observed at
+   * that tap, which the journey refuses to be created against if it has moved
+   * since. Both are facts about the journey, not permissions: the destination
+   * and everything the child can reach there are identical either way.
    */
-  onOpenBooks?: (fromMissionId: string) => void
+  onOpenBooks?: (fromMissionId: string, observedEpoch: number) => void
   /** Move to the existing armor gallery on this page. */
   onVisitForge?: () => void
 }

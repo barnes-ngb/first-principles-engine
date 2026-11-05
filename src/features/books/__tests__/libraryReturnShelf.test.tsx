@@ -13,7 +13,9 @@ import {
   LibraryReturnPhase,
   beginLibraryReturnFlow,
   endLibraryReturnFlow,
+  getLibraryIdentityEpoch,
   getLibraryReturnFlow,
+  requestLibraryReturn,
 } from '../../avatar/stonebridge/libraryReturnFlow'
 
 /**
@@ -36,6 +38,14 @@ vi.mock('react-router-dom', () => ({ useNavigate: () => navigateMock }))
 
 vi.mock('../../../core/auth/useAuth', () => ({ useFamilyId: () => 'family-1' }))
 
+/**
+ * The read's own state, reported beside the child exactly as `useChildren`
+ * does: the shared children list is KEPT across a re-read, so `activeChild` can
+ * be a whole object from the previous answer while `isLoading` / `loadFailed`
+ * say the current one has not arrived or has failed.
+ */
+const readRef = { isLoading: false, loadFailed: false }
+
 vi.mock('../../../core/hooks/useActiveChild', () => ({
   useActiveChild: () => ({
     activeChild: activeRef.current,
@@ -43,6 +53,8 @@ vi.mock('../../../core/hooks/useActiveChild', () => ({
     children: [LINCOLN, LONDON],
     setActiveChildId: () => {},
     isChildProfile: false,
+    isLoading: readRef.isLoading,
+    loadFailed: readRef.loadFailed,
   }),
 }))
 
@@ -79,6 +91,15 @@ import { MAKE_BOOK_DOOR_LABEL } from '../makeBookDoor'
 
 const JOURNEY = { familyId: 'family-1', childId: LINCOLN.id, missionId: 'library_hut' }
 
+/** Begin a journey against the epoch the module has actually observed. */
+function begin(origin: Partial<typeof JOURNEY> = {}) {
+  return beginLibraryReturnFlow({
+    ...JOURNEY,
+    ...origin,
+    observedEpoch: getLibraryIdentityEpoch(),
+  })
+}
+
 function makeBook(overrides: Partial<Book> = {}): Book {
   return {
     childId: LINCOLN.id,
@@ -98,13 +119,15 @@ beforeEach(() => {
   booksFixture = []
   currentProfile = 'lincoln'
   activeRef.current = LINCOLN
+  readRef.isLoading = false
+  readRef.loadFailed = false
   setActiveChildIdShared(LINCOLN.id)
   endLibraryReturnFlow()
 })
 
 describe('the shelf offers the way back when the child came from the village', () => {
   it('renders it above the shelf’s own title, where a back control belongs', () => {
-    beginLibraryReturnFlow(JOURNEY)
+    begin()
     render(<BookshelfPage />)
 
     const back = screen.getByRole('button', { name: LIBRARY_RETURN_LABEL })
@@ -119,7 +142,7 @@ describe('the shelf offers the way back when the child came from the village', (
   it('on an empty shelf, which is exactly when a child needs it most', () => {
     // No books at all: the shelf shows its empty state, and the way back is
     // still there rather than being a sibling of the book grid.
-    beginLibraryReturnFlow(JOURNEY)
+    begin()
     render(<BookshelfPage />)
     expect(screen.getByText('No books yet!')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: LIBRARY_RETURN_LABEL })).toBeInTheDocument()
@@ -127,7 +150,7 @@ describe('the shelf offers the way back when the child came from the village', (
 
   it('and on a full shelf, and on a parent’s view of it', () => {
     booksFixture = [makeBook({ id: 'b1' }), makeBook({ id: 'b2', status: 'complete' })]
-    beginLibraryReturnFlow(JOURNEY)
+    begin()
     const { unmount } = render(<BookshelfPage />)
     expect(screen.getByRole('button', { name: LIBRARY_RETURN_LABEL })).toBeInTheDocument()
     unmount()
@@ -139,7 +162,7 @@ describe('the shelf offers the way back when the child came from the village', (
 
   it('takes the child back with ordinary navigation, and spends the request', async () => {
     const user = userEvent.setup()
-    beginLibraryReturnFlow(JOURNEY)
+    const flow = begin()!
     render(<BookshelfPage />)
 
     await user.click(screen.getByRole('button', { name: LIBRARY_RETURN_LABEL }))
@@ -148,8 +171,15 @@ describe('the shelf offers the way back when the child came from the village', (
     expect(navigateMock).toHaveBeenCalledWith('/avatar')
     expect(getLibraryReturnFlow()?.phase).toBe(LibraryReturnPhase.Returning)
 
-    // And it cannot be asked for twice from the same shelf.
-    await user.click(screen.getByRole('button', { name: LIBRARY_RETURN_LABEL }))
+    // The request is spent, so the control is no longer on the shelf — there is
+    // nothing left to ask for and nothing left to tap.
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: LIBRARY_RETURN_LABEL })).not.toBeInTheDocument()
+    })
+    // And once-only is the FLOW's rule, not the button's absence: the handler a
+    // stale render still holds is refused by generation, so a second departure
+    // cannot be asked for even by a caller that kept its closure.
+    expect(requestLibraryReturn(flow.generation)).toBeNull()
     expect(navigateMock).toHaveBeenCalledTimes(1)
   })
 })
@@ -163,19 +193,19 @@ describe('and does not offer it otherwise', () => {
   })
 
   it('for another child’s journey, even with the same family', () => {
-    beginLibraryReturnFlow({ ...JOURNEY, childId: LONDON.id })
+    begin({ childId: LONDON.id })
     render(<BookshelfPage />)
     expect(screen.queryByRole('button', { name: LIBRARY_RETURN_LABEL })).not.toBeInTheDocument()
   })
 
   it('for another family’s journey, even with the same child', () => {
-    beginLibraryReturnFlow({ ...JOURNEY, familyId: 'family-2' })
+    begin({ familyId: 'family-2' })
     render(<BookshelfPage />)
     expect(screen.queryByRole('button', { name: LIBRARY_RETURN_LABEL })).not.toBeInTheDocument()
   })
 
   it('and it disappears from an open shelf the moment the child changes', async () => {
-    beginLibraryReturnFlow(JOURNEY)
+    begin()
     render(<BookshelfPage />)
     expect(screen.getByRole('button', { name: LIBRARY_RETURN_LABEL })).toBeInTheDocument()
 
@@ -191,12 +221,43 @@ describe('and does not offer it otherwise', () => {
     expect(getLibraryReturnFlow()).toBeNull()
   })
 
-  it('while the children read has not settled or has failed', () => {
-    // A failed read is not an affirmative empty family, so an unsettled
-    // identity is not a scope the control may be offered for.
-    activeRef.current = { id: '', name: '' }
-    beginLibraryReturnFlow(JOURNEY)
+  it('while a re-read is still in flight, with the previous child retained', () => {
+    // The case an "activeChild is undefined" guard would miss: `useChildren`
+    // KEEPS the shared list across a re-read, so the matching child object is
+    // still there and only `isLoading` says the answer is not current.
+    begin()
+    readRef.isLoading = true
     render(<BookshelfPage />)
+    expect(activeRef.current.id).toBe(JOURNEY.childId)
     expect(screen.queryByRole('button', { name: LIBRARY_RETURN_LABEL })).not.toBeInTheDocument()
+  })
+
+  it('and when that read FAILED, which is not an affirmative identity', () => {
+    // `loadFailed` is reported beside a retained child and `isLoading` stays
+    // true with it. A failed read is the GATE verdict: not editable, not
+    // offerable, and never read as an empty family.
+    begin()
+    readRef.isLoading = true
+    readRef.loadFailed = true
+    render(<BookshelfPage />)
+    expect(activeRef.current.id).toBe(JOURNEY.childId)
+    expect(screen.queryByRole('button', { name: LIBRARY_RETURN_LABEL })).not.toBeInTheDocument()
+    // The journey is not destroyed by a failed read — it is simply not offered
+    // against one, so the next settled render can still show it.
+    expect(getLibraryReturnFlow()).not.toBeNull()
+  })
+
+  it('and comes back when the read settles on the same child', () => {
+    begin()
+    readRef.isLoading = true
+    readRef.loadFailed = true
+    const { unmount } = render(<BookshelfPage />)
+    expect(screen.queryByRole('button', { name: LIBRARY_RETURN_LABEL })).not.toBeInTheDocument()
+    unmount()
+
+    readRef.isLoading = false
+    readRef.loadFailed = false
+    render(<BookshelfPage />)
+    expect(screen.getByRole('button', { name: LIBRARY_RETURN_LABEL })).toBeInTheDocument()
   })
 })

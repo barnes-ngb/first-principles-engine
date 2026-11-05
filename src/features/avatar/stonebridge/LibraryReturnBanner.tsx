@@ -46,15 +46,21 @@ import {
 export default function LibraryReturnBanner() {
   const navigate = useNavigate()
   const familyId = useFamilyId()
-  const { activeChild } = useActiveChild()
+  const { activeChild, isLoading, loadFailed } = useActiveChild()
   const flow = useSyncExternalStore(subscribeLibraryReturnFlow, getLibraryReturnFlow)
-  // `activeChild` is undefined while the children read has not settled — and
-  // also when it FAILED, which is not an affirmative empty family. Either way
-  // the scope is unknown, so there is nothing to offer a return for.
-  const live = liveLibraryReturnFlow(flow, {
-    familyId,
-    childId: activeChild?.id ?? '',
-  })
+  /**
+   * The identity has to be SETTLED, not merely present.
+   *
+   * `useChildren` keeps the shared children list across a re-read and reports
+   * `isLoading` / `loadFailed` beside it, so `activeChild` can still be a whole
+   * object from the previous answer while the current read is unsettled or has
+   * failed. A failed read is not an affirmative identity, so the control is not
+   * offered against one — the GATE verdict, not a guess about undefined.
+   */
+  const settled = !isLoading && !loadFailed
+  const live = settled
+    ? liveLibraryReturnFlow(flow, { familyId, childId: activeChild?.id ?? '' })
+    : null
 
   if (!live) return null
 

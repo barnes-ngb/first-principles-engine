@@ -1,77 +1,50 @@
 /**
  * The temporary way back from My Books to the village a child left from.
  *
- * ── What this is, and what it deliberately is not ────────────────────────────
+ * ── What it is ───────────────────────────────────────────────────────────────
  *
- * A child who taps *Open My Books* inside a Stonebridge location visit lands on
- * the real shelf — the same `/books` the nav item reaches, with the same books,
- * the same reader and the same editor. Before this module there was no way back
- * except the nav, which is a different place: the shelf's own exits all go to
- * the shelf, and the shelf's only onward doors are books. So the village was a
- * door that only opened one way.
+ * A child who taps *Open My Books* in a Stonebridge location visit lands on the
+ * real shelf. This module is the one note that says the shelf was opened FROM a
+ * village location, so the shelf can offer one explicit way back. It is held in
+ * module memory — never localStorage, never a URL, never route state, never a
+ * document — so a refresh, a copied link, a new tab and a direct `/books` have
+ * no flow at all and fall back to ordinary navigation.
  *
- * This is the one piece that was missing: a **temporary, in-memory** note that
- * the shelf was opened FROM a village location, so the shelf can offer one
- * explicit way back. It is:
+ * Module memory does NOT expire by itself: it outlives every screen, including a
+ * logout that unmounts the whole routed shell. So everything below is about
+ * ending it explicitly, from three channels that each see something the others
+ * cannot:
  *
- *   • **in memory only** — never localStorage, never a URL, never route state,
- *     and never a document. A refresh, a copied link, a new tab and a direct
- *     `/books` all have no flow at all, and fall back to ordinary navigation
- *     with no return control. Nothing here can be *recreated* from anything a
- *     browser keeps, which is the whole reason it is not in the URL: a marker a
- *     child can paste is a marker that outlives the thing it describes.
- *   • **bound to a family, a child and a monotonic generation** — a scope change
- *     ends it permanently, including `A → B → A` (see below), and a stale
- *     callback holding an old generation cannot act or revive it.
- *   • **consumed once** — the return is served exactly one time, by the village
- *     board that opens for it.
- *   • **free** — no Firestore access of any kind lives in this file. Reaching
- *     the shelf through the village writes nothing that reaching it from the nav
- *     would not, and the return writes nothing either. The village's own reading
- *     progress, the hours a creative session logs and the XP a read awards are
- *     all untouched: they belong to the surfaces that already own them.
+ *   1. **identity** (`observeLibraryReturnIdentity`) — the account, profile and
+ *      selected child, observed above the auth/profile gates by
+ *      `LibraryReturnScopeObserver` in `App.tsx`. It sees a logout, a profile
+ *      exit, an unsettled gate and a resolved-child change, none of which the
+ *      shell can report because the shell is gone by then.
+ *   2. **the shared active-child store** — synchronous, once per raw write, so a
+ *      same-tick `A → B → A` is seen as two movements. React batches that into
+ *      one render reading `A`; a render-level comparison sees nothing happen.
+ *   3. **the route** (`reconcileLibraryReturnFlowPath`) — leaving the journey.
  *
- * ── Why `A → B → A` has to be caught at the store, not at the render ─────────
+ * Channels 1 and 2 both record **identity movement**, which bumps a monotonic
+ * epoch and ends any flow. The epoch is also what guards the tap-to-close
+ * boundary: the village captures it when the Books door is tapped and the
+ * departure is refused if it moved before the dialog finished closing — the one
+ * window in which no flow exists yet for the channels to cancel.
  *
- * The flow is invalidated by a child switch because the shelf, the reader and
- * the editor are all child-scoped: a return offered to the child now on screen,
- * for a journey another child started, is the `FIX-220` class of defect in a new
- * place. The obvious test — compare the rendered `activeChildId` — cannot see
- * the case that matters. Two synchronous writes in one handler (`setActiveChildId('B')`
- * then `setActiveChildId('A')`, which `BookshelfPage.handleResumeDraft` can
- * legitimately produce) are batched into **one** render that still reads `A`, so
- * a render-level comparison sees nothing happen at all while the shelf
- * underneath it has re-read for somebody else and back.
- *
- * So the invalidation is subscribed at the shared `activeChildStore` — the
- * boundary every switch actually crosses, synchronously, once per write — and it
- * lives in THIS module rather than in a component, so it holds whether or not
- * anything is mounted to watch. Once ended, a flow is gone: coming back to `A`
- * does not restore it, because nothing anywhere is still holding it. That is
- * what "permanently" means here.
- *
- * ── What it never does ───────────────────────────────────────────────────────
- *
- * It never selects a child. The village hands over the family and child it was
- * already rendering for; if they do not match the scope asking, there is no live
- * flow and no return control — a return is refused, never *made* possible by
- * moving the child under it. `BookshelfPage`'s existing authorised draft-resume
- * switch is untouched: the flow does not block it and adds no competing guard to
- * it; that switch simply ends the flow like any other.
+ * It never selects a child. The village hands over the family and child it is
+ * already rendering; a mismatch means no return, never a reason to move the
+ * child under it. `BookshelfPage`'s authorised draft-resume switch is untouched:
+ * the flow neither blocks it nor questions it, and that switch ends the flow
+ * like any other identity movement.
  */
-import {
-  getActiveChildId,
-  subscribeActiveChildId,
-} from '../../../core/hooks/activeChildStore'
+import { subscribeActiveChildId } from '../../../core/hooks/activeChildStore'
 
 /** Where a return goes: the Hero Hub, which hosts the village board. */
 export const LIBRARY_RETURN_VILLAGE_PATH = '/avatar'
 
 /**
- * Has the child asked to go back yet?
- *
- * `away` — on the shelf (or somewhere the shelf leads), with the way back
- * offered. `returning` — the way back was taken, and the village board owes one
+ * `away` — on the shelf or somewhere it leads, with the way back offered.
+ * `returning` — the way back was taken, and the village board owes one
  * open-with-focus, which it serves once.
  */
 export const LibraryReturnPhase = {
@@ -82,24 +55,16 @@ export type LibraryReturnPhase =
   (typeof LibraryReturnPhase)[keyof typeof LibraryReturnPhase]
 
 export interface LibraryReturnFlow {
-  /** The family the village was open for. */
   readonly familyId: string
-  /** The child the village was open for. Never written, only compared. */
   readonly childId: string
   /** The location the child left from — the tile a return focuses. */
   readonly missionId: string
-  /**
-   * Monotonic, never reused, bumped on every new flow.
-   *
-   * A callback captured in one render holds the generation it was rendered with,
-   * so a tap that lands after a switch (or after a second journey started) is
-   * refused by identity rather than by hoping the component re-rendered first.
-   */
+  /** Monotonic, never reused: a stale callback cannot act on an old one. */
   readonly generation: number
   readonly phase: LibraryReturnPhase
 }
 
-/** The scope a surface is asking on behalf of — its OWN family and child. */
+/** The scope a surface asks on behalf of — its OWN family and child. */
 export interface LibraryReturnScope {
   familyId: string
   childId: string
@@ -108,6 +73,16 @@ export interface LibraryReturnScope {
 let flow: LibraryReturnFlow | null = null
 /** Never decremented and never reset: a generation is used once, ever. */
 let generations = 0
+/**
+ * Has the current flow been observed OUTSIDE the village since it began?
+ *
+ * Module-level rather than part of the record so the record stays immutable and
+ * no subscriber is woken for a fact nothing renders. It is what lets the village
+ * path be the flow's birthplace and still end the flow when the child comes back
+ * to the hub by ordinary navigation.
+ */
+let leftOrigin = false
+
 const listeners = new Set<() => void>()
 
 function notify(): void {
@@ -126,31 +101,80 @@ export function subscribeLibraryReturnFlow(listener: () => void): () => void {
   }
 }
 
-/**
- * End the flow. Irreversible: there is no undo and no second copy to restore
- * from, which is what makes `A → B → A` and Back/Forward safe.
- */
+/** End the flow. Irreversible — there is no second copy to restore from. */
 export function endLibraryReturnFlow(): void {
+  leftOrigin = false
   if (!flow) return
   flow = null
   notify()
 }
 
+// ── Identity movement, and the epoch it counts ──────────────────────────────
+
+/** The last identity actually observed, or `null` for "nothing yet". */
+let observedIdentity: string | null = null
+/** Monotonic count of observed identity movements. */
+let identityEpoch = 0
+
+/**
+ * The epoch to carry across a delayed callback.
+ *
+ * Captured before the thing it guards — the village captures it on the tap that
+ * closes the board, not when the board has closed — so the window between them
+ * is covered even though no flow exists in it yet.
+ */
+export function getLibraryIdentityEpoch(): number {
+  return identityEpoch
+}
+
+/** Record a movement: the epoch advances and any flow in hand is over. */
+function moveIdentity(): void {
+  identityEpoch += 1
+  endLibraryReturnFlow()
+}
+
+/**
+ * Observe the identity the gates grant, as one settled string.
+ *
+ * `''` means unknown — still loading, signed out, anonymous, or no profile
+ * chosen. The two unresolved states must not be collapsed, exactly as
+ * `useHandoffScopeWatch` splits them: **before** anything has resolved it is a
+ * page still settling and a brand-new arrival must survive, while **after** one
+ * has resolved it is a session ending, which moves the identity. So signing
+ * straight back into the same account starts a new epoch holding nothing from
+ * the session before it.
+ */
+export function observeLibraryReturnIdentity(identity: string): void {
+  if (identity === '') {
+    if (observedIdentity === null) return
+    observedIdentity = null
+    moveIdentity()
+    return
+  }
+  if (observedIdentity === identity) return
+  observedIdentity = identity
+  moveIdentity()
+}
+
 /**
  * The child left a village location for the shelf.
  *
- * Refuses an unsettled scope — an empty family or child id is "we do not know
- * yet", and a flow bound to nothing would match the next person to arrive.
- * Replaces any earlier flow, with a fresh generation, so the most recent
- * journey is the only one that can be returned from.
+ * Refuses an unsettled scope — an empty id is "we do not know yet", and a flow
+ * bound to nothing would match whoever arrived next — and refuses a stale
+ * `observedEpoch`, which is how an `A → B → A` during the board's closing
+ * transition is rejected even though the scope string matches `A` again.
  */
 export function beginLibraryReturnFlow(origin: {
   familyId: string
   childId: string
   missionId: string
+  /** `getLibraryIdentityEpoch()` as read at the tap. */
+  observedEpoch: number
 }): LibraryReturnFlow | null {
   if (!origin.familyId || !origin.childId) return null
+  if (origin.observedEpoch !== identityEpoch) return null
   generations += 1
+  leftOrigin = false
   flow = {
     familyId: origin.familyId,
     childId: origin.childId,
@@ -165,9 +189,8 @@ export function beginLibraryReturnFlow(origin: {
 /**
  * Is this flow live for the scope asking, in the phase asked about?
  *
- * Pure, and takes the flow as an argument rather than reading the module, so a
- * component can derive it from the value it subscribed with — deriving from a
- * fresh read instead would be a second source of truth for the same render.
+ * Pure, and takes the flow as an argument so a component derives it from the
+ * value it subscribed with rather than from a second read of the module.
  */
 export function liveLibraryReturnFlow(
   candidate: LibraryReturnFlow | null,
@@ -183,13 +206,9 @@ export function liveLibraryReturnFlow(
 }
 
 /**
- * Take the way back.
- *
- * Guarded on the generation the caller was rendered with: a tap from a view the
- * scope has moved out from under — a switch during an async boundary, a second
- * journey started in another tab of the same session — finds no matching flow
- * and sends nobody anywhere. Returns the flow when the request is accepted, so
- * the caller navigates only on a real one.
+ * Take the way back. Guarded on the generation the caller was rendered with, so
+ * a tap that lands after the scope moved finds no matching flow and the caller
+ * never navigates. Returns the flow when accepted.
  */
 export function requestLibraryReturn(generation: number): LibraryReturnFlow | null {
   if (!flow) return null
@@ -202,83 +221,91 @@ export function requestLibraryReturn(generation: number): LibraryReturnFlow | nu
 
 /**
  * The village board has opened for a return and put the focus where it belongs.
- *
- * Consumes the request: one return per journey, so a board reopened later —
- * however it was opened — is an ordinary board with no focus taken from it.
- * Guarded on the generation for the same reason the request is.
+ * Consumes the request: one return per journey, so a board opened later is an
+ * ordinary board.
  */
 export function serveLibraryReturn(generation: number): boolean {
   if (!flow) return false
   if (flow.generation !== generation) return false
   if (flow.phase !== LibraryReturnPhase.Returning) return false
   flow = null
+  leftOrigin = false
   notify()
   return true
 }
 
-// ── Where the flow survives, and where it ends ──────────────────────────────
+// ── Where the flow survives, by route and by phase ──────────────────────────
 
-/** The village itself: the flow is created here and returns here. */
-const EXACT_PATHS = new Set([LIBRARY_RETURN_VILLAGE_PATH, '/books', '/stickers'])
-
-/**
- * Everything under the shelf: the editor, the reader, the per-page review, the
- * sight-word pages and the create flows. `/books-about-me` is deliberately NOT
- * matched — it is the monthly-review reader, a different feature with a
- * different shelf — which is why this is `'/books/'` with the slash and an
- * exact `'/books'` beside it, rather than a `startsWith('/books')`.
- */
-const PREFIXES = ['/books/']
-
-/**
- * Does being at this path keep a live flow?
- *
- * The rule is a whitelist, not a blacklist: the flow survives the village, the
- * shelf and the places the shelf leads, and **anything else ends it**. A child
- * who goes to Today, the Knowledge Mine or Barnes Bros has left the journey, and
- * a way back offered after that is a way back to something they are no longer
- * doing.
- *
- * It is evaluated on each location CHANGE, so the village path a flow is born on
- * is not re-tested while nothing has moved — and arriving back at the village by
- * any other route ends the flow, because the journey is over either way.
- */
-export function pathKeepsLibraryReturnFlow(pathname: string): boolean {
+function normalise(pathname: string): string {
   const path = pathname.replace(/[?#].*$/, '')
-  const trimmed = path.length > 1 ? path.replace(/\/+$/, '') : path
-  if (EXACT_PATHS.has(trimmed)) return true
-  return PREFIXES.some((prefix) => trimmed.startsWith(prefix))
+  return path.length > 1 ? path.replace(/\/+$/, '') : path
+}
+
+/** The Books-area routes the app actually mounts, named rather than prefixed. */
+const BOOKS_AREA_EXACT = new Set([
+  '/books',
+  '/books/create-story',
+  '/books/sight-words',
+  // Retired wizard; the router redirects it to the shelf (FEAT-187).
+  '/books/story-guide',
+  '/stickers',
+])
+
+/** `/books/:bookId`, and its `read` / `review` children. Nothing deeper. */
+const BOOK_ROUTE = /^\/books\/[^/]+(?:\/(?:read|review))?$/
+
+/**
+ * Is this one of the real routes the shelf opens?
+ *
+ * A whitelist of actual route shapes, not a `/books` prefix: `/books/x/extra`
+ * and `/books-about-me` both render something else — the first is `NotFound`,
+ * the second is the monthly-review reader — and a journey that survived either
+ * would be offering a way back from a page that is not in it.
+ */
+export function isBooksAreaPath(pathname: string): boolean {
+  const path = normalise(pathname)
+  return BOOKS_AREA_EXACT.has(path) || BOOK_ROUTE.test(path)
+}
+
+/** The hub that hosts the village board. */
+export function isVillagePath(pathname: string): boolean {
+  return normalise(pathname) === LIBRARY_RETURN_VILLAGE_PATH
 }
 
 /**
- * End the flow if this scope or this location is no longer the one it belongs
- * to. Called from the shell, which is the one thing mounted above every route
- * transition; the child-switch half is below and needs nothing mounted at all.
+ * A route transition: keep the flow only where its phase belongs.
+ *
+ *   • **away** — inside the Books area, or still standing where it began (the
+ *     hub, before the first step into the shelf). Coming back to the hub by
+ *     ordinary navigation ENDS it: the journey is over whether or not the way
+ *     back was used, and an origin that outlives it would reopen the board on a
+ *     later ordinary visit.
+ *   • **returning** — at the hub, which is where it was going. Anywhere else
+ *     means the return was abandoned — the village read failed and the child
+ *     went back to the shelf, say — so it ends rather than waiting to fire at
+ *     the next hub arrival.
+ *
+ * Called on each location change, so Back and Forward are ordinary changes:
+ * stepping out ends the flow and stepping back in finds it already gone.
  */
-export function reconcileLibraryReturnFlow(scope: {
-  familyId: string
-  pathname: string
-}): void {
+export function reconcileLibraryReturnFlowPath(pathname: string): void {
   if (!flow) return
-  if (flow.familyId !== scope.familyId) {
-    endLibraryReturnFlow()
+  if (flow.phase === LibraryReturnPhase.Returning) {
+    if (!isVillagePath(pathname)) endLibraryReturnFlow()
     return
   }
-  if (!pathKeepsLibraryReturnFlow(scope.pathname)) endLibraryReturnFlow()
+  if (isBooksAreaPath(pathname)) {
+    leftOrigin = true
+    return
+  }
+  if (!leftOrigin && isVillagePath(pathname)) return
+  endLibraryReturnFlow()
 }
 
 /**
- * The child-switch half, subscribed at the shared store rather than at a render.
- *
- * Registered once, at import, and never torn down: a rule that only holds while
- * some component happens to be mounted is a rule with a hole in it, and this one
- * has to hold during the exact moment a surface is unmounting. Every write to
- * the active child notifies synchronously, so a same-tick `A → B → A` is seen as
- * TWO notifications — and the first of them, reading `B`, already ends the flow
- * that `A` started. By the time the batched render happens there is nothing left
- * to revive.
+ * The raw store channel, subscribed in the module so it holds with nothing
+ * mounted — including during the frame a surface is unmounting. Every write to
+ * the active child notifies synchronously and only when the value really
+ * changed, so each notification is one movement.
  */
-subscribeActiveChildId(() => {
-  if (!flow) return
-  if (getActiveChildId() !== flow.childId) endLibraryReturnFlow()
-})
+subscribeActiveChildId(moveIdentity)

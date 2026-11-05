@@ -9,15 +9,20 @@ import { getMission } from './missions'
 import { LIBRARY_RETURN_LABEL, LIBRARY_RETURN_LINE } from './libraryReturnCopy'
 import {
   LIBRARY_RETURN_VILLAGE_PATH,
+  LibraryReturnPhase,
   beginLibraryReturnFlow,
   endLibraryReturnFlow,
+  getLibraryIdentityEpoch,
   getLibraryReturnFlow,
   requestLibraryReturn,
 } from './libraryReturnFlow'
 // `vi.mock` is hoisted above these, so the components below are the real ones.
 import LibraryReturnBanner from './LibraryReturnBanner'
 import StonebridgeMissionCard from './StonebridgeMissionCard'
-import { useLibraryReturnScopeWatch } from './useLibraryReturnScopeWatch'
+import {
+  useLibraryReturnIdentityWatch,
+  useLibraryReturnRouteWatch,
+} from './useLibraryReturnScopeWatch'
 
 /**
  * The village → My Books → village round trip, over a real router.
@@ -104,9 +109,17 @@ const LIBRARY_REPAIRED: StonebridgeProgressData = {
   retry: () => {},
 }
 
-function emulateReducedMotion() {
+/**
+ * Report a reduced-motion preference, or withdraw it.
+ *
+ * Most of this file uses `true`, which makes the dialog transitions instant so
+ * the hand-offs are still exercised without a wait. The tap-to-close boundary
+ * tests pass `false` on purpose: that boundary only EXISTS while a close is
+ * actually taking time.
+ */
+function emulateReducedMotion(reduce = true) {
   window.matchMedia = ((q: string) => ({
-    matches: q.includes('prefers-reduced-motion'),
+    matches: reduce && q.includes('prefers-reduced-motion'),
     media: q,
     onchange: null,
     addListener: () => {},
@@ -119,16 +132,19 @@ function emulateReducedMotion() {
 
 const realMatchMedia = window.matchMedia
 
-/** The layout route: the one thing mounted across every transition. */
+/** The layout route: the one thing mounted across every route transition. */
 function Shell() {
   const location = useLocation()
   const navigate = useNavigate()
-  useLibraryReturnScopeWatch({ familyId: 'fam-1', pathname: location.pathname })
+  useLibraryReturnRouteWatch(location.pathname)
   return (
     <div>
       <span data-testid="where">{location.pathname}</span>
       {/* The app nav, as far as this journey is concerned: a way out of it. */}
       <button onClick={() => navigate('/today')}>Go to Today</button>
+      {/* The nav's own My Hero entry — ordinary navigation to the hub. */}
+      <button onClick={() => navigate(LIBRARY_RETURN_VILLAGE_PATH)}>Go to My Hero</button>
+      <button onClick={() => navigate('/books')}>Go to My Books</button>
       <Outlet />
     </div>
   )
@@ -142,11 +158,12 @@ function VillageRoute() {
       familyId="fam-1"
       childId={fx.activeChild.id}
       isLincoln
-      onOpenBooks={(fromMissionId) => {
+      onOpenBooks={(fromMissionId, observedEpoch) => {
         beginLibraryReturnFlow({
           familyId: 'fam-1',
           childId: fx.activeChild.id,
           missionId: fromMissionId,
+          observedEpoch,
         })
         navigate(STONEBRIDGE_BOOKS_PATH)
       }}
@@ -183,6 +200,17 @@ function BooksSubPage({ name }: { name: string }) {
   )
 }
 
+/**
+ * What sits ABOVE the router in the real app: the identity observer from
+ * `App.tsx`, which outlives the routed shell. Here it also gives the harness a
+ * way to close the gate — `signedIn={false}` is a logout — without pretending a
+ * component inside the gate could have seen it.
+ */
+function IdentityObserver({ signedIn }: { signedIn: boolean }) {
+  useLibraryReturnIdentityWatch(signedIn ? 'fam-1' : '', signedIn ? 'lincoln' : null)
+  return null
+}
+
 function renderJourney(initial = LIBRARY_RETURN_VILLAGE_PATH) {
   const router = createMemoryRouter(
     [
@@ -201,8 +229,39 @@ function renderJourney(initial = LIBRARY_RETURN_VILLAGE_PATH) {
     ],
     { initialEntries: [initial] },
   )
-  render(<RouterProvider router={router} />)
-  return router
+  const view = render(
+    <>
+      <IdentityObserver signedIn />
+      <RouterProvider router={router} />
+    </>,
+  )
+  /** Close the gate: the observer stays, the routed shell goes. */
+  const signOut = () =>
+    view.rerender(
+      <>
+        <IdentityObserver signedIn={false} />
+      </>,
+    )
+  /** The same account and profile signing straight back in. */
+  const signBackIn = () =>
+    view.rerender(
+      <>
+        <IdentityObserver signedIn />
+        <RouterProvider router={router} />
+      </>,
+    )
+  return { router, signOut, signBackIn }
+}
+
+/** Begin a journey directly, against the epoch the module has observed. */
+function begin(origin: { familyId?: string; childId?: string; missionId?: string } = {}) {
+  return beginLibraryReturnFlow({
+    familyId: 'fam-1',
+    childId: 'lincoln',
+    missionId: 'library_hut',
+    ...origin,
+    observedEpoch: getLibraryIdentityEpoch(),
+  })
 }
 
 function boardRegion() {
@@ -320,7 +379,7 @@ describe('the repaired Library is still a door to the real books', () => {
 
 describe('the way back', () => {
   it('comes back to the board, with the focus on the place it left', async () => {
-    const router = renderJourney()
+    const { router } = renderJourney()
     await leaveFromLocation(LIBRARY)
 
     expect(screen.getByText(`🏰 ${LIBRARY_RETURN_LINE}`)).toBeInTheDocument()
@@ -412,7 +471,7 @@ describe('the way back', () => {
 
 describe('leaving the journey ends it, and history cannot bring it back', () => {
   it('a trip to Today ends it — even with Back and Forward', async () => {
-    const router = renderJourney()
+    const { router } = renderJourney()
     await leaveFromLocation(LIBRARY)
     expect(screen.getByRole('button', { name: LIBRARY_RETURN_LABEL })).toBeInTheDocument()
 
@@ -435,21 +494,91 @@ describe('leaving the journey ends it, and history cannot bring it back', () => 
     expect(getLibraryReturnFlow()).toBeNull()
   })
 
-  it('stepping back to the village by hand opens nothing', async () => {
-    const router = renderJourney()
+  it('stepping back to the village by hand ends it, and opens nothing', async () => {
+    const { router } = renderJourney()
     await leaveFromLocation(LIBRARY)
 
     await act(async () => {
       await router.navigate(-1)
     })
-    // The child is back at the village without having asked to be, so nothing
-    // was asked of the board: it stays closed, and no return is served. The
-    // journey itself is still live — they have not left it, and the village and
-    // the shelf are both inside it — so going on to the shelf again still
-    // offers the way back. What a browser's Back button cannot do is revive a
-    // journey that has ENDED, which is the case above.
+    // The child is back at the hub without having asked to be. Nothing is
+    // asked of the board — it stays closed and no return is served — and the
+    // journey is over: they arrived at the place it would have taken them.
     expect(screen.queryByRole('dialog', { name: 'Stonebridge Village' })).not.toBeInTheDocument()
-    expect(getLibraryReturnFlow()?.phase).toBe('away')
+    expect(getLibraryReturnFlow()).toBeNull()
+  })
+
+  it('Library → Books → ordinary My Hero → Books offers nothing', async () => {
+    renderJourney()
+    await leaveFromLocation(LIBRARY)
+    expect(screen.getByRole('button', { name: LIBRARY_RETURN_LABEL })).toBeInTheDocument()
+
+    // The nav's own My Hero entry, not the way back.
+    fireEvent.click(screen.getByRole('button', { name: 'Go to My Hero' }))
+    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/avatar'))
+    expect(screen.queryByRole('dialog', { name: 'Stonebridge Village' })).not.toBeInTheDocument()
+    expect(getLibraryReturnFlow()).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Go to My Books' }))
+    await screen.findByRole('heading', { name: 'My Books' })
+    expect(screen.queryByRole('button', { name: LIBRARY_RETURN_LABEL })).not.toBeInTheDocument()
+  })
+
+  it('an unsupported Books URL ends it rather than passing as part of the area', async () => {
+    const { router } = renderJourney()
+    await leaveFromLocation(LIBRARY)
+
+    await act(async () => {
+      await router.navigate('/books/book-1/extra')
+    })
+    expect(getLibraryReturnFlow()).toBeNull()
+  })
+
+  it('a logout ends it, and the same account signing back in gets nothing', async () => {
+    // The module-memory failure the above-gates observer exists for: the routed
+    // shell is unmounted by the gate, so nothing inside it can see the closure.
+    const { signOut, signBackIn } = renderJourney()
+    await leaveFromLocation(LIBRARY)
+    expect(getLibraryReturnFlow()).not.toBeNull()
+
+    act(() => signOut())
+    expect(getLibraryReturnFlow()).toBeNull()
+
+    act(() => signBackIn())
+    // Nothing from the session before it: the journey is gone, so whatever the
+    // shell mounts there is no way back on it.
+    expect(getLibraryReturnFlow()).toBeNull()
+    expect(screen.queryByRole('button', { name: LIBRARY_RETURN_LABEL })).not.toBeInTheDocument()
+  })
+})
+
+describe('an abandoned return does not fire later', () => {
+  it('a failed village read, then back to the shelf, ends the request', async () => {
+    fx.data = { ...LIBRARY_REPAIRED, loading: false, mission: null, active: null, readError: true }
+    const { router } = renderJourney('/books')
+    act(() => {
+      begin()
+    })
+    fireEvent.click(await screen.findByRole('button', { name: LIBRARY_RETURN_LABEL }))
+
+    // The honest recovery, and no board.
+    await screen.findByText("Couldn't load your village.")
+    expect(getLibraryReturnFlow()?.phase).toBe(LibraryReturnPhase.Returning)
+
+    // The child gives up and goes back to the shelf.
+    await act(async () => {
+      await router.navigate('/books')
+    })
+    expect(getLibraryReturnFlow()).toBeNull()
+
+    // A later ordinary visit to the hub opens an ordinary hub — the abandoned
+    // request does not reopen the board now that the read works.
+    fx.data = LIBRARY_REPAIRED
+    await act(async () => {
+      await router.navigate(LIBRARY_RETURN_VILLAGE_PATH)
+    })
+    expect(screen.queryByRole('dialog', { name: 'Stonebridge Village' })).not.toBeInTheDocument()
+    expect(screen.getByText('🏰 Open Stonebridge')).toBeInTheDocument()
   })
 })
 
@@ -488,19 +617,64 @@ describe('a scope change ends it under an open shelf', () => {
     expect(getLibraryReturnFlow()).toBeNull()
   })
 
+  it('a same-tick A → B → A during a REAL close refuses the departure', async () => {
+    // The tap-to-close window, with the transition actually running (no
+    // reduced-motion shortcut): the board takes time to leave, the journey is
+    // created only once it has, and nothing exists in between for the store
+    // subscription to cancel. By the time the board has gone the selected child
+    // is Lincoln again — so the scope string matches — and only the epoch
+    // captured at the tap can tell that the shelf re-read for his brother and
+    // back underneath it.
+    emulateReducedMotion(false)
+    renderJourney()
+    fireEvent.click(screen.getByText('🏰 Open Stonebridge'))
+    fireEvent.click(tile(LIBRARY))
+    fireEvent.click(
+      within(screen.getByRole('dialog', { name: 'The Library Hut' })).getByRole('button', {
+        name: 'Open My Books',
+      }),
+    )
+
+    act(() => {
+      setActiveChildIdShared('london')
+      setActiveChildIdShared('lincoln')
+    })
+
+    // Let the whole close transition finish, then assert nothing happened.
+    await waitFor(() => {
+      expect(screen.queryByText('🎌 Banner Hall')).not.toBeInTheDocument()
+    })
+    expect(screen.getByTestId('where')).toHaveTextContent(LIBRARY_RETURN_VILLAGE_PATH)
+    expect(getLibraryReturnFlow()).toBeNull()
+    expect(screen.queryByRole('heading', { name: 'My Books' })).not.toBeInTheDocument()
+  })
+
+  it('but an untouched identity across the same real close still departs', async () => {
+    // The positive control for the test above: with nothing moving, the same
+    // delayed callback reaches the shelf and offers the way back.
+    emulateReducedMotion(false)
+    renderJourney()
+    fireEvent.click(screen.getByText('🏰 Open Stonebridge'))
+    fireEvent.click(tile(LIBRARY))
+    fireEvent.click(
+      within(screen.getByRole('dialog', { name: 'The Library Hut' })).getByRole('button', {
+        name: 'Open My Books',
+      }),
+    )
+
+    await screen.findByRole('heading', { name: 'My Books' })
+    expect(getLibraryReturnFlow()?.missionId).toBe('library_hut')
+    expect(screen.getByRole('button', { name: LIBRARY_RETURN_LABEL })).toBeInTheDocument()
+  })
+
   it('a switch while the departure is held leaves the next child a closed board', async () => {
     // The held-boundary case: the way back was taken, and the chip moved before
     // the village was reached. The next child must not arrive at a board that
     // opened itself for somebody else's journey.
-    const router = renderJourney('/books')
+    const { router } = renderJourney('/books')
     await screen.findByRole('heading', { name: 'My Books' })
     act(() => {
-      const flow = beginLibraryReturnFlow({
-        familyId: 'fam-1',
-        childId: 'lincoln',
-        missionId: 'library_hut',
-      })
-      requestLibraryReturn(flow!.generation)
+      requestLibraryReturn(begin()!.generation)
     })
     act(() => {
       fx.activeChild = { id: 'london', name: 'London' }
@@ -526,7 +700,7 @@ describe('a scope change ends it under an open shelf', () => {
     // `libraryReturnFlow.test.ts`; the shell here is pinned to one family on
     // purpose, because a second mocked family would be testing the mock.)
     act(() => {
-      beginLibraryReturnFlow({ familyId: 'fam-2', childId: 'lincoln', missionId: 'library_hut' })
+      begin({ familyId: 'fam-2' })
     })
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: LIBRARY_RETURN_LABEL })).not.toBeInTheDocument()
@@ -539,11 +713,7 @@ describe('a marker that means nothing is simply ordinary navigation', () => {
     renderJourney('/books')
     await screen.findByRole('heading', { name: 'My Books' })
     act(() => {
-      beginLibraryReturnFlow({
-        familyId: 'fam-1',
-        childId: 'lincoln',
-        missionId: 'not_a_place',
-      })
+      begin({ missionId: 'not_a_place' })
     })
 
     const back = await screen.findByRole('button', { name: LIBRARY_RETURN_LABEL })
@@ -559,7 +729,7 @@ describe('a marker that means nothing is simply ordinary navigation', () => {
     fx.data = { ...LIBRARY_REPAIRED, loading: true, mission: null, active: null }
     renderJourney('/books')
     act(() => {
-      beginLibraryReturnFlow({ familyId: 'fam-1', childId: 'lincoln', missionId: 'library_hut' })
+      begin()
     })
     fireEvent.click(await screen.findByRole('button', { name: LIBRARY_RETURN_LABEL }))
 
@@ -580,7 +750,7 @@ describe('a marker that means nothing is simply ordinary navigation', () => {
     }
     renderJourney('/books')
     act(() => {
-      beginLibraryReturnFlow({ familyId: 'fam-1', childId: 'lincoln', missionId: 'library_hut' })
+      begin()
     })
     fireEvent.click(await screen.findByRole('button', { name: LIBRARY_RETURN_LABEL }))
 
