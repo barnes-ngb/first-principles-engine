@@ -74,7 +74,7 @@ export const STONEBRIDGE_MISSIONS: StonebridgeMission[] = [
       // Mara the Builder — pragmatic, warm, plain-spoken; breaks big jobs into
       // faithful doable steps.
       name: 'Mara the Builder',
-      line: "You did it, Lincoln — plank by plank, the Old Bridge holds again! Wagons can cross to the farms now. That's what faithful steps build.",
+      line: "You did it — plank by plank, the Old Bridge holds again! Wagons can cross to the farms now. That's what faithful steps build.",
     },
     formationBeat: {
       // Brother Cal — connects village choices to scripture, plainly for kids.
@@ -97,7 +97,7 @@ export const STONEBRIDGE_MISSIONS: StonebridgeMission[] = [
       // Captain Wren — alert, disciplined, quietly protective; values
       // preparation over panic.
       name: 'Captain Wren',
-      line: 'The stair holds and the balcony stands, Lincoln. Now the watch can see the whole valley again. Well prepared — well done.',
+      line: 'The stair holds and the balcony stands. Now the watch can see the whole valley again. Well prepared — well done.',
     },
     formationBeat: {
       // Sister Anya — tender, steady, hopeful.
@@ -142,7 +142,7 @@ export const STONEBRIDGE_MISSIONS: StonebridgeMission[] = [
     thankYou: {
       // Finn the Smith — energetic, inventive, humble enough to learn from mistakes.
       name: 'Finn the Smith',
-      line: 'Listen to that hearth ROAR, Lincoln! Now I can mend every hinge and lantern hook in town. I fumbled plenty learning this — but we kept at it, and look!',
+      line: 'Listen to that hearth ROAR! Now I can mend every hinge and lantern hook in town. I fumbled plenty learning this — but we kept at it, and look!',
     },
     formationBeat: {
       // Mara the Builder — faithful steps finish big jobs.
@@ -164,7 +164,7 @@ export const STONEBRIDGE_MISSIONS: StonebridgeMission[] = [
     thankYou: {
       // Sister Anya — tender, steady, hopeful; true strength includes compassion.
       name: 'Sister Anya',
-      line: 'The far markers glow again, Lincoln. Now no neighbor walks home in the dark. That is what real strength does — it carries a light for the weary.',
+      line: 'The far markers glow again. Now no neighbor walks home in the dark. That is what real strength does — it carries a light for the weary.',
     },
     formationBeat: {
       // Old Tomas — gentle, poetic.
@@ -186,7 +186,7 @@ export const STONEBRIDGE_MISSIONS: StonebridgeMission[] = [
     thankYou: {
       // Brother Cal — cheerful, grounded; speaks clearly so children understand.
       name: 'Brother Cal',
-      line: 'The beacon is bright again, Lincoln! Now the allied villages can see that Stonebridge is standing, rebuilding, and ready to help others. What a light you have lit.',
+      line: 'The beacon is bright again! Now the allied villages can see that Stonebridge is standing, rebuilding, and ready to help others. What a light you have lit.',
     },
     formationBeat: {
       // Captain Wren — calm courage, preparation over panic.
@@ -209,7 +209,7 @@ export const STONEBRIDGE_MISSIONS: StonebridgeMission[] = [
     thankYou: {
       // Mayor Oakley — fair-minded servant-leader who grows Lincoln into responsibility.
       name: 'Mayor Oakley',
-      line: 'Look around this hall, Lincoln — every banner is a place you helped rebuild. Today you hang your own colors. This is who you are becoming: a hero who shows up, step by step.',
+      line: 'Look around this hall — every banner is a place you helped rebuild. Today you hang your own colors. This is who you are becoming: a hero who shows up, step by step.',
     },
     formationBeat: {
       // Brother Cal — warm, not preachy.

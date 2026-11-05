@@ -11,6 +11,7 @@ import StonebridgeRecoveryNotice, { type StonebridgeRecoveryState } from './Ston
 import BannerRaiseCelebration from './BannerRaiseCelebration'
 import VillageScene from './VillageScene'
 import { getMission } from './missions'
+import { getLibraryIdentityEpoch } from './libraryReturnFlow'
 import {
   deriveVillageBoard,
   VillageLocationState,
@@ -53,10 +54,45 @@ interface StonebridgeVillageProps extends StonebridgeRecoveryState, StonebridgeD
   currentMissionId: string
   /** Derived counters for the active mission (null if every location is repaired). */
   active: MissionComputation | null
+  /**
+   * A location tile to put the focus on once the board has finished opening.
+   *
+   * Set only when the board is being opened to serve a return from My Books:
+   * the child asked to come back to a place, so the focus belongs on that place
+   * rather than on the top of a board they have to find their way down again.
+   * Nothing else about the board changes — no location visit is opened, nothing
+   * is claimed to be repaired, and no progress is read or written. A board
+   * opened any other way passes `null` and behaves exactly as it always has.
+   */
+  focusMissionId?: string | null
+  /**
+   * The focus hand-off above has happened (or had no tile to land on).
+   *
+   * Called once, from the board's own `onEntered`, so the request is consumed
+   * exactly once however it turned out — a tile that is not there must not
+   * leave a request behind to fire at the next board.
+   */
+  onFocusServed?: () => void
 }
 
 /** What a visit is on its way to, and whose visit it was. */
-type PendingLeave = { scopeKey: string; destination: 'books' | 'forge' }
+type PendingLeave = {
+  scopeKey: string
+  destination: 'books' | 'forge'
+  /** The location the child was looking at when they left it. */
+  missionId: string
+  /**
+   * The observed identity epoch at the moment of the TAP.
+   *
+   * The scope string alone cannot answer this boundary: the board takes time to
+   * close, the journey is created only once it has, and an `A → B → A` inside
+   * that window leaves `scopeKey` reading `A` again with the shelf underneath
+   * having re-read for someone else and back. There is no flow yet for the
+   * store subscription to cancel, so the tap carries a monotonic token instead
+   * and the departure is refused if it moved.
+   */
+  identityEpoch: number
+}
 
 /**
  * Everything an open board holds, stamped with the child it belongs to.
@@ -121,8 +157,12 @@ interface VillageView {
  * on all three views this file opens — the board, the location visit and the
  * replayed thank-you — and instead: a closed visit puts the focus back on the
  * tile it came from, a closed replay puts it back on the repaired tile it was
- * played from, a dismissed board hands it back to the caller's opener, and a
- * board closed on the way to a destination hands it to the destination.
+ * played from, a dismissed board hands it back to the caller's opener, a board
+ * closed on the way to a destination hands it to the destination, a departure
+ * REFUSED on arrival hands it back to the caller's opener as a dismissal does
+ * (`refuseLeave` — refusing the navigation must not also strand the keyboard on
+ * `document.body`), and a board OPENED to serve a return from My Books puts it
+ * on the place the child asked to come back to (`focusMissionId`).
  *
  * **Every one of those happens on the view's own `onExited`, never on the tap.**
  * Until a modal's transition is over its focus trap still owns the focus and
@@ -147,6 +187,8 @@ export default function StonebridgeVillage({
   onRetry,
   onOpenBooks,
   onVisitForge,
+  focusMissionId = null,
+  onFocusServed,
 }: StonebridgeVillageProps) {
   /**
    * The open visit and the replay, stamped with the child they belong to.
@@ -305,12 +347,39 @@ export default function StonebridgeVillage({
    * since been replaced must not send the child now on screen anywhere.
    */
   const leaveFor = (destination: 'books' | 'forge') => {
-    if (!live) return
-    pendingLeaveRef.current = { scopeKey, destination }
+    if (!live?.selected) return
+    pendingLeaveRef.current = {
+      scopeKey,
+      destination,
+      missionId: live.selected,
+      identityEpoch: getLibraryIdentityEpoch(),
+    }
     pendingDismissRef.current = false
     tileToFocusRef.current = null
     setView({ ...live, selected: null, replay: null })
     onClose()
+  }
+
+  /**
+   * A departure was refused on arrival — so the focus has to land somewhere.
+   *
+   * The board is gone, `disableRestoreFocus` means MUI moved nothing on its way
+   * out, and the refusal paths below used to simply return: the keyboard was
+   * left on `document.body`, with the next Tab starting again at the top of the
+   * page. Refusing the navigation was right; stranding the focus was not.
+   *
+   * It goes to the caller's opener — the control that opened this board, handed
+   * over as `onReturnFocus`, exactly the element a plain dismissal gives it
+   * back to. That element belongs to whoever is on screen NOW: the hub re-renders
+   * for the current child, so this is the current scope's opener and never the
+   * old child's detached node (the caller checks it is still in the document
+   * before focusing it, because a scope change can re-render the hub into a
+   * branch that has no opener at all). Nothing else happens: no visit is
+   * reopened, no board is reopened, no child is changed and no journey is
+   * created — the only thing the refusal still owes is the focus.
+   */
+  const refuseLeave = () => {
+    onReturnFocus?.()
   }
 
   /**
@@ -328,12 +397,43 @@ export default function StonebridgeVillage({
     pendingDismissRef.current = false
     if (pending) {
       // A tap from a view that has since been replaced sends nobody anywhere.
-      if (pending.scopeKey !== scopeKey) return
-      if (pending.destination === 'books') onOpenBooks?.()
-      else onVisitForge?.()
+      if (pending.scopeKey !== scopeKey) {
+        refuseLeave()
+        return
+      }
+      if (pending.destination === 'books') {
+        // …and neither does one whose identity moved while the board closed,
+        // even where the scope string has come back to what it was. Applied to
+        // the Books departure, which is the one that creates a journey; the
+        // Forge keeps its existing behaviour exactly — it focuses a gallery on
+        // this page under the gallery's own rules and starts nothing.
+        if (pending.identityEpoch !== getLibraryIdentityEpoch()) {
+          refuseLeave()
+          return
+        }
+        onOpenBooks?.(pending.missionId, pending.identityEpoch)
+      } else onVisitForge?.()
       return
     }
     if (dismissed) onReturnFocus?.()
+  }
+
+  /**
+   * The board has finished OPENING — the only safe moment to hand the focus to
+   * a tile, for the same reason every other hand-off in this file waits: until
+   * the transition is over the dialog's focus trap is still settling and MUI
+   * still owns where the focus lands.
+   *
+   * Only ever for a return from My Books, and only for the child the board
+   * belongs to. The request is consumed either way: a mission id with no tile on
+   * the board (an unknown place) leaves the focus where MUI put it — the board
+   * itself — which is ordinary behaviour and not a failure worth a message.
+   */
+  const handleBoardEntered = () => {
+    if (!focusMissionId) return
+    if (!live) return
+    tileRefs.current.get(focusMissionId)?.focus()
+    onFocusServed?.()
   }
 
   return (
@@ -343,7 +443,7 @@ export default function StonebridgeVillage({
         onClose={dismiss}
         fullScreen
         transitionDuration={reduceMotion ? 0 : undefined}
-        TransitionProps={{ onExited: handleBoardExited }}
+        TransitionProps={{ onEntered: handleBoardEntered, onExited: handleBoardExited }}
         // The focus hand-off is this component's job on every path (see the
         // header), so MUI must not also move it.
         disableRestoreFocus

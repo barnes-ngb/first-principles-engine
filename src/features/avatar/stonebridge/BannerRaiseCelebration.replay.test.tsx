@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { getMission } from './missions'
+import { getMission, STONEBRIDGE_MISSIONS } from './missions'
 import type { StonebridgeProgressData } from './useStonebridgeProgress'
 import StonebridgeMissionCard from './StonebridgeMissionCard'
 
@@ -574,6 +574,40 @@ describe('a celebration does not outlive the child it belongs to', () => {
     await waitFor(() => {
       expect(screen.queryByRole('dialog', { name: `${OLD_BRIDGE.locationName} repaired` })).not.toBeInTheDocument()
       expect(screen.queryByText('🎌 Banner Hall')).not.toBeInTheDocument()
+    })
+  })
+})
+
+// The real visit and replay share copy across child scopes and visual themes.
+// The no-name oracle is independent of mission data: the original vocatives fail it.
+describe.each(['lincoln', 'london', 'other-child'])('shared thanks for %s', (childId) => {
+  describe.each([true, false])('isLincoln theme = %s', (isLincoln) => {
+    it.each(STONEBRIDGE_MISSIONS)('$id addresses the player in the visit and spoken replay', async (mission) => {
+      fx.data = {
+        ...PARTIAL,
+        completedMissions: STONEBRIDGE_MISSIONS.map((entry) => entry.id),
+        raisedBanners: STONEBRIDGE_MISSIONS.map((entry) => entry.id),
+      }
+      render(<StonebridgeMissionCard familyId="fam-1" childId={childId} isLincoln={isLincoln} />)
+      fireEvent.click(screen.getByText('🏰 Open Stonebridge'))
+      fireEvent.click((await boardRegion()).getByRole('button', {
+        name: `Visit ${mission.locationName}. Fixed.`,
+      }))
+      const visit = within(await screen.findByRole('dialog', { name: mission.locationName }))
+      const visibleLine = visit.getByText(`“${mission.thankYou.line}”`)
+      expect(visibleLine).toBeVisible()
+      expect(visibleLine.textContent).not.toMatch(/\b(Lincoln|London)\b/i)
+      expect(visit.getByText(mission.thankYou.name)).toBeVisible()
+
+      fireEvent.click(visit.getByRole('button', { name: 'Hear the thank you' }))
+      const replay = within(await screen.findByRole('dialog', {
+        name: `${mission.locationName} repaired`,
+      }))
+      expect(replay.getByText(`“${mission.thankYou.line}”`)).toBeVisible()
+      await waitFor(() => expect(fx.speak).toHaveBeenCalledTimes(1), { timeout: 2000 })
+      const spokenLine = fx.speak.mock.calls[0][0] as string
+      expect(spokenLine).not.toMatch(/\b(Lincoln|London)\b/i)
+      expect(visibleLine.textContent).toBe(`“${spokenLine}”`)
     })
   })
 })

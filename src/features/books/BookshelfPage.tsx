@@ -35,6 +35,7 @@ import StorefrontIcon from '@mui/icons-material/Storefront'
 
 import CreativeTimer from '../../components/CreativeTimer'
 import Page from '../../components/Page'
+import LibraryReturnBanner from '../avatar/stonebridge/LibraryReturnBanner'
 import { EmptyState, LoadingState } from '../../components/states'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
@@ -330,6 +331,14 @@ export default function BookshelfPage() {
         defaultSubject={SubjectBucket.Art}
         defaultDescription="Book creation"
       />
+      {/* The one way back to Stonebridge, and only for a child who came from
+          there (FEAT — Library return). Above the title because it is a way
+          *out* of this page: a back control a child has to scroll to find is a
+          back control they do not find. It renders nothing at all on an
+          ordinary visit, and it is not a second source of truth for anything —
+          the flow it reads is temporary in-memory state created by the village
+          itself. See `avatar/stonebridge/libraryReturnFlow`. */}
+      <LibraryReturnBanner />
       <Typography
         variant="h4"
         component="h1"
