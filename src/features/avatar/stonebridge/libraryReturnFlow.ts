@@ -279,12 +279,20 @@ const BOOKS_AREA_EXACT = new Set([
   '/books',
   '/books/create-story',
   '/books/sight-words',
-  // Retired wizard; the router redirects it to the shelf (FEAT-187).
-  '/books/story-guide',
   '/stickers',
 ])
 
-/** `/books/:bookId`, and its `read` / `review` children. Nothing deeper. */
+/**
+ * `/books/:bookId`, and its `read` / `review` children. Nothing deeper.
+ *
+ * One segment under `/books` is one pattern, so this already covers the retired
+ * wizard path the router keeps as a redirect to the shelf (FEAT-187) — which is
+ * why that path is not named in the set above. `storyGuideRetired.test.ts` holds
+ * that the redirect is the ONE live mention of it left in the app, and a second
+ * copy here would be a surface naming it again for no behaviour: the flow is
+ * kept across it either way, which `libraryReturnFlow.test.ts` pins by walking
+ * that very path through `isBooksAreaPath`.
+ */
 const BOOK_ROUTE = /^\/books\/[^/]+(?:\/(?:read|review))?$/
 
 /**
