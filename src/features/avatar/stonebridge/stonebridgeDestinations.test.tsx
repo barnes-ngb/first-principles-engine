@@ -4,10 +4,14 @@ import { describe, expect, it, vi } from 'vitest'
 
 import BookshelfPage from '../../books/BookshelfPage'
 import { routes } from '../../../app/router'
+import { VillageLocationState } from './computeStonebridgeProgress'
+import { STONEBRIDGE_MISSIONS, getMission } from './missions'
 import {
   FORGE_GALLERY_ANCHOR_ID,
+  LIBRARY_MISSION_ID,
   STONEBRIDGE_BOOKS_PATH,
   focusForgeGallery,
+  offersBooksDoor,
 } from './stonebridgeDestinations'
 
 /**
@@ -75,10 +79,48 @@ describe('Open My Books lands on the app’s real bookshelf', () => {
 
   it('the page navigates there and sets no active child', () => {
     const source = read(AVATAR_PAGE)
-    expect(source).toContain('onOpenBooks={() => navigate(STONEBRIDGE_BOOKS_PATH)}')
+    expect(source).toContain('navigate(STONEBRIDGE_BOOKS_PATH)')
     // The whole page, not just this call site: the active child is READ here
     // (`useActiveChild`) and changed only by the app bar's chip (UX-425).
+    // The Library return flow does not weaken this — it compares the child it
+    // was given and never writes one.
     expect(source).not.toMatch(/setActiveChild/)
+  })
+
+  it('and the one other thing it does on the way is the temporary return note', () => {
+    // The destination is unchanged; what is added is in-memory only. Read as
+    // source for the same reason the rest of this suite is: mounting a
+    // 1,900-line host with Three.js behind it would make this a suite about
+    // mocking.
+    const source = read(AVATAR_PAGE)
+    expect(source).toContain('beginLibraryReturnFlow({ familyId, childId, missionId: fromMissionId })')
+    // One call site for the Books destination, so there is no second place that
+    // could navigate without the note or leave a note without navigating.
+    expect(source.match(/STONEBRIDGE_BOOKS_PATH/g)).toHaveLength(2) // the import + the one call
+    expect(source.match(/beginLibraryReturnFlow/g)).toHaveLength(2)
+  })
+})
+
+describe('the Books door is offered where the place means it', () => {
+  it('on whichever location is being repaired now — unchanged', () => {
+    for (const mission of STONEBRIDGE_MISSIONS) {
+      expect(offersBooksDoor(mission.id, VillageLocationState.Active)).toBe(true)
+    }
+  })
+
+  it('and on the repaired Library Hut, which IS the books place', () => {
+    expect(offersBooksDoor(LIBRARY_MISSION_ID, VillageLocationState.Repaired)).toBe(true)
+    // The id is the Bible's library location, not a name typed twice.
+    expect(getMission(LIBRARY_MISSION_ID)?.locationName).toBe('The Library Hut')
+  })
+
+  it('on no other repaired location, and on nothing not started yet', () => {
+    for (const mission of STONEBRIDGE_MISSIONS) {
+      if (mission.id !== LIBRARY_MISSION_ID) {
+        expect(offersBooksDoor(mission.id, VillageLocationState.Repaired)).toBe(false)
+      }
+      expect(offersBooksDoor(mission.id, VillageLocationState.Upcoming)).toBe(false)
+    }
   })
 })
 

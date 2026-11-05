@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { expectKidLine, expectKidWording } from '../../../test/kidReadability'
+import { LIBRARY_RETURN_LABEL, LIBRARY_RETURN_LINE } from './libraryReturnCopy'
 import { STONEBRIDGE_MISSIONS, getMission } from './missions'
 import type { StonebridgeProgressData } from './useStonebridgeProgress'
 // `vi.mock` is hoisted above this, so the card renders against the stubbed hook.
@@ -675,6 +676,17 @@ describe('the new copy holds the kid readability bar', () => {
     // doing its job.
     expectKidWording('🗺️ Your Village', 'Stonebridge · overview heading')
     expectKidWording('🏘️ Each Place', 'Stonebridge · list heading')
+  })
+
+  it('including the repaired Library’s door and the way back from the shelf', () => {
+    // The two new sentences in the loop: what the repaired Library's door is,
+    // and what the shelf says to a child who arrived from the village. Both are
+    // read by a six-year-old with nobody beside him, so both are held to the
+    // bar — which is also why neither of them says "Stonebridge" or "Library":
+    // the proxy counts three syllables in each, and it is right to.
+    expectKidLine('This opens your books.', 'Stonebridge visit · library door caption')
+    expectKidLine(LIBRARY_RETURN_LINE, 'My Books · came from the village')
+    expectKidWording(LIBRARY_RETURN_LABEL, 'My Books · way back to the village')
   })
 
   it('and every label on a control', () => {

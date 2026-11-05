@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useRef, useState, useSyncExternalStore } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Typography from '@mui/material/Typography'
@@ -7,6 +7,13 @@ import { useStonebridgeProgress } from './useStonebridgeProgress'
 import StonebridgeLocationArt from './StonebridgeLocationArt'
 import BannerRaiseCelebration from './BannerRaiseCelebration'
 import StonebridgeVillage from './StonebridgeVillage'
+import {
+  LibraryReturnPhase,
+  getLibraryReturnFlow,
+  liveLibraryReturnFlow,
+  serveLibraryReturn,
+  subscribeLibraryReturnFlow,
+} from './libraryReturnFlow'
 import type { StonebridgeDestinations } from './stonebridgeDestinations'
 
 interface StonebridgeMissionCardProps extends StonebridgeDestinations {
@@ -20,6 +27,14 @@ interface StonebridgeMissionCardProps extends StonebridgeDestinations {
  * preview). Reading activity Lincoln already generates fills the bar; completion
  * heals the location, raises its banner, and a canon character thanks him, then
  * the next mission queues automatically.
+ *
+ * It is also where a journey to My Books comes back to. A child who left a
+ * location for the shelf and tapped the way back arrives here with a temporary
+ * in-memory request waiting (`libraryReturnFlow`); this card opens the board for
+ * it, once, with the focus on the place they left — and nothing more. The board
+ * opening is not a visit to that location, no progress is read differently, and
+ * nothing is written. A read that has failed shows the same honest notice and
+ * the same *Try again* it always did.
  *
  * Read-only on the XP / forge / diamond economy — progress is derived, never minted.
  */
@@ -46,19 +61,58 @@ export default function StonebridgeMissionCard({
   } = useStonebridgeProgress(familyId, childId)
 
   /**
-   * Whose board is open.
+   * Whose board this is.
    *
-   * Stamped with the child, and reset in the same render the child changes, so
-   * a switch cannot leave the previous child's board (or anything open on it)
-   * standing over the new child's hub for a frame. One conditional
-   * render-phase update, matching `useStonebridgeProgress`.
+   * Everything the board holds is stamped with it and reset in the same render
+   * the child changes, so a switch cannot leave the previous child's board (or
+   * anything open on it) standing over the new child's hub for a frame. One
+   * conditional render-phase update, matching `useStonebridgeProgress`.
    */
   const scopeKey = `${familyId}_${childId}`
-  const [board, setBoard] = useState<{ scopeKey: string; open: boolean }>(() => ({
-    scopeKey,
-    open: false,
-  }))
-  if (board.scopeKey !== scopeKey) setBoard({ scopeKey, open: false })
+
+  /**
+   * A return from My Books, if one is waiting for THIS child.
+   *
+   * Subscribed at the flow's own store rather than passed down, because the
+   * journey outlives the page that started it: the child was on `/books` when
+   * they asked, and this card is mounted fresh by the route they land on. The
+   * store is in memory only — a refresh or a direct visit has nothing here and
+   * this is simply `null` (see `libraryReturnFlow`).
+   */
+  const flow = useSyncExternalStore(subscribeLibraryReturnFlow, getLibraryReturnFlow)
+  const pendingReturn = liveLibraryReturnFlow(
+    flow,
+    { familyId, childId },
+    LibraryReturnPhase.Returning,
+  )
+
+  /**
+   * Whose board is open, where its focus belongs, and which return it served.
+   *
+   * `servedGeneration` is why the request can be adopted in the render phase
+   * without becoming a loop: a generation is used once ever, so the condition
+   * below is true exactly one render per journey. The flow itself is consumed
+   * later, when the board has actually opened and moved the focus — and if the
+   * village read has failed and there is no board to open, the request waits for
+   * the existing *Try again* rather than being thrown away or pretended to have
+   * happened.
+   */
+  const [board, setBoard] = useState<{
+    scopeKey: string
+    open: boolean
+    focusMissionId: string | null
+    servedGeneration: number
+  }>(() => ({ scopeKey, open: false, focusMissionId: null, servedGeneration: 0 }))
+  if (board.scopeKey !== scopeKey) {
+    setBoard({ scopeKey, open: false, focusMissionId: null, servedGeneration: 0 })
+  } else if (pendingReturn && board.servedGeneration !== pendingReturn.generation) {
+    setBoard({
+      scopeKey,
+      open: true,
+      focusMissionId: pendingReturn.missionId,
+      servedGeneration: pendingReturn.generation,
+    })
+  }
   const villageOpen = board.scopeKey === scopeKey && board.open
 
   /**
@@ -319,7 +373,16 @@ export default function StonebridgeMissionCard({
           ref={(el: HTMLElement | null) => {
             openButtonRef.current = el
           }}
-          onClick={() => setBoard({ scopeKey, open: true })}
+          onClick={() =>
+            // Opened by hand: no tile takes the focus, and the served
+            // generation is kept so a request already answered stays answered.
+            setBoard({
+              scopeKey,
+              open: true,
+              focusMissionId: null,
+              servedGeneration: board.servedGeneration,
+            })
+          }
           sx={{
             display: 'block',
             width: '100%',
@@ -354,11 +417,27 @@ export default function StonebridgeMissionCard({
           Books lives. */}
       <StonebridgeVillage
         open={villageOpen}
-        onClose={() => setBoard({ scopeKey, open: false })}
+        onClose={() =>
+          setBoard({
+            scopeKey,
+            open: false,
+            focusMissionId: null,
+            servedGeneration: board.servedGeneration,
+          })
+        }
         onReturnFocus={() => openButtonRef.current?.focus()}
         scopeKey={scopeKey}
         onOpenBooks={onOpenBooks}
         onVisitForge={onVisitForge}
+        focusMissionId={board.focusMissionId}
+        // Consumed once the board is open and the focus has landed: the journey
+        // is over, and the next board — however it is opened — is an ordinary
+        // one. The generation guard means a request that has been replaced in
+        // the meantime consumes nothing.
+        onFocusServed={() => {
+          serveLibraryReturn(board.servedGeneration)
+          setBoard((prev) => ({ ...prev, focusMissionId: null }))
+        }}
         isLincoln={isLincoln}
         completedMissions={completedMissions}
         raisedBanners={raisedBanners}

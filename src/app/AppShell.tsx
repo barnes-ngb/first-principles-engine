@@ -14,6 +14,7 @@ import { useChildSkillSnapshot } from '../core/hooks/useChildSkillSnapshot'
 import { useProfile } from '../core/profile/useProfile'
 import { UserProfile } from '../core/types/enums'
 import AvatarThumbnail from '../features/avatar/AvatarThumbnail'
+import { useLibraryReturnScopeWatch } from '../features/avatar/stonebridge/useLibraryReturnScopeWatch'
 import { useAvatarProfile } from '../features/avatar/useAvatarProfile'
 import { isArmorComplete } from '../features/avatar/armorGate'
 import { canAccessKnowledgeMine } from '../features/quest/knowledgeMineAccess'
@@ -201,6 +202,15 @@ export function AppShell({ children }: AppShellProps) {
     !isParent && kidSnapshotLoaded && canAccessKnowledgeMine(kidSnapshot)
 
   const armorReady = !isParent && avatarProfile ? isArmorComplete(avatarProfile) : undefined
+
+  // The Stonebridge → My Books journey is the one piece of state that has to
+  // outlive each page in it and nothing more, so it is watched HERE: the layout
+  // route is the only thing mounted across every transition the shelf, the
+  // reader and the editor make between them. Leaving the journey, or changing
+  // family, ends it; a child switch is caught at the shared active-child store
+  // instead, where a same-tick A→B→A is still two writes. Called before the
+  // call-mode return below, because a hook is not optional.
+  useLibraryReturnScopeWatch({ familyId: familyId ?? '', pathname: location.pathname })
 
   const closeDrawer = useCallback(() => setDrawerOpen(false), [])
 

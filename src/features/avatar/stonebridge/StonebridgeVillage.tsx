@@ -53,10 +53,34 @@ interface StonebridgeVillageProps extends StonebridgeRecoveryState, StonebridgeD
   currentMissionId: string
   /** Derived counters for the active mission (null if every location is repaired). */
   active: MissionComputation | null
+  /**
+   * A location tile to put the focus on once the board has finished opening.
+   *
+   * Set only when the board is being opened to serve a return from My Books:
+   * the child asked to come back to a place, so the focus belongs on that place
+   * rather than on the top of a board they have to find their way down again.
+   * Nothing else about the board changes — no location visit is opened, nothing
+   * is claimed to be repaired, and no progress is read or written. A board
+   * opened any other way passes `null` and behaves exactly as it always has.
+   */
+  focusMissionId?: string | null
+  /**
+   * The focus hand-off above has happened (or had no tile to land on).
+   *
+   * Called once, from the board's own `onEntered`, so the request is consumed
+   * exactly once however it turned out — a tile that is not there must not
+   * leave a request behind to fire at the next board.
+   */
+  onFocusServed?: () => void
 }
 
 /** What a visit is on its way to, and whose visit it was. */
-type PendingLeave = { scopeKey: string; destination: 'books' | 'forge' }
+type PendingLeave = {
+  scopeKey: string
+  destination: 'books' | 'forge'
+  /** The location the child was looking at when they left it. */
+  missionId: string
+}
 
 /**
  * Everything an open board holds, stamped with the child it belongs to.
@@ -121,8 +145,10 @@ interface VillageView {
  * on all three views this file opens — the board, the location visit and the
  * replayed thank-you — and instead: a closed visit puts the focus back on the
  * tile it came from, a closed replay puts it back on the repaired tile it was
- * played from, a dismissed board hands it back to the caller's opener, and a
- * board closed on the way to a destination hands it to the destination.
+ * played from, a dismissed board hands it back to the caller's opener, a board
+ * closed on the way to a destination hands it to the destination, and a board
+ * OPENED to serve a return from My Books puts it on the place the child asked to
+ * come back to (`focusMissionId`).
  *
  * **Every one of those happens on the view's own `onExited`, never on the tap.**
  * Until a modal's transition is over its focus trap still owns the focus and
@@ -147,6 +173,8 @@ export default function StonebridgeVillage({
   onRetry,
   onOpenBooks,
   onVisitForge,
+  focusMissionId = null,
+  onFocusServed,
 }: StonebridgeVillageProps) {
   /**
    * The open visit and the replay, stamped with the child they belong to.
@@ -305,8 +333,8 @@ export default function StonebridgeVillage({
    * since been replaced must not send the child now on screen anywhere.
    */
   const leaveFor = (destination: 'books' | 'forge') => {
-    if (!live) return
-    pendingLeaveRef.current = { scopeKey, destination }
+    if (!live?.selected) return
+    pendingLeaveRef.current = { scopeKey, destination, missionId: live.selected }
     pendingDismissRef.current = false
     tileToFocusRef.current = null
     setView({ ...live, selected: null, replay: null })
@@ -329,11 +357,29 @@ export default function StonebridgeVillage({
     if (pending) {
       // A tap from a view that has since been replaced sends nobody anywhere.
       if (pending.scopeKey !== scopeKey) return
-      if (pending.destination === 'books') onOpenBooks?.()
+      if (pending.destination === 'books') onOpenBooks?.(pending.missionId)
       else onVisitForge?.()
       return
     }
     if (dismissed) onReturnFocus?.()
+  }
+
+  /**
+   * The board has finished OPENING — the only safe moment to hand the focus to
+   * a tile, for the same reason every other hand-off in this file waits: until
+   * the transition is over the dialog's focus trap is still settling and MUI
+   * still owns where the focus lands.
+   *
+   * Only ever for a return from My Books, and only for the child the board
+   * belongs to. The request is consumed either way: a mission id with no tile on
+   * the board (an unknown place) leaves the focus where MUI put it — the board
+   * itself — which is ordinary behaviour and not a failure worth a message.
+   */
+  const handleBoardEntered = () => {
+    if (!focusMissionId) return
+    if (!live) return
+    tileRefs.current.get(focusMissionId)?.focus()
+    onFocusServed?.()
   }
 
   return (
@@ -343,7 +389,7 @@ export default function StonebridgeVillage({
         onClose={dismiss}
         fullScreen
         transitionDuration={reduceMotion ? 0 : undefined}
-        TransitionProps={{ onExited: handleBoardExited }}
+        TransitionProps={{ onEntered: handleBoardEntered, onExited: handleBoardExited }}
         // The focus hand-off is this component's job on every path (see the
         // header), so MUI must not also move it.
         disableRestoreFocus

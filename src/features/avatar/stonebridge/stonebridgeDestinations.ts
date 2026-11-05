@@ -12,7 +12,10 @@
  *     does nothing else: it does not set the active child, does not touch
  *     completion logic, and does not promise a particular book is ready to
  *     read. Which book — or whether to read at all — is the shelf's own choice,
- *     exactly as it is from the Hero Hub's My Books tile.
+ *     exactly as it is from the Hero Hub's My Books tile. It is handed the
+ *     location it was tapped in, which is the only thing the temporary return
+ *     flow needs to bring the child back to the right tile — see
+ *     `libraryReturnFlow`.
  *
  *   • **See your armor** → the ArmorPieceGallery already mounted further down
  *     `MyAvatarPage`. There is **no `/forge` route**; inventing one, or drawing
@@ -24,6 +27,7 @@
  */
 
 import { prefersReducedMotion, scrollBehaviourFor } from '../../today/logWorkJump'
+import { VillageLocationState } from './computeStonebridgeProgress'
 
 /** The shelf route. Pinned to the app's route table by this module's test. */
 export const STONEBRIDGE_BOOKS_PATH = '/books'
@@ -31,12 +35,54 @@ export const STONEBRIDGE_BOOKS_PATH = '/books'
 /** The id `MyAvatarPage` puts on the real ArmorPieceGallery wrapper. */
 export const FORGE_GALLERY_ANCHOR_ID = 'armor-piece-gallery'
 
+/** The one location that IS the books place: Old Tomas's Library Hut. */
+export const LIBRARY_MISSION_ID = 'library_hut'
+
 /** A location visit's real destinations, scoped to the child on screen. */
 export interface StonebridgeDestinations {
-  /** Navigate to the existing bookshelf. No active-child write. */
-  onOpenBooks?: () => void
+  /**
+   * Navigate to the existing bookshelf. No active-child write.
+   *
+   * Handed the id of the location the tap came from, so the shelf's temporary
+   * way back knows which tile to return to. It is a fact about the journey, not
+   * a permission: the destination, the shelf's contents and everything the child
+   * can reach there are identical whichever location offered it.
+   */
+  onOpenBooks?: (fromMissionId: string) => void
   /** Move to the existing armor gallery on this page. */
   onVisitForge?: () => void
+}
+
+/**
+ * Does this location, in this state, offer the real bookshelf?
+ *
+ * Two cases, and the difference between them is what the place IS rather than
+ * how far along it is:
+ *
+ *   • **the location being repaired now** — reading is what repairs it, so the
+ *     shelf is the thing to do next. Unchanged, for every location.
+ *   • **the repaired Library Hut** — the Library is the village's books place.
+ *     Old Tomas's shelves being dry again is not a reason to take the shelf
+ *     away: a child who fixed the library and then cannot open a book from it
+ *     has watched the one door they earned close. So the Library keeps its door
+ *     once repaired, and keeps it through the capstone — the rally parks on
+ *     Banner Hall with every location repaired, and the Library is still the
+ *     Library.
+ *
+ * Every other repaired location keeps exactly what it had: its saved look and
+ * its thank-you, and no destination. The Forge is unaffected either way — the
+ * armor gallery is offered at the Forge in any state, by its own rule, and this
+ * predicate has nothing to do with it.
+ *
+ * One predicate for one button: the visit renders the Books control from this
+ * and nothing else, so a repaired Library cannot end up with two of them.
+ */
+export function offersBooksDoor(
+  missionId: string,
+  state: VillageLocationState,
+): boolean {
+  if (state === VillageLocationState.Active) return true
+  return state === VillageLocationState.Repaired && missionId === LIBRARY_MISSION_ID
 }
 
 /**

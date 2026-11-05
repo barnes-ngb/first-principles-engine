@@ -81,6 +81,7 @@ import { dayLogDocId } from '../today/daylog.model'
 import HeroMissionCard, { type HeroMission } from './HeroMissionCard'
 import HeroLauncherTiles from './HeroLauncherTiles'
 import StonebridgeMissionCard from './stonebridge/StonebridgeMissionCard'
+import { beginLibraryReturnFlow } from './stonebridge/libraryReturnFlow'
 import {
   FORGE_GALLERY_ANCHOR_ID,
   STONEBRIDGE_BOOKS_PATH,
@@ -1461,7 +1462,17 @@ export default function MyAvatarPage() {
             // the active child, touch completion logic, or claim a particular
             // book is ready to read — the shelf is where that is chosen, the
             // same as from the My Books launcher tile.
-            onOpenBooks={() => navigate(STONEBRIDGE_BOOKS_PATH)}
+            //
+            // It now also leaves a temporary in-memory note that the shelf was
+            // opened from this village location, so the shelf can offer one way
+            // back (`libraryReturnFlow`). The note is bound to the family and
+            // child this card is already rendering for — it is never written
+            // anywhere, never put in the URL, and selects nobody: a scope that
+            // moves ends it permanently.
+            onOpenBooks={(fromMissionId) => {
+              beginLibraryReturnFlow({ familyId, childId, missionId: fromMissionId })
+              navigate(STONEBRIDGE_BOOKS_PATH)
+            }}
             // The Forge visit moves to the gallery already mounted below. It
             // is deliberately NOT a route and NOT a second copy of forge
             // state: the one gallery keeps its own progress and cost rules,
