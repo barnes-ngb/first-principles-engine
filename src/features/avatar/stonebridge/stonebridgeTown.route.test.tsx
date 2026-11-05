@@ -61,8 +61,32 @@ import {
 const fx = vi.hoisted(() => ({
   data: null as unknown as StonebridgeProgressData,
   activeChild: { id: 'lincoln', name: 'Lincoln' } as { id: string; name: string } | undefined,
+  /**
+   * The children read's own state, reported exactly as `useChildren` reports it.
+   *
+   * Two of these pairs are shapes the real hook really produces and the page has
+   * to tell apart, so they are set by hand here rather than simulated:
+   *
+   *   • a COLD read — `activeChild` undefined with `isLoading` true, because the
+   *     shared list that resolves the selected id has not arrived yet;
+   *   • a FAILED read — `loadFailed` true with `isLoading` STILL TRUE, because a
+   *     read that rejected is not a read that answered.
+   */
   childrenLoading: false,
   childrenLoadFailed: false,
+  /**
+   * The hook's own retry and the hook's own setter, as spies.
+   *
+   * Spies and nothing more: neither one re-reads, recovers or selects here.
+   * Loading the children and choosing a child belong to `useChildren` /
+   * `useActiveChild`, and a fixture that flipped its own flags inside
+   * `retryLoad` would be asserting the hook's behaviour while pretending it was
+   * the page's. What the page owes is the delegation — that it calls this and
+   * does nothing else — and a later read reporting something different, which
+   * the test performs itself.
+   */
+  retryLoad: vi.fn(),
+  setActiveChildId: vi.fn(),
 }))
 
 vi.mock('./useStonebridgeProgress', () => ({
@@ -84,10 +108,11 @@ vi.mock('../../../core/hooks/useActiveChild', () => ({
       { id: 'lincoln', name: 'Lincoln' },
       { id: 'london', name: 'London' },
     ],
-    setActiveChildId: () => {},
+    setActiveChildId: fx.setActiveChildId,
     isChildProfile: false,
     isLoading: fx.childrenLoading,
     loadFailed: fx.childrenLoadFailed,
+    retryLoad: fx.retryLoad,
   }),
 }))
 
@@ -246,6 +271,8 @@ beforeEach(() => {
   fx.activeChild = { id: 'lincoln', name: 'Lincoln' }
   fx.childrenLoading = false
   fx.childrenLoadFailed = false
+  fx.retryLoad.mockClear()
+  fx.setActiveChildId.mockClear()
   setActiveChildIdShared('lincoln')
   endLibraryReturnFlow()
   clearForgeFocusRequest()
@@ -322,12 +349,148 @@ describe('arriving at the town', () => {
   })
 
   it('a page with nobody selected asks for a child rather than choosing one', () => {
+    // SETTLED and genuinely nobody: the read answered, and choosing is the one
+    // thing that would actually help.
     fx.activeChild = undefined
     renderTown()
     expect(screen.getByText('Pick a child to see the village.')).toBeInTheDocument()
     expect(screen.queryByRole('region', { name: 'Stonebridge Village' })).not.toBeInTheDocument()
     // The doors are still there, and nothing was selected on anyone's behalf.
     expect(screen.getByRole('button', { name: 'My Books' })).toBeInTheDocument()
+    expect(fx.setActiveChildId).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * "No child" is three different facts, and the page used to tell only one.
+ *
+ * `useActiveChild` resolves the selected id against the shared children list, so
+ * a COLD read has `activeChild` undefined while the id is already populated —
+ * and a FAILED read keeps `isLoading` true on purpose, because a read that
+ * rejected is not a read that answered. Reading only `activeChild` therefore
+ * told a family whose list had not arrived to *pick a child*: an instruction
+ * they cannot act on, with nothing to retry.
+ *
+ * All three readings come from values `useActiveChild` already publishes. The
+ * page adds no flag, no store, no lookup and no selection, and the retry it
+ * offers is the hook's own.
+ */
+describe('the three readings of "no child yet"', () => {
+  it('an unsettled read says it is loading, and does not instruct a selection', () => {
+    // The cold-read shape: no resolved child, the read still in flight.
+    fx.activeChild = undefined
+    fx.childrenLoading = true
+    renderTown()
+
+    expect(screen.getByText('Loading your village…')).toBeInTheDocument()
+    expect(screen.queryByText('Pick a child to see the village.')).not.toBeInTheDocument()
+    // Nothing to retry while it is still coming, and no village claimed.
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Stonebridge Village' })).not.toBeInTheDocument()
+    // And the ordinary ways on are still ways on.
+    for (const label of ['My Books', 'Today', 'My armor']) {
+      expect(screen.getByRole('button', { name: label }), label).toBeInTheDocument()
+    }
+  })
+
+  it('a FAILED read says so and offers the hook’s own retry — with isLoading still true', () => {
+    // The shape that makes the order load-bearing: `loadFailed` arrives WITH
+    // `isLoading` true. A loading-first branch would show "loading" for a read
+    // that is never coming back, and gating the retry on `!isLoading` would
+    // disable it forever.
+    fx.activeChild = undefined
+    fx.childrenLoading = true
+    fx.childrenLoadFailed = true
+    renderTown()
+
+    expect(screen.getByRole('alert')).toHaveTextContent("Couldn't load your village.")
+    expect(screen.queryByText('Loading your village…')).not.toBeInTheDocument()
+    expect(screen.queryByText('Pick a child to see the village.')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
+    for (const label of ['My Books', 'Today', 'My armor']) {
+      expect(screen.getByRole('button', { name: label }), label).toBeInTheDocument()
+    }
+  })
+
+  it('and its retry delegates to the children-load owner and does nothing else', () => {
+    fx.activeChild = undefined
+    fx.childrenLoading = true
+    fx.childrenLoadFailed = true
+    const { router } = renderTown()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+
+    // Delegated, once, to the hook that owns the read.
+    expect(fx.retryLoad).toHaveBeenCalledTimes(1)
+    // And the page did nothing of its own: it did not move, and it did not
+    // choose a child to get itself out of the state.
+    expect(fx.setActiveChildId).not.toHaveBeenCalled()
+    expect(router.state.location.pathname).toBe(STONEBRIDGE_TOWN_PATH)
+    expect(screen.getByRole('alert')).toHaveTextContent("Couldn't load your village.")
+    expect(screen.queryByRole('region', { name: 'Stonebridge Village' })).not.toBeInTheDocument()
+  })
+
+  it('and a read that comes back with a child shows that child’s village', async () => {
+    // The recovery, and the honest division of labour in it: the page's part is
+    // the delegation above, and `useChildren` owns actually re-reading. So each
+    // later read is reported HERE — not from inside the retry spy, which would
+    // be the fixture doing the hook's job and calling it the page's. What the
+    // two reads below report is `useChildren`'s own published contract, pinned
+    // against the real hook in `core/hooks/useChildren.load.test.tsx`.
+    fx.activeChild = undefined
+    fx.childrenLoading = true
+    fx.childrenLoadFailed = true
+    const { router } = renderTown()
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(fx.retryLoad).toHaveBeenCalledTimes(1)
+
+    // A retry's own state: the failure is cleared and the read is in flight
+    // again. The page has to stop saying it failed and say it is loading —
+    // which is the ordering doing its work in the other direction.
+    fx.childrenLoadFailed = false
+    await act(async () => {
+      await router.navigate(STONEBRIDGE_TOWN_PATH)
+    })
+    expect(screen.getByText('Loading your village…')).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument()
+
+    // And then it lands, with a child.
+    fx.activeChild = { id: 'lincoln', name: 'Lincoln' }
+    fx.childrenLoading = false
+    await act(async () => {
+      await router.navigate(STONEBRIDGE_TOWN_PATH)
+    })
+
+    await screen.findByRole('region', { name: 'Stonebridge Village' })
+    expect(tile(LIBRARY)).toBeInTheDocument()
+    // Still nothing selected by the page, at any point in that sequence.
+    expect(fx.setActiveChildId).not.toHaveBeenCalled()
+  })
+
+  it('a child already KNOWN never reaches any of those three', () => {
+    // The state the family is in almost all the time, and the one none of this
+    // may disturb: the list is populated, the child resolves, the town renders.
+    renderTown()
+    expect(screen.getByRole('region', { name: 'Stonebridge Village' })).toBeInTheDocument()
+    for (const sentence of [
+      'Pick a child to see the village.',
+      'Loading your village…',
+      "Couldn't load your village.",
+    ]) {
+      expect(screen.queryByText(sentence), sentence).not.toBeInTheDocument()
+    }
+  })
+
+  it('and a known child whose read goes unknown under them keeps the board', () => {
+    // `isLoading` going true again for a child who IS resolved is a re-read, not
+    // an unknown identity: `activeChild` still answers, so this page is not in
+    // the branch at all and the village it is already showing stays.
+    fx.childrenLoading = true
+    fx.childrenLoadFailed = true
+    renderTown()
+    expect(screen.getByRole('region', { name: 'Stonebridge Village' })).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 })
 

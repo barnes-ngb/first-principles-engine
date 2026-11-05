@@ -59,25 +59,47 @@ import {
  * ── Whose village, and never a selection ─────────────────────────────────────
  *
  * It reads the child the app bar has already selected (`useActiveChild`) and
- * never sets one: a parent sees the currently selected child's village, a kid
- * profile is locked to their own by that hook as everywhere else, and a page
- * with nobody selected says so instead of choosing for anyone. Everything the
- * board holds is stamped `${familyId}_${childId}` and dropped during render on a
- * change, so a switch cannot leave the previous child's town standing.
+ * never sets one: a parent sees the currently selected child's village, and a
+ * kid profile is locked to their own by that hook as everywhere else. Everything
+ * the board holds is stamped `${familyId}_${childId}` and dropped during render
+ * on a change, so a switch cannot leave the previous child's town standing.
+ *
+ * **"No child" is three different facts**, and saying the wrong one is a defect
+ * rather than a wording choice: the read may have FAILED, it may not have
+ * ANSWERED yet (the shared list resolves the selected id, so a cold read leaves
+ * `activeChild` undefined while the id is already there), or it may have
+ * answered that there is genuinely nobody. Only the last of those is *pick a
+ * child*; the first offers the hook's own `retryLoad` and the second says it is
+ * loading. See the `!childId` branch, which asks about failure first because a
+ * failed read deliberately keeps `isLoading` true.
  *
  * ── The ordinary doors ───────────────────────────────────────────────────────
  *
  * My Books, Today and the armor are offered as plain navigation at the foot of
- * the page — including while the village read is loading or has failed, which is
- * the one state where a child could otherwise be stuck on a page with nothing on
- * it. That fallback says the village did not load; it never says the child has
- * no village.
+ * the page — in every state of it, including a read that is loading or has
+ * failed, which is where a child could otherwise be stuck on a page with nothing
+ * on it. That fallback says the village did not load; it never says the child
+ * has no village, and it never says a village is empty.
  */
 export default function StonebridgePage() {
   const navigate = useNavigate()
   const familyId = useFamilyId()
-  // The shell's chip is the only thing that changes this; the page only reads it.
-  const { activeChild } = useActiveChild()
+  /**
+   * The child, and the STATE of the read that resolves them.
+   *
+   * The shell's chip is the only thing that changes the selection; this page
+   * only reads it. All three values come from the one call `useActiveChild`
+   * already makes — no second read, no new flag, and `retryLoad` is the
+   * children-load owner's own door, not a re-read of this page's making. They
+   * are told apart in the `!childId` branch below, where `activeChild` alone
+   * cannot say whether there is nobody or whether nobody is KNOWN yet.
+   */
+  const {
+    activeChild,
+    isLoading: childrenLoading,
+    loadFailed: childrenLoadFailed,
+    retryLoad,
+  } = useActiveChild()
   const childId = activeChild?.id ?? ''
 
   /**
@@ -245,19 +267,77 @@ export default function StonebridgePage() {
     </Box>
   )
 
-  /** Nobody is selected — said plainly, and never chosen on their behalf. */
+  /**
+   * The page with no village on it yet: one sentence, one optional door back to
+   * whatever failed, and the ordinary doors underneath.
+   *
+   * One shape for all four of those states rather than four copies of the same
+   * markup, so the only thing that differs between them is what is TRUE — the
+   * sentence, whether it is an alert, and whose retry it offers.
+   */
+  const plainPage = (
+    sentence: string,
+    options: { alert?: boolean; onRetry?: () => void } = {},
+  ) => (
+    <Page>
+      <Typography component="h1" sx={{ fontFamily: titleFont, fontSize: '20px', fontWeight: 700 }}>
+        🏰 Stonebridge Village
+      </Typography>
+      <Typography
+        role={options.alert ? 'alert' : undefined}
+        sx={{ fontSize: '14px', lineHeight: 1.45 }}
+      >
+        {sentence}
+      </Typography>
+      {options.onRetry && (
+        <Box>
+          <Button variant="outlined" sx={doorSx} onClick={options.onRetry}>
+            Try again
+          </Button>
+        </Box>
+      )}
+      {doors}
+    </Page>
+  )
+
   if (!childId) {
-    return (
-      <Page>
-        <Typography component="h1" sx={{ fontFamily: titleFont, fontSize: '20px', fontWeight: 700 }}>
-          🏰 Stonebridge Village
-        </Typography>
-        <Typography sx={{ fontSize: '14px', lineHeight: 1.45 }}>
-          Pick a child to see the village.
-        </Typography>
-        {doors}
-      </Page>
-    )
+    /**
+     * There is no child to show a village FOR — and which of the three reasons
+     * it is decides what this page may honestly say.
+     *
+     * `useActiveChild` resolves the child by looking the selected id up in the
+     * shared children list, so on a COLD read the list is empty while the raw
+     * selected id can already be populated: `activeChild` is `undefined` with
+     * `isLoading` true. Reading only `activeChild` therefore told a family whose
+     * list had not arrived yet to *pick a child* — an instruction they cannot
+     * act on, with nothing to retry — when the honest answer was "not yet".
+     *
+     * **Failure is asked about FIRST, deliberately.** `useChildren` reports
+     * `loadFailed` with `isLoading` still TRUE (a failed read is not an
+     * answered one), so a loading-first branch would show *loading* for a read
+     * that is never coming back, and gating the retry on `!isLoading` would
+     * disable it forever. The three readings, in order:
+     *
+     *   1. **failed** — say so, and offer the children-load owner's own
+     *      `retryLoad`. Nothing here re-reads anything itself.
+     *   2. **unsettled** — say it is loading. Never an instruction.
+     *   3. **settled, and still nobody** — the ordinary *pick a child*, which is
+     *      the one state where choosing is a thing a parent can actually do.
+     *
+     * No flag, store, lookup or selection is added for any of this: the three
+     * values are the ones `useActiveChild` already publishes, the retry is the
+     * hook's own, and a child whose village is already known or cached never
+     * reaches this branch at all.
+     */
+    if (childrenLoadFailed) {
+      // The same sentence the village's own failure uses: to the reader it is
+      // the same fact, and the difference between the two reads is not one a
+      // six-year-old can act on. Which retry it offers is the difference that
+      // matters, and that is wired here rather than said in words.
+      return plainPage("Couldn't load your village.", { alert: true, onRetry: retryLoad })
+    }
+    if (childrenLoading) return plainPage('Loading your village…')
+    return plainPage('Pick a child to see the village.')
   }
 
   if (loading || !mission || !active) {
@@ -274,24 +354,10 @@ export default function StonebridgePage() {
       : failed
         ? "Couldn't load your village."
         : 'Loading your village…'
-    return (
-      <Page>
-        <Typography component="h1" sx={{ fontFamily: titleFont, fontSize: '20px', fontWeight: 700 }}>
-          🏰 Stonebridge Village
-        </Typography>
-        <Typography role={failed ? 'alert' : undefined} sx={{ fontSize: '14px', lineHeight: 1.45 }}>
-          {sentence}
-        </Typography>
-        {(failed || retrying) && (
-          <Box>
-            <Button variant="outlined" sx={doorSx} onClick={retry}>
-              Try again
-            </Button>
-          </Box>
-        )}
-        {doors}
-      </Page>
-    )
+    return plainPage(sentence, {
+      alert: failed,
+      onRetry: failed || retrying ? retry : undefined,
+    })
   }
 
   return (
