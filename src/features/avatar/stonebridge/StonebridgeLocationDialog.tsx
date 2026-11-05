@@ -11,6 +11,7 @@ import useMediaQuery from '@mui/material/useMediaQuery'
 import StonebridgeLocationArt from './StonebridgeLocationArt'
 import StonebridgeRecoveryNotice, { type StonebridgeRecoveryState } from './StonebridgeRecoveryNotice'
 import { VillageLocationState, type MissionComputation } from './computeStonebridgeProgress'
+import { LIBRARY_MISSION_ID, offersBooksDoor } from './stonebridgeDestinations'
 import type { StonebridgeMission } from './missions'
 
 /** The one location whose visit offers the armor gallery (the Forge). */
@@ -33,7 +34,10 @@ interface StonebridgeLocationDialogProps extends StonebridgeRecoveryState {
   onExited: () => void
   /** Replay this location's saved thank-you (repaired locations only). */
   onReplayThanks: () => void
-  /** Go to the real bookshelf. Offered on the location being repaired now. */
+  /**
+   * Go to the real bookshelf. Offered on the location being repaired now, and
+   * on the Library Hut once it is repaired — see `offersBooksDoor`.
+   */
   onOpenBooks?: () => void
   /** Go to the real armor gallery. Offered at the Forge, in any state. */
   onVisitForge?: () => void
@@ -48,9 +52,11 @@ interface StonebridgeLocationDialogProps extends StonebridgeRecoveryState {
  *
  *   • **repaired** — the saved appearance is kept (it does not decay, and a
  *     revisit is not a re-earn) and the canon character's thank-you can be
- *     replayed as many times as the child likes;
+ *     replayed as many times as the child likes. The **Library Hut** keeps its
+ *     bookshelf door here too, because the Library IS the books place and a
+ *     repair is no reason to close it (`offersBooksDoor`);
  *   • **active** — this is the one being repaired now, with the same counters
- *     the card shows, and the one place a real reading destination is offered;
+ *     the card shows, and the shelf as the thing to do next;
  *   • **upcoming** — honestly not started. **No destination, no call to
  *     action, and nothing that reads as "do this to unlock it"**, because
  *     nothing here is bought, won or unlocked — the rally moves one location at
@@ -96,6 +102,21 @@ export default function StonebridgeLocationDialog({
   const bodyFont = isLincoln ? undefined : '"Fredoka", cursive'
   const repaired = state === VillageLocationState.Repaired
   const isActive = state === VillageLocationState.Active
+  /**
+   * The ONE condition the Books control is rendered from, so a repaired Library
+   * gains the door rather than a second copy of it.
+   */
+  const booksDoor = !!onOpenBooks && offersBooksDoor(mission.id, state)
+  /**
+   * Say what the door is, where the place itself is the explanation.
+   *
+   * Only on the repaired Library: the location being repaired now already has
+   * its framing and its counters saying why reading matters here, and a second
+   * sentence under them would be the same thing twice. The shape is the Forge's
+   * ("This opens your armor.") on purpose — one caption, one verb, no reward
+   * language.
+   */
+  const booksCaption = booksDoor && repaired && mission.id === LIBRARY_MISSION_ID
   const accent = mission.art.accent
   const bodyColor = isLincoln ? 'rgba(255,255,255,0.92)' : 'rgba(32,16,24,0.88)'
   /** One shape for every control in the footer. */
@@ -265,6 +286,24 @@ export default function StonebridgeLocationDialog({
           </Typography>
         )}
 
+        {/* The repaired Library is still the books place. Said plainly, so the
+            door reads as what it is — a way to the real shelf — and not as
+            something the repair handed out. */}
+        {booksCaption && (
+          <Typography
+            sx={{
+              fontFamily: bodyFont,
+              fontSize: '14px',
+              lineHeight: 1.45,
+              color: bodyColor,
+              opacity: 0.78,
+              mt: 1.5,
+            }}
+          >
+            This opens your books.
+          </Typography>
+        )}
+
         {/* The Forge is a workshop that already exists on this page. Said
             plainly, so nobody reads the armor door as a story reward. */}
         {mission.id === FORGE_MISSION_ID && onVisitForge && (
@@ -295,7 +334,7 @@ export default function StonebridgeLocationDialog({
             Hear the thank you
           </Button>
         )}
-        {isActive && onOpenBooks && (
+        {booksDoor && (
           <Button
             onClick={onOpenBooks}
             variant="contained"

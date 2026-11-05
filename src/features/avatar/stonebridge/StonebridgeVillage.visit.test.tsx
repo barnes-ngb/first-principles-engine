@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { expectKidLine, expectKidWording } from '../../../test/kidReadability'
+import { LIBRARY_RETURN_LABEL, LIBRARY_RETURN_LINE } from './libraryReturnCopy'
 import { STONEBRIDGE_MISSIONS, getMission } from './missions'
 import type { StonebridgeProgressData } from './useStonebridgeProgress'
 // `vi.mock` is hoisted above this, so the card renders against the stubbed hook.
@@ -492,6 +493,48 @@ describe('a child switch takes the previous child’s view with it', () => {
     expect(screen.getByRole('dialog', { name: 'Stonebridge Village' })).toBeInTheDocument()
     expect(screen.queryByText('You fixed this place.')).not.toBeInTheDocument()
   })
+
+  it('a refused departure gives the focus back instead of stranding it on the body', async () => {
+    // A REAL close, with the transition actually running: the departure is
+    // performed on the board's own `onExited`, the switch lands while it is
+    // still closing, and the departure is refused on arrival. That part was
+    // right; the focus was not. MUI's restore is off because this component
+    // owns every hand-off, and the refusal simply returned — so the keyboard
+    // was left on `document.body` and the next Tab started at the top of the
+    // page with nothing said.
+    emulateReducedMotion(false)
+    const { rerender } = renderCard('lincoln')
+    const opener = openBoard()
+    fireEvent.click(tile(OLD_BRIDGE))
+    fireEvent.click(
+      within(screen.getByRole('dialog', { name: 'The Old Bridge' })).getByRole('button', {
+        name: 'Open My Books',
+      }),
+    )
+
+    rerender(
+      <StonebridgeMissionCard
+        familyId="fam-1"
+        childId="london"
+        isLincoln
+        onOpenBooks={fx.books}
+        onVisitForge={fx.forge}
+      />,
+    )
+
+    await expectEverythingClosed()
+    // Still refused: nobody is sent anywhere on a view that was replaced.
+    expect(fx.books).not.toHaveBeenCalled()
+    expect(fx.forge).not.toHaveBeenCalled()
+    // The focus is on the opener that is on screen NOW — the same control a
+    // plain dismissal hands it back to, belonging to the child whose hub this
+    // is. Nothing was reopened to put it there.
+    await waitFor(() => expect(screen.getByText('🏰 Open Stonebridge')).toHaveFocus())
+    expect(document.activeElement).not.toBe(document.body)
+    expect(screen.getByText('🏰 Open Stonebridge')).toBe(opener)
+    expect(screen.queryByRole('dialog', { name: 'Stonebridge Village' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: 'The Old Bridge' })).not.toBeInTheDocument()
+  })
 })
 
 describe('recovery stays reachable in whatever view is on top', () => {
@@ -675,6 +718,17 @@ describe('the new copy holds the kid readability bar', () => {
     // doing its job.
     expectKidWording('🗺️ Your Village', 'Stonebridge · overview heading')
     expectKidWording('🏘️ Each Place', 'Stonebridge · list heading')
+  })
+
+  it('including the repaired Library’s door and the way back from the shelf', () => {
+    // The two new sentences in the loop: what the repaired Library's door is,
+    // and what the shelf says to a child who arrived from the village. Both are
+    // read by a six-year-old with nobody beside him, so both are held to the
+    // bar — which is also why neither of them says "Stonebridge" or "Library":
+    // the proxy counts three syllables in each, and it is right to.
+    expectKidLine('This opens your books.', 'Stonebridge visit · library door caption')
+    expectKidLine(LIBRARY_RETURN_LINE, 'My Books · came from the village')
+    expectKidWording(LIBRARY_RETURN_LABEL, 'My Books · way back to the village')
   })
 
   it('and every label on a control', () => {

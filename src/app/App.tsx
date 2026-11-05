@@ -18,6 +18,7 @@ import {
   handoffScopeIdentity,
   useHandoffScopeWatch,
 } from '../features/shelly-chat/useHandoffScopeWatch'
+import { useLibraryReturnIdentityWatch } from '../features/avatar/stonebridge/useLibraryReturnScopeWatch'
 
 /**
  * UX-273's scope observer, mounted ABOVE `AuthGate` and outside the error
@@ -40,6 +41,25 @@ function HandoffScopeObserver() {
   const { user, loading, familyId } = useAuth()
   const { profile } = useProfile()
   useHandoffScopeWatch(handoffScopeIdentity({ loading, user, familyId }), profile)
+  return null
+}
+
+/**
+ * The Stonebridge → My Books journey's identity observer, mounted here for the
+ * same reason as the one above it: the journey is module memory, and the gates
+ * below unmount the routed shell on loading, logout and profile exit, so a
+ * watcher inside the shell cannot see the scope close. It reads the identity the
+ * GATE grants (`handoffScopeIdentity` — `familyId` is a uid an anonymous user
+ * also has), renders nothing, sets nothing and writes nothing.
+ *
+ * Separate from `HandoffScopeObserver` rather than folded into it: two features,
+ * two slots, and neither should be able to break the other by changing what it
+ * watches. Both contexts are already mounted, so a second reader costs nothing.
+ */
+function LibraryReturnScopeObserver() {
+  const { user, loading, familyId } = useAuth()
+  const { profile } = useProfile()
+  useLibraryReturnIdentityWatch(handoffScopeIdentity({ loading, user, familyId }), profile)
   return null
 }
 
@@ -90,6 +110,7 @@ function ThemedApp() {
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <HandoffScopeObserver />
+      <LibraryReturnScopeObserver />
       <ErrorBoundary>
         <AuthGate />
       </ErrorBoundary>
