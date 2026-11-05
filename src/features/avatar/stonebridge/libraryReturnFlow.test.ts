@@ -9,6 +9,7 @@ import {
   LibraryReturnPhase,
   beginLibraryReturnFlow,
   endLibraryReturnFlow,
+  expireLibraryReturnForUnsettledIdentity,
   getLibraryIdentityEpoch,
   getLibraryReturnFlow,
   isBooksAreaPath,
@@ -232,6 +233,63 @@ describe('an identity movement ends it permanently', () => {
     begin()
     setActiveChildIdShared(LONDON)
     expect(getLibraryReturnFlow()).toBeNull()
+  })
+})
+
+describe('an unknown children read ends it, with the identity string standing still', () => {
+  it('ends a live journey even though the selected child never changed', () => {
+    // The hole the identity key cannot see: it is built from the SELECTED child
+    // id, and a read that is unsettled or has REJECTED leaves that id exactly
+    // where it was — with `useChildren` keeping the previous answer's list, so
+    // the matching `activeChild` object is still there too. Hiding the control
+    // was never enough, because the flow is module memory.
+    begin()
+    expireLibraryReturnForUnsettledIdentity()
+    expect(getActiveChildId()).toBe(LINCOLN)
+    expect(getLibraryReturnFlow()).toBeNull()
+  })
+
+  it('and the read coming back does not hand the old journey over', () => {
+    const flow = begin()!
+    expireLibraryReturnForUnsettledIdentity()
+    // The read works again — which is a page that works, not a journey that
+    // resumes. There is no second copy to restore from, and the generation the
+    // shelf was rendered with is spent.
+    observeLibraryReturnIdentity(`${FAM}|parents|${LINCOLN}`)
+    expect(getLibraryReturnFlow()).toBeNull()
+    expect(requestLibraryReturn(flow.generation)).toBeNull()
+  })
+
+  it('moves the epoch, so a departure tapped before it is refused', () => {
+    // The pending-departure window: the board is closing, no flow exists yet,
+    // and the read under it goes unknown. Clearing the flow alone would leave
+    // the delayed callback free to create one against an identity nobody can
+    // vouch for, so the expiry is a movement like every other.
+    const tapped = getLibraryIdentityEpoch()
+    expireLibraryReturnForUnsettledIdentity()
+    expect(getLibraryIdentityEpoch()).toBeGreaterThan(tapped)
+    expect(beginLibraryReturnFlow({ ...ORIGIN, observedEpoch: tapped })).toBeNull()
+  })
+
+  it('and a return already in the air expires with it', () => {
+    const flow = begin()!
+    requestLibraryReturn(flow.generation)
+    expireLibraryReturnForUnsettledIdentity()
+    expect(getLibraryReturnFlow()).toBeNull()
+    expect(serveLibraryReturn(flow.generation)).toBe(false)
+  })
+
+  it('but a fresh, deliberate trip after the recovery is a perfectly good one', () => {
+    // The positive control: what expired is the journey, not the feature.
+    begin()
+    expireLibraryReturnForUnsettledIdentity()
+    const fresh = begin()
+    expect(fresh).not.toBeNull()
+    reconcileLibraryReturnFlowPath('/books')
+    expect(liveLibraryReturnFlow(getLibraryReturnFlow(), {
+      familyId: FAM,
+      childId: LINCOLN,
+    })).toBe(fresh)
   })
 })
 

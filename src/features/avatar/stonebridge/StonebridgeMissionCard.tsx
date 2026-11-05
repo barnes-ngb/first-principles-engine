@@ -125,6 +125,24 @@ export default function StonebridgeMissionCard({
    */
   const openButtonRef = useRef<HTMLElement | null>(null)
 
+  /**
+   * Give the focus back to this card's opener, if this card still has one.
+   *
+   * Called on a plain dismissal and on a departure the board refused on arrival
+   * (a scope that moved while it closed). The `isConnected` check is what makes
+   * the second case safe: a scope change re-renders this card for the child who
+   * is there now, and while that child's progress read has not answered the card
+   * renders its loading branch, which has no opener — the ref's last node would
+   * then be detached, and focusing a node outside the document moves the focus
+   * to `body` while telling the caller it landed somewhere. Nothing is focused
+   * instead, which is the honest no-op; the rest of the page is untouched and
+   * reachable, and no child is switched to find something to focus.
+   */
+  const returnFocusToOpener = () => {
+    const opener = openButtonRef.current
+    if (opener?.isConnected) opener.focus()
+  }
+
   const titleFont = isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive'
 
   /** The one retry door, in both the no-data card and the notice below. */
@@ -425,7 +443,7 @@ export default function StonebridgeMissionCard({
             servedGeneration: board.servedGeneration,
           })
         }
-        onReturnFocus={() => openButtonRef.current?.focus()}
+        onReturnFocus={returnFocusToOpener}
         scopeKey={scopeKey}
         onOpenBooks={onOpenBooks}
         onVisitForge={onVisitForge}

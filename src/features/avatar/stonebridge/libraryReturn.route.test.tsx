@@ -56,6 +56,14 @@ import {
 const fx = vi.hoisted(() => ({
   data: null as unknown as StonebridgeProgressData,
   activeChild: { id: 'lincoln', name: 'Lincoln' } as { id: string; name: string },
+  /**
+   * The children read's own state, reported beside the child exactly as
+   * `useChildren` reports it: `isLoading` stays TRUE alongside a failure, and
+   * the previous answer's `activeChild` object stays in place with the matching
+   * id — which is the shape that used to hide the control and keep the journey.
+   */
+  childrenLoading: false,
+  childrenLoadFailed: false,
 }))
 
 vi.mock('./useStonebridgeProgress', () => ({
@@ -77,6 +85,8 @@ vi.mock('../../../core/hooks/useActiveChild', () => ({
     ],
     setActiveChildId: () => {},
     isChildProfile: false,
+    isLoading: fx.childrenLoading,
+    loadFailed: fx.childrenLoadFailed,
   }),
 }))
 
@@ -224,6 +234,20 @@ function renderJourney(initial = LIBRARY_RETURN_VILLAGE_PATH) {
           { path: '/books/:bookId/review', element: <BooksSubPage name="Read it to me" /> },
           { path: '/stickers', element: <BooksSubPage name="Stickers" /> },
           { path: '/today', element: <h1>Today</h1> },
+          /**
+           * `*` — NotFound, INSIDE the layout route, which is where
+           * `src/app/router.tsx` wires it (`{ path: '*', element: <NotFoundPage
+           * /> }`, the last child of the `AppShell` route).
+           *
+           * Load-bearing, not scenery. Without it an unsupported URL matches no
+           * route at all, React Router renders its own 404 boundary INSTEAD of
+           * the layout, and the scope watch is unmounted by the very navigation
+           * it is supposed to report — so the journey survived here while the
+           * real app ended it. That made this fixture's verdict on an
+           * unsupported Books URL the opposite of the app's, which is the
+           * failure a fixture exists to avoid.
+           */
+          { path: '*', element: <h1>Not found</h1> },
         ],
       },
     ],
@@ -288,6 +312,8 @@ beforeEach(() => {
   emulateReducedMotion()
   fx.data = LIBRARY_REPAIRED
   fx.activeChild = { id: 'lincoln', name: 'Lincoln' }
+  fx.childrenLoading = false
+  fx.childrenLoadFailed = false
   setActiveChildIdShared('lincoln')
   endLibraryReturnFlow()
 })
@@ -531,7 +557,20 @@ describe('leaving the journey ends it, and history cannot bring it back', () => 
     await act(async () => {
       await router.navigate('/books/book-1/extra')
     })
+    // The app's NotFound route is inside the shell, so the watch is still
+    // mounted and the URL really was reported to it — assert that, so a fixture
+    // that unmounted the watch can never pass this as an expiry.
+    expect(screen.getByTestId('where')).toHaveTextContent('/books/book-1/extra')
+    expect(screen.getByRole('heading', { name: 'Not found' })).toBeInTheDocument()
     expect(getLibraryReturnFlow()).toBeNull()
+
+    // And back on the shelf there is nothing to offer: the journey ended, it was
+    // not merely hidden by the page the child was on.
+    await act(async () => {
+      await router.navigate('/books')
+    })
+    await screen.findByRole('heading', { name: 'My Books' })
+    expect(screen.queryByRole('button', { name: LIBRARY_RETURN_LABEL })).not.toBeInTheDocument()
   })
 
   it('a logout ends it, and the same account signing back in gets nothing', async () => {
@@ -649,6 +688,41 @@ describe('a scope change ends it under an open shelf', () => {
     expect(screen.queryByRole('heading', { name: 'My Books' })).not.toBeInTheDocument()
   })
 
+  it('and the refused departure leaves the focus on the hub, not on the body', async () => {
+    // The accessibility half of the refusal above. The board turns MUI's own
+    // focus restore off because it owns every hand-off, and the refusal used to
+    // just return — so the keyboard was left on `document.body` and the next Tab
+    // started again at the top of the page, with no sign anything had happened.
+    emulateReducedMotion(false)
+    renderJourney()
+    const opener = screen.getByText('🏰 Open Stonebridge')
+    fireEvent.click(opener)
+    fireEvent.click(tile(LIBRARY))
+    fireEvent.click(
+      within(screen.getByRole('dialog', { name: 'The Library Hut' })).getByRole('button', {
+        name: 'Open My Books',
+      }),
+    )
+
+    act(() => {
+      setActiveChildIdShared('london')
+      setActiveChildIdShared('lincoln')
+    })
+
+    await waitFor(() => {
+      expect(screen.queryByText('🎌 Banner Hall')).not.toBeInTheDocument()
+    })
+    // Refused, as above — and the focus is back on the control that opened the
+    // board, which is where a plain dismissal leaves it too.
+    expect(getLibraryReturnFlow()).toBeNull()
+    expect(screen.queryByRole('heading', { name: 'My Books' })).not.toBeInTheDocument()
+    await waitFor(() => expect(opener).toHaveFocus())
+    expect(document.activeElement).not.toBe(document.body)
+    // Nothing was reopened to put it there: no board, no visit.
+    expect(screen.queryByRole('dialog', { name: 'Stonebridge Village' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: 'The Library Hut' })).not.toBeInTheDocument()
+  })
+
   it('but an untouched identity across the same real close still departs', async () => {
     // The positive control for the test above: with nothing moving, the same
     // delayed callback reaches the shelf and offers the way back.
@@ -705,6 +779,96 @@ describe('a scope change ends it under an open shelf', () => {
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: LIBRARY_RETURN_LABEL })).not.toBeInTheDocument()
     })
+  })
+})
+
+describe('an unknown children read ENDS it, rather than only hiding the way back', () => {
+  it('a shelf whose read has failed ends the journey, and clearing the flag revives nothing', async () => {
+    const { router } = renderJourney()
+    await leaveFromLocation(LIBRARY)
+    expect(screen.getByRole('button', { name: LIBRARY_RETURN_LABEL })).toBeInTheDocument()
+    const tapped = getLibraryIdentityEpoch()
+
+    // The child reads a book, and while they are in the reader the family read
+    // comes back REJECTED. `useChildren` keeps the previous answer beside the
+    // failure, so `activeChild` is still the whole Lincoln object and the
+    // selected id still matches the journey — the identity key the observer
+    // above the gates watches has not moved at all. Only the read knows.
+    fireEvent.click(screen.getByRole('button', { name: 'Read a book' }))
+    await screen.findByRole('heading', { name: 'Book reader' })
+    act(() => {
+      fx.childrenLoading = true
+      fx.childrenLoadFailed = true
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'My Books' }))
+    await screen.findByRole('heading', { name: 'My Books' })
+
+    // Not offered — and not merely unrendered: the journey is over.
+    expect(screen.queryByRole('button', { name: LIBRARY_RETURN_LABEL })).not.toBeInTheDocument()
+    expect(getLibraryReturnFlow()).toBeNull()
+    // The epoch moved with it, so a departure tapped before the failure cannot
+    // create one after it either.
+    expect(
+      beginLibraryReturnFlow({
+        familyId: 'fam-1',
+        childId: 'lincoln',
+        missionId: 'library_hut',
+        observedEpoch: tapped,
+      }),
+    ).toBeNull()
+
+    // The read works again. That is a page that works, not a journey resuming:
+    // the shelf is the ordinary shelf, with no way back handed back.
+    act(() => {
+      fx.childrenLoading = false
+      fx.childrenLoadFailed = false
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Read a book' }))
+    await screen.findByRole('heading', { name: 'Book reader' })
+    fireEvent.click(screen.getByRole('button', { name: 'My Books' }))
+    await screen.findByRole('heading', { name: 'My Books' })
+    expect(screen.queryByRole('button', { name: LIBRARY_RETURN_LABEL })).not.toBeInTheDocument()
+    expect(getLibraryReturnFlow()).toBeNull()
+
+    // The positive control, and the thing that must not be broken by any of the
+    // above: a fresh, deliberate trip from the village still offers the way
+    // back, so what expired was the old journey and not the feature.
+    await act(async () => {
+      await router.navigate(LIBRARY_RETURN_VILLAGE_PATH)
+    })
+    await leaveFromLocation(LIBRARY)
+    expect(screen.getByRole('button', { name: LIBRARY_RETURN_LABEL })).toBeInTheDocument()
+    expect(getLibraryReturnFlow()?.missionId).toBe('library_hut')
+  })
+
+  it('a shelf that has not answered YET keeps the journey and simply says nothing', async () => {
+    // The negative control for the rule above: every fresh mount of
+    // `useChildren` starts out loading, including the shelf the journey was
+    // created for, so ending it on "not answered yet" would end it on the first
+    // render of the page it is for. Hidden, held, and offered when the read
+    // lands.
+    renderJourney()
+    await leaveFromLocation(LIBRARY)
+    fireEvent.click(screen.getByRole('button', { name: 'Read a book' }))
+    await screen.findByRole('heading', { name: 'Book reader' })
+
+    act(() => {
+      fx.childrenLoading = true
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'My Books' }))
+    await screen.findByRole('heading', { name: 'My Books' })
+    expect(screen.queryByRole('button', { name: LIBRARY_RETURN_LABEL })).not.toBeInTheDocument()
+    expect(getLibraryReturnFlow()).not.toBeNull()
+
+    // The read answers, with the same child it always had.
+    act(() => {
+      fx.childrenLoading = false
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Read a book' }))
+    await screen.findByRole('heading', { name: 'Book reader' })
+    fireEvent.click(screen.getByRole('button', { name: 'My Books' }))
+    await screen.findByRole('heading', { name: 'My Books' })
+    expect(screen.getByRole('button', { name: LIBRARY_RETURN_LABEL })).toBeInTheDocument()
   })
 })
 

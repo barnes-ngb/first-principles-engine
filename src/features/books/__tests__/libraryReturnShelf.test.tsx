@@ -230,24 +230,42 @@ describe('and does not offer it otherwise', () => {
     render(<BookshelfPage />)
     expect(activeRef.current.id).toBe(JOURNEY.childId)
     expect(screen.queryByRole('button', { name: LIBRARY_RETURN_LABEL })).not.toBeInTheDocument()
+    // Held, not ended: every fresh mount of `useChildren` starts out loading,
+    // including the shelf this journey was created for, so "has not answered
+    // yet" is a page settling and must survive it.
+    expect(getLibraryReturnFlow()).not.toBeNull()
   })
 
-  it('and when that read FAILED, which is not an affirmative identity', () => {
+  it('and comes back when that in-flight read settles on the same child', () => {
+    begin()
+    readRef.isLoading = true
+    const { unmount } = render(<BookshelfPage />)
+    expect(screen.queryByRole('button', { name: LIBRARY_RETURN_LABEL })).not.toBeInTheDocument()
+    unmount()
+
+    readRef.isLoading = false
+    render(<BookshelfPage />)
+    expect(screen.getByRole('button', { name: LIBRARY_RETURN_LABEL })).toBeInTheDocument()
+  })
+
+  it('and when that read FAILED it ENDS the journey, rather than only hiding it', () => {
     // `loadFailed` is reported beside a retained child and `isLoading` stays
-    // true with it. A failed read is the GATE verdict: not editable, not
-    // offerable, and never read as an empty family.
+    // true with it. A failed read is the GATE verdict — not offerable, and never
+    // read as an empty family — and hiding it was never the end of the matter:
+    // the flow is module memory, so the journey sat there behind the hidden
+    // control and was handed back the moment the flag cleared. A failed read is
+    // an affirmative answer that the identity is UNKNOWN, so it is an identity
+    // movement and the journey is over.
     begin()
     readRef.isLoading = true
     readRef.loadFailed = true
     render(<BookshelfPage />)
     expect(activeRef.current.id).toBe(JOURNEY.childId)
     expect(screen.queryByRole('button', { name: LIBRARY_RETURN_LABEL })).not.toBeInTheDocument()
-    // The journey is not destroyed by a failed read — it is simply not offered
-    // against one, so the next settled render can still show it.
-    expect(getLibraryReturnFlow()).not.toBeNull()
+    expect(getLibraryReturnFlow()).toBeNull()
   })
 
-  it('and comes back when the read settles on the same child', () => {
+  it('and clearing that failure does not hand the old journey back', () => {
     begin()
     readRef.isLoading = true
     readRef.loadFailed = true
@@ -258,6 +276,17 @@ describe('and does not offer it otherwise', () => {
     readRef.isLoading = false
     readRef.loadFailed = false
     render(<BookshelfPage />)
+    // The read works again, which is a page that works — not a journey that
+    // resumes.
+    expect(screen.queryByRole('button', { name: LIBRARY_RETURN_LABEL })).not.toBeInTheDocument()
+    expect(getLibraryReturnFlow()).toBeNull()
+
+    // The positive control: a fresh, deliberate trip from the village is
+    // offered on this very shelf exactly as it always was, so what expired was
+    // the old journey and not the feature.
+    act(() => {
+      begin()
+    })
     expect(screen.getByRole('button', { name: LIBRARY_RETURN_LABEL })).toBeInTheDocument()
   })
 })

@@ -1,10 +1,11 @@
-import { useEffect, useSyncExternalStore } from 'react'
+import { useEffect, useRef, useSyncExternalStore } from 'react'
 
 import {
   getActiveChildId,
   subscribeActiveChildId,
 } from '../../../core/hooks/activeChildStore'
 import {
+  expireLibraryReturnForUnsettledIdentity,
   observeLibraryReturnIdentity,
   reconcileLibraryReturnFlowPath,
 } from './libraryReturnFlow'
@@ -52,4 +53,48 @@ export function useLibraryReturnIdentityWatch(
   useEffect(() => {
     observeLibraryReturnIdentity(identity)
   }, [identity])
+}
+
+/**
+ * The readiness half: the scoped children read the surface ALREADY makes.
+ *
+ * Takes `isLoading` / `loadFailed` straight from a `useActiveChild()` call the
+ * caller already has — no second read, no new permission, no child switch, no
+ * stored flag — because the identity key the watch above builds is made of the
+ * SELECTED child id, which survives both of those states. A failed read leaves
+ * the previous answer's `activeChild` object in place with the matching id, so
+ * that key never moves and the journey outlived the identity it was bound to.
+ *
+ * Two unresolved states, split exactly as the identity watch splits them, and
+ * for the same reason — which is why the latch is a ref and NOT module state:
+ *
+ *   • **failed** (`loadFailed`) is an affirmative answer. The identity is
+ *     unknown and will not become known on its own, so it ends the journey the
+ *     moment it is seen — including on a surface that has just mounted into a
+ *     failure, which is the shelf a child reaches back to from the reader.
+ *   • **not answered yet** is a page still settling. `useChildren` keeps
+ *     `isLoading` per hook instance, so EVERY fresh mount starts there; ending
+ *     the journey on it would end it on the first render of the shelf the
+ *     journey was created for. It counts only once THIS observer has seen its
+ *     own read settle — a re-read or a retry under an open shelf — so the latch
+ *     has to be scoped to one mount's lifetime and nothing wider.
+ *
+ * The latch is dropped when it fires, so a retry that stays in flight bumps the
+ * epoch once rather than once per report. The caller keeps whatever gate it
+ * already had: hiding the control is still right, it was simply never enough.
+ */
+export function useLibraryReturnReadinessWatch(
+  isLoading: boolean | undefined,
+  loadFailed: boolean | undefined,
+): void {
+  const settledOnce = useRef(false)
+  useEffect(() => {
+    if (!isLoading && !loadFailed) {
+      settledOnce.current = true
+      return
+    }
+    if (!loadFailed && !settledOnce.current) return
+    settledOnce.current = false
+    expireLibraryReturnForUnsettledIdentity()
+  }, [isLoading, loadFailed])
 }

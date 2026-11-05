@@ -792,6 +792,8 @@ Band = priority band from §2. The audit prompt updates this table; the fix prom
 
 † DATA-01 and DATA-03 were in band 4 by topic but **promoted to top of queue**: DATA-01 as compliance- and time-sensitive (June 30); DATA-03 because the app is Lincoln's only legal MO record and a data-loss recovery path had to be confirmed. DATA-03 is now **RESOLVED** — Firebase console confirms daily backups (98-day retention).
 
+| **UX-478** | 2 | **BUILT** (local) | **A restored Library remains a useful door to Books with a safe way back.** Temporary child/family-scoped navigation survives supported Books reading and creation routes, expires on identity/readiness changes and unrelated navigation, and returns once to acknowledged village state with location focus. Repaired Library remains available after capstone. Existing draft guards, parent draft resume and ordinary reading credits retain their owners; navigation creates no new learning/reward rule. Independent actual workflow and final checks gate local acceptance; physical Android and family usefulness remain unverified. | `src/features/avatar/stonebridge/` and Books/shell integration; local run `20261105-stonebridge-library-return`. |
+
 ## 7. Triggers (phone-first cheat-sheet)
 
 Everything below is either fully automatic or a single short message pasted into Claude Code web.
@@ -849,3 +851,4 @@ No local commands, ever.
   It then stops: no PR subscription, no check-in, reminder or scheduled task, no staying resident to watch CI.
   Merge only a PR whose first summary line says `safe to merge`; a fix needed after that goes on a new branch and PR.
   Full protocol: `CLAUDE.md` › AI Development Operating Model › **End of run**.
+

@@ -14,7 +14,10 @@ import { useChildSkillSnapshot } from '../core/hooks/useChildSkillSnapshot'
 import { useProfile } from '../core/profile/useProfile'
 import { UserProfile } from '../core/types/enums'
 import AvatarThumbnail from '../features/avatar/AvatarThumbnail'
-import { useLibraryReturnRouteWatch } from '../features/avatar/stonebridge/useLibraryReturnScopeWatch'
+import {
+  useLibraryReturnReadinessWatch,
+  useLibraryReturnRouteWatch,
+} from '../features/avatar/stonebridge/useLibraryReturnScopeWatch'
 import { useAvatarProfile } from '../features/avatar/useAvatarProfile'
 import { isArmorComplete } from '../features/avatar/armorGate'
 import { canAccessKnowledgeMine } from '../features/quest/knowledgeMineAccess'
@@ -179,7 +182,12 @@ function NavContent({
 
 export function AppShell({ children }: AppShellProps) {
   const { profile } = useProfile()
-  const { activeChild, activeChildId } = useActiveChild()
+  const {
+    activeChild,
+    activeChildId,
+    isLoading: childrenLoading,
+    loadFailed: childrenLoadFailed,
+  } = useActiveChild()
   const { familyId } = useAuth()
   const avatarProfile = useAvatarProfile(familyId ?? undefined, activeChild?.id)
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -210,6 +218,16 @@ export function AppShell({ children }: AppShellProps) {
   // because this shell unmounts on logout. Called before the call-mode return
   // below, because a hook is not optional.
   useLibraryReturnRouteWatch(location.pathname)
+
+  // And the identity READINESS half, from the `useActiveChild()` read this shell
+  // already makes for the app bar — no second read, no permission, no write. The
+  // identity key watched in `App.tsx` is built from the selected child ID, which
+  // survives a read that is unsettled or has failed, so without this the journey
+  // outlived the identity it was bound to and came back when the flag cleared.
+  // Here as well as on the shelf's own control, because this is the one read
+  // mounted across the hub — including the window in which the village board is
+  // closing on its way to a departure that has not been created yet.
+  useLibraryReturnReadinessWatch(childrenLoading, childrenLoadFailed)
 
   const closeDrawer = useCallback(() => setDrawerOpen(false), [])
 

@@ -14,6 +14,7 @@ import {
   requestLibraryReturn,
   subscribeLibraryReturnFlow,
 } from './libraryReturnFlow'
+import { useLibraryReturnReadinessWatch } from './useLibraryReturnScopeWatch'
 
 /**
  * The one way back from My Books to the village the child came from.
@@ -33,6 +34,9 @@ import {
  * It renders only while the flow is live for THIS family and THIS child. A
  * direct `/books`, a refresh, a copied link and an unsettled or failed children
  * read all leave it absent, and the shelf is exactly the shelf it always was.
+ * A FAILED read also ends the journey outright rather than waiting to be offered
+ * again — see the watch inside the component: an unknown identity that only hid
+ * this control handed the old origin back the moment the flag cleared.
  *
  * ── What the tap does ────────────────────────────────────────────────────────
  *
@@ -56,7 +60,15 @@ export default function LibraryReturnBanner() {
    * object from the previous answer while the current read is unsettled or has
    * failed. A failed read is not an affirmative identity, so the control is not
    * offered against one — the GATE verdict, not a guess about undefined.
+   *
+   * And hiding it is not the end of it: the flow is module memory, so an unknown
+   * read that only hid the control left the journey sitting there to be handed
+   * back when the flag cleared. The watch below ENDS it from the same two values
+   * — the one read this component already makes, with no second read and no
+   * stored flag — and the gate here stays exactly as it was for the frames
+   * before that lands.
    */
+  useLibraryReturnReadinessWatch(isLoading, loadFailed)
   const settled = !isLoading && !loadFailed
   const live = settled
     ? liveLibraryReturnFlow(flow, { familyId, childId: activeChild?.id ?? '' })

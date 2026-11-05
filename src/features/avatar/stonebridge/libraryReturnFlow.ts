@@ -19,7 +19,12 @@
  *      selected child, observed above the auth/profile gates by
  *      `LibraryReturnScopeObserver` in `App.tsx`. It sees a logout, a profile
  *      exit, an unsettled gate and a resolved-child change, none of which the
- *      shell can report because the shell is gone by then.
+ *      shell can report because the shell is gone by then. Its other half is
+ *      `expireLibraryReturnForUnsettledIdentity`, reported from the scoped
+ *      children read a surface already has: the selected ID survives a read
+ *      that is unsettled or has FAILED — `activeChild` can still be the whole
+ *      object from the previous answer — so that channel sees an identity go
+ *      unknown while this one still reads the same string.
  *   2. **the shared active-child store** — synchronous, once per raw write, so a
  *      same-tick `A → B → A` is seen as two movements. React batches that into
  *      one render reading `A`; a render-level comparison sees nothing happen.
@@ -153,6 +158,34 @@ export function observeLibraryReturnIdentity(identity: string): void {
   }
   if (observedIdentity === identity) return
   observedIdentity = identity
+  moveIdentity()
+}
+
+/**
+ * The scoped children read behind the identity has gone unknown — unsettled, or
+ * FAILED — so the journey is over.
+ *
+ * This is the hole `observeLibraryReturnIdentity` cannot see. That key is built
+ * from the SELECTED child id, which is a string in a shared store: it survives a
+ * read that is still in flight and a read that rejected, and `useChildren` keeps
+ * the previous answer's list beside the failure, so `activeChild` is still a
+ * whole object whose id still matches the journey. Gating the control on that
+ * (`LibraryReturnBanner`'s GATE verdict) only HIDES it — the flow is module
+ * memory and sits there until something ends it, so clearing the flag an hour
+ * later handed the old origin back.
+ *
+ * So the unknown read ends it, through the same `moveIdentity` every other
+ * movement uses. That is deliberately more than clearing the flow: the epoch
+ * advances too, so a departure captured at a tap before this — the board's
+ * closing window — is refused rather than creating a journey against an identity
+ * nobody can vouch for. Nothing here reads, writes, selects or retries anything;
+ * it is told what a surface already knows.
+ *
+ * Irreversible, like every other movement: the read coming back is a page that
+ * works again, not the journey resuming. A fresh, deliberate trip from the
+ * village begins a new one against the epoch this bumped.
+ */
+export function expireLibraryReturnForUnsettledIdentity(): void {
   moveIdentity()
 }
 
