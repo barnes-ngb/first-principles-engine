@@ -4,8 +4,11 @@ import {
   getActiveChildId,
   setActiveChildIdShared,
 } from '../../../core/hooks/activeChildStore'
+import { STONEBRIDGE_TOWN_PATH } from './stonebridgeDestinations'
 import {
+  LIBRARY_RETURN_ORIGIN_PATHS,
   LIBRARY_RETURN_VILLAGE_PATH,
+  LibraryReturnOrigin,
   LibraryReturnPhase,
   beginLibraryReturnFlow,
   endLibraryReturnFlow,
@@ -13,6 +16,10 @@ import {
   getLibraryIdentityEpoch,
   getLibraryReturnFlow,
   isBooksAreaPath,
+  isOwnOriginPath,
+  isVillagePath,
+  libraryReturnForOrigin,
+  libraryReturnPath,
   liveLibraryReturnFlow,
   observeLibraryReturnIdentity,
   reconcileLibraryReturnFlowPath,
@@ -39,7 +46,17 @@ import {
 const LINCOLN = 'lincoln'
 const LONDON = 'london'
 const FAM = 'fam-1'
-const ORIGIN = { familyId: FAM, childId: LINCOLN, missionId: 'library_hut' }
+/**
+ * The legacy Hero-Hub entry, which is what most of this file is about: the rules
+ * below are the same rules whichever entry a journey left from, and the ones
+ * that are ABOUT the entry have their own block at the end.
+ */
+const ORIGIN = {
+  familyId: FAM,
+  childId: LINCOLN,
+  missionId: 'library_hut',
+  origin: LibraryReturnOrigin.Hub as LibraryReturnOrigin,
+}
 
 /** Begin against the epoch the module has actually observed. */
 function begin(origin: Partial<typeof ORIGIN> = {}) {
@@ -48,6 +65,11 @@ function begin(origin: Partial<typeof ORIGIN> = {}) {
     ...origin,
     observedEpoch: getLibraryIdentityEpoch(),
   })
+}
+
+/** The canonical town page's equivalent. */
+function beginFromTown(origin: Partial<typeof ORIGIN> = {}) {
+  return begin({ origin: LibraryReturnOrigin.Town, ...origin })
 }
 
 /** A live journey that has already stepped into the Books area. */
@@ -71,12 +93,13 @@ afterEach(() => {
 })
 
 describe('beginning a journey', () => {
-  it('records the family, the child and the place, away from the village', () => {
+  it('records the family, the child, the place and the entry, away from the village', () => {
     const flow = begin()
     expect(flow).toMatchObject({
       familyId: FAM,
       childId: LINCOLN,
       missionId: 'library_hut',
+      origin: LibraryReturnOrigin.Hub,
       phase: LibraryReturnPhase.Away,
     })
     expect(getLibraryReturnFlow()).toBe(flow)
@@ -357,6 +380,7 @@ describe('the routes the journey actually lives on', () => {
       '/books-about-me/review-1',
       '/booksomething',
       LIBRARY_RETURN_VILLAGE_PATH,
+      STONEBRIDGE_TOWN_PATH,
       '/today',
       '/quest',
       '/',
@@ -411,6 +435,165 @@ describe('leaving the journey ends it', () => {
     reconcileLibraryReturnFlowPath('/today')
     expect(seen).not.toHaveBeenCalled()
     unsubscribe()
+  })
+})
+
+describe('which entry a journey belongs to', () => {
+  it('maps each entry to exactly one internal app route', () => {
+    expect(LIBRARY_RETURN_ORIGIN_PATHS).toEqual({
+      [LibraryReturnOrigin.Town]: STONEBRIDGE_TOWN_PATH,
+      [LibraryReturnOrigin.Hub]: LIBRARY_RETURN_VILLAGE_PATH,
+    })
+    // Two entries, two different routes — never the same path twice, which
+    // would make "which one did they leave from" unanswerable.
+    expect(new Set(Object.values(LIBRARY_RETURN_ORIGIN_PATHS)).size).toBe(2)
+  })
+
+  it('sends the way back to the entry the journey actually left', () => {
+    expect(libraryReturnPath(begin()!)).toBe(LIBRARY_RETURN_VILLAGE_PATH)
+    endLibraryReturnFlow()
+    expect(libraryReturnPath(beginFromTown()!)).toBe(STONEBRIDGE_TOWN_PATH)
+  })
+
+  it('refuses an entry with no internal route behind it', () => {
+    // The authority rule, at the module's own boundary: a token that is not one
+    // of the two produces NO journey rather than one whose way back is
+    // `undefined`. Nothing outside this module — a URL, a link, route state —
+    // can supply a destination.
+    expect(
+      beginLibraryReturnFlow({
+        ...ORIGIN,
+        origin: '/books' as unknown as LibraryReturnOrigin,
+        observedEpoch: getLibraryIdentityEpoch(),
+      }),
+    ).toBeNull()
+    expect(
+      beginLibraryReturnFlow({
+        ...ORIGIN,
+        origin: 'https://example.com/avatar' as unknown as LibraryReturnOrigin,
+        observedEpoch: getLibraryIdentityEpoch(),
+      }),
+    ).toBeNull()
+    expect(getLibraryReturnFlow()).toBeNull()
+  })
+
+  it('is only served by the entry it left, for the right child and phase', () => {
+    const flow = begin()!
+    const scope = { familyId: FAM, childId: LINCOLN }
+    requestLibraryReturn(flow.generation)
+    const returning = getLibraryReturnFlow()
+    // The hub's own journey: the hub serves it, the town page does not.
+    expect(libraryReturnForOrigin(returning, scope, LibraryReturnOrigin.Hub)).toBe(returning)
+    expect(libraryReturnForOrigin(returning, scope, LibraryReturnOrigin.Town)).toBeNull()
+    // And the brother's hub does not serve it either.
+    expect(
+      libraryReturnForOrigin(returning, { familyId: FAM, childId: LONDON }, LibraryReturnOrigin.Hub),
+    ).toBeNull()
+  })
+
+  it('and an AWAY journey is nobody’s to serve yet', () => {
+    const flow = begin()
+    const scope = { familyId: FAM, childId: LINCOLN }
+    expect(libraryReturnForOrigin(flow, scope, LibraryReturnOrigin.Hub)).toBeNull()
+  })
+
+  it('a town journey stands still on the town page and ends at the hub', () => {
+    // The two halves of "its own entry, not any entry". Arriving at the OTHER
+    // village entry is leaving the journey, exactly as a trip to Today is —
+    // which is what a whitelist of both paths would have got wrong.
+    beginFromTown()
+    reconcileLibraryReturnFlowPath(STONEBRIDGE_TOWN_PATH)
+    expect(getLibraryReturnFlow()).not.toBeNull()
+    reconcileLibraryReturnFlowPath(LIBRARY_RETURN_VILLAGE_PATH)
+    expect(getLibraryReturnFlow()).toBeNull()
+  })
+
+  it('and a hub journey stands still on the hub and ends at the town page', () => {
+    begin()
+    reconcileLibraryReturnFlowPath(LIBRARY_RETURN_VILLAGE_PATH)
+    expect(getLibraryReturnFlow()).not.toBeNull()
+    reconcileLibraryReturnFlowPath(STONEBRIDGE_TOWN_PATH)
+    expect(getLibraryReturnFlow()).toBeNull()
+  })
+
+  it('keeps the legacy hub origin across the FIRST step into Books', () => {
+    // The behaviour the existing journey has and must not lose: the flow is
+    // created while the child is still at the hub, so arriving there is not yet
+    // a departure, and the shelf is reached with the way back intact.
+    const flow = begin()!
+    reconcileLibraryReturnFlowPath(LIBRARY_RETURN_VILLAGE_PATH)
+    reconcileLibraryReturnFlowPath('/books')
+    expect(getLibraryReturnFlow()).toBe(flow)
+  })
+
+  it('but an ordinary hub visit LATER still expires it', () => {
+    const flow = beginOnTheShelf()
+    reconcileLibraryReturnFlowPath(LIBRARY_RETURN_VILLAGE_PATH)
+    expect(getLibraryReturnFlow()).toBeNull()
+    expect(requestLibraryReturn(flow.generation)).toBeNull()
+  })
+
+  it('and the same pair holds for the town page', () => {
+    const flow = beginFromTown()!
+    reconcileLibraryReturnFlowPath(STONEBRIDGE_TOWN_PATH)
+    reconcileLibraryReturnFlowPath('/books')
+    expect(getLibraryReturnFlow()).toBe(flow)
+    reconcileLibraryReturnFlowPath(STONEBRIDGE_TOWN_PATH)
+    expect(getLibraryReturnFlow()).toBeNull()
+  })
+
+  it('a RETURNING journey is only kept at its own entry', () => {
+    const flow = beginFromTown()!
+    requestLibraryReturn(flow.generation)
+    reconcileLibraryReturnFlowPath(LIBRARY_RETURN_VILLAGE_PATH)
+    expect(getLibraryReturnFlow()).toBeNull()
+
+    const again = beginFromTown()!
+    requestLibraryReturn(again.generation)
+    reconcileLibraryReturnFlowPath(STONEBRIDGE_TOWN_PATH)
+    expect(getLibraryReturnFlow()?.phase).toBe(LibraryReturnPhase.Returning)
+  })
+
+  it('answers "is this my entry" per journey, not per path class', () => {
+    const town = beginFromTown()!
+    expect(isOwnOriginPath(town, STONEBRIDGE_TOWN_PATH)).toBe(true)
+    expect(isOwnOriginPath(town, `${STONEBRIDGE_TOWN_PATH}/`)).toBe(true)
+    expect(isOwnOriginPath(town, LIBRARY_RETURN_VILLAGE_PATH)).toBe(false)
+    endLibraryReturnFlow()
+
+    const hub = begin()!
+    expect(isOwnOriginPath(hub, LIBRARY_RETURN_VILLAGE_PATH)).toBe(true)
+    expect(isOwnOriginPath(hub, STONEBRIDGE_TOWN_PATH)).toBe(false)
+    // The class predicate says yes to both, which is exactly why the rules
+    // above do not use it.
+    expect(isVillagePath(STONEBRIDGE_TOWN_PATH)).toBe(true)
+    expect(isVillagePath(LIBRARY_RETURN_VILLAGE_PATH)).toBe(true)
+    expect(isVillagePath('/today')).toBe(false)
+  })
+
+  it('an identity movement ends a town journey exactly as it does a hub one', () => {
+    // The entry changes where a return GOES; it changes nothing about when a
+    // journey is over. All four channels, against the new origin.
+    expect(beginFromTown(), 'the child channel').not.toBeNull()
+    setActiveChildIdShared(LONDON)
+    expect(getLibraryReturnFlow()).toBeNull()
+
+    setActiveChildIdShared(LINCOLN)
+    expect(beginFromTown(), 'the profile channel').not.toBeNull()
+    observeLibraryReturnIdentity(`${FAM}|london|${LINCOLN}`)
+    expect(getLibraryReturnFlow()).toBeNull()
+
+    expect(beginFromTown(), 'the family channel').not.toBeNull()
+    observeLibraryReturnIdentity(`fam-2|london|${LINCOLN}`)
+    expect(getLibraryReturnFlow()).toBeNull()
+
+    expect(beginFromTown(), 'the readiness channel').not.toBeNull()
+    expireLibraryReturnForUnsettledIdentity()
+    expect(getLibraryReturnFlow()).toBeNull()
+
+    expect(beginFromTown(), 'the gate channel').not.toBeNull()
+    observeLibraryReturnIdentity('')
+    expect(getLibraryReturnFlow()).toBeNull()
   })
 })
 

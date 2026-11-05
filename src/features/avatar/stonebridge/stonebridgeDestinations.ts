@@ -32,6 +32,30 @@ import { VillageLocationState } from './computeStonebridgeProgress'
 /** The shelf route. Pinned to the app's route table by this module's test. */
 export const STONEBRIDGE_BOOKS_PATH = '/books'
 
+/**
+ * The canonical town page — the route the nav's Stonebridge entry opens.
+ *
+ * It is the SAME village as the Hero Hub's board: one controller, one progress
+ * owner, one set of location visits, presented as a page instead of a modal
+ * (`StonebridgeVillage`'s `presentation` prop). The legacy `/avatar` board is
+ * untouched and keeps the armor, the customizer and the tier ceremonies around
+ * it; this is a second door to the village, not a second village.
+ *
+ * Pinned to the app's route table by this module's test, and it is one of the
+ * two paths a `libraryReturnFlow` journey may carry.
+ */
+export const STONEBRIDGE_TOWN_PATH = '/stonebridge'
+
+/**
+ * Today, as the town page offers it.
+ *
+ * The page needs an ordinary way out that is not the village — the same
+ * destination the hub's own mission card already sends a finished hero to. It is
+ * a plain navigation: nothing about the default Today view, its gates or its
+ * contents changes, and nothing is logged by arriving there.
+ */
+export const STONEBRIDGE_TODAY_PATH = '/today'
+
 /** The id `MyAvatarPage` puts on the real ArmorPieceGallery wrapper. */
 export const FORGE_GALLERY_ANCHOR_ID = 'armor-piece-gallery'
 

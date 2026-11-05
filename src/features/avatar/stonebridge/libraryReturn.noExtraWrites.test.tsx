@@ -67,6 +67,7 @@ vi.mock('../../../core/hooks/useActiveChild', () => ({
 import CreativeTimer from '../../../components/CreativeTimer'
 import { SubjectBucket } from '../../../core/types/enums'
 import {
+  LibraryReturnOrigin,
   beginLibraryReturnFlow,
   endLibraryReturnFlow,
   getLibraryIdentityEpoch,
@@ -79,6 +80,7 @@ function beginJourney() {
     familyId: 'fam-1',
     childId: LINCOLN.id,
     missionId: 'library_hut',
+    origin: LibraryReturnOrigin.Hub,
     observedEpoch: getLibraryIdentityEpoch(),
   })
 }
@@ -211,8 +213,12 @@ describe('the journey itself cannot write or persist anything', () => {
       'src/features/avatar/stonebridge/useLibraryReturnScopeWatch.ts',
       'src/features/avatar/stonebridge/LibraryReturnBanner.tsx',
       'src/features/avatar/stonebridge/StonebridgeMissionCard.tsx',
+      'src/features/avatar/stonebridge/StonebridgePage.tsx',
       'src/features/avatar/stonebridge/StonebridgeVillage.tsx',
       'src/features/avatar/stonebridge/StonebridgeLocationDialog.tsx',
+      // The town page's armor door is a navigation plus an in-memory focus
+      // request; it may not select a child either.
+      'src/features/avatar/stonebridge/forgeFocusHandoff.ts',
     ]) {
       // The flow COMPARES the active child; nothing in it selects one. The
       // shared store's writer is `setActiveChildIdShared` and the hook's is

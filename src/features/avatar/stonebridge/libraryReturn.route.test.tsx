@@ -9,6 +9,7 @@ import { getMission } from './missions'
 import { LIBRARY_RETURN_LABEL, LIBRARY_RETURN_LINE } from './libraryReturnCopy'
 import {
   LIBRARY_RETURN_VILLAGE_PATH,
+  LibraryReturnOrigin,
   LibraryReturnPhase,
   beginLibraryReturnFlow,
   endLibraryReturnFlow,
@@ -173,6 +174,8 @@ function VillageRoute() {
           familyId: 'fam-1',
           childId: fx.activeChild.id,
           missionId: fromMissionId,
+          // The hub's entry, which is what `MyAvatarPage` passes.
+          origin: LibraryReturnOrigin.Hub,
           observedEpoch,
         })
         navigate(STONEBRIDGE_BOOKS_PATH)
@@ -278,11 +281,19 @@ function renderJourney(initial = LIBRARY_RETURN_VILLAGE_PATH) {
 }
 
 /** Begin a journey directly, against the epoch the module has observed. */
-function begin(origin: { familyId?: string; childId?: string; missionId?: string } = {}) {
+function begin(
+  origin: {
+    familyId?: string
+    childId?: string
+    missionId?: string
+    origin?: LibraryReturnOrigin
+  } = {},
+) {
   return beginLibraryReturnFlow({
     familyId: 'fam-1',
     childId: 'lincoln',
     missionId: 'library_hut',
+    origin: LibraryReturnOrigin.Hub,
     ...origin,
     observedEpoch: getLibraryIdentityEpoch(),
   })
@@ -869,6 +880,39 @@ describe('an unknown children read ENDS it, rather than only hiding the way back
     fireEvent.click(screen.getByRole('button', { name: 'My Books' }))
     await screen.findByRole('heading', { name: 'My Books' })
     expect(screen.getByRole('button', { name: LIBRARY_RETURN_LABEL })).toBeInTheDocument()
+  })
+})
+
+describe('the hub serves only the journeys that left from the hub', () => {
+  it('a town-page journey passing through the hub opens nothing here', async () => {
+    // The canonical `/stonebridge` page is the other entry, and its returns are
+    // its own. The hub must not adopt one just because it is for the right child
+    // in the right phase — which is what a phase-only check would have done, and
+    // the board would have opened itself over somebody else's journey.
+    const { router } = renderJourney('/books')
+    await screen.findByRole('heading', { name: 'My Books' })
+    act(() => {
+      requestLibraryReturn(begin({ origin: LibraryReturnOrigin.Town })!.generation)
+    })
+
+    await act(async () => {
+      await router.navigate(LIBRARY_RETURN_VILLAGE_PATH)
+    })
+    expect(screen.queryByRole('dialog', { name: 'Stonebridge Village' })).not.toBeInTheDocument()
+    // The hub is the ordinary hub, with its own way in.
+    expect(screen.getByText('🏰 Open Stonebridge')).toBeInTheDocument()
+    // And the journey is over, because arriving anywhere that is not its own
+    // entry ends it — so there is nothing left on the shelf either.
+    expect(getLibraryReturnFlow()).toBeNull()
+  })
+
+  it('while its own journey still opens the board with the focus on the tile', async () => {
+    // The positive control: the guard above distinguishes entries, it does not
+    // simply refuse everything.
+    renderJourney()
+    await leaveFromLocation(LIBRARY)
+    fireEvent.click(screen.getByRole('button', { name: LIBRARY_RETURN_LABEL }))
+    await waitFor(() => expect(tile(LIBRARY)).toHaveFocus())
   })
 })
 

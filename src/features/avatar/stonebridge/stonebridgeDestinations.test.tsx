@@ -3,13 +3,19 @@ import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 
 import BookshelfPage from '../../books/BookshelfPage'
+import MyAvatarPage from '../MyAvatarPage'
+import StonebridgePage from './StonebridgePage'
+import TodayPage from '../../today/TodayPage'
 import { routes } from '../../../app/router'
 import { VillageLocationState } from './computeStonebridgeProgress'
 import { STONEBRIDGE_MISSIONS, getMission } from './missions'
+import { FORGE_HOST_PATH } from './forgeFocusHandoff'
 import {
   FORGE_GALLERY_ANCHOR_ID,
   LIBRARY_MISSION_ID,
   STONEBRIDGE_BOOKS_PATH,
+  STONEBRIDGE_TODAY_PATH,
+  STONEBRIDGE_TOWN_PATH,
   focusForgeGallery,
   offersBooksDoor,
 } from './stonebridgeDestinations'
@@ -103,6 +109,70 @@ describe('Open My Books lands on the app’s real bookshelf', () => {
     // could navigate without the note or leave a note without navigating.
     expect(source.match(/STONEBRIDGE_BOOKS_PATH/g)).toHaveLength(2) // the import + the one call
     expect(source.match(/beginLibraryReturnFlow/g)).toHaveLength(2)
+  })
+})
+
+describe('the canonical town route is the page the app really mounts', () => {
+  /**
+   * Read from the app's own table for the same reason the shelf is: "the nav
+   * entry opens the village" is a claim about which component the app mounts for
+   * `/stonebridge`, and a test that mounted its own route with a stub would pass
+   * against a path the app does not have.
+   */
+  it('mounts StonebridgePage at the canonical path', () => {
+    const route = findRoute(routes as readonly RouteNode[], STONEBRIDGE_TOWN_PATH)
+    expect(route, `${STONEBRIDGE_TOWN_PATH} is not in the app's route table`).toBeDefined()
+    const element = route?.element as { type?: unknown } | undefined
+    expect(element?.type).toBe(StonebridgePage)
+  })
+
+  it('is not behind the parent-only guard — a kid reaching the village is the point', () => {
+    const parentOnly = (routes as readonly RouteNode[])
+      .flatMap((node) => node.children ?? [])
+      .filter((node) => !node.path && node.children)
+      .flatMap((node) => node.children ?? [])
+      .map((node) => node.path)
+    expect(parentOnly).not.toContain(STONEBRIDGE_TOWN_PATH)
+  })
+
+  it('leaves the legacy hub, its aliases and Today exactly where they were', () => {
+    // The additive claim, asserted rather than remembered: the new page is a
+    // second door. `/avatar` still mounts the real hub (armor, customizer,
+    // ceremonies and its own village board), `/hero` and `/armor` still land
+    // there, and Today is untouched.
+    const hub = findRoute(routes as readonly RouteNode[], FORGE_HOST_PATH)
+    expect((hub?.element as { type?: unknown } | undefined)?.type).toBe(MyAvatarPage)
+    for (const alias of ['/hero', '/armor']) {
+      const node = findRoute(routes as readonly RouteNode[], alias)
+      expect(node, `${alias} is no longer routed`).toBeDefined()
+      expect(
+        (node?.element as { props?: { to?: string } } | undefined)?.props?.to,
+        `${alias} no longer redirects to the hub`,
+      ).toBe(FORGE_HOST_PATH)
+    }
+    const today = findRoute(routes as readonly RouteNode[], STONEBRIDGE_TODAY_PATH)
+    expect((today?.element as { type?: unknown } | undefined)?.type).toBe(TodayPage)
+  })
+
+  it('and the page’s own doors are the paths it names', () => {
+    // One definition for each destination the town page offers, so the page and
+    // the route table cannot drift.
+    const source = read('src/features/avatar/stonebridge/StonebridgePage.tsx')
+    expect(source).toContain('navigate(STONEBRIDGE_BOOKS_PATH)')
+    expect(source).toContain('navigate(STONEBRIDGE_TODAY_PATH)')
+    expect(source).toContain('navigate(FORGE_HOST_PATH)')
+    // No invented armor route, and no second gallery drawn on the new page.
+    expect(source).not.toMatch(/['"]\/forge['"]/)
+    expect(source).not.toMatch(/ArmorPieceGallery|FORGE_GALLERY_ANCHOR_ID/)
+    // And it never selects a child.
+    expect(source).not.toMatch(/setActiveChild/)
+    // Nor does it carry the hub's 3D character onto a page that is about the
+    // village: the town is the existing 2D scene and its location list.
+    expect(source).not.toMatch(/VoxelCharacter|AvatarCharacterDisplay|from 'three'/)
+    // One progress owner per rendered journey: the page reads the hook itself
+    // and must not also render the card, which reads it again.
+    expect(source).toContain('useStonebridgeProgress(familyId, childId)')
+    expect(source).not.toMatch(/StonebridgeMissionCard/)
   })
 })
 

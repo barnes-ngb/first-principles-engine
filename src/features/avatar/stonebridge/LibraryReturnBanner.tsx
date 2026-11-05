@@ -8,8 +8,8 @@ import { useFamilyId } from '../../../core/auth/useAuth'
 import { useActiveChild } from '../../../core/hooks/useActiveChild'
 import { LIBRARY_RETURN_LABEL, LIBRARY_RETURN_LINE } from './libraryReturnCopy'
 import {
-  LIBRARY_RETURN_VILLAGE_PATH,
   getLibraryReturnFlow,
+  libraryReturnPath,
   liveLibraryReturnFlow,
   requestLibraryReturn,
   subscribeLibraryReturnFlow,
@@ -41,7 +41,11 @@ import { useLibraryReturnReadinessWatch } from './useLibraryReturnScopeWatch'
  * ── What the tap does ────────────────────────────────────────────────────────
  *
  * Asks the flow, by the generation this render was given; navigates only if the
- * flow says yes. A scope that moved under an open shelf — the app-bar chip, an
+ * flow says yes, and to the entry THAT journey left from — the canonical
+ * `/stonebridge` town page or the Hero Hub's board. The destination comes from
+ * the accepted journey, so this control has no opinion of its own about where
+ * the village is and a refused tap goes nowhere. A scope that moved under an
+ * open shelf — the app-bar chip, an
  * authorised draft resume — has already ended the flow, so the tap sends nobody
  * anywhere rather than taking the child now on screen to a journey they were not
  * on. Navigation is the app's ordinary router call: whatever guard owns the
@@ -110,9 +114,15 @@ export default function LibraryReturnBanner() {
         variant="contained"
         color="warning"
         onClick={() => {
-          // The flow decides, not the render that drew this button.
-          if (!requestLibraryReturn(generation)) return
-          navigate(LIBRARY_RETURN_VILLAGE_PATH)
+          // The flow decides, not the render that drew this button — and it
+          // decides WHERE as well as whether: the journey carries the entry it
+          // left (the canonical town page, or the Hero Hub's board), so the way
+          // back lands on the screen the child actually came from. The path is
+          // the flow's own, read from the accepted journey rather than from this
+          // render, so a tap the flow refused navigates nowhere at all.
+          const returning = requestLibraryReturn(generation)
+          if (!returning) return
+          navigate(libraryReturnPath(returning))
         }}
         sx={{
           // A 44px target that is allowed its own row on a narrow phone rather

@@ -8,9 +8,9 @@ import StonebridgeLocationArt from './StonebridgeLocationArt'
 import BannerRaiseCelebration from './BannerRaiseCelebration'
 import StonebridgeVillage from './StonebridgeVillage'
 import {
-  LibraryReturnPhase,
+  LibraryReturnOrigin,
   getLibraryReturnFlow,
-  liveLibraryReturnFlow,
+  libraryReturnForOrigin,
   serveLibraryReturn,
   subscribeLibraryReturnFlow,
 } from './libraryReturnFlow'
@@ -71,19 +71,23 @@ export default function StonebridgeMissionCard({
   const scopeKey = `${familyId}_${childId}`
 
   /**
-   * A return from My Books, if one is waiting for THIS child.
+   * A return from My Books, if one is waiting for THIS child and THIS entry.
    *
    * Subscribed at the flow's own store rather than passed down, because the
    * journey outlives the page that started it: the child was on `/books` when
    * they asked, and this card is mounted fresh by the route they land on. The
    * store is in memory only — a refresh or a direct visit has nothing here and
    * this is simply `null` (see `libraryReturnFlow`).
+   *
+   * `libraryReturnForOrigin` is the half the canonical town page made necessary:
+   * a journey that left from `/stonebridge` is not the hub's to serve, so the
+   * hub does not open its board for one that merely passes through here.
    */
   const flow = useSyncExternalStore(subscribeLibraryReturnFlow, getLibraryReturnFlow)
-  const pendingReturn = liveLibraryReturnFlow(
+  const pendingReturn = libraryReturnForOrigin(
     flow,
     { familyId, childId },
-    LibraryReturnPhase.Returning,
+    LibraryReturnOrigin.Hub,
   )
 
   /**

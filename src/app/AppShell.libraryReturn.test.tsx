@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AppShell } from './AppShell'
 import { UserProfile } from '../core/types/enums'
 import {
+  LibraryReturnOrigin,
   beginLibraryReturnFlow,
   endLibraryReturnFlow,
   getLibraryIdentityEpoch,
@@ -60,7 +61,12 @@ vi.mock('../components/ProfileMenu', () => ({ default: () => <div>profile-menu</
 vi.mock('../components/DebugPanel', () => ({ default: () => <div>debug-panel</div> }))
 vi.mock('../features/avatar/AvatarThumbnail', () => ({ default: () => null }))
 
-const ORIGIN = { familyId: 'family-1', childId: 'c1', missionId: 'library_hut' }
+const ORIGIN = {
+  familyId: 'family-1',
+  childId: 'c1',
+  missionId: 'library_hut',
+  origin: LibraryReturnOrigin.Hub,
+}
 
 /** A journey, begun against the epoch the module has actually observed. */
 function begin() {
