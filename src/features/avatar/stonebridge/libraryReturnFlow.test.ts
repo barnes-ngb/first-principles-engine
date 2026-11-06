@@ -26,6 +26,7 @@ import {
   requestLibraryReturn,
   serveLibraryReturn,
   subscribeLibraryReturnFlow,
+  subscribeLibraryIdentityEpoch,
 } from './libraryReturnFlow'
 
 /**
@@ -622,6 +623,34 @@ describe('taking the way back', () => {
     begin({ missionId: 'the_forge' })
     expect(requestLibraryReturn(first.generation)).toBeNull()
     expect(getLibraryReturnFlow()?.missionId).toBe('the_forge')
+  })
+})
+
+describe('identity epoch observation without a journey', () => {
+  it('notifies epoch subscribers on every movement, preserving flow notification semantics', () => {
+    endLibraryReturnFlow()
+    const epochChanged = vi.fn(() => expect(getLibraryReturnFlow()).toBeNull())
+    const flowChanged = vi.fn()
+    const stopEpoch = subscribeLibraryIdentityEpoch(epochChanged)
+    const stopFlow = subscribeLibraryReturnFlow(flowChanged)
+    try {
+      const before = getLibraryIdentityEpoch()
+      observeLibraryReturnIdentity('epoch-only-parent')
+      expect(getLibraryIdentityEpoch()).toBe(before + 1)
+      expect(epochChanged).toHaveBeenCalledTimes(1)
+      expect(flowChanged).not.toHaveBeenCalled()
+      observeLibraryReturnIdentity('epoch-only-parent')
+      expect(epochChanged).toHaveBeenCalledTimes(1)
+      begin()
+      expect(flowChanged).toHaveBeenCalledTimes(1)
+      observeLibraryReturnIdentity('epoch-only-kid')
+      expect(epochChanged).toHaveBeenCalledTimes(2)
+      expect(flowChanged).toHaveBeenCalledTimes(2)
+      stopEpoch()
+      observeLibraryReturnIdentity('epoch-only-parent')
+      expect(epochChanged).toHaveBeenCalledTimes(2)
+      expect(flowChanged).toHaveBeenCalledTimes(2)
+    } finally { stopEpoch(); stopFlow() }
   })
 })
 

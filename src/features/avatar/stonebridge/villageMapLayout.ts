@@ -210,24 +210,26 @@ export const RIDGE_LINE =
  * `pointer-events: none`, so even where it is drawn over the picture it is
  * never between a finger and a place.
  */
-export const HERO_FIGURE = { width: 20, height: 34 } as const
+// Includes crest/curls, the swept waving hand/sword, strokes and stepping feet.
+export const HERO_FIGURE = { width: 36, height: 38, belowFeet: 2 } as const
 
 /** Where the walk starts, where it stops, and the line the feet are on. */
 export const HERO_ROAD = {
   /** The feet line — just above the lower road at `LOWER` (190). */
   ground: 188,
-  /** Stepping in from the Square's road… */
-  startX: 124,
+  /** Both feet positions lie on the actual vertical road M150 126 L150 190. */
+  startGround: 164,
+  startX: 150,
   /** …and the stable pose, on the central road out of the Square. */
   stopX: 150,
 } as const
 
 /** The figure's box at a given x, in map units — the oracle for "clear of". */
-export const heroFigureBox = (x: number) => ({
+export const heroFigureBox = (x: number, ground: number = HERO_ROAD.ground) => ({
   left: x - HERO_FIGURE.width / 2,
   right: x + HERO_FIGURE.width / 2,
-  top: HERO_ROAD.ground - HERO_FIGURE.height,
-  bottom: HERO_ROAD.ground,
+  top: ground - HERO_FIGURE.height,
+  bottom: ground + HERO_FIGURE.belowFeet,
 })
 
 /**

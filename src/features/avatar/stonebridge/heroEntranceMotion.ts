@@ -66,9 +66,7 @@ export function nextHeroPhase(phase: HeroPhase): HeroPhase | null {
 /** How long to wait before {@link nextHeroPhase}, or `null` for "never". */
 export function heroPhaseDurationMs(phase: HeroPhase): number | null {
   switch (phase) {
-    // Armed advances on the next tick: the figure is placed at the start of the
-    // road and the walk begins from there, so the walk is a real transition
-    // rather than a jump the browser coalesces into nothing.
+    // The stage uses two bounded animation frames for Armed, not this delay.
     case HeroPhase.Armed:
       return 0
     case HeroPhase.Entering:
@@ -84,7 +82,8 @@ export function heroPhaseDurationMs(phase: HeroPhase): number | null {
 export interface HeroPose {
   /** Map-x of the figure's centre. */
   x: number
-  /** CSS transition duration for that x, in ms. `0` is "no movement". */
+  y: number
+  /** CSS transition duration for the position, in ms. `0` is "no movement". */
   travelMs: number
   /** Draw the one wave. */
   waving: boolean
@@ -105,15 +104,15 @@ export function heroPoseFor(
   phase: HeroPhase,
   options: { running: boolean; reducedMotion: boolean },
 ): HeroPose {
-  const stable: HeroPose = { x: HERO_ROAD.stopX, travelMs: 0, waving: false }
+  const stable: HeroPose = { x: HERO_ROAD.stopX, y: HERO_ROAD.ground, travelMs: 0, waving: false }
   if (!options.running || options.reducedMotion) return stable
   switch (phase) {
     case HeroPhase.Armed:
-      return { x: HERO_ROAD.startX, travelMs: 0, waving: false }
+      return { x: HERO_ROAD.startX, y: HERO_ROAD.startGround, travelMs: 0, waving: false }
     case HeroPhase.Entering:
-      return { x: HERO_ROAD.stopX, travelMs: HERO_MOTION_MS.enter, waving: false }
+      return { ...stable, travelMs: HERO_MOTION_MS.enter }
     case HeroPhase.Waving:
-      return { x: HERO_ROAD.stopX, travelMs: 0, waving: true }
+      return { ...stable, waving: true }
     case HeroPhase.Settled:
       return stable
   }

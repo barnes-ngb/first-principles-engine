@@ -65,9 +65,15 @@ export const HERO_VISUAL_DEFAULTS = {
   skin: '#F0D0B0',
   hair: '#7B5B3A',
   eyes: '#5B7B8A',
-  shirt: '#4E7FBF',
-  pants: '#3B4C63',
-  shoes: '#5A4632',
+  shirt: '#CC5500',
+  pants: '#2A3A52',
+  shoes: '#3D2B1F',
+} as const
+
+// Same default outfit as the hub's LEGENDS_OUTFIT; kept pure to avoid Three.
+export const HERO_OUTFIT_DEFAULTS = {
+  older: { shirt: '#CC5500', pants: '#2A3A52', shoes: '#3D2B1F' },
+  younger: { shirt: '#E8A838', pants: '#C4B998', shoes: '#3D2B1F' },
 } as const
 
 /** The 2D palette, scoped to this feature. No material or renderer is imported. */
@@ -162,6 +168,8 @@ export interface HeroAppearanceInput {
    * so a legacy document can be drawn with shared defaults *and say so*.
    */
   hasSavedFeatures: boolean
+  hasSavedAgeGroup?: boolean
+  fallbackAgeGroup?: 'older' | 'younger'
 }
 
 /**
@@ -183,9 +191,15 @@ const FEATURE_FIELDS = new Set(['skinTone', 'hairColor', 'eyeColor'])
 export function buildHeroAppearance({
   profile,
   hasSavedFeatures,
+  hasSavedAgeGroup,
+  fallbackAgeGroup = 'older',
 }: HeroAppearanceInput): HeroAppearance {
   const defaulted: string[] = []
-  const features = profile.characterFeatures
+  const features = hasSavedFeatures ? profile.characterFeatures : undefined
+  const outfit = HERO_OUTFIT_DEFAULTS[
+    hasSavedAgeGroup !== false && (profile.ageGroup === 'younger' || profile.ageGroup === 'older')
+      ? profile.ageGroup : fallbackAgeGroup
+  ]
   if (!hasSavedFeatures) defaulted.push('features')
 
   const pick = (raw: unknown, fallback: string, name: string): string => {
@@ -222,16 +236,22 @@ export function buildHeroAppearance({
   }
 
   const wears = (pieceId: VoxelArmorPieceId) => pieces.some((p) => p.pieceId === pieceId)
+  const validStyle = features && ['short', 'medium', 'long', 'curly', 'long_wavy'].includes(features.hairStyle)
+  const validLength = features && ['above_ear', 'ear_length', 'shoulder', 'below_shoulder'].includes(features.hairLength)
+  if (hasSavedFeatures && !validStyle) defaulted.push('hairStyle')
+  if (hasSavedFeatures && !validLength) defaulted.push('hairLength')
 
   return {
     skin: pick(features?.skinTone, HERO_VISUAL_DEFAULTS.skin, 'skinTone'),
     hair: pick(features?.hairColor, HERO_VISUAL_DEFAULTS.hair, 'hairColor'),
-    hairStyle: features?.hairStyle ?? 'medium',
-    hairLength: features?.hairLength ?? 'ear_length',
+    hairStyle: features && validStyle
+      ? features.hairStyle : 'medium',
+    hairLength: features && validLength
+      ? features.hairLength : 'ear_length',
     eyes: pick(features?.eyeColor, HERO_VISUAL_DEFAULTS.eyes, 'eyeColor'),
-    shirt: pick(custom?.shirtColor, HERO_VISUAL_DEFAULTS.shirt, 'shirtColor'),
-    pants: pick(custom?.pantsColor, HERO_VISUAL_DEFAULTS.pants, 'pantsColor'),
-    shoes: pick(custom?.shoeColor, HERO_VISUAL_DEFAULTS.shoes, 'shoeColor'),
+    shirt: pick(custom?.shirtColor, outfit.shirt, 'shirtColor'),
+    pants: pick(custom?.pantsColor, outfit.pants, 'pantsColor'),
+    shoes: pick(custom?.shoeColor, outfit.shoes, 'shoeColor'),
     cape: safeHexColor(custom?.capeColor),
     faceGrid: readHeroFaceGrid(profile.faceGrid),
     pieces,

@@ -138,6 +138,10 @@ vi.mock('../../../core/auth/useAuth', () => ({
   useAuth: () => ({ familyId: 'fam-1' }),
 }))
 
+vi.mock('../../../core/profile/useProfile', () => ({
+  useProfile: () => ({ profile: 'parents' }),
+}))
+
 vi.mock('../../../core/hooks/useActiveChild', () => ({
   useActiveChild: () => ({
     activeChild: fx.activeChild,
@@ -505,11 +509,12 @@ describe('arriving at the town', () => {
   it('and a settled read with no saved character puts no hero on the map', () => {
     // `missing` is the default fixture: a successful read that says this child
     // has no saved hero yet. It is not a hero and is not drawn as one — and it
-    // says nothing, because there is nothing wrong.
+    // says honestly that a personal character has not been saved yet.
     renderTown()
     expect(screen.queryByTestId('stonebridge-hero')).not.toBeInTheDocument()
     expect(screen.queryByTestId('hero-stage')).not.toBeInTheDocument()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.getByText('No saved hero yet. You can make one in My armor.')).toBeInTheDocument()
   })
 
   it('a saved hero stands on the map, decoratively, over nobody’s target', () => {
@@ -529,15 +534,17 @@ describe('arriving at the town', () => {
   })
 
   it('and tapping a place still opens it immediately, with the motion withdrawn', () => {
+    emulateReducedMotion(false)
     fx.hero = { ...fx.hero, phase: 'ready', exposureKey: 'fam-1_lincoln|0|0@0', document: SAVED_HERO }
     renderTown()
-    expect(townRegion().getByTestId('hero-stage')).toHaveAttribute('data-hero-running', 'true')
+    const stage = townRegion().getByTestId('hero-stage')
+    expect(stage).toHaveAttribute('data-hero-running', 'true')
 
     // No delay, no travel, no waiting for a walk: the dialog is open in the
     // same tick as the tap, which is also what hides the map underneath it.
     fireEvent.click(tile(LIBRARY))
     expect(screen.getByRole('dialog', { name: 'The Library Hut' })).toBeInTheDocument()
-    expect(townRegion().getByTestId('hero-stage')).toHaveAttribute('data-hero-running', 'false')
+    expect(stage).toHaveAttribute('data-hero-running', 'false')
   })
 
   it('a hero read that FAILS says so, offers its own door, and blocks nothing', () => {
@@ -577,6 +584,37 @@ describe('arriving at the town', () => {
     for (const label of ['My Books', 'Today', 'My armor']) {
       expect(screen.getByRole('button', { name: label }), label).toBeInTheDocument()
     }
+  })
+
+  it.each(['loading', 'failed'] as const)('cached-child %s still shows three direct fallback doors', (state) => {
+    fx.childrenLoading = true
+    fx.childrenLoadFailed = state === 'failed'
+    fx.hero = { ...fx.hero, phase: 'idle' }
+    renderTown()
+    expect(screen.queryByRole('button', { name: 'Quick links' })).not.toBeInTheDocument()
+    for (const label of ['My Books', 'Today', 'My armor']) expect(screen.getByRole('button', { name: label })).toBeInTheDocument()
+    expect(screen.queryByTestId('stonebridge-hero')).not.toBeInTheDocument()
+    if (state === 'failed') {
+      expect(screen.getByRole('alert')).toHaveTextContent("Couldn't confirm the selected child.")
+      fireEvent.click(screen.getByRole('button', { name: 'Reload children' }))
+      expect(fx.retryLoad).toHaveBeenCalledTimes(1)
+    } else expect(screen.getByText('Checking the selected child…')).toBeInTheDocument()
+  })
+
+  it('reports hero loading without blocking useful places', () => {
+    fx.hero = { ...fx.hero, phase: 'loading' }
+    renderTown()
+    expect(screen.getByText('Loading your saved hero…')).toBeInTheDocument()
+    expect(tile(LIBRARY)).toBeInTheDocument()
+  })
+
+  it('qualifies a legacy/default saved appearance', () => {
+    fx.hero = { ...fx.hero, phase: 'ready', exposureKey: 'legacy', document: {
+      ...(SAVED_HERO as object), hasSavedFeatures: false,
+    } }
+    renderTown()
+    expect(screen.getByText(/Your saved hero uses some shared appearance defaults/)).toBeInTheDocument()
+    expect(screen.getByTestId('stonebridge-hero')).toBeInTheDocument()
   })
 
   it('a deep link straight to a place still lands on the town, not a journey', () => {

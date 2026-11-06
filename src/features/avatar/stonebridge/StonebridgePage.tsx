@@ -8,6 +8,7 @@ import Page from '../../../components/Page'
 import { useFamilyId } from '../../../core/auth/useAuth'
 import { useActiveChild } from '../../../core/hooks/useActiveChild'
 import { getChildAgeGroup } from '../../../core/profile/childIdentity'
+import { useProfile } from '../../../core/profile/useProfile'
 import BannerRaiseCelebration from './BannerRaiseCelebration'
 import StonebridgeQuickLinks from './StonebridgeQuickLinks'
 import StonebridgeVillage from './StonebridgeVillage'
@@ -113,6 +114,7 @@ import {
 export default function StonebridgePage() {
   const navigate = useNavigate()
   const familyId = useFamilyId()
+  const { profile } = useProfile()
   /**
    * The child, and the STATE of the read that resolves them.
    *
@@ -149,7 +151,8 @@ export default function StonebridgePage() {
   const heroRead = useTownHeroProfile({
     familyId,
     childId,
-    ready: Boolean(childId) && !childrenLoading && !childrenLoadFailed,
+    identityKey: profile ?? '',
+    ready: Boolean(childId) && profile !== null && !childrenLoading && !childrenLoadFailed,
   })
   /** Only ever a document proven to be this child's, from a settled read. */
   const heroDocument = heroRead.phase === TownHeroPhase.Ready ? heroRead.document : null
@@ -177,8 +180,8 @@ export default function StonebridgePage() {
    * session). It reads what the hub's equip flow has already saved.
    */
   const heroAppearance = useMemo(
-    () => (heroDocument ? buildHeroAppearance(heroDocument) : null),
-    [heroDocument],
+    () => (heroDocument ? buildHeroAppearance({ ...heroDocument, fallbackAgeGroup: getChildAgeGroup(activeChild) }) : null),
+    [heroDocument, activeChild],
   )
 
   const {
@@ -448,7 +451,7 @@ export default function StonebridgePage() {
    * here: a decorative character standing in a village whose numbers are not
    * fresh adds a claim to a screen that is already apologising.
    */
-  const villageHealthy = !stale && !readError && !saveError && !retrying
+  const villageHealthy = profile !== null && !childrenLoading && !childrenLoadFailed && !stale && !readError && !saveError && !retrying
 
   /**
    * The hero handed to the board, or nothing at all.
@@ -548,6 +551,26 @@ export default function StonebridgePage() {
           retry's own name is deliberately not *Try again* — the village has one
           of those, and two buttons with one name is one button nobody can aim
           at. Nothing here writes, creates or selects anything. */}
+      {(childrenLoading || childrenLoadFailed) && (
+        <Box sx={{ mt: 1 }}>
+          <Typography role={childrenLoadFailed ? 'alert' : undefined} sx={{ fontSize: '14px' }}>
+            {childrenLoadFailed ? "Couldn't confirm the selected child." : 'Checking the selected child…'}
+          </Typography>
+          {childrenLoadFailed && retryLoad && (
+            <Button variant="outlined" sx={doorSx} onClick={retryLoad}>Reload children</Button>
+          )}
+        </Box>
+      )}
+      {(heroRead.phase === TownHeroPhase.Loading || heroRead.phase === TownHeroPhase.Missing ||
+        (heroAppearance && (!heroDocument?.hasSavedFeatures || heroAppearance.defaulted.length > 0))) && (
+        <Typography sx={{ mt: 1, fontSize: '14px', lineHeight: 1.45 }}>
+          {heroRead.phase === TownHeroPhase.Loading
+            ? 'Loading your saved hero…'
+            : heroRead.phase === TownHeroPhase.Missing
+              ? 'No saved hero yet. You can make one in My armor.'
+              : 'Your saved hero uses some shared appearance defaults in this simplified 2D view.'}
+        </Typography>
+      )}
       {heroRead.phase === TownHeroPhase.Error && (
         <Box sx={{ mt: 1 }}>
           <Typography role="alert" sx={{ fontSize: '14px', lineHeight: 1.45 }}>
@@ -573,7 +596,7 @@ export default function StonebridgePage() {
           and the plain three-door strip whenever the village itself is
           loading, stale, failed or unsaved. Same routes either way. */}
       {villageHealthy ? (
-        <StonebridgeQuickLinks links={townLinks} isLincoln={isLincoln} scopeKey={scopeKey} />
+        <StonebridgeQuickLinks links={townLinks} isLincoln={isLincoln} scopeKey={`${scopeKey}|${profile}|${heroRead.exposureKey}`} />
       ) : (
         doors
       )}

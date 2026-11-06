@@ -69,7 +69,7 @@ import { doc, onSnapshot } from 'firebase/firestore'
 import { avatarProfilesCollection } from '../../../core/firebase/firestore'
 import type { AvatarProfile } from '../../../core/types'
 import { normalizeAvatarProfile } from '../normalizeProfile'
-import { getLibraryIdentityEpoch } from './libraryReturnFlow'
+import { getLibraryIdentityEpoch, subscribeLibraryIdentityEpoch } from './libraryReturnFlow'
 import { subscribeActiveChildId } from '../../../core/hooks/activeChildStore'
 
 // ── The scope authority this read binds to ──────────────────────────────────
@@ -137,6 +137,7 @@ export interface TownHeroDocument {
    * surface may say so instead of implying the colours are theirs.
    */
   hasSavedFeatures: boolean
+  hasSavedAgeGroup: boolean
 }
 
 export interface TownHeroRead {
@@ -224,12 +225,15 @@ export interface UseTownHeroProfileParams {
    * `false` is `idle`: no subscription, no document, and nothing on screen.
    */
   ready: boolean
+  /** Current profile authority, so its render invalidates before the epoch watcher effect. */
+  identityKey?: string
 }
 
 export function useTownHeroProfile({
   familyId,
   childId,
   ready,
+  identityKey = '',
 }: UseTownHeroProfileParams): TownHeroRead {
   /**
    * The scope authority, subscribed so a movement really re-renders.
@@ -238,10 +242,11 @@ export function useTownHeroProfile({
    * across a batched `A → B → A` while a count does not.
    */
   const movements = useSyncExternalStore(subscribeTownHeroScope, getTownHeroScopeMovements)
+  const epoch = useSyncExternalStore(subscribeLibraryIdentityEpoch, getLibraryIdentityEpoch)
 
   /** A Retry stamped with the child it was tapped for. */
   const [retryRequest, setRetryRequest] = useState<{ key: string; n: number } | null>(null)
-  const scopeKey = familyId && childId ? `${familyId}_${childId}` : ''
+  const scopeKey = familyId && childId ? JSON.stringify([familyId, childId, identityKey, movements, epoch]) : ''
   const retryN = retryRequest && retryRequest.key === scopeKey ? retryRequest.n : 0
 
   const enabled = Boolean(scopeKey) && ready
@@ -265,8 +270,8 @@ export function useTownHeroProfile({
      * and re-read in every callback: an answer that arrives after either moved
      * is answering about an identity this read can no longer vouch for.
      */
-    const epochAtSubscribe = getLibraryIdentityEpoch()
-    const movementsAtSubscribe = getTownHeroScopeMovements()
+    const epochAtSubscribe = epoch
+    const movementsAtSubscribe = movements
     let cancelled = false
     const live = () =>
       !cancelled &&
@@ -297,7 +302,8 @@ export function useTownHeroProfile({
         }
         const raw = data as Record<string, unknown>
         const stamped = typeof raw.childId === 'string' ? raw.childId.trim() : ''
-        if (stamped && stamped !== childId) {
+        if ((raw.childId !== undefined && raw.childId !== null && raw.childId !== '' && typeof raw.childId !== 'string') ||
+            (stamped && stamped !== childId)) {
           // Two claims that disagree. The document is not drawn, and a Retry is
           // not offered as a fix for it — re-reading says the same thing.
           report(TownHeroPhase.Error, null, TownHeroFailure.Mismatch)
@@ -310,6 +316,7 @@ export function useTownHeroProfile({
             hasSavedFeatures: Boolean(
               raw.characterFeatures && typeof raw.characterFeatures === 'object',
             ),
+            hasSavedAgeGroup: raw.ageGroup === 'older' || raw.ageGroup === 'younger',
           },
           null,
         )
@@ -328,15 +335,15 @@ export function useTownHeroProfile({
       cancelled = true
       unsub()
     }
-  }, [enabled, readId, familyId, childId])
+  }, [enabled, readId, familyId, childId, epoch, movements])
 
   const retry = useCallback(() => {
-    if (!scopeKey) return
+    if (!enabled || getLibraryIdentityEpoch() !== epoch || getTownHeroScopeMovements() !== movements) return
     setRetryRequest((prev) => ({
       key: scopeKey,
       n: (prev && prev.key === scopeKey ? prev.n : 0) + 1,
     }))
-  }, [scopeKey])
+  }, [scopeKey, enabled, epoch, movements])
 
   return useMemo<TownHeroRead>(() => {
     if (!current) {

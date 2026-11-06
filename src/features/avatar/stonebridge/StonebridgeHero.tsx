@@ -17,7 +17,7 @@
  * The origin is the figure's **feet, centred** — so the caller positions it by
  * translating to a point on the road and nothing in here needs to know where
  * that is. Up is negative y, as everywhere in SVG. The figure stands inside
- * `HERO_FIGURE` (20 × 34 map units), which is what `heroFigureBox` measures when
+ * `HERO_FIGURE`'s conservative animated bounds, which `heroFigureBox` measures when
  * a test proves the hero clears every tap target.
  *
  * ── Decoration, structurally ─────────────────────────────────────────────────
@@ -82,9 +82,10 @@ interface StonebridgeHeroProps {
   appearance: HeroAppearance
   /** Draw the one wave. The caller's motion owner decides; this just draws. */
   waving: boolean
+  walking?: boolean
 }
 
-export default function StonebridgeHero({ appearance, waving }: StonebridgeHeroProps) {
+export default function StonebridgeHero({ appearance, waving, walking = false }: StonebridgeHeroProps) {
   const piece = (id: VoxelArmorPieceId): HeroPiecePaint | undefined =>
     appearance.pieces.find((entry) => entry.pieceId === id)
   const helmet = piece('helmet')
@@ -111,21 +112,24 @@ export default function StonebridgeHero({ appearance, waving }: StonebridgeHeroP
       )}
 
       {/* Legs and feet. Shoes, when equipped, are painted over the feet. */}
-      <rect x={-4.2} y={-13} width={3.4} height={13} fill={appearance.pants} />
-      <rect x={0.8} y={-13} width={3.4} height={13} fill={appearance.pants} />
-      {shoes ? (
-        <g data-testid="hero-piece-shoes" data-hero-tier={shoes.tier}>
-          <rect x={-4.8} y={-3.2} width={4.4} height={3.2} fill={shoes.base} />
-          <rect x={0.4} y={-3.2} width={4.4} height={3.2} fill={shoes.base} />
-          <rect x={-4.8} y={-0.8} width={4.4} height={0.8} fill={shoes.edge} />
-          <rect x={0.4} y={-0.8} width={4.4} height={0.8} fill={shoes.edge} />
-        </g>
-      ) : (
-        <>
-          <rect x={-4.8} y={-2} width={4.4} height={2} fill={appearance.shoes} />
-          <rect x={0.4} y={-2} width={4.4} height={2} fill={appearance.shoes} />
-        </>
-      )}
+      <g data-testid={shoes ? 'hero-piece-shoes' : undefined} data-hero-tier={shoes?.tier}>
+        {[-1, 1].map((side) => (
+          <Box component="g" key={side} data-testid="hero-leg" sx={{
+            transformOrigin: `${side * 2.5}px -13px`,
+            '@keyframes stonebridgeHeroStep': {
+              '0%, 100%': { transform: 'rotate(0deg)' },
+              '25%': { transform: `rotate(${side * 12}deg)` },
+              '75%': { transform: `rotate(${-side * 12}deg)` },
+            },
+            animation: walking ? `stonebridgeHeroStep ${HERO_MOTION_MS.enter / 6}ms linear 6` : 'none',
+            '@media (prefers-reduced-motion: reduce)': { animation: 'none' },
+          }}>
+            <rect x={side < 0 ? -4.2 : 0.8} y={-13} width={3.4} height={13} fill={appearance.pants} />
+            <rect x={side < 0 ? -4.8 : 0.4} y={shoes ? -3.2 : -2} width={4.4} height={shoes ? 3.2 : 2} fill={shoes?.base ?? appearance.shoes} />
+            {shoes && <rect x={side < 0 ? -4.8 : 0.4} y={-0.8} width={4.4} height={0.8} fill={shoes.edge} />}
+          </Box>
+        ))}
+      </g>
 
       {/* Torso, then the breastplate over it. */}
       <rect x={-5} y={-24} width={10} height={11} fill={appearance.shirt} />
@@ -160,7 +164,7 @@ export default function StonebridgeHero({ appearance, waving }: StonebridgeHeroP
         </g>
       )}
 
-      {/* The waving arm. The animation is the only motion in the figure, it is
+      {/* The waving arm. Like the entrance's leg steps, its animation is
           finite (two passes), and it is applied only while the caller says the
           hero is waving — a reduced-motion preference never reaches this,
           because the caller's pose never asks for it. */}
@@ -245,8 +249,9 @@ export default function StonebridgeHero({ appearance, waving }: StonebridgeHeroP
       {/* The helmet goes on last, over the hair, with its crest above it. */}
       {helmet && (
         <g data-testid="hero-piece-helmet" data-hero-tier={helmet.tier}>
-          <rect x={-4.6} y={-33} width={9.2} height={6} rx={1} fill={helmet.base} />
-          <rect x={-4.6} y={-28.2} width={9.2} height={1.2} fill={helmet.edge} />
+          <rect x={-4.6} y={-33} width={9.2} height={2.5} rx={0.7} fill={helmet.base} />
+          <rect x={-4.6} y={-30.5} width={1} height={4.5} fill={helmet.edge} />
+          <rect x={3.6} y={-30.5} width={1} height={4.5} fill={helmet.edge} />
           {appearance.helmetCrest && appearance.helmetCrest !== 'none' && (
             <path
               data-testid="hero-helmet-crest"

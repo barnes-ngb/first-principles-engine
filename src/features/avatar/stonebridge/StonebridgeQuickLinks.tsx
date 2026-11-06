@@ -104,17 +104,15 @@ export default function StonebridgeQuickLinks({
         </Box>
         Quick links
       </Button>
-      {/* Unmounted while closed rather than hidden: a control that is off
-          screen but still in the tab order is a tab stop a child cannot see. */}
-      {open && (
-        <Box id={panelId} sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, mt: 1 }}>
-          {links.map((link) => (
-            <Button key={link.label} variant="outlined" sx={doorSx} onClick={link.onSelect}>
-              {link.label}
-            </Button>
-          ))}
-        </Box>
-      )}
+      {/* Keep the control relationship valid while hidden removes the panel
+          and its buttons from both the accessibility tree and keyboard order. */}
+      <Box id={panelId} hidden={!open} sx={{ display: open ? 'flex' : 'none', flexWrap: 'wrap', gap: 1.5, mt: 1 }}>
+        {links.map((link) => (
+          <Button key={link.label} variant="outlined" sx={doorSx} onClick={link.onSelect}>
+            {link.label}
+          </Button>
+        ))}
+      </Box>
     </Box>
   )
 }
