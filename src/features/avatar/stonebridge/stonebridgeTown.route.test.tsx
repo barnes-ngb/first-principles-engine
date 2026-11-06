@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef } from 'react'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { Outlet, RouterProvider, createMemoryRouter, useLocation, useNavigate } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -24,6 +25,8 @@ import {
   endLibraryReturnFlow,
   getLibraryIdentityEpoch,
   getLibraryReturnFlow,
+  libraryReturnPath,
+  liveLibraryReturnFlow,
   requestLibraryReturn,
 } from './libraryReturnFlow'
 // `vi.mock` is hoisted above these, so the components below are the real ones.
@@ -1052,5 +1055,269 @@ describe('the town’s armor door reaches the real hub', () => {
     // asked. (Asked for Lincoln, so the refusal is the epoch's and not a
     // mismatched id — the brother's case is the module test's.)
     expect(consumeForgeFocus({ familyId: 'fam-1', childId: 'lincoln' })).toBe(false)
+  })
+})
+
+/**
+ * ── A return taken before the shelf's own arrival had been observed ──────────
+ *
+ * The one ordering the suite above cannot pin, and the one a real child hits:
+ * the way back is tapped in the window between the shelf's route COMMITTING and
+ * that commit's passive effects being flushed. The screen is fully there — the
+ * banner is on it, the button is hit-testable — but a route watch reported from
+ * a passive effect has not yet said that `/books` is where the child now is. So
+ * the journey moves to `returning`, and the pending observation of `/books` then
+ * lands on it and reads "not at its own entry" as an ABANDONED return.
+ *
+ * Everything here is the real thing: the real page, the real village, the real
+ * banner, the real flow module and the real watches. Two deliberate differences
+ * from the fixture above, both only about WHEN the tap happens:
+ *
+ *   • the watches are hosted in `<ShellWatches />`, the shell's FIRST child,
+ *     and the probe is its LAST — React runs layout effects children-first and
+ *     siblings in order, which is the only thing that deterministically places
+ *     the tap after the watch's own commit-time observation. In the app the
+ *     watch sits on the layout route itself and the tap comes from the browser,
+ *     which can only dispatch once the whole commit is done — the same side of
+ *     the same boundary, pinned here without depending on a scheduler;
+ *   • the tap is performed as the banner's own handler performs it —
+ *     `requestLibraryReturn(live.generation)` then
+ *     `navigate(libraryReturnPath(returning))`, read off the live flow exactly
+ *     as `LibraryReturnBanner` reads it — because dispatching a DOM click from
+ *     inside a commit would make React flush from a lifecycle rather than model
+ *     a browser event. That those two calls ARE what the button does is held by
+ *     the clicks in the suite above, and the probe records whether the real
+ *     control was on screen at that instant, so the window it taps in is a
+ *     window the child really had.
+ *
+ * Against the passive watch these fail on the focus itself — the town arrives
+ * with nothing to serve — and not on anything about how the source is written.
+ */
+const probe = {
+  /** How many taps the probe performed; a loop must not read as a pass. */
+  taps: 0,
+  /** Was the real *Come back* control on screen at the instant of the tap? */
+  sawControl: false,
+}
+
+/**
+ * The three watches `AppShell` carries, hosted in a child of the shell.
+ *
+ * Identical calls, with the same values, in the same order; see the block
+ * comment above for why they are not called on the shell itself here.
+ */
+function ShellWatches() {
+  const { pathname } = useLocation()
+  useLibraryReturnRouteWatch(pathname)
+  useLibraryReturnReadinessWatch(fx.childrenLoading, fx.childrenLoadFailed)
+  useForgeFocusRouteWatch(pathname)
+  return null
+}
+
+/** The child's tap, made at the commit that put the shelf on screen. */
+function ReturnTapProbe({ at }: { at: string }) {
+  const { pathname } = useLocation()
+  const navigate = useNavigate()
+  const tapped = useRef(false)
+  useLayoutEffect(() => {
+    if (tapped.current || pathname !== at) return
+    // Whose journey it is, and its generation, asked the way the banner asks.
+    const live = liveLibraryReturnFlow(getLibraryReturnFlow(), {
+      familyId: 'fam-1',
+      childId: 'lincoln',
+    })
+    if (!live) return
+    tapped.current = true
+    probe.taps += 1
+    probe.sawControl = Boolean(screen.queryByRole('button', { name: LIBRARY_RETURN_LABEL }))
+    const returning = requestLibraryReturn(live.generation)
+    if (!returning) return
+    navigate(libraryReturnPath(returning))
+  }, [at, pathname, navigate])
+  return null
+}
+
+function ProbeShell() {
+  const location = useLocation()
+  const navigate = useNavigate()
+  return (
+    <div>
+      <ShellWatches />
+      <span data-testid="where">{location.pathname}</span>
+      <button onClick={() => navigate(STONEBRIDGE_TOWN_PATH)}>Nav Stonebridge</button>
+      <button onClick={() => navigate(LIBRARY_RETURN_VILLAGE_PATH)}>Nav My Hero</button>
+      <button onClick={() => navigate('/books')}>Nav My Books</button>
+      <Outlet />
+      {/* LAST, deliberately: the tap is the last thing in the commit, which is
+          the earliest moment a browser could have dispatched it. */}
+      <ReturnTapProbe at={STONEBRIDGE_BOOKS_PATH} />
+    </div>
+  )
+}
+
+/** The same routes as `renderTown`, under the shell that carries the probe. */
+function renderTownWithTapProbe(initial = STONEBRIDGE_TOWN_PATH) {
+  const router = createMemoryRouter(
+    [
+      {
+        element: <ProbeShell />,
+        children: [
+          { path: STONEBRIDGE_TOWN_PATH, element: <StonebridgePage /> },
+          { path: LIBRARY_RETURN_VILLAGE_PATH, element: <h1>Hero Hub</h1> },
+          { path: '/books', element: <ShelfRoute /> },
+          { path: '/books/:bookId/read', element: <BooksSubPage name="Book reader" /> },
+          { path: STONEBRIDGE_TODAY_PATH, element: <h1>Today</h1> },
+          { path: '*', element: <h1>Not found</h1> },
+        ],
+      },
+    ],
+    { initialEntries: [initial] },
+  )
+  render(
+    <>
+      <IdentityObserver signedIn />
+      <RouterProvider router={router} />
+    </>,
+  )
+  return { router }
+}
+
+/** Leave the town from a place, without waiting for the shelf to settle. */
+function departFromLocation(mission: { locationName: string }) {
+  fireEvent.click(tile(mission))
+  fireEvent.click(
+    within(screen.getByRole('dialog', { name: mission.locationName })).getByRole('button', {
+      name: 'Open My Books',
+    }),
+  )
+}
+
+describe('a return taken in the window before the shelf’s arrival was observed', () => {
+  beforeEach(() => {
+    probe.taps = 0
+    probe.sawControl = false
+  })
+
+  it('reaches the town page and the place it left', async () => {
+    renderTownWithTapProbe()
+    departFromLocation(LIBRARY)
+
+    // The tap happened once, in a window in which the child really was being
+    // offered the way back.
+    await waitFor(() => expect(probe.taps).toBe(1))
+    expect(probe.sawControl).toBe(true)
+
+    // And it was honoured: the town page, and the Library tile the journey
+    // named. Against the passive watch the arrival had nothing to serve — the
+    // `/books` observation had ended the journey as abandoned — and no focus
+    // hand-off was attempted at all.
+    await waitFor(() =>
+      expect(screen.getByTestId('where')).toHaveTextContent(STONEBRIDGE_TOWN_PATH),
+    )
+    await waitFor(() => expect(tile(LIBRARY)).toHaveFocus())
+    expect(screen.queryByRole('dialog', { name: 'The Library Hut' })).not.toBeInTheDocument()
+    // Served rather than abandoned: the journey is spent BY the hand-off.
+    expect(getLibraryReturnFlow()).toBeNull()
+  })
+
+  it('and is still consumed once: the next arrival is an ordinary town', async () => {
+    const { router } = renderTownWithTapProbe()
+    departFromLocation(LIBRARY)
+    await waitFor(() => expect(tile(LIBRARY)).toHaveFocus())
+
+    // Ordinary navigation to the shelf: nothing is owed a way back, so there is
+    // nothing for the probe to tap a second time either.
+    fireEvent.click(screen.getByRole('button', { name: 'Nav My Books' }))
+    await screen.findByRole('heading', { name: 'My Books' })
+    expect(screen.queryByRole('button', { name: LIBRARY_RETURN_LABEL })).not.toBeInTheDocument()
+    expect(probe.taps).toBe(1)
+
+    await act(async () => {
+      await router.navigate(STONEBRIDGE_TOWN_PATH)
+    })
+    await waitFor(() => expect(tile(LIBRARY)).not.toHaveFocus())
+    expect(getLibraryReturnFlow()).toBeNull()
+  })
+
+  it('but a real departure after the return is still observed, and still ends it', async () => {
+    // The negative control the fix may not buy its way out of: moving the
+    // observation to its own commit must not stop a `returning` journey being
+    // ended by a route it really does arrive at. The child gives up and opens a
+    // book instead, which is an arrival outside the journey's own entry.
+    const { router } = renderTownWithTapProbe('/books')
+    await screen.findByRole('heading', { name: 'My Books' })
+    act(() => {
+      requestLibraryReturn(begin()!.generation)
+    })
+    expect(getLibraryReturnFlow()?.phase).toBe(LibraryReturnPhase.Returning)
+
+    await act(async () => {
+      await router.navigate('/books/book-1/read')
+    })
+    await screen.findByRole('heading', { name: 'Book reader' })
+    expect(getLibraryReturnFlow()).toBeNull()
+
+    // And a later ordinary visit to the town is an ordinary town.
+    await act(async () => {
+      await router.navigate(STONEBRIDGE_TOWN_PATH)
+    })
+    await screen.findByRole('region', { name: 'Stonebridge Village' })
+    await waitFor(() => expect(tile(LIBRARY)).not.toHaveFocus())
+    expect(probe.taps).toBe(0)
+  })
+
+  it('and a HUB journey’s return is not adopted by the town it arrives at', async () => {
+    // The other half of the same boundary: the observation still keeps the two
+    // doors apart. A journey that left from the Hero Hub's board ends when it
+    // reaches the town page, and the town serves nothing.
+    const { router } = renderTownWithTapProbe('/books')
+    await screen.findByRole('heading', { name: 'My Books' })
+    act(() => {
+      requestLibraryReturn(begin({ origin: LibraryReturnOrigin.Hub })!.generation)
+    })
+
+    await act(async () => {
+      await router.navigate(STONEBRIDGE_TOWN_PATH)
+    })
+    await screen.findByRole('region', { name: 'Stonebridge Village' })
+    expect(getLibraryReturnFlow()).toBeNull()
+    await waitFor(() => expect(tile(LIBRARY)).not.toHaveFocus())
+  })
+
+  it('and an identity that moved leaves the shelf’s own window with nothing in it', async () => {
+    // The identity rail at this boundary. The journey is ended by a same-tick
+    // raw `A → B → A` while the child is reading, and the shelf is then arrived
+    // at again — so the probe DOES get its window at a real `/books` commit and
+    // finds nothing in it: no control to offer, no journey to take, and an
+    // ordinary town afterwards.
+    const { router } = renderTownWithTapProbe('/books')
+    await screen.findByRole('heading', { name: 'My Books' })
+    act(() => {
+      begin()
+    })
+    await act(async () => {
+      await router.navigate('/books/book-1/read')
+    })
+    await screen.findByRole('heading', { name: 'Book reader' })
+
+    act(() => {
+      setActiveChildIdShared('london')
+      setActiveChildIdShared('lincoln')
+    })
+    expect(getLibraryReturnFlow()).toBeNull()
+
+    // Back to the shelf: a real arrival, a real window, and nothing in it.
+    await act(async () => {
+      await router.navigate('/books')
+    })
+    await screen.findByRole('heading', { name: 'My Books' })
+    expect(screen.queryByRole('button', { name: LIBRARY_RETURN_LABEL })).not.toBeInTheDocument()
+    expect(probe.taps).toBe(0)
+
+    await act(async () => {
+      await router.navigate(STONEBRIDGE_TOWN_PATH)
+    })
+    await screen.findByRole('region', { name: 'Stonebridge Village' })
+    await waitFor(() => expect(tile(LIBRARY)).not.toHaveFocus())
   })
 })
