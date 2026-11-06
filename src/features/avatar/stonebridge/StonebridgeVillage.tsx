@@ -19,6 +19,13 @@ import {
 } from './computeStonebridgeProgress'
 import type { StonebridgeDestinations } from './stonebridgeDestinations'
 import { villageSurface } from './villageSurface'
+import {
+  VillagePlacesView,
+  createOpenerRegistry,
+  placeCondition,
+  placeControlName,
+  type OpenerRegistry,
+} from './villageOpeners'
 import { kidPalette } from '../../../app/tokens'
 
 /**
@@ -35,6 +42,19 @@ import { kidPalette } from '../../../app/tokens'
  * own `onExited` rather than on the tap (see the component header).
  */
 export type StonebridgeVillagePresentation = 'modal' | 'page'
+
+/**
+ * The two ways to pick a place, in the order they are offered.
+ *
+ * Both controls are rendered in both views, so the one a child just pressed is
+ * still under their finger (and under the keyboard) afterwards. `name` is the
+ * accessible name and contains the visible word, so saying "places" works for
+ * someone driving the screen by voice.
+ */
+const PLACES_VIEW_CHOICES = [
+  { view: VillagePlacesView.Map, label: '🗺️ Map', name: 'Show the map' },
+  { view: VillagePlacesView.Places, label: '🏘️ Places', name: 'Show the places list' },
+] as const
 
 interface StonebridgeVillageProps extends StonebridgeRecoveryState, StonebridgeDestinations {
   open: boolean
@@ -179,15 +199,32 @@ interface VillageView {
  * never reads or writes the XP / forge / diamond economy: opening it, visiting a
  * location and replaying a thank-you all write nothing.
  *
- * ── The overview, and the list under it ──────────────────────────────────────
+ * ── The map, the list, and why only one of them is live ──────────────────────
  *
  * The board opens with `VillageScene` — the seven locations drawn once, in one
  * landscape, with the Square and the roads that join them — and the plain list
- * of places underneath. The picture is **noninteractive** (see that file for the
- * enlarged-text finding that settled it), so the list is the one and only way
- * into a location: one control per place, each a full-size target naming its
- * place and its condition, and the focus comes back to the exact tile a visit
- * was opened from.
+ * of places underneath. **Both can be the way in, and exactly one of them is at
+ * a time**, chosen by the *Map* / *Places* control above the list:
+ *
+ *   • **Map** puts a native button over each building (that file explains the
+ *     geometry and why nothing is labelled on the art) and renders the list as
+ *     plain readable rows — names and conditions in normal flow, no tab stops;
+ *   • **Places** is the list as it has always been — a full-size tile per place
+ *     — with the picture back to being only a picture.
+ *
+ * So there are never two tab stops for one place, and never a place a child can
+ * see but not reach. The view is **transient presentation state**: no stored
+ * preference, no child flag, nothing added to the schema, and a real route
+ * remount simply starts on the map again.
+ *
+ * Both sets call the same `openLocation`, carry the same accessible name from
+ * the same `placeControlName`, and register into the same registry of visible
+ * place controls (`villageOpeners`) — which is what lets every focus hand-off
+ * below name a PLACE and get whichever control is currently showing it. The
+ * exact control a visit was opened from gets the focus back when it is still on
+ * screen; when it genuinely is not, the live *Map* / *Places* control is the
+ * fallback, because the one thing a closing view may not do is leave the
+ * keyboard on `document.body`.
  *
  * ── Why this is a Dialog and the tiles are buttons ───────────────────────────
  *
@@ -268,9 +305,28 @@ export default function StonebridgeVillage({
   const scopeSettled = view.scopeKey === scopeKey
   const isPage = presentation === 'page'
 
-  /** Tiles, by mission id, so a closed visit can give the focus back. */
-  const tileRefs = useRef<Map<string, HTMLElement | null>>(new Map())
-  /** The tile a closing visit should return the focus to. */
+  /**
+   * Which control set is live — the map's buildings, or the readable list.
+   *
+   * Presentation and nothing else: not a stored preference, not a child flag,
+   * not a schema field. It is deliberately NOT reset when the child changes —
+   * it is a fact about this screen rather than about a child, and resetting it
+   * under the keyboard would move the focus for no reason — and a real route
+   * remount starts on the map again, which the two controls and the caption
+   * above the picture say plainly rather than silently.
+   */
+  const [placesView, setPlacesView] = useState<VillagePlacesView>(VillagePlacesView.Map)
+  /**
+   * The one registry of VISIBLE place controls, by mission id.
+   *
+   * Filled by whichever set is on screen (see `villageOpeners` for why a plain
+   * `Map` is not enough once two sets share a key), so a closed visit asks for
+   * a PLACE and gets the control that is currently showing it.
+   */
+  const [openers] = useState<OpenerRegistry>(createOpenerRegistry)
+  /** The two view controls, so a fallback has something real to land on. */
+  const viewButtonRefs = useRef<Map<VillagePlacesView, HTMLElement | null>>(new Map())
+  /** The place control a closing visit should return the focus to. */
   const tileToFocusRef = useRef<string | null>(null)
   /** The repaired tile an open replay came from, for when it closes. */
   const replayTileRef = useRef<string | null>(null)
@@ -307,6 +363,10 @@ export default function StonebridgeVillage({
    * and both presentations; nothing that already names a colour is touched.
    */
   const frame = villageSurface(isLincoln, 'board')
+  /** The one accent a focus ring, a live view control and a target are drawn in. */
+  const accentRing = isLincoln ? kidPalette.xpGreen : '#7a3f67'
+  /** The map carries the tab stops in this render; the list is plain rows. */
+  const mapIsLive = placesView === VillagePlacesView.Map
 
   const board = deriveVillageBoard(completedMissions, currentMissionId)
   const bannerCount = raisedBanners.length
@@ -330,8 +390,38 @@ export default function StonebridgeVillage({
 
   const recovery: StonebridgeRecoveryState = { stale, readError, saveError, retrying, onRetry }
 
+  /**
+   * One opener for both control sets.
+   *
+   * The map's buildings and the list's tiles call exactly this, so a visit is
+   * the same visit however it was opened and there is no second way in to keep
+   * in step.
+   */
   const openLocation = (missionId: string) => {
     setView({ scopeKey, selected: missionId, shown: missionId, replay: null })
+  }
+
+  /**
+   * Give the keyboard back to the control a view was opened from.
+   *
+   * The exact one while it is still on screen — which is the whole promise, and
+   * is what the registry's `isConnected` check protects: focusing a node that
+   * has been unmounted moves the focus to `document.body` while reporting that
+   * it landed somewhere. When there genuinely is no control for that place any
+   * more, the live *Map* / *Places* control is the current visible equivalent:
+   * it is in normal flow immediately above the places, it is never unmounted by
+   * a view change, and it is somewhere rather than nowhere.
+   *
+   * This is for the hand-offs a MOUNTED board owes — a closed visit, a
+   * dismissed thank-you. A return from My Books does not use it, on purpose:
+   * that request names a place, and a place this board does not have must take
+   * no focus at all rather than grab the nearest thing to it.
+   */
+  const returnFocusToPlace = (missionId: string | null) => {
+    openers.focusOrFallback(missionId, () => {
+      const viewButton = viewButtonRefs.current.get(placesView)
+      if (viewButton?.isConnected) viewButton.focus()
+    })
   }
 
   /**
@@ -466,7 +556,7 @@ export default function StonebridgeVillage({
       if (isPage) performPendingLeave()
       return
     }
-    if (tile) tileRefs.current.get(tile)?.focus()
+    if (tile) returnFocusToPlace(tile)
   }
 
   /** Replay a repaired location's saved thank-you. Writes nothing. */
@@ -509,7 +599,7 @@ export default function StonebridgeVillage({
     const tile = replayTileRef.current
     replayTileRef.current = null
     if (!tile || live?.replay) return
-    tileRefs.current.get(tile)?.focus()
+    returnFocusToPlace(tile)
   }
 
   /**
@@ -561,14 +651,17 @@ export default function StonebridgeVillage({
    * still settling and MUI still owns where the focus lands.
    *
    * Only ever for a return from My Books, and only for the child the board
-   * belongs to. The request is consumed either way: a mission id with no tile on
-   * the board (an unknown place) leaves the focus where MUI put it — the board
-   * itself — which is ordinary behaviour and not a failure worth a message.
+   * belongs to. The focus goes to whichever control is currently showing that
+   * place — the map's building or the list's tile, whichever set is live, since
+   * both register into the one registry. The request is consumed either way: a
+   * mission id with no control on the board (an unknown place) leaves the focus
+   * where MUI put it — the board itself — which is ordinary behaviour and not a
+   * failure worth a message, and is why this takes no fallback.
    */
   const handleBoardEntered = () => {
     if (!focusMissionId) return
     if (!live) return
-    tileRefs.current.get(focusMissionId)?.focus()
+    openers.focus(focusMissionId)
     onFocusServed?.()
   }
 
@@ -600,7 +693,7 @@ export default function StonebridgeVillage({
    * A page has no `onEntered` to wait for, and waiting for one would hold a
    * return request forever. The equivalent moment is the first COMMIT in which
    * the real page DOM holds this child's board — which is what an effect is: it
-   * runs after the tiles are in the document, so `tileRefs` is populated and the
+   * runs after the controls are in the document, so the registry is filled and the
    * node can genuinely take the focus. Everything else about the rule is the
    * modal's:
    *
@@ -614,6 +707,9 @@ export default function StonebridgeVillage({
    *   • **once, whatever the outcome** — an unknown place consumes the request
    *     and leaves the focus where it was, exactly as the modal does, and the
    *     latch means a re-render cannot serve the same journey twice.
+   *
+   * What it lands ON is whichever control is showing that place in the live
+   * view, from the same registry the modal path reads.
    */
   useEffect(() => {
     if (!isPage) return
@@ -621,9 +717,9 @@ export default function StonebridgeVillage({
     const token = `${scopeKey}:${focusMissionId}`
     if (pageFocusServedRef.current === token) return
     pageFocusServedRef.current = token
-    tileRefs.current.get(focusMissionId)?.focus()
+    openers.focus(focusMissionId)
     onFocusServed?.()
-  }, [isPage, focusMissionId, scopeSettled, scopeKey, onFocusServed])
+  }, [isPage, focusMissionId, scopeSettled, scopeKey, onFocusServed, openers])
 
   /**
    * The board itself — identical in both presentations.
@@ -696,153 +792,280 @@ export default function StonebridgeVillage({
               same landscape. It sits BELOW the recovery notice only because a
               failure a child has to scroll past is a failure they do not find.
 
-              A picture and nothing more — no hotspot, no label, no control (see
-              `VillageScene`). It is not a second source of truth either:
-              `board` is the same derived value the list renders from. */}
-          <VillageScene board={board} isLincoln={isLincoln} />
+              In the Map view it is also the way in: a native button over each
+              building, siblings of the drawing, no label on the art (see
+              `VillageScene`). It is not a second source of truth either —
+              `board` is the same derived value the list renders from, and the
+              targets open the same `openLocation` the tiles do. */}
+          <VillageScene
+            board={board}
+            isLincoln={isLincoln}
+            interactive={mapIsLive}
+            onOpenLocation={openLocation}
+            registerTarget={(missionId, node) => openers.register(missionId, node)}
+          />
 
-          {/* ── The readable list — the whole way around the village ───
-              The plain list of places with the condition of each one written
-              out, and the one set of controls: full-size targets, named
-              dialogs, and the focus handed back to the exact tile. */}
+          {/* ── Map or list — one live set of place controls ────────────
+              Two ways to pick a place and only ever ONE of them carrying tab
+              stops. Both controls are rendered in both views, so switching
+              never pulls the focus out from under the child who switched: the
+              button they pressed is still the button they are on. It sits
+              between the picture and the places so that whichever view is
+              live, the other one is next to what it would replace. */}
+          <Box
+            role="group"
+            aria-label="Map or list"
+            sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 1.5 }}
+          >
+            {PLACES_VIEW_CHOICES.map(({ view, label, name }) => {
+              const live = placesView === view
+              return (
+                <Box
+                  key={view}
+                  component="button"
+                  type="button"
+                  ref={(node: HTMLElement | null) => {
+                    viewButtonRefs.current.set(view, node)
+                  }}
+                  // A toggle, said as one: pressed is the view you are in.
+                  aria-pressed={live}
+                  aria-label={name}
+                  onClick={() => setPlacesView(view)}
+                  sx={{
+                    // A 44px target, like every other control on this board.
+                    minHeight: 44,
+                    px: 1.5,
+                    fontFamily: titleFont,
+                    fontSize: isLincoln ? '11px' : '14px',
+                    fontWeight: 700,
+                    color: isLincoln ? '#F7D774' : '#7a3f67',
+                    background: live
+                      ? isLincoln
+                        ? 'rgba(126,252,32,0.16)'
+                        : 'rgba(122,63,103,0.12)'
+                      : 'transparent',
+                    border: `${live ? 2 : 1}px solid ${live ? accentRing : 'rgba(120,120,120,0.4)'}`,
+                    borderRadius: isLincoln ? '8px' : '14px',
+                    cursor: 'pointer',
+                    '&:focus-visible': { outline: `3px solid ${accentRing}`, outlineOffset: 2 },
+                  }}
+                >
+                  {label}
+                </Box>
+              )
+            })}
+          </Box>
+
+          {/* ── The places, written out ─────────────────────────────────
+              Every place, its name and its condition, in normal flow and at a
+              readable size — in BOTH views, because a name a child can only
+              get at by hovering a building is not a name they have. In the
+              Places view each row is the control; in the Map view the controls
+              are on the picture and these are plain rows. */}
           <Typography
             sx={{ fontFamily: titleFont, fontSize: isLincoln ? '12px' : '17px', fontWeight: 700, mb: 1 }}
           >
             🏘️ Each Place
           </Typography>
-          <Box
-            sx={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))',
-              gap: 1.5,
-            }}
-          >
-            {board.map(({ mission, state }) => {
-              const repaired = state === VillageLocationState.Repaired
-              const isActive = state === VillageLocationState.Active
-              const upcoming = state === VillageLocationState.Upcoming
-              const accent = mission.art.accent
-              const condition = repaired
-                ? 'Fixed.'
-                : isActive
-                  ? 'Being fixed now.'
-                  : 'Not started yet.'
-
-              return (
-                <Box
-                  key={mission.id}
-                  component="button"
-                  type="button"
-                  ref={(el: HTMLElement | null) => {
-                    tileRefs.current.set(mission.id, el)
-                  }}
-                  onClick={() => openLocation(mission.id)}
-                  // Says which place and what state it is in — the visible
-                  // label underneath is the same two facts, for everyone else.
-                  aria-label={`Visit ${mission.locationName}. ${condition}`}
-                  sx={{
-                    display: 'block',
-                    width: '100%',
-                    textAlign: 'left',
-                    font: 'inherit',
-                    color: 'inherit',
-                    p: 1,
-                    borderRadius: isLincoln ? '8px' : '16px',
-                    border: `1px solid ${isActive ? accent : repaired ? `${accent}66` : 'rgba(120,120,120,0.3)'}`,
-                    background: isLincoln ? 'rgba(16,24,32,0.75)' : 'rgba(255,255,255,0.7)',
-                    opacity: upcoming ? 0.6 : 1,
-                    cursor: 'pointer',
-                    boxShadow: isActive ? `0 0 14px ${accent}55` : 'none',
-                    transition: 'opacity 0.3s ease, box-shadow 0.3s ease',
-                    '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
-                    '&:focus-visible': {
-                      outline: `3px solid ${isLincoln ? kidPalette.xpGreen : '#7a3f67'}`,
-                      outlineOffset: 2,
-                    },
-                  }}
-                >
-                  <StonebridgeLocationArt
-                    missionId={mission.id}
-                    art={mission.art}
-                    state={repaired ? 'repaired' : 'damaged'}
-                    isLincoln={isLincoln}
-                    height={96}
-                  />
-                  {/* Spans, not paragraphs: the tile is a <button>, whose
-                      content model is phrasing content. The name keeps the
-                      pixel theme — it is two or three words — and is allowed
-                      to wrap rather than shrink on a narrow phone. */}
-                  <Typography
-                    component="span"
+          {mapIsLive ? (
+            <Box
+              component="ul"
+              // One handle for "the places, written out", in both views — so a
+              // test can tell a place's own row from the same name on a banner
+              // in the hall below.
+              data-testid="village-places"
+              sx={{
+                listStyle: 'none',
+                m: 0,
+                p: 0,
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))',
+                gap: 1,
+              }}
+            >
+              {board.map(({ mission, state }) => {
+                const isActive = state === VillageLocationState.Active
+                return (
+                  <Box
+                    component="li"
+                    key={mission.id}
                     sx={{
-                      display: 'block',
-                      fontFamily: titleFont,
-                      fontSize: isLincoln ? '12px' : '15px',
-                      fontWeight: 700,
-                      lineHeight: 1.45,
-                      overflowWrap: 'break-word',
-                      mt: 0.75,
-                      color: isLincoln ? '#F7D774' : '#7a3f67',
+                      p: 1,
+                      borderRadius: isLincoln ? '8px' : '16px',
+                      border: `1px solid ${isActive ? mission.art.accent : 'rgba(120,120,120,0.3)'}`,
+                      background: isLincoln ? 'rgba(16,24,32,0.55)' : 'rgba(255,255,255,0.55)',
                     }}
                   >
-                    {mission.locationName}
-                  </Typography>
-
-                  {/* State row */}
-                  {repaired && (
                     <Typography
                       component="span"
-                      sx={{ display: 'block', fontFamily: bodyFont, fontSize: '13px', lineHeight: 1.4, opacity: 0.85, mt: 0.25 }}
+                      sx={{
+                        display: 'block',
+                        fontFamily: titleFont,
+                        fontSize: isLincoln ? '12px' : '15px',
+                        fontWeight: 700,
+                        lineHeight: 1.45,
+                        // Allowed to wrap rather than shrink: this row is the
+                        // readable half of the design, and enlarged text is
+                        // exactly what it is for.
+                        overflowWrap: 'break-word',
+                        color: isLincoln ? '#F7D774' : '#7a3f67',
+                      }}
                     >
-                      ✓ Fixed · tap to see it
+                      {mission.locationName}
                     </Typography>
-                  )}
-                  {isActive && active && (
-                    <Box component="span" sx={{ display: 'block', mt: 0.5 }}>
-                      <Box
+                    <Typography
+                      component="span"
+                      sx={{
+                        display: 'block',
+                        fontFamily: bodyFont,
+                        fontSize: '13px',
+                        lineHeight: 1.4,
+                        // Not dimmed for an upcoming place: a tile may be
+                        // muted, a sentence a child has to read may not.
+                        opacity: 0.85,
+                        mt: 0.25,
+                      }}
+                    >
+                      {/* The same sentence the control's own name ends with. */}
+                      {placeCondition(state)}
+                      {isActive && active ? ` ${active.current} / ${active.target}` : ''}
+                    </Typography>
+                  </Box>
+                )
+              })}
+            </Box>
+          ) : (
+            <Box
+              data-testid="village-places"
+              sx={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))',
+                gap: 1.5,
+              }}
+            >
+              {board.map(({ mission, state }) => {
+                const repaired = state === VillageLocationState.Repaired
+                const isActive = state === VillageLocationState.Active
+                const upcoming = state === VillageLocationState.Upcoming
+                const accent = mission.art.accent
+
+                return (
+                  <Box
+                    key={mission.id}
+                    component="button"
+                    type="button"
+                    ref={(el: HTMLElement | null) => {
+                      openers.register(mission.id, el)
+                    }}
+                    onClick={() => openLocation(mission.id)}
+                    // Says which place and what state it is in — the visible
+                    // label underneath is the same two facts, for everyone
+                    // else, and the map's target says it identically.
+                    aria-label={placeControlName(mission.locationName, state)}
+                    sx={{
+                      display: 'block',
+                      width: '100%',
+                      textAlign: 'left',
+                      font: 'inherit',
+                      color: 'inherit',
+                      p: 1,
+                      borderRadius: isLincoln ? '8px' : '16px',
+                      border: `1px solid ${isActive ? accent : repaired ? `${accent}66` : 'rgba(120,120,120,0.3)'}`,
+                      background: isLincoln ? 'rgba(16,24,32,0.75)' : 'rgba(255,255,255,0.7)',
+                      opacity: upcoming ? 0.6 : 1,
+                      cursor: 'pointer',
+                      boxShadow: isActive ? `0 0 14px ${accent}55` : 'none',
+                      transition: 'opacity 0.3s ease, box-shadow 0.3s ease',
+                      '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
+                      '&:focus-visible': {
+                        outline: `3px solid ${accentRing}`,
+                        outlineOffset: 2,
+                      },
+                    }}
+                  >
+                    <StonebridgeLocationArt
+                      missionId={mission.id}
+                      art={mission.art}
+                      state={repaired ? 'repaired' : 'damaged'}
+                      isLincoln={isLincoln}
+                      height={96}
+                    />
+                    {/* Spans, not paragraphs: the tile is a <button>, whose
+                        content model is phrasing content. The name keeps the
+                        pixel theme — it is two or three words — and is allowed
+                        to wrap rather than shrink on a narrow phone. */}
+                    <Typography
+                      component="span"
+                      sx={{
+                        display: 'block',
+                        fontFamily: titleFont,
+                        fontSize: isLincoln ? '12px' : '15px',
+                        fontWeight: 700,
+                        lineHeight: 1.45,
+                        overflowWrap: 'break-word',
+                        mt: 0.75,
+                        color: isLincoln ? '#F7D774' : '#7a3f67',
+                      }}
+                    >
+                      {mission.locationName}
+                    </Typography>
+
+                    {/* State row */}
+                    {repaired && (
+                      <Typography
                         component="span"
-                        sx={{
-                          display: 'block',
-                          position: 'relative',
-                          height: isLincoln ? 8 : 12,
-                          borderRadius: isLincoln ? '2px' : '6px',
-                          background: isLincoln ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)',
-                          overflow: 'hidden',
-                        }}
+                        sx={{ display: 'block', fontFamily: bodyFont, fontSize: '13px', lineHeight: 1.4, opacity: 0.85, mt: 0.25 }}
                       >
+                        ✓ Fixed · tap to see it
+                      </Typography>
+                    )}
+                    {isActive && active && (
+                      <Box component="span" sx={{ display: 'block', mt: 0.5 }}>
                         <Box
                           component="span"
                           sx={{
                             display: 'block',
-                            position: 'absolute',
-                            inset: 0,
-                            width: `${active.percent}%`,
-                            background: `linear-gradient(90deg, ${accent}, ${accent}cc)`,
-                            transition: 'width 0.6s ease',
-                            '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
+                            position: 'relative',
+                            height: isLincoln ? 8 : 12,
+                            borderRadius: isLincoln ? '2px' : '6px',
+                            background: isLincoln ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)',
+                            overflow: 'hidden',
                           }}
-                        />
+                        >
+                          <Box
+                            component="span"
+                            sx={{
+                              display: 'block',
+                              position: 'absolute',
+                              inset: 0,
+                              width: `${active.percent}%`,
+                              background: `linear-gradient(90deg, ${accent}, ${accent}cc)`,
+                              transition: 'width 0.6s ease',
+                              '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
+                            }}
+                          />
+                        </Box>
+                        <Typography
+                          component="span"
+                          sx={{ display: 'block', fontFamily: bodyFont, fontSize: '13px', fontWeight: 700, opacity: 0.85, mt: 0.25, textAlign: 'right' }}
+                        >
+                          {active.current} / {active.target}
+                        </Typography>
                       </Box>
+                    )}
+                    {upcoming && (
                       <Typography
                         component="span"
-                        sx={{ display: 'block', fontFamily: bodyFont, fontSize: '13px', fontWeight: 700, opacity: 0.85, mt: 0.25, textAlign: 'right' }}
+                        sx={{ display: 'block', fontFamily: bodyFont, fontSize: '13px', lineHeight: 1.4, opacity: 0.8, mt: 0.25 }}
                       >
-                        {active.current} / {active.target}
+                        Coming soon
                       </Typography>
-                    </Box>
-                  )}
-                  {upcoming && (
-                    <Typography
-                      component="span"
-                      sx={{ display: 'block', fontFamily: bodyFont, fontSize: '13px', lineHeight: 1.4, opacity: 0.8, mt: 0.25 }}
-                    >
-                      Coming soon
-                    </Typography>
-                  )}
-                </Box>
-              )
-            })}
-          </Box>
+                    )}
+                  </Box>
+                )
+              })}
+            </Box>
+          )}
 
           {/* ── Banner Hall — your raised colors ─────────────────────── */}
           <Box
