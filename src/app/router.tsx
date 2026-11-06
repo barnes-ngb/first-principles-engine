@@ -24,6 +24,7 @@ import CreateSightWordBook from '../features/books/CreateSightWordBook'
 import SightWordDashboard from '../features/books/SightWordDashboard'
 import StickersPage from '../features/books/StickersPage'
 import MyAvatarPage from '../features/avatar/MyAvatarPage'
+import StonebridgePage from '../features/avatar/stonebridge/StonebridgePage'
 import WorkshopPage from '../features/workshop/WorkshopPage'
 import ShellyChatPage from '../features/shelly-chat/ShellyChatPage'
 import MonthlyReviewReaderPage from '../features/monthly-review/MonthlyReviewReaderPage'
@@ -100,6 +101,13 @@ export const routes = [
       { path: '/avatar', element: <MyAvatarPage /> },
       { path: '/hero', element: <Navigate to="/avatar" replace /> },
       { path: '/armor', element: <Navigate to="/avatar" replace /> },
+      // The canonical village page — the nav's Stonebridge entry. The SAME
+      // village the Hero Hub's board shows, as a page: one controller, one
+      // progress owner, no 3D character on this route. `/avatar` keeps its own
+      // board along with the armor, the customizer and the ceremonies, so this
+      // is a second door and not a replacement. Ungated, exactly as the hub's
+      // board is — it is the village the child already has.
+      { path: '/stonebridge', element: <StonebridgePage /> },
       { path: '/workshop', element: <WorkshopPage /> },
       { path: '/business', element: <BusinessPage /> },
       { path: '/ladders', element: <Navigate to="/progress" replace /> },

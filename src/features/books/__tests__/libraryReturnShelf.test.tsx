@@ -10,6 +10,7 @@ import {
   LIBRARY_RETURN_LINE,
 } from '../../avatar/stonebridge/libraryReturnCopy'
 import {
+  LibraryReturnOrigin,
   LibraryReturnPhase,
   beginLibraryReturnFlow,
   endLibraryReturnFlow,
@@ -89,7 +90,12 @@ vi.mock('../../../components/Page', () => ({
 import BookshelfPage from '../BookshelfPage'
 import { MAKE_BOOK_DOOR_LABEL } from '../makeBookDoor'
 
-const JOURNEY = { familyId: 'family-1', childId: LINCOLN.id, missionId: 'library_hut' }
+const JOURNEY = {
+  familyId: 'family-1',
+  childId: LINCOLN.id,
+  missionId: 'library_hut',
+  origin: LibraryReturnOrigin.Hub,
+}
 
 /** Begin a journey against the epoch the module has actually observed. */
 function begin(origin: Partial<typeof JOURNEY> = {}) {

@@ -5,10 +5,12 @@
  *
  * A child who taps *Open My Books* in a Stonebridge location visit lands on the
  * real shelf. This module is the one note that says the shelf was opened FROM a
- * village location, so the shelf can offer one explicit way back. It is held in
- * module memory — never localStorage, never a URL, never route state, never a
- * document — so a refresh, a copied link, a new tab and a direct `/books` have
- * no flow at all and fall back to ordinary navigation.
+ * village location — and, since the canonical town page exists, from WHICH of
+ * the two village entries — so the shelf can offer one explicit way back to the
+ * screen they actually left. It is held in module memory — never localStorage,
+ * never a URL, never route state, never a document — so a refresh, a copied
+ * link, a new tab and a direct `/books` have no flow at all and fall back to
+ * ordinary navigation.
  *
  * Module memory does NOT expire by itself: it outlives every screen, including a
  * logout that unmounts the whole routed shell. So everything below is about
@@ -43,9 +45,42 @@
  * like any other identity movement.
  */
 import { subscribeActiveChildId } from '../../../core/hooks/activeChildStore'
+import { STONEBRIDGE_TOWN_PATH } from './stonebridgeDestinations'
 
-/** Where a return goes: the Hero Hub, which hosts the village board. */
+/** The legacy village entry: the Hero Hub, whose mission card hosts the board. */
 export const LIBRARY_RETURN_VILLAGE_PATH = '/avatar'
+
+/**
+ * WHICH village entry a journey left from.
+ *
+ * There are two, and a return has to come back to the one the child actually
+ * used: the canonical town page (`/stonebridge`) and the legacy Hero-Hub modal
+ * (`/avatar`). Sending a child who entered from the nav's Stonebridge entry back
+ * to the Hero Hub would be a different screen than the one they left, and
+ * sending a child who opened the board from the hub to the town page would take
+ * the hub's armor, customizer and ceremonies off their way back.
+ *
+ * It is a typed token chosen by the SURFACE that is rendering, never derived
+ * from `location.pathname`, a link, route state or anything else a copied or
+ * stale URL can supply. The token is mapped to a path by
+ * {@link LIBRARY_RETURN_ORIGIN_PATHS} below — two internal routes the app really
+ * mounts, pinned to the route table by `stonebridgeDestinations.test.tsx` — so
+ * the only thing a journey can carry is one of exactly two app routes.
+ */
+export const LibraryReturnOrigin = {
+  /** The canonical `/stonebridge` town page. */
+  Town: 'town',
+  /** The Hero Hub at `/avatar`, where the board is a modal over the card. */
+  Hub: 'hub',
+} as const
+export type LibraryReturnOrigin =
+  (typeof LibraryReturnOrigin)[keyof typeof LibraryReturnOrigin]
+
+/** The one place a token becomes a route. Internal paths only. */
+export const LIBRARY_RETURN_ORIGIN_PATHS: Record<LibraryReturnOrigin, string> = {
+  [LibraryReturnOrigin.Town]: STONEBRIDGE_TOWN_PATH,
+  [LibraryReturnOrigin.Hub]: LIBRARY_RETURN_VILLAGE_PATH,
+}
 
 /**
  * `away` — on the shelf or somewhere it leads, with the way back offered.
@@ -64,9 +99,16 @@ export interface LibraryReturnFlow {
   readonly childId: string
   /** The location the child left from — the tile a return focuses. */
   readonly missionId: string
+  /** WHICH village entry it left: the canonical town page, or the legacy hub. */
+  readonly origin: LibraryReturnOrigin
   /** Monotonic, never reused: a stale callback cannot act on an old one. */
   readonly generation: number
   readonly phase: LibraryReturnPhase
+}
+
+/** The route this journey's way back goes to, and nowhere else. */
+export function libraryReturnPath(flow: LibraryReturnFlow): string {
+  return LIBRARY_RETURN_ORIGIN_PATHS[flow.origin]
 }
 
 /** The scope a surface asks on behalf of — its OWN family and child. */
@@ -196,15 +238,23 @@ export function expireLibraryReturnForUnsettledIdentity(): void {
  * bound to nothing would match whoever arrived next — and refuses a stale
  * `observedEpoch`, which is how an `A → B → A` during the board's closing
  * transition is rejected even though the scope string matches `A` again.
+ *
+ * `origin` says which of the two village entries the child is coming FROM, as a
+ * token the rendering surface knows about itself. It is checked against the map
+ * rather than trusted: a token with no internal route behind it is refused
+ * outright instead of producing a journey whose way back is `undefined`.
  */
 export function beginLibraryReturnFlow(origin: {
   familyId: string
   childId: string
   missionId: string
+  /** The entry the surface asking is itself rendering. */
+  origin: LibraryReturnOrigin
   /** `getLibraryIdentityEpoch()` as read at the tap. */
   observedEpoch: number
 }): LibraryReturnFlow | null {
   if (!origin.familyId || !origin.childId) return null
+  if (!LIBRARY_RETURN_ORIGIN_PATHS[origin.origin]) return null
   if (origin.observedEpoch !== identityEpoch) return null
   generations += 1
   leftOrigin = false
@@ -212,6 +262,7 @@ export function beginLibraryReturnFlow(origin: {
     familyId: origin.familyId,
     childId: origin.childId,
     missionId: origin.missionId,
+    origin: origin.origin,
     generation: generations,
     phase: LibraryReturnPhase.Away,
   }
@@ -236,6 +287,28 @@ export function liveLibraryReturnFlow(
   if (candidate.childId !== scope.childId) return null
   if (candidate.phase !== phase) return null
   return candidate
+}
+
+/**
+ * Is this journey's way back THIS entry's to serve?
+ *
+ * The phase check alone is not enough now that there are two entries: a
+ * `returning` journey that belongs to the hub must not be adopted by the town
+ * page it happens to pass through, and the other way round. The route
+ * reconciliation ends such a journey, but it is reported from the layout route —
+ * whose effects run AFTER a routed page's — so the host that would serve it asks
+ * this first rather than relying on the order two effects happen to run in.
+ *
+ * One definition, used by both hosts, so "whose return is this" cannot be
+ * answered two ways.
+ */
+export function libraryReturnForOrigin(
+  candidate: LibraryReturnFlow | null,
+  scope: LibraryReturnScope,
+  origin: LibraryReturnOrigin,
+): LibraryReturnFlow | null {
+  const live = liveLibraryReturnFlow(candidate, scope, LibraryReturnPhase.Returning)
+  return live && live.origin === origin ? live : null
 }
 
 /**
@@ -308,23 +381,45 @@ export function isBooksAreaPath(pathname: string): boolean {
   return BOOKS_AREA_EXACT.has(path) || BOOK_ROUTE.test(path)
 }
 
-/** The hub that hosts the village board. */
+/**
+ * Is this path a village entry at all?
+ *
+ * Deliberately NOT what the reconciliation below asks. A journey belongs to ONE
+ * entry, and "either entry" is the whitelist that would let a town journey come
+ * back to the hub and a hub journey to the town page. This is here for callers
+ * that genuinely mean the class — `isOwnOriginPath` is the one the rules use.
+ */
 export function isVillagePath(pathname: string): boolean {
-  return normalise(pathname) === LIBRARY_RETURN_VILLAGE_PATH
+  const path = normalise(pathname)
+  return Object.values(LIBRARY_RETURN_ORIGIN_PATHS).includes(path)
+}
+
+/** Is this path the entry THIS journey left from — not merely a village one? */
+export function isOwnOriginPath(
+  candidate: LibraryReturnFlow,
+  pathname: string,
+): boolean {
+  return normalise(pathname) === LIBRARY_RETURN_ORIGIN_PATHS[candidate.origin]
 }
 
 /**
  * A route transition: keep the flow only where its phase belongs.
  *
- *   • **away** — inside the Books area, or still standing where it began (the
- *     hub, before the first step into the shelf). Coming back to the hub by
- *     ordinary navigation ENDS it: the journey is over whether or not the way
- *     back was used, and an origin that outlives it would reopen the board on a
- *     later ordinary visit.
- *   • **returning** — at the hub, which is where it was going. Anywhere else
- *     means the return was abandoned — the village read failed and the child
- *     went back to the shelf, say — so it ends rather than waiting to fire at
- *     the next hub arrival.
+ *   • **away** — inside the Books area, or still standing where it began (its
+ *     OWN entry, before the first step into the shelf). Coming back to that
+ *     entry by ordinary navigation ENDS it: the journey is over whether or not
+ *     the way back was used, and an origin that outlives it would reopen the
+ *     board on a later ordinary visit.
+ *   • **returning** — at its own entry, which is where it was going. Anywhere
+ *     else means the return was abandoned — the village read failed and the
+ *     child went back to the shelf, say — so it ends rather than waiting to fire
+ *     at the next arrival.
+ *
+ * Both clauses ask about the journey's own entry and not about the class of
+ * entries, which is what keeps the two doors apart: a hub journey standing at
+ * `/avatar` is still at its birthplace, while a TOWN journey arriving at
+ * `/avatar` has left the journey and ends there, exactly as a trip to Today
+ * does.
  *
  * Called on each location change, so Back and Forward are ordinary changes:
  * stepping out ends the flow and stepping back in finds it already gone.
@@ -332,14 +427,14 @@ export function isVillagePath(pathname: string): boolean {
 export function reconcileLibraryReturnFlowPath(pathname: string): void {
   if (!flow) return
   if (flow.phase === LibraryReturnPhase.Returning) {
-    if (!isVillagePath(pathname)) endLibraryReturnFlow()
+    if (!isOwnOriginPath(flow, pathname)) endLibraryReturnFlow()
     return
   }
   if (isBooksAreaPath(pathname)) {
     leftOrigin = true
     return
   }
-  if (!leftOrigin && isVillagePath(pathname)) return
+  if (!leftOrigin && isOwnOriginPath(flow, pathname)) return
   endLibraryReturnFlow()
 }
 

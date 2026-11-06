@@ -8,9 +8,9 @@ import StonebridgeLocationArt from './StonebridgeLocationArt'
 import BannerRaiseCelebration from './BannerRaiseCelebration'
 import StonebridgeVillage from './StonebridgeVillage'
 import {
-  LibraryReturnPhase,
+  LibraryReturnOrigin,
   getLibraryReturnFlow,
-  liveLibraryReturnFlow,
+  libraryReturnForOrigin,
   serveLibraryReturn,
   subscribeLibraryReturnFlow,
 } from './libraryReturnFlow'
@@ -71,19 +71,23 @@ export default function StonebridgeMissionCard({
   const scopeKey = `${familyId}_${childId}`
 
   /**
-   * A return from My Books, if one is waiting for THIS child.
+   * A return from My Books, if one is waiting for THIS child and THIS entry.
    *
    * Subscribed at the flow's own store rather than passed down, because the
    * journey outlives the page that started it: the child was on `/books` when
    * they asked, and this card is mounted fresh by the route they land on. The
    * store is in memory only — a refresh or a direct visit has nothing here and
    * this is simply `null` (see `libraryReturnFlow`).
+   *
+   * `libraryReturnForOrigin` is the half the canonical town page made necessary:
+   * a journey that left from `/stonebridge` is not the hub's to serve, so the
+   * hub does not open its board for one that merely passes through here.
    */
   const flow = useSyncExternalStore(subscribeLibraryReturnFlow, getLibraryReturnFlow)
-  const pendingReturn = liveLibraryReturnFlow(
+  const pendingReturn = libraryReturnForOrigin(
     flow,
     { familyId, childId },
-    LibraryReturnPhase.Returning,
+    LibraryReturnOrigin.Hub,
   )
 
   /**
@@ -111,6 +115,38 @@ export default function StonebridgeMissionCard({
       open: true,
       focusMissionId: pendingReturn.missionId,
       servedGeneration: pendingReturn.generation,
+    })
+  } else if (board.focusMissionId !== null && pendingReturn?.generation !== board.servedGeneration) {
+    /**
+     * The journey this board was opened for is no longer live — so the board it
+     * opened goes with it.
+     *
+     * Adoption happens in the render phase, and while the village read is held
+     * this card renders its loading branch: the board is "open" in state with
+     * nothing on screen yet. If the module ends the journey in that window — a
+     * raw same-tick `A → B → A`, an unsettled children read, a failed one — the
+     * cached request used to outlive it, and the recovered read then opened the
+     * board and focused the tile for a journey that was over. The generation
+     * guard on `serveLibraryReturn` cannot prevent that: it refuses the consume
+     * AFTER the open and the focus have already happened.
+     *
+     * `focusMissionId !== null` is exactly "opened to serve a return, not yet
+     * served", which is what makes this safe to do: a board the child opened by
+     * hand carries no focus request and is never touched, and a request already
+     * served has set it to null, so neither the open board nor the focus it
+     * landed is undone afterwards. `servedGeneration` is kept, so a journey
+     * already answered cannot be adopted again.
+     *
+     * A served return cannot be mistaken for an expired one, and that rests on
+     * `onFocusServed` consuming the flow and clearing this marker in two
+     * ADJACENT synchronous statements: no render can land between them, so any
+     * render that reads the flow as gone has the cleared marker queued with it.
+     */
+    setBoard({
+      scopeKey,
+      open: false,
+      focusMissionId: null,
+      servedGeneration: board.servedGeneration,
     })
   }
   const villageOpen = board.scopeKey === scopeKey && board.open

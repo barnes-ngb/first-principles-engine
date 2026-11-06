@@ -81,7 +81,8 @@ import { dayLogDocId } from '../today/daylog.model'
 import HeroMissionCard, { type HeroMission } from './HeroMissionCard'
 import HeroLauncherTiles from './HeroLauncherTiles'
 import StonebridgeMissionCard from './stonebridge/StonebridgeMissionCard'
-import { beginLibraryReturnFlow } from './stonebridge/libraryReturnFlow'
+import { LibraryReturnOrigin, beginLibraryReturnFlow } from './stonebridge/libraryReturnFlow'
+import { consumeForgeFocus } from './stonebridge/forgeFocusHandoff'
 import {
   FORGE_GALLERY_ANCHOR_ID,
   STONEBRIDGE_BOOKS_PATH,
@@ -1332,6 +1333,35 @@ export default function MyAvatarPage() {
     }
   }, [familyId, childId, profile, activeChild, currentTierName, slotsEquippedToday])
 
+  /**
+   * A Forge door taken on the canonical town page lands here.
+   *
+   * There is no `/forge` route and no second gallery: the town page's armor door
+   * navigates to this hub and leaves a scoped, epoch-stamped request, and this
+   * is the half that performs it — the SAME `focusForgeGallery` the in-page
+   * Forge visit uses, so the reduced-motion scroll and the keyboard focus are
+   * one definition rather than two.
+   *
+   * It waits for the anchor to be in the document rather than for a timer: until
+   * the profile has loaded this page renders a spinner and there is nothing to
+   * focus, and a hash scroll into a page that is not there yet is exactly the
+   * no-op this avoids. The request is consumed on the first ask whatever the
+   * answer, so a refused one cannot fire at a later arrival, and
+   * `consumeForgeFocus` refuses it unless the family and child match THIS page
+   * and the identity never moved on the way. Nothing is selected, granted or
+   * written; the gallery's own rules decide what the child may do when they get
+   * there.
+   */
+  useEffect(() => {
+    // Still a spinner, or no profile: the page body — and with it the anchor —
+    // is not rendered yet, so there is nothing to move to.
+    if (loading || !profile) return
+    if (!familyId || !childId) return
+    if (!document.getElementById(FORGE_GALLERY_ANCHOR_ID)) return
+    if (!consumeForgeFocus({ familyId, childId })) return
+    focusForgeGallery()
+  }, [familyId, childId, loading, profile])
+
   if (loading) {
     return (
       <Box sx={{ minHeight: '100dvh', bgcolor: bgColor, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -1472,11 +1502,17 @@ export default function MyAvatarPage() {
             // closed never reaches here — the board refuses it — and a note
             // refused here still leaves the door working: the shelf opens, with
             // no way back offered, which is ordinary navigation.
+            //
+            // The note names this entry — the Hero Hub board, not the canonical
+            // town page — so the way back comes to the screen the child actually
+            // left, with the armor, the customizer and the ceremonies still
+            // around it.
             onOpenBooks={(fromMissionId, observedEpoch) => {
               beginLibraryReturnFlow({
                 familyId,
                 childId,
                 missionId: fromMissionId,
+                origin: LibraryReturnOrigin.Hub,
                 observedEpoch,
               })
               navigate(STONEBRIDGE_BOOKS_PATH)
