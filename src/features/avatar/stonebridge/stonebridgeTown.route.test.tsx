@@ -301,6 +301,73 @@ describe('arriving at the town', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
+  it('the places are the buildings themselves, and the picture stays a picture', () => {
+    renderTown()
+    const town = townRegion()
+
+    // On the page as in the modal, the board opens on the map: the control for
+    // a place is a native button over its building, and `tile()` — the helper
+    // every page test here finds a place by — resolves to it.
+    const target = town.getByTestId('map-target-library_hut')
+    expect(target.tagName).toBe('BUTTON')
+    expect(target).toHaveAccessibleName('Visit The Library Hut. Fixed.')
+    expect(tile(LIBRARY)).toBe(target)
+    // The drawing keeps its single name and holds no control of its own.
+    const picture = town.getByRole('img', { name: /^Stonebridge village:/ })
+    expect(within(picture).queryAllByRole('button')).toHaveLength(0)
+    expect(picture).not.toContainElement(target)
+    // Exactly one control per place, and the way to the other view.
+    expect(town.getAllByRole('button', { name: /^Visit The Library Hut\./ })).toHaveLength(1)
+    expect(town.getByRole('button', { name: 'Show the places list' })).toBeInTheDocument()
+  })
+
+  it('a visit opened from a building comes back to that building', async () => {
+    // The page has no board transition behind the visit, so this is the page's
+    // own hand-off: the visit's `onExited` is the last modal transition in
+    // play, and the focus goes to the exact control it was opened from.
+    renderTown()
+    const target = townRegion().getByTestId('map-target-library_hut')
+    target.focus()
+    fireEvent.click(target)
+
+    const visit = within(screen.getByRole('dialog', { name: 'The Library Hut' }))
+    expect(visit.getByText('You fixed this place.')).toBeInTheDocument()
+    fireEvent.click(visit.getByRole('button', { name: 'Close' }))
+
+    await waitFor(() => {
+      expect(screen.queryByText('You fixed this place.')).not.toBeInTheDocument()
+    })
+    await waitFor(() => expect(townRegion().getByTestId('map-target-library_hut')).toHaveFocus())
+    expect(document.activeElement).not.toBe(document.body)
+  })
+
+  it('switching to the places list moves the tab stops, not the focus', async () => {
+    renderTown()
+    const town = townRegion()
+    const places = town.getByRole('button', { name: 'Show the places list' })
+    places.focus()
+    fireEvent.click(places)
+
+    // One set of place controls at a time, and the control that switched is
+    // not remounted by switching — so the keyboard stays on it.
+    expect(town.queryByTestId('map-target-library_hut')).not.toBeInTheDocument()
+    expect(tile(LIBRARY)).toHaveAccessibleName('Visit The Library Hut. Fixed.')
+    expect(places).toHaveFocus()
+    expect(places).toHaveAttribute('aria-pressed', 'true')
+
+    // And a visit opened from the list comes back to the list's own tile.
+    fireEvent.click(tile(LIBRARY))
+    fireEvent.click(
+      within(screen.getByRole('dialog', { name: 'The Library Hut' })).getByRole('button', {
+        name: 'Close',
+      }),
+    )
+    await waitFor(() => {
+      expect(screen.queryByText('You fixed this place.')).not.toBeInTheDocument()
+    })
+    await waitFor(() => expect(tile(LIBRARY)).toHaveFocus())
+  })
+
   it('offers the ordinary doors beside it', () => {
     renderTown()
     for (const label of ['My Books', 'Today', 'My armor']) {

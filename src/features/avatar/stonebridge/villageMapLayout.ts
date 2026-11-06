@@ -86,6 +86,94 @@ export const DRAWN_LOCATION_IDS: readonly string[] = VILLAGE_MAP.map((cell) => c
 export const cellTransform = (col: number, row: number) =>
   `translate(${(col - 1) * VILLAGE_MAP_GRID.unitWidth} ${(row - 1) * VILLAGE_MAP_GRID.unitHeight})`
 
+/**
+ * How far a tap target is held back from its cell's edges, in map units.
+ *
+ * Two jobs, both structural rather than taste: in this geometry it keeps two
+ * neighbouring targets from sharing an edge (so a tap near the boundary cannot
+ * be ambiguous, and two focus rings are not drawn on top of each other), and it
+ * holds a focused target's ring off the picture's own rounded border. How both
+ * then look on a real screen is a browser reading, not something these numbers
+ * establish.
+ */
+export const MAP_TARGET_INSET = { x: 5, y: 4 } as const
+
+/** A target's box over the picture, as percentages of the picture's own size. */
+export interface MapTargetRect {
+  leftPct: number
+  topPct: number
+  widthPct: number
+  heightPct: number
+}
+
+/**
+ * One location's tap target, derived from the cell its structure is drawn in.
+ *
+ * Percentages, deliberately: the picture is locked to the viewBox's aspect
+ * ratio, so a percentage box over it is the SAME box as the cell the building is
+ * drawn in at every width — there is no second coordinate system to keep in step
+ * and nothing to recompute on resize. The target is the whole cell (the building
+ * and the ground it stands on), inset by {@link MAP_TARGET_INSET}, because a
+ * child aims at a place rather than at a silhouette.
+ */
+export const mapTargetRect = (col: number, row: number): MapTargetRect => {
+  const { unitWidth, unitHeight } = VILLAGE_MAP_GRID
+  return {
+    leftPct: (((col - 1) * unitWidth + MAP_TARGET_INSET.x) / MAP_WIDTH) * 100,
+    topPct: (((row - 1) * unitHeight + MAP_TARGET_INSET.y) / MAP_HEIGHT) * 100,
+    widthPct: ((unitWidth - MAP_TARGET_INSET.x * 2) / MAP_WIDTH) * 100,
+    heightPct: ((unitHeight - MAP_TARGET_INSET.y * 2) / MAP_HEIGHT) * 100,
+  }
+}
+
+/**
+ * What a target really MEASURES, at a picture of this CSS width.
+ *
+ * The percentages above are only half of a 44 × 44 claim: what matters is the
+ * pixels they come out as on a real phone. This is the arithmetic that turns one
+ * into the other — the picture's height follows the viewBox, so a width is all
+ * it takes — and it is exported so a test can assert the sizes at the widths the
+ * board is actually shown at rather than trusting the percentages.
+ *
+ * It is NOT a measurement: a unit test of this function proves the geometry, not
+ * the layout. Whether the picture really is this wide at 390 / 768 / 1280, and
+ * whether anything overlaps it, is a browser pass.
+ */
+export const mapTargetSizeAt = (pictureWidthPx: number) => ({
+  width: (pictureWidthPx * (VILLAGE_MAP_GRID.unitWidth - MAP_TARGET_INSET.x * 2)) / MAP_WIDTH,
+  // The picture's height is `width × MAP_HEIGHT / MAP_WIDTH`, and the target
+  // takes `(unitHeight − inset) / MAP_HEIGHT` of it — so `MAP_HEIGHT` cancels.
+  height: (pictureWidthPx * (VILLAGE_MAP_GRID.unitHeight - MAP_TARGET_INSET.y * 2)) / MAP_WIDTH,
+})
+
+/**
+ * The width at which the FRACTIONAL target box reaches 44 × 44 CSS px.
+ *
+ * Derived from {@link mapTargetSizeAt}, not chosen: the height is the binding
+ * dimension (a cell is wider than it is tall), so this is the picture width at
+ * which a target's percentage height works out to 44.
+ *
+ * ── What it is, and what it is not ──────────────────────────────────────────
+ *
+ * It is a **reading of the arithmetic** and a threshold a geometry test can
+ * name. It is **not enforced anywhere**: nothing in this module or in
+ * `VillageScene` sets a minimum picture width, watches the box, or switches
+ * views by size, and this constant is read by no styling. A picture narrower
+ * than this is therefore possible — the targets keep the unconditional 44px
+ * CSS floor each one carries, which holds the SIZE and says nothing about
+ * where the percentage-positioned boxes then sit relative to each other.
+ * Whether any pair would then touch, and at what width, is a real layout
+ * question this number does not answer and this file does not claim.
+ *
+ * And it is not a measurement of anything: the sizes targets really come out
+ * as — at 390 × 844, 768 × 1024, 1280 × 900 and at enlarged text — are read in
+ * a browser, independently. That pass is the evidence for 44 × 44; this is the
+ * arithmetic it agrees or disagrees with.
+ */
+export const MAP_TARGET_MIN_PICTURE_WIDTH = Math.ceil(
+  (44 * MAP_WIDTH) / (VILLAGE_MAP_GRID.unitHeight - MAP_TARGET_INSET.y * 2),
+)
+
 /** The ground line of a row, in map coordinates. Terrain is drawn to meet these. */
 export const groundOf = (row: number) =>
   (row - 1) * VILLAGE_MAP_GRID.unitHeight + STRUCTURE_BOX.ground
