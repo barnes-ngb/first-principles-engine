@@ -34,9 +34,11 @@
  *     text size. Enlarged text makes the names bigger *in the list*, which is
  *     where names belong;
  *   • its box is the **cell the building is drawn in**, inset a little
- *     (`mapTargetRect`), so neighbours never share an edge, a focus ring is
- *     never clipped, and every target measures at least 44 × 44 CSS px at every
- *     width the board shows the picture at;
+ *     (`mapTargetRect`), so in that geometry neighbours do not share an edge
+ *     and a ring is drawn clear of the picture's border; the box is positioned
+ *     in percentages and floored at 44px in CSS, and what it then really
+ *     measures on a phone, a tablet, a desktop and at enlarged text is read in
+ *     a browser rather than argued from these numbers;
  *   • and it is never the only way in. The caller keeps a **Places** control
  *     set — the readable list — one tap away, and only one of the two sets is
  *     interactive at a time, so there are never two tab stops for one place.
@@ -273,11 +275,14 @@ export default function VillageScene({
                   }}
                   sx={{
                     position: 'absolute',
-                    // The percentages already measure well over this at every
-                    // width the board shows the picture at
-                    // (`MAP_TARGET_MIN_PICTURE_WIDTH`); the floor is here so
-                    // that a narrower picture than this design allows would
-                    // keep its targets tappable rather than shrink them.
+                    // An unconditional floor on the SIZE, whatever the
+                    // percentages work out to: a target never shrinks below a
+                    // tappable box. Nothing here constrains how wide the
+                    // picture may be, and the floor is not conditioned on it —
+                    // `MAP_TARGET_MIN_PICTURE_WIDTH` is the width at which the
+                    // fractional box reaches 44 by itself, which is a reading
+                    // of the arithmetic rather than a rule anything enforces.
+                    // What targets really measure is read in a browser.
                     minWidth: 44,
                     minHeight: 44,
                     p: 0,

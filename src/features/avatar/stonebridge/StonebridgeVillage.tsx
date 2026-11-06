@@ -207,8 +207,10 @@ interface VillageView {
  * a time**, chosen by the *Map* / *Places* control above the list:
  *
  *   • **Map** puts a native button over each building (that file explains the
- *     geometry and why nothing is labelled on the art) and renders the list as
- *     plain readable rows — names and conditions in normal flow, no tab stops;
+ *     geometry and why nothing is labelled on the art) and renders the places
+ *     below as a **legend**: names, conditions and the live counter as plain
+ *     text in normal flow, with no card, no border and no tab stop, so nothing
+ *     down there invites a tap it cannot answer;
  *   • **Places** is the list as it has always been — a full-size tile per place
  *     — with the picture back to being only a picture.
  *
@@ -859,9 +861,18 @@ export default function StonebridgeVillage({
           {/* ── The places, written out ─────────────────────────────────
               Every place, its name and its condition, in normal flow and at a
               readable size — in BOTH views, because a name a child can only
-              get at by hovering a building is not a name they have. In the
-              Places view each row is the control; in the Map view the controls
-              are on the picture and these are plain rows. */}
+              get at by hovering a building is not a name they have.
+
+              The two views say it in deliberately different visual languages,
+              because only one of them can be tapped. In the Places view each
+              row IS the control and looks like one: a bordered, raised card
+              with the art on it. In the Map view the controls are on the
+              picture and this is a **legend** — plain text lines, no border,
+              no panel, no rounding, no shadow, no hover and no pointer. Real
+              phone and tablet screenshots of the first attempt showed why that
+              matters: the legend was drawn as bordered accent cards, a child
+              taps one, and nothing happens. A thing that looks like a button
+              and is not one is worse than no affordance at all. */}
           <Typography
             sx={{ fontFamily: titleFont, fontSize: isLincoln ? '12px' : '17px', fontWeight: 700, mb: 1 }}
           >
@@ -877,10 +888,16 @@ export default function StonebridgeVillage({
               sx={{
                 listStyle: 'none',
                 m: 0,
+                // No panel and no inset of its own: the legend is text in the
+                // board's own flow, not a container sitting on it.
                 p: 0,
                 display: 'grid',
                 gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))',
-                gap: 1,
+                // Space is the only separation there is — no rule, no edge and
+                // no cell — so the columns get a little more of it than the
+                // rows do to keep two names on one line apart.
+                rowGap: 1,
+                columnGap: 2,
               }}
             >
               {board.map(({ mission, state }) => {
@@ -889,12 +906,11 @@ export default function StonebridgeVillage({
                   <Box
                     component="li"
                     key={mission.id}
-                    sx={{
-                      p: 1,
-                      borderRadius: isLincoln ? '8px' : '16px',
-                      border: `1px solid ${isActive ? mission.art.accent : 'rgba(120,120,120,0.3)'}`,
-                      background: isLincoln ? 'rgba(16,24,32,0.55)' : 'rgba(255,255,255,0.55)',
-                    }}
+                    // Two readable lines and nothing else. No border, no
+                    // background, no rounding, no shadow, no hover and no
+                    // pointer cursor: this is the one place on the board that
+                    // must not look operable, because it is not.
+                    sx={{ minWidth: 0 }}
                   >
                     <Typography
                       component="span"

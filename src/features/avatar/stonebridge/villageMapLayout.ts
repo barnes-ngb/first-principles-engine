@@ -89,10 +89,12 @@ export const cellTransform = (col: number, row: number) =>
 /**
  * How far a tap target is held back from its cell's edges, in map units.
  *
- * Two jobs, both measured rather than taste: it keeps two neighbouring targets
- * from sharing an edge (so a tap near the boundary cannot be ambiguous, and two
- * focus rings cannot sit on top of each other), and it keeps a focused target's
- * ring inside the picture rather than against its rounded border.
+ * Two jobs, both structural rather than taste: in this geometry it keeps two
+ * neighbouring targets from sharing an edge (so a tap near the boundary cannot
+ * be ambiguous, and two focus rings are not drawn on top of each other), and it
+ * holds a focused target's ring off the picture's own rounded border. How both
+ * then look on a real screen is a browser reading, not something these numbers
+ * establish.
  */
 export const MAP_TARGET_INSET = { x: 5, y: 4 } as const
 
@@ -145,14 +147,28 @@ export const mapTargetSizeAt = (pictureWidthPx: number) => ({
 })
 
 /**
- * The narrowest picture at which every target is still at least 44 × 44 CSS px.
+ * The width at which the FRACTIONAL target box reaches 44 × 44 CSS px.
  *
  * Derived from {@link mapTargetSizeAt}, not chosen: the height is the binding
- * dimension (a cell is wider than it is tall), so this is the width at which a
- * target's height reaches 44. Below it the targets carry a 44px floor instead
- * and would begin to touch — which is why the board's picture is never narrower
- * than this, and why the readable Places list exists for the sizes where a map
- * is the wrong answer.
+ * dimension (a cell is wider than it is tall), so this is the picture width at
+ * which a target's percentage height works out to 44.
+ *
+ * ── What it is, and what it is not ──────────────────────────────────────────
+ *
+ * It is a **reading of the arithmetic** and a threshold a geometry test can
+ * name. It is **not enforced anywhere**: nothing in this module or in
+ * `VillageScene` sets a minimum picture width, watches the box, or switches
+ * views by size, and this constant is read by no styling. A picture narrower
+ * than this is therefore possible — the targets keep the unconditional 44px
+ * CSS floor each one carries, which holds the SIZE and says nothing about
+ * where the percentage-positioned boxes then sit relative to each other.
+ * Whether any pair would then touch, and at what width, is a real layout
+ * question this number does not answer and this file does not claim.
+ *
+ * And it is not a measurement of anything: the sizes targets really come out
+ * as — at 390 × 844, 768 × 1024, 1280 × 900 and at enlarged text — are read in
+ * a browser, independently. That pass is the evidence for 44 × 44; this is the
+ * arithmetic it agrees or disagrees with.
  */
 export const MAP_TARGET_MIN_PICTURE_WIDTH = Math.ceil(
   (44 * MAP_WIDTH) / (VILLAGE_MAP_GRID.unitHeight - MAP_TARGET_INSET.y * 2),

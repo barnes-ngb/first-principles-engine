@@ -16,27 +16,36 @@ import {
  *
  * Every target is derived from the cell its building is drawn in, so these are
  * the properties that make "tap the building" true rather than approximately
- * true: the target is centred on the building, it is inside the picture, no two
- * of them overlap or even touch, and at every width the board shows the picture
- * at it measures at least 44 × 44 CSS px.
+ * true *in the geometry*: the target is centred on the building, it is inside
+ * the picture, no two of the fractional boxes overlap or even touch, and the
+ * arithmetic works out above 44 × 44 CSS px at the picture widths this design
+ * expects.
  *
- * **This proves the arithmetic, not the layout.** Whether the picture really is
- * as wide as these widths say on a 390 × 844 phone, a 768 × 1024 tablet, a
- * 1280 × 900 desktop and at enlarged text — and whether a ring is visible, a
+ * **This proves the arithmetic, and nothing about the layout.** The widths
+ * below are COMPUTED from the container chain, not read off a screen; whether
+ * the picture really is that wide on a 390 × 844 phone, a 768 × 1024 tablet, a
+ * 1280 × 900 desktop or at enlarged text — and whether a ring is visible, a
  * target is covered by something else, or the page scrolls sideways — is a real
  * viewport pass and is Sol's. A unit test of a percentage cannot measure a
- * button, and this file does not pretend to.
+ * button, and this file does not pretend to. Nothing here is enforced by the
+ * styling either: the component sets no minimum picture width and watches no
+ * box, so these are the properties of the formula the targets are positioned
+ * by, checked against the sizes that formula is expected to be given.
  */
 
 const CELL = VILLAGE_MAP_GRID
 
-/** The widths the picture is really drawn at, narrowest first. */
+/**
+ * The picture widths this design expects, narrowest first — derived by hand
+ * from the container chain (page container padding, then the board's own), not
+ * measured in a browser.
+ */
 const PICTURE_WIDTHS = [
   // A 320px phone, inside the page container and the board's own padding.
   256,
   // A 390px phone, same chain.
   326,
-  // The cap: the picture never grows past this, however wide the screen is.
+  // The cap the picture's own `maxWidth` sets, however wide the screen is.
   460,
 ]
 
@@ -116,25 +125,29 @@ describe('no two targets overlap, or even touch', () => {
 })
 
 describe('44 × 44 is arithmetic here, and measurement in a browser', () => {
-  it('names the narrowest picture that still holds the floor', () => {
+  it('names the width at which the fractional box reaches 44 on its own', () => {
     // Derived, not chosen — the height is the binding dimension because a cell
-    // is wider than it is tall.
+    // is wider than it is tall. It is a reading of this formula and not a
+    // minimum anything enforces: no styling consults it, and each target
+    // carries its own unconditional 44px CSS floor regardless of it.
     expect(MAP_TARGET_MIN_PICTURE_WIDTH).toBe(213)
-    const atFloor = mapTargetSizeAt(MAP_TARGET_MIN_PICTURE_WIDTH)
-    expect(atFloor.width).toBeGreaterThanOrEqual(44)
-    expect(atFloor.height).toBeGreaterThanOrEqual(44)
+    const atThreshold = mapTargetSizeAt(MAP_TARGET_MIN_PICTURE_WIDTH)
+    expect(atThreshold.width).toBeGreaterThanOrEqual(44)
+    expect(atThreshold.height).toBeGreaterThanOrEqual(44)
   })
 
-  it('and one pixel narrower really does fall through it', () => {
-    // The positive control: the floor is the actual boundary, not a round
-    // number that happens to pass.
+  it('and one pixel narrower really does fall below it', () => {
+    // The positive control: the threshold is the actual boundary OF THIS
+    // FORMULA, not a round number that happens to pass. What a narrower
+    // picture then looks like is the CSS floor's business and a browser's to
+    // report — nothing is claimed about it here.
     expect(mapTargetSizeAt(MAP_TARGET_MIN_PICTURE_WIDTH - 1).height).toBeLessThan(44)
   })
 
-  it('clears it at every width the board draws the picture at', () => {
+  it('clears it at the picture widths this design expects', () => {
     for (const width of PICTURE_WIDTHS) {
       const size = mapTargetSizeAt(width)
-      expect(width, `${width}px picture is below the design floor`).toBeGreaterThanOrEqual(
+      expect(width, `${width}px picture is below the derived threshold`).toBeGreaterThanOrEqual(
         MAP_TARGET_MIN_PICTURE_WIDTH,
       )
       expect(size.width, `${width}px picture: target too narrow`).toBeGreaterThanOrEqual(44)
