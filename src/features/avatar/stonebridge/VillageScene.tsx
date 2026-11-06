@@ -47,14 +47,27 @@
  * rendered with no opener handed to it is the picture alone, exactly as before.
  *
  * Presentational only. `board` is derived read-only from the existing
- * completed-mission state; nothing here reads or writes progress, the drawing is
- * completely static — there is no motion for a reduced-motion preference to have
- * to switch off, and the targets have none either.
+ * completed-mission state; nothing here reads or writes progress, and the
+ * LANDSCAPE is completely static — the drawing and the targets have no motion
+ * for a reduced-motion preference to have to switch off.
+ *
+ * ── The one thing that does move, when it is handed one ──────────────────────
+ *
+ * `hero` is optional and defaults to absent. When a caller hands one over (the
+ * canonical town page, and nothing else today), a decorative layer is mounted
+ * between the drawing and the target layer: the child's own saved character,
+ * standing on the Square-to-bridge road, which walks in and waves once when the
+ * map becomes visible and then stands still. It is `aria-hidden`,
+ * `pointer-events: none`, holds no control and is drawn clear of every target
+ * cell — `StonebridgeHeroStage` is where that is explained and enforced. With
+ * no `hero` prop this file renders exactly what it rendered before.
  */
 import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
 
 import LocationStructure, { VillageSquareStructure } from './LocationScenes'
+import StonebridgeHeroStage from './StonebridgeHeroStage'
+import type { HeroAppearance } from './heroAppearance'
 import { describeVillageOverview } from './locationArtDescriptions'
 import { VillageLocationState, type VillageLocation } from './computeStonebridgeProgress'
 import { placeControlName } from './villageOpeners'
@@ -76,10 +89,28 @@ import {
 } from './villageMapLayout'
 import { kidPalette } from '../../../app/tokens'
 
+/**
+ * The child's own hero on the map — everything the scene needs to show one.
+ *
+ * Absent means no hero and no layer at all, which is every caller that does not
+ * pass one (the Hero Hub's board) and every state in which the town has no
+ * saved character to show: a read that is loading, missing, failed or whose
+ * document belongs to somebody else.
+ */
+export interface VillageSceneHero {
+  appearance: HeroAppearance
+  /** One exposure of one child's read — the entrance plays once per value. */
+  exposureKey: string
+  /** The map is live and healthy and nothing covers it, so motion may run. */
+  exposed: boolean
+}
+
 interface VillageSceneProps {
   /** Every location and its state, from `deriveVillageBoard`. Read-only. */
   board: VillageLocation[]
   isLincoln: boolean
+  /** Optional, decorative: the saved hero standing in the village. */
+  hero?: VillageSceneHero | null
   /**
    * Put a tap target on each building — the Map control set.
    *
@@ -102,6 +133,7 @@ interface VillageSceneProps {
 export default function VillageScene({
   board,
   isLincoln,
+  hero = null,
   interactive = false,
   onOpenLocation,
   registerTarget,
@@ -233,6 +265,19 @@ export default function VillageScene({
             })}
           </svg>
         </Box>
+
+        {/* ── The child's own hero, standing in their village ─────────
+            A sibling of the drawing, like the targets: the picture keeps its
+            single accessible name and its `aria-hidden` subtree, and this
+            layer is decorative, noninteractive and clear of every target
+            cell. Rendered only when a caller hands one over. */}
+        {hero && (
+          <StonebridgeHeroStage
+            appearance={hero.appearance}
+            exposureKey={hero.exposureKey}
+            exposed={hero.exposed}
+          />
+        )}
 
         {/* ── The way in: one native button per building ──────────────
             A SIBLING of the drawing above, so the picture keeps its single

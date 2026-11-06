@@ -958,6 +958,12 @@ describe('the new copy holds the kid readability bar', () => {
     expectKidWording('Today', 'Stonebridge town · today door')
     expectKidWording('My armor', 'Stonebridge town · armor door')
     expectKidWording('Try again', 'Stonebridge town · retry button')
+    // The compact form those three doors now take on a healthy town, and the
+    // hero read's own honest states beside it.
+    expectKidWording('Quick links', 'Stonebridge town · quick links disclosure')
+    expectKidWording('Show my hero', 'Stonebridge town · hero retry button')
+    expectKidLine("Couldn't load your hero.", 'Stonebridge town · hero read failed')
+    expectKidLine('That hero is not yours.', 'Stonebridge town · hero not this child’s')
     expectKidLine('Pick a child to see the village.', 'Stonebridge town · nobody selected')
     expectKidWording('Loading your village…', 'Stonebridge town · loading')
     expectKidWording('Trying again…', 'Stonebridge town · retrying')
@@ -977,6 +983,9 @@ describe('the new copy holds the kid readability bar', () => {
       'Loading your village…',
       'Trying again…',
       "Couldn't load your village.",
+      'Show my hero',
+      "Couldn't load your hero.",
+      'That hero is not yours.',
     ]) {
       expect(page, `StonebridgePage no longer renders "${copy}"`).toContain(copy)
     }

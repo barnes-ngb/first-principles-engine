@@ -190,6 +190,47 @@ export const RIDGE_LINE =
   `M0 54 L28 51 L50 ${RIDGE} L78 53 L112 60 L150 57 L186 52 L220 48 L250 ${RIDGE} L276 52 L300 56`
 
 /**
+ * The stretch of road the child's own hero stands on, in map coordinates.
+ *
+ * ── Why here, and why this stretch ───────────────────────────────────────────
+ *
+ * Additive and read-only: nothing that already exists is moved, resized or
+ * re-numbered, and no existing export changes value. The geometry lives in this
+ * module for the same reason the rest does — the drawing's coordinate system is
+ * a fact about the picture, and a test asserts against it rather than
+ * re-deriving it.
+ *
+ * The stretch is the **Square-to-bridge corridor**: the central road
+ * (`'M150 126 L150 190'`) below the Square, running down toward the river. It is
+ * the one part of the map that is a road and **not a building target** — the
+ * Square's own cell carries no target at all (it has no mission), the cell this
+ * walk happens in (column 2, row 3) holds no location, and `heroFigureBox`
+ * below is what proves the figure clears every neighbouring target rather than
+ * this comment asserting it. The hero is decorative and
+ * `pointer-events: none`, so even where it is drawn over the picture it is
+ * never between a finger and a place.
+ */
+export const HERO_FIGURE = { width: 20, height: 34 } as const
+
+/** Where the walk starts, where it stops, and the line the feet are on. */
+export const HERO_ROAD = {
+  /** The feet line — just above the lower road at `LOWER` (190). */
+  ground: 188,
+  /** Stepping in from the Square's road… */
+  startX: 124,
+  /** …and the stable pose, on the central road out of the Square. */
+  stopX: 150,
+} as const
+
+/** The figure's box at a given x, in map units — the oracle for "clear of". */
+export const heroFigureBox = (x: number) => ({
+  left: x - HERO_FIGURE.width / 2,
+  right: x + HERO_FIGURE.width / 2,
+  top: HERO_ROAD.ground - HERO_FIGURE.height,
+  bottom: HERO_ROAD.ground,
+})
+
+/**
  * The roads. Every one of them starts or ends at the Square, which is the
  * point: *most village decisions begin here*.
  */

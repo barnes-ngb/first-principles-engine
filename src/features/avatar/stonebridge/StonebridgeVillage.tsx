@@ -9,7 +9,7 @@ import StonebridgeLocationArt from './StonebridgeLocationArt'
 import StonebridgeLocationDialog from './StonebridgeLocationDialog'
 import StonebridgeRecoveryNotice, { type StonebridgeRecoveryState } from './StonebridgeRecoveryNotice'
 import BannerRaiseCelebration from './BannerRaiseCelebration'
-import VillageScene from './VillageScene'
+import VillageScene, { type VillageSceneHero } from './VillageScene'
 import { getMission } from './missions'
 import { getLibraryIdentityEpoch } from './libraryReturnFlow'
 import {
@@ -55,6 +55,15 @@ const PLACES_VIEW_CHOICES = [
   { view: VillagePlacesView.Map, label: '🗺️ Map', name: 'Show the map' },
   { view: VillagePlacesView.Places, label: '🏘️ Places', name: 'Show the places list' },
 ] as const
+
+/**
+ * What the board needs to show a hero — the appearance and its exposure.
+ *
+ * The `exposed` half of `VillageSceneHero` is deliberately NOT here: it is this
+ * component's answer, not the caller's, because only the board knows whether a
+ * visit, a replay or the places list is currently in front of the map.
+ */
+export type StonebridgeVillageHero = Omit<VillageSceneHero, 'exposed'>
 
 interface StonebridgeVillageProps extends StonebridgeRecoveryState, StonebridgeDestinations {
   open: boolean
@@ -114,6 +123,18 @@ interface StonebridgeVillageProps extends StonebridgeRecoveryState, StonebridgeD
    * opened any other way passes `null` and behaves exactly as it always has.
    */
   focusMissionId?: string | null
+  /**
+   * The child's own saved hero, drawn standing in the village.
+   *
+   * Optional and absent by default, so the Hero Hub's board renders exactly
+   * what it rendered before. The caller (the canonical town page) owns the READ
+   * and decides whether there is a hero at all — a loading, missing, failed or
+   * mismatched profile is handed over as nothing. This component owns only the
+   * **activity gate**: whether the map is the live control set, and whether a
+   * location visit, a replayed thank-you or an unsettled scope is covering it.
+   * Everything else about the motion belongs to `StonebridgeHeroStage`.
+   */
+  hero?: StonebridgeVillageHero | null
   /**
    * The focus hand-off above has happened (or had no tile to land on).
    *
@@ -281,6 +302,7 @@ export default function StonebridgeVillage({
   onRetry,
   onOpenBooks,
   onVisitForge,
+  hero = null,
   focusMissionId = null,
   onFocusServed,
 }: StonebridgeVillageProps) {
@@ -391,6 +413,32 @@ export default function StonebridgeVillage({
   const visitOpen = open && !!live?.selected && live.selected === live.shown
 
   const recovery: StonebridgeRecoveryState = { stale, readError, saveError, retrying, onRetry }
+
+  /**
+   * May the hero's decorative motion run RIGHT NOW?
+   *
+   * The board's half of the cancellation rule, and all of it is state this
+   * component already holds:
+   *
+   *   • `scopeSettled` — this board's state still belongs to the child on
+   *     screen. A scope change drops it in the render phase, and the hero's
+   *     exposure is withdrawn in the same render rather than one frame later;
+   *   • `mapIsLive` — the places list is the live control set instead, so there
+   *     is no map on screen to walk across;
+   *   • no open location visit and no replayed thank-you — both are real modals
+   *     that cover the map, so motion underneath them would be motion nobody
+   *     can see, running timers nobody asked for. This is also why no visible
+   *     travel to a building is promised: the dialog opens immediately and the
+   *     map goes behind it;
+   *   • the board is actually open — in `modal` presentation a closed dialog is
+   *     not an exposure at all. A page is always open.
+   *
+   * It does not consider the village's own `stale` / recovery state: the hero
+   * comes from a DIFFERENT read, and the caller withdraws it when THAT read is
+   * loading, missing or failed.
+   */
+  const heroExposed =
+    scopeSettled && mapIsLive && !live?.shown && !live?.replay && (isPage || open)
 
   /**
    * One opener for both control sets.
@@ -802,6 +850,9 @@ export default function StonebridgeVillage({
           <VillageScene
             board={board}
             isLincoln={isLincoln}
+            // The caller's hero, with this board's activity gate applied. No
+            // hero, no layer — and the hub's board passes none.
+            hero={hero ? { ...hero, exposed: heroExposed } : null}
             interactive={mapIsLive}
             onOpenLocation={openLocation}
             registerTarget={(missionId, node) => openers.register(missionId, node)}
