@@ -594,27 +594,38 @@ describe('a reduced-motion preference loses no state', () => {
   })
 })
 
-describe('the overview is the village, and the list is the way around it', () => {
-  it('shows the connected place above the list, with nothing on it to tap', () => {
+describe('the overview is the village, and it is also the way around it', () => {
+  it('shows the connected place above the places, with ONE way in at a time', () => {
     fx.data = PARTIAL
     renderCard()
     openBoard()
     const board = boardRegion()
 
-    // The picture, and the sentence that says where the way in is.
+    // The picture, and the sentence that says where to tap. The board opens on
+    // the map, so that sentence is the map's.
     expect(board.getByText('🗺️ Your Village')).toBeInTheDocument()
-    expect(board.getByText('Pick a place from the list.')).toBeInTheDocument()
+    expect(board.getByText('Tap a place on the map.')).toBeInTheDocument()
+    expect(board.queryByText('Pick a place from the list.')).not.toBeInTheDocument()
     expect(board.getByText('🏘️ Each Place')).toBeInTheDocument()
     expect(overview().getByTestId('village-roads')).toBeInTheDocument()
     expect(overview().getByTestId('village-river')).toBeInTheDocument()
     expect(overview().getByTestId('square-fountain-water')).toBeInTheDocument()
 
-    // Exactly one control per place, and it is the list's — the hotspot grid
-    // this replaced covered the buildings with its own labels at enlarged text.
+    // Exactly one control per place — the whole point of the two views being
+    // exclusive. Two sets of seven tab stops for the same seven places is the
+    // defect the old hotspot grid had on top of its labels.
     for (const mission of STONEBRIDGE_MISSIONS) {
       expect(board.getAllByRole('button', { name: new RegExp(`${mission.locationName}\\.`) })).toHaveLength(1)
     }
     expect(board.queryByRole('button', { name: /village map/ })).not.toBeInTheDocument()
+
+    // And the same holds in the other view, with the caption that goes with it.
+    fireEvent.click(board.getByRole('button', { name: 'Show the places list' }))
+    expect(board.getByText('Pick a place from the list.')).toBeInTheDocument()
+    expect(board.queryByText('Tap a place on the map.')).not.toBeInTheDocument()
+    for (const mission of STONEBRIDGE_MISSIONS) {
+      expect(board.getAllByRole('button', { name: new RegExp(`${mission.locationName}\\.`) })).toHaveLength(1)
+    }
   })
 
   it('draws each place in the state the list says it is in', () => {
@@ -695,6 +706,192 @@ describe('the overview is the village, and the list is the way around it', () =>
   })
 })
 
+describe('the Map and the Places list, one live control set at a time', () => {
+  beforeEach(() => emulateReducedMotion(true))
+
+  it('opens on the map, where the building itself is the control', () => {
+    fx.data = PARTIAL
+    renderCard()
+    openBoard()
+    const board = boardRegion()
+
+    // The control for a place IS the building: `tile()` — the helper every
+    // file in this suite finds a place by — resolves to the map's target.
+    const target = board.getByTestId('map-target-old_bridge')
+    expect(target).toHaveAccessibleName('Visit The Old Bridge. Fixed.')
+    expect(tile(OLD_BRIDGE)).toBe(target)
+    expect(target.tagName).toBe('BUTTON')
+    // And it is OUTSIDE the drawing, which stays one picture under one name.
+    expect(overview().queryAllByRole('button')).toHaveLength(0)
+    expect(
+      board.getByRole('img', { name: /^Stonebridge village:/ }),
+    ).not.toContainElement(target)
+    // Both ways in are offered, and the map is the one that is live.
+    expect(board.getByRole('button', { name: 'Show the map' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+    expect(board.getByRole('button', { name: 'Show the places list' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    )
+  })
+
+  it('tapping a building opens that place, with what is true of it', () => {
+    fx.data = PARTIAL
+    renderCard()
+    openBoard()
+    fireEvent.click(boardRegion().getByTestId('map-target-library_hut'))
+
+    // The same visit the list opened, because it is the same opener.
+    const visit = within(screen.getByRole('dialog', { name: 'The Library Hut' }))
+    expect(visit.getByText('You are fixing this now.')).toBeInTheDocument()
+    expect(visit.getByText('3 / 8 done')).toBeInTheDocument()
+    expect(visit.getByRole('button', { name: 'Open My Books' })).toBeInTheDocument()
+  })
+
+  it('and the keyboard opens it, and closing comes back to that building', async () => {
+    renderCard()
+    openBoard()
+    const target = boardRegion().getByTestId('map-target-old_bridge')
+    target.focus()
+    expect(target).toHaveFocus()
+
+    // A native button, so Enter is the browser's job.
+    await userEvent.keyboard('{Enter}')
+    const visit = screen.getByRole('dialog', { name: 'The Old Bridge' })
+    fireEvent.click(within(visit).getByRole('button', { name: 'Close' }))
+
+    await waitFor(() => {
+      expect(screen.queryByText('You are fixing this now.')).not.toBeInTheDocument()
+    })
+    // The exact building, not the top of the board and not the body.
+    await waitFor(() => expect(boardRegion().getByTestId('map-target-old_bridge')).toHaveFocus())
+    expect(document.activeElement).not.toBe(document.body)
+  })
+
+  it('a thank-you replays from a building, and the board keeps that building', async () => {
+    // What is claimed here is the HAND-OFF INTO the replay from a map target —
+    // the visit closes, the celebration opens, and the building the focus is
+    // owed to is still on the board. Where the focus actually lands when the
+    // replay is dismissed needs the real overlay's own `onExited` (the
+    // celebration is stubbed in this file), and is asserted against the real
+    // component in `BannerRaiseCelebration.replay.test.tsx`.
+    fx.data = PARTIAL
+    renderCard()
+    openBoard()
+    fireEvent.click(boardRegion().getByTestId('map-target-watchtower'))
+    fireEvent.click(
+      within(screen.getByRole('dialog', { name: 'The Watchtower' })).getByRole('button', {
+        name: 'Hear the thank you',
+      }),
+    )
+    expect(screen.getByTestId('thank-you-replay')).toHaveTextContent('watchtower')
+
+    await waitFor(() => expect(screen.queryByText('You fixed this place.')).not.toBeInTheDocument())
+    expect(boardRegion().getByTestId('map-target-watchtower')).toBeInTheDocument()
+  })
+
+  it('switching views moves the tab stops and keeps the focus where it was', async () => {
+    renderCard()
+    openBoard()
+    const board = boardRegion()
+    const places = board.getByRole('button', { name: 'Show the places list' })
+    places.focus()
+    await userEvent.keyboard('{Enter}')
+
+    // The map's targets are gone, the list's tiles are there, and there is
+    // still exactly one control per place.
+    expect(board.queryByTestId('map-target-old_bridge')).not.toBeInTheDocument()
+    expect(tile(OLD_BRIDGE)).toBeInTheDocument()
+    expect(tile(OLD_BRIDGE).tagName).toBe('BUTTON')
+    // The control that switched is not remounted by switching, so the keyboard
+    // is still on it rather than on a detached node or on `document.body`.
+    expect(places).toHaveFocus()
+    expect(document.activeElement).not.toBe(document.body)
+    expect(places).toHaveAttribute('aria-pressed', 'true')
+    expect(board.getByRole('button', { name: 'Show the map' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    )
+  })
+
+  it('and a place opened from the list comes back to its tile', async () => {
+    renderCard()
+    openBoard()
+    fireEvent.click(boardRegion().getByRole('button', { name: 'Show the places list' }))
+
+    const listTile = tile(OLD_BRIDGE)
+    listTile.focus()
+    fireEvent.click(listTile)
+    fireEvent.click(
+      within(screen.getByRole('dialog', { name: 'The Old Bridge' })).getByRole('button', {
+        name: 'Close',
+      }),
+    )
+
+    await waitFor(() => {
+      expect(screen.queryByText('You are fixing this now.')).not.toBeInTheDocument()
+    })
+    await waitFor(() => expect(tile(OLD_BRIDGE)).toHaveFocus())
+    expect(screen.queryByTestId('map-target-old_bridge')).not.toBeInTheDocument()
+  })
+
+  it('a place still comes back after switching views and back again', async () => {
+    // The registry rule, end to end: the two control sets share one key per
+    // place, so a switch that nulled the replacement would leave the closing
+    // visit with nothing to focus and nothing saying so.
+    renderCard()
+    openBoard()
+    const board = boardRegion()
+    fireEvent.click(board.getByRole('button', { name: 'Show the places list' }))
+    fireEvent.click(board.getByRole('button', { name: 'Show the map' }))
+
+    const target = board.getByTestId('map-target-old_bridge')
+    fireEvent.click(target)
+    fireEvent.click(
+      within(screen.getByRole('dialog', { name: 'The Old Bridge' })).getByRole('button', {
+        name: 'Close',
+      }),
+    )
+
+    await waitFor(() => {
+      expect(screen.queryByText('You are fixing this now.')).not.toBeInTheDocument()
+    })
+    await waitFor(() => expect(boardRegion().getByTestId('map-target-old_bridge')).toHaveFocus())
+  })
+
+  it('writes every name and condition out in BOTH views, off the art', () => {
+    fx.data = PARTIAL
+    renderCard()
+    openBoard()
+    const board = boardRegion()
+    const picture = board.getByRole('img', { name: /^Stonebridge village:/ })
+    // Scoped to the places themselves: the Banner Hall below names the places
+    // whose banners are up, and that is a different claim about the same word.
+    const places = () => within(board.getByTestId('village-places'))
+
+    // The map view: the targets carry no text, so the names and conditions
+    // live here — in normal flow, at a readable size, never over a building.
+    for (const mission of STONEBRIDGE_MISSIONS) {
+      const name = places().getByText(mission.locationName)
+      expect(picture).not.toContainElement(name)
+    }
+    expect(places().getByText(/^Being fixed now\./)).toBeInTheDocument()
+    expect(places().getAllByText('Fixed.')).toHaveLength(2)
+    expect(places().getAllByText('Not started yet.')).toHaveLength(
+      STONEBRIDGE_MISSIONS.length - 3,
+    )
+
+    // And the places view says the same two facts on the control itself.
+    fireEvent.click(board.getByRole('button', { name: 'Show the places list' }))
+    for (const mission of STONEBRIDGE_MISSIONS) {
+      expect(places().getByText(mission.locationName)).toBeInTheDocument()
+    }
+    expect(places().getAllByText('✓ Fixed · tap to see it')).toHaveLength(2)
+  })
+})
+
 describe('the new copy holds the kid readability bar', () => {
   it('every sentence a child reads in a visit', () => {
     expectKidLine('You fixed this place.', 'Stonebridge visit · repaired')
@@ -709,6 +906,7 @@ describe('the new copy holds the kid readability bar', () => {
     expectKidLine('Your banners are all up.', 'Stonebridge · banners all raised')
     expectKidLine('Each banner is up. Well done.', 'Stonebridge · Banner Hall done')
     expectKidLine('Pick a place from the list.', 'Stonebridge overview · where to go')
+    expectKidLine('Tap a place on the map.', 'Stonebridge map · where to tap')
   })
 
   it('and the two headings over the picture and the list', () => {
@@ -718,6 +916,18 @@ describe('the new copy holds the kid readability bar', () => {
     // doing its job.
     expectKidWording('🗺️ Your Village', 'Stonebridge · overview heading')
     expectKidWording('🏘️ Each Place', 'Stonebridge · list heading')
+  })
+
+  it('and the two ways in, on the control and in its name', () => {
+    // A child reads the label; a screen reader reads the name. Both are held
+    // to the bar, and the name contains the visible word so that saying
+    // "places" out loud works on a surface driven by voice.
+    expectKidWording('🗺️ Map', 'Stonebridge · map view label')
+    expectKidWording('🏘️ Places', 'Stonebridge · places view label')
+    expectKidWording('Show the map', 'Stonebridge · map view name')
+    expectKidWording('Show the places list', 'Stonebridge · places view name')
+    expectKidWording('Map or list', 'Stonebridge · view group name')
+    expectKidWording('Places on the map', 'Stonebridge · map targets group name')
   })
 
   it('including the repaired Library’s door and the way back from the shelf', () => {

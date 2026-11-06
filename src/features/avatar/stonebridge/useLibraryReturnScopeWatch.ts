@@ -1,4 +1,4 @@
-import { useEffect, useRef, useSyncExternalStore } from 'react'
+import { useEffect, useLayoutEffect, useRef, useSyncExternalStore } from 'react'
 
 import {
   getActiveChildId,
@@ -15,9 +15,56 @@ import {
  * across every transition the shelf, the reader and the editor make between
  * them. It reports each location change and nothing else; whose journey it is
  * belongs to the identity half below, so there is one definition of each.
+ *
+ * ── Why this one is a LAYOUT effect, and the other two are not ───────────────
+ *
+ * What this reports is not a value — it is that a route **has become current**,
+ * and the reconciliation it feeds reads the flow as it stands when the report
+ * arrives. So the report has to be made at the commit that made that route
+ * current: an observation of the route the child was on, applied to a flow that
+ * has moved on since, is a statement about a screen that is no longer there.
+ *
+ * As a passive effect it was not made there. A passive effect is flushed after
+ * React yields to the browser, so a tap on a control that the just-committed
+ * screen is already showing can be processed BEFORE the observation of that
+ * screen's own arrival. That is one real sequence, captured on a bounded local
+ * reproduction of the shelf's *Come back to Stonebridge* case — 17 clean runs,
+ * then run 18, on generation 1:
+ *
+ *   1. `/books` commits with the journey in `away`; the shelf renders the way
+ *      back; the last route this watch has observed is still `/stonebridge`.
+ *   2. The child takes it. `requestLibraryReturn` moves the journey to
+ *      `returning` and the router is sent to the town page.
+ *   3. The `/books` observation from step 1 finally runs. The `returning` clause
+ *      of `reconcileLibraryReturnFlowPath` asks whether `/books` is this
+ *      journey's own entry, which it is not — so the return reads as ABANDONED
+ *      and the journey is ended.
+ *   4. The town page arrives with no request to serve: no focus hand-off is
+ *      attempted at all, and the child is left on a board with the keyboard
+ *      nowhere near the place they asked to come back to.
+ *
+ * A layout effect is flushed inside the commit, before the browser can dispatch
+ * anything, so the observation can never be older than the flow it is applied
+ * to. Nothing else about it changes: same reconciliation, same dependency, same
+ * two clauses, same expiry for a genuine departure — a real later arrival
+ * outside the journey's own entry still ends it, because that arrival is itself
+ * a commit this now reports from.
+ *
+ * What is NOT claimed: the focus failures seen before this were not instrumented,
+ * so this is the mechanism a local recurrence actually showed and the boundary
+ * this holds from now on — not a trace of those earlier runs.
+ *
+ * It is deliberately the ONLY layout effect here. The identity and readiness
+ * halves below report a VALUE a surface has already read — an identity string,
+ * a read's own `isLoading` / `loadFailed` — which is as true a frame later as it
+ * is during the commit, and the readiness latch depends on seeing its own read
+ * settle rather than on when it is told. And this does not make anything rely on
+ * effect order: `libraryReturnForOrigin` is still what answers "whose return is
+ * this", so a host never serves a journey because two effects happened to run in
+ * a convenient sequence.
  */
 export function useLibraryReturnRouteWatch(pathname: string): void {
-  useEffect(() => {
+  useLayoutEffect(() => {
     reconcileLibraryReturnFlowPath(pathname)
   }, [pathname])
 }
