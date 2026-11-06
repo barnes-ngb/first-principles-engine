@@ -791,15 +791,18 @@ describe('the three readings of "no child yet"', () => {
     }
   })
 
-  it('and a known child whose read goes unknown under them keeps the board', () => {
-    // `isLoading` going true again for a child who IS resolved is a re-read, not
-    // an unknown identity: `activeChild` still answers, so this page is not in
-    // the branch at all and the village it is already showing stays.
+  it('a cached child whose read fails keeps the board, honest notice and direct fallback doors', () => {
+    // The cached child keeps the board reachable, while the failed identity
+    // read is reported honestly and the useful-work doors stay directly visible.
     fx.childrenLoading = true
     fx.childrenLoadFailed = true
     renderTown()
     expect(screen.getByRole('region', { name: 'Stonebridge Village' })).toBeInTheDocument()
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent("Couldn't confirm the selected child.")
+    expect(screen.queryByRole('button', { name: 'Quick links' })).not.toBeInTheDocument()
+    for (const label of ['My Books', 'Today', 'My armor']) {
+      expect(screen.getByRole('button', { name: label })).toBeInTheDocument()
+    }
   })
 })
 

@@ -80,6 +80,8 @@ describe('finite visible entrance', () => {
     for (const leg of screen.getAllByTestId('hero-leg')) {
       expect(getComputedStyle(leg).animation).toContain('200ms linear 6')
     }
+    const legs = screen.getAllByTestId('hero-leg')
+    expect(getComputedStyle(legs[0]).animation).not.toBe(getComputedStyle(legs[1]).animation)
     act(() => vi.advanceTimersByTime(HERO_MOTION_MS.enter))
     expect(stage()).toHaveAttribute('data-hero-phase', 'waving')
     expect(getComputedStyle(screen.getByTestId('hero-wave-arm')).animation).toContain('350ms ease-in-out 2')

@@ -116,12 +116,12 @@ export default function StonebridgeHero({ appearance, waving, walking = false }:
         {[-1, 1].map((side) => (
           <Box component="g" key={side} data-testid="hero-leg" sx={{
             transformOrigin: `${side * 2.5}px -13px`,
-            '@keyframes stonebridgeHeroStep': {
+            [`@keyframes stonebridgeHeroStep${side < 0 ? 'Left' : 'Right'}`]: {
               '0%, 100%': { transform: 'rotate(0deg)' },
               '25%': { transform: `rotate(${side * 12}deg)` },
               '75%': { transform: `rotate(${-side * 12}deg)` },
             },
-            animation: walking ? `stonebridgeHeroStep ${HERO_MOTION_MS.enter / 6}ms linear 6` : 'none',
+            animation: walking ? `stonebridgeHeroStep${side < 0 ? 'Left' : 'Right'} ${HERO_MOTION_MS.enter / 6}ms linear 6` : 'none',
             '@media (prefers-reduced-motion: reduce)': { animation: 'none' },
           }}>
             <rect x={side < 0 ? -4.2 : 0.8} y={-13} width={3.4} height={13} fill={appearance.pants} />
