@@ -1,4 +1,4 @@
-import { useRef, useState, useSyncExternalStore } from 'react'
+import { useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -8,9 +8,16 @@ import Page from '../../../components/Page'
 import { useFamilyId } from '../../../core/auth/useAuth'
 import { useActiveChild } from '../../../core/hooks/useActiveChild'
 import { getChildAgeGroup } from '../../../core/profile/childIdentity'
-import { useAvatarProfile } from '../useAvatarProfile'
+import { useProfile } from '../../../core/profile/useProfile'
 import BannerRaiseCelebration from './BannerRaiseCelebration'
+import StonebridgeQuickLinks from './StonebridgeQuickLinks'
 import StonebridgeVillage from './StonebridgeVillage'
+import { buildHeroAppearance } from './heroAppearance'
+import {
+  TownHeroFailure,
+  TownHeroPhase,
+  useTownHeroProfile,
+} from './useTownHeroProfile'
 import { useStonebridgeProgress } from './useStonebridgeProgress'
 import { requestForgeFocus, FORGE_HOST_PATH } from './forgeFocusHandoff'
 import {
@@ -73,17 +80,41 @@ import {
  * loading. See the `!childId` branch, which asks about failure first because a
  * failed read deliberately keeps `isLoading` true.
  *
- * ── The ordinary doors ───────────────────────────────────────────────────────
+ * ── The ordinary doors, and where they are compact ───────────────────────────
  *
- * My Books, Today and the armor are offered as plain navigation at the foot of
- * the page — in every state of it, including a read that is loading or has
- * failed, which is where a child could otherwise be stuck on a page with nothing
- * on it. That fallback says the village did not load; it never says the child
- * has no village, and it never says a village is empty.
+ * My Books, Today and the armor are the same three destinations they have always
+ * been, reachable from this page in every state of it. What changed is their
+ * WEIGHT: on a healthy town they are one compact *Quick links* disclosure
+ * (`StonebridgeQuickLinks`), because the same three actions are already in the
+ * shell's navigation and three standing buttons pushed the village itself down
+ * the screen. The owner's clarification named these three and not the left menu.
+ *
+ * When there is **no village on screen** — loading, failed, retrying, or no
+ * child resolved — the three doors are rendered DIRECTLY instead, with no
+ * disclosure to find first. That is the state in which a child needs an obvious
+ * way out, so it is the state that keeps the plain strip. Same routes, same
+ * Forge epoch hand-off, no new Library origin for ordinary Books.
+ *
+ * ── The child's own hero, standing in their village ──────────────────────────
+ *
+ * The town shows the child's SAVED character on the map: a flat, 2D paper-doll
+ * of the saved record (`heroAppearance` / `StonebridgeHero`), never the hub's
+ * 3D renderer, which this route still does not import. It comes from this
+ * page's own profile read — `useTownHeroProfile`, which is this town's and is
+ * bound to the family, the resolved child, the identity epoch and the raw scope
+ * so a sibling's document can never be drawn here — and NOT from the shared
+ * `useAvatarProfile`, which retains the last profile across a new scope and
+ * normalises a missing or failed read into a default-looking profile. A
+ * loading, missing, failed or mismatched read means **no hero**, said honestly,
+ * with a read-only retry; the village, its places and the doors never wait for
+ * it. The one `themeStyle` the page already read for its cosmetic look comes
+ * from the same result, so there is one profile read on this route rather than
+ * two.
  */
 export default function StonebridgePage() {
   const navigate = useNavigate()
   const familyId = useFamilyId()
+  const { profile } = useProfile()
   /**
    * The child, and the STATE of the read that resolves them.
    *
@@ -103,17 +134,55 @@ export default function StonebridgePage() {
   const childId = activeChild?.id ?? ''
 
   /**
+   * This town's OWN avatar-profile read — the theme AND the hero, from one
+   * subscription.
+   *
+   * `useTownHeroProfile` replaces the shared `useAvatarProfile` on this route
+   * only; every other caller of the shared hook is untouched. The reason is in
+   * that module's header: the shared hook keeps the previous child's profile
+   * across a new scope until the new snapshot lands, and turns a missing or
+   * failed read into a default-looking profile — tolerable for a colour, and
+   * not something a child's own face may be built from.
+   *
+   * `ready` is this page's readiness and nothing new: a child must be resolved
+   * and the children read must not be unsettled or failed. While it is false
+   * the read is idle — no subscription, and nothing on screen.
+   */
+  const heroRead = useTownHeroProfile({
+    familyId,
+    childId,
+    identityKey: profile ?? '',
+    ready: Boolean(childId) && profile !== null && !childrenLoading && !childrenLoadFailed,
+  })
+  /** Only ever a document proven to be this child's, from a settled read. */
+  const heroDocument = heroRead.phase === TownHeroPhase.Ready ? heroRead.document : null
+
+  /**
    * The retro look, or the softer one — cosmetic and nothing else.
    *
    * The same one-liner the Hero Hub uses, from the avatar profile's saved
    * `themeStyle` with the child's age group as the seed, so the town looks like
    * the rest of that child's hub. It is read-only and gates nothing: every
    * destination, control and capability on this page is identical either way.
+   * A read that has not settled falls back to the age-group default exactly as
+   * it did when the profile was `null`.
    */
-  const avatarProfile = useAvatarProfile(familyId, childId || undefined)
   const isLincoln =
-    (avatarProfile?.themeStyle ??
+    (heroDocument?.profile.themeStyle ??
       (getChildAgeGroup(activeChild) === 'older' ? 'minecraft' : 'platformer')) === 'minecraft'
+
+  /**
+   * The saved record as validated appearance — recomputed only when the
+   * DOCUMENT changes, never per render.
+   *
+   * Nothing here fetches an image, reads a photo or texture URL, generates
+   * anything, or calls `getDailyArmorSession` (which may create or reset a
+   * session). It reads what the hub's equip flow has already saved.
+   */
+  const heroAppearance = useMemo(
+    () => (heroDocument ? buildHeroAppearance({ ...heroDocument, fallbackAgeGroup: getChildAgeGroup(activeChild) }) : null),
+    [heroDocument, activeChild],
+  )
 
   const {
     mission,
@@ -230,40 +299,52 @@ export default function StonebridgePage() {
   /**
    * The ordinary ways on, which are ordinary navigation and nothing else.
    *
-   * Rendered in every state of this page, including a failed read: a child who
-   * arrives at a village that will not load must still be able to reach their
-   * books and their day. None of these creates a journey, writes anything or
-   * changes a capability — the shelf, Today and the hub each keep their own
-   * existing rules about what is there when the child arrives.
+   * ONE definition per destination, used by both the compact disclosure and the
+   * direct fallback strip — so there is exactly one place that decides where
+   * Books, Today and the armor are, whichever form the page is showing. None of
+   * these creates a journey, writes anything or changes a capability: the shelf,
+   * Today and the hub each keep their own existing rules about what is there
+   * when the child arrives. In particular the Books link is plain navigation
+   * with **no** library-return origin — a way back belongs to a journey that
+   * started at a village location, not to an ordinary trip to the shelf.
+   */
+  const townLinks = [
+    { label: 'My Books', onSelect: () => navigate(STONEBRIDGE_BOOKS_PATH) },
+    { label: 'Today', onSelect: () => navigate(STONEBRIDGE_TODAY_PATH) },
+    {
+      label: 'My armor',
+      onSelect: () => {
+        // The armor lives on the hub, with the customizer and the ceremonies.
+        // There is no `/forge` route and no second gallery: this leaves a
+        // scoped, epoch-stamped request and the hub performs the same
+        // reduced-motion scroll-and-focus its own Forge visit does, once its
+        // DOM is there. A stale request is refused rather than served.
+        //
+        // Read HERE because here IS the tap: this door is a plain control on
+        // the page — in the disclosure or in the fallback strip, both of which
+        // are on the page itself with no view closing between the press and the
+        // navigation. The village-mediated door below is the one that must be
+        // handed the tap's reading instead of taking its own.
+        requestForgeFocus({ familyId, childId, epoch: getLibraryIdentityEpoch() })
+        navigate(FORGE_HOST_PATH)
+      },
+    },
+  ] as const
+
+  /**
+   * The doors as a plain strip — the shape every state WITHOUT a village uses.
+   *
+   * A child who arrives at a village that will not load must still be able to
+   * reach their books and their day, and must not have to open something first
+   * to find out that they can.
    */
   const doors = (
     <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5 }}>
-      <Button variant="outlined" sx={doorSx} onClick={() => navigate(STONEBRIDGE_BOOKS_PATH)}>
-        My Books
-      </Button>
-      <Button variant="outlined" sx={doorSx} onClick={() => navigate(STONEBRIDGE_TODAY_PATH)}>
-        Today
-      </Button>
-      <Button
-        variant="outlined"
-        sx={doorSx}
-        onClick={() => {
-          // The armor lives on the hub, with the customizer and the ceremonies.
-          // There is no `/forge` route and no second gallery: this leaves a
-          // scoped, epoch-stamped request and the hub performs the same
-          // reduced-motion scroll-and-focus its own Forge visit does, once its
-          // DOM is there. A stale request is refused rather than served.
-          //
-          // Read HERE because here IS the tap: this door is a plain control on
-          // the page with no view closing between the press and the navigation.
-          // The village-mediated door below is the one that must be handed the
-          // tap's reading instead of taking its own.
-          requestForgeFocus({ familyId, childId, epoch: getLibraryIdentityEpoch() })
-          navigate(FORGE_HOST_PATH)
-        }}
-      >
-        My armor
-      </Button>
+      {townLinks.map((link) => (
+        <Button key={link.label} variant="outlined" sx={doorSx} onClick={link.onSelect}>
+          {link.label}
+        </Button>
+      ))}
     </Box>
   )
 
@@ -360,6 +441,33 @@ export default function StonebridgePage() {
     })
   }
 
+  /**
+   * Is this a healthy town — a current read, nothing being recovered?
+   *
+   * Two things hang off it, for the same reason. The quick links are compact
+   * only here, and the plain strip comes back for a village that is stale,
+   * failed, retrying or unsaved — those are the states in which the obvious way
+   * to useful work matters more than the saved space. And the hero is shown only
+   * here: a decorative character standing in a village whose numbers are not
+   * fresh adds a claim to a screen that is already apologising.
+   */
+  const villageHealthy = profile !== null && !childrenLoading && !childrenLoadFailed && !stale && !readError && !saveError && !retrying
+
+  /**
+   * The hero handed to the board, or nothing at all.
+   *
+   * Withdrawn — not merely stopped — whenever there is no settled saved hero for
+   * the child on screen: a loading, missing, failed or mismatched read, a
+   * village in recovery, or a banner-raise celebration on top of the map. The
+   * board applies its own activity gate on top of this (the places list, an open
+   * visit, a replay, an unsettled scope), and the stage applies the browser's
+   * (a hidden tab, a map scrolled out of view, a reduced-motion preference).
+   */
+  const hero =
+    heroAppearance && villageHealthy && !justCompletedMissionId
+      ? { appearance: heroAppearance, exposureKey: heroRead.exposureKey }
+      : null
+
   return (
     <Page>
       <Box
@@ -419,6 +527,10 @@ export default function StonebridgePage() {
             requestForgeFocus({ familyId, childId, epoch: observedEpoch })
             navigate(FORGE_HOST_PATH)
           }}
+          // The child's own saved hero, standing in their village. The board
+          // owns only whether the map is currently exposed; this page owns
+          // whether there is a hero to show at all.
+          hero={hero}
           focusMissionId={town.focusMissionId}
           // Consumed once the page's DOM has the board and the focus has landed:
           // the journey is over, and the next arrival — however it happens — is
@@ -430,7 +542,64 @@ export default function StonebridgePage() {
           }}
         />
       </Box>
-      {doors}
+
+      {/* ── The hero read, said honestly ────────────────────────────────
+          The village does not wait for this read and is not held by it, so the
+          only thing owed is the truth plus one read-only door. A mismatched
+          document is a different fact from a failed one and gets no retry: the
+          document names somebody else, and re-reading says the same thing. The
+          retry's own name is deliberately not *Try again* — the village has one
+          of those, and two buttons with one name is one button nobody can aim
+          at. Nothing here writes, creates or selects anything. */}
+      {(childrenLoading || childrenLoadFailed) && (
+        <Box sx={{ mt: 1 }}>
+          <Typography role={childrenLoadFailed ? 'alert' : undefined} sx={{ fontSize: '14px' }}>
+            {childrenLoadFailed ? "Couldn't confirm the selected child." : 'Checking the selected child…'}
+          </Typography>
+          {childrenLoadFailed && retryLoad && (
+            <Button variant="outlined" sx={doorSx} onClick={retryLoad}>Reload children</Button>
+          )}
+        </Box>
+      )}
+      {(heroRead.phase === TownHeroPhase.Loading || heroRead.phase === TownHeroPhase.Missing ||
+        (heroAppearance && (!heroDocument?.hasSavedFeatures || heroAppearance.defaulted.length > 0))) && (
+        <Typography sx={{ mt: 1, fontSize: '14px', lineHeight: 1.45 }}>
+          {heroRead.phase === TownHeroPhase.Loading
+            ? 'Loading your saved hero…'
+            : heroRead.phase === TownHeroPhase.Missing
+              ? 'No saved hero yet. You can make one in My armor.'
+              : 'Your saved hero uses some shared appearance defaults in this simplified 2D view.'}
+        </Typography>
+      )}
+      {heroRead.phase === TownHeroPhase.Error && (
+        <Box sx={{ mt: 1 }}>
+          <Typography role="alert" sx={{ fontSize: '14px', lineHeight: 1.45 }}>
+            {heroRead.failure === TownHeroFailure.Mismatch
+              ? 'That hero is not yours.'
+              : "Couldn't load your hero."}
+          </Typography>
+          {heroRead.failure === TownHeroFailure.Read && (
+            <Button
+              variant="outlined"
+              sx={doorSx}
+              disabled={heroRead.retrying}
+              onClick={heroRead.retry}
+            >
+              Show my hero
+            </Button>
+          )}
+        </Box>
+      )}
+
+      {/* ── The ordinary ways on ────────────────────────────────────────
+          Compact on a healthy town — one disclosure, closed to begin with —
+          and the plain three-door strip whenever the village itself is
+          loading, stale, failed or unsaved. Same routes either way. */}
+      {villageHealthy ? (
+        <StonebridgeQuickLinks links={townLinks} isLincoln={isLincoln} scopeKey={`${scopeKey}|${profile}|${heroRead.exposureKey}`} />
+      ) : (
+        doors
+      )}
 
       {/* The banner-raise, exactly as the Hero Hub card plays it: this page owns
           the progress read, so a completion observed here is a completion the
