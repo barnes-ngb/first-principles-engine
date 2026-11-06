@@ -3,13 +3,19 @@ import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 
 import BookshelfPage from '../../books/BookshelfPage'
+import MyAvatarPage from '../MyAvatarPage'
+import StonebridgePage from './StonebridgePage'
+import TodayPage from '../../today/TodayPage'
 import { routes } from '../../../app/router'
 import { VillageLocationState } from './computeStonebridgeProgress'
 import { STONEBRIDGE_MISSIONS, getMission } from './missions'
+import { FORGE_HOST_PATH } from './forgeFocusHandoff'
 import {
   FORGE_GALLERY_ANCHOR_ID,
   LIBRARY_MISSION_ID,
   STONEBRIDGE_BOOKS_PATH,
+  STONEBRIDGE_TODAY_PATH,
+  STONEBRIDGE_TOWN_PATH,
   focusForgeGallery,
   offersBooksDoor,
 } from './stonebridgeDestinations'
@@ -38,6 +44,21 @@ import {
  */
 
 const read = (rel: string) => readFileSync(resolve(process.cwd(), rel), 'utf8')
+
+/**
+ * The same file with its comments removed — the CODE, for any claim about what a
+ * module imports, renders or calls.
+ *
+ * A structural claim asked of the raw text is answered by the prose that
+ * explains the structure, which is how the first draft of the block below
+ * reported "the page renders the mission card" against the sentence saying it
+ * deliberately does not.
+ */
+const readCode = (rel: string) =>
+  read(rel)
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '')
+
 const AVATAR_PAGE = 'src/features/avatar/MyAvatarPage.tsx'
 
 interface RouteNode {
@@ -103,6 +124,121 @@ describe('Open My Books lands on the app’s real bookshelf', () => {
     // could navigate without the note or leave a note without navigating.
     expect(source.match(/STONEBRIDGE_BOOKS_PATH/g)).toHaveLength(2) // the import + the one call
     expect(source.match(/beginLibraryReturnFlow/g)).toHaveLength(2)
+  })
+})
+
+describe('the canonical town route is the page the app really mounts', () => {
+  /**
+   * Read from the app's own table for the same reason the shelf is: "the nav
+   * entry opens the village" is a claim about which component the app mounts for
+   * `/stonebridge`, and a test that mounted its own route with a stub would pass
+   * against a path the app does not have.
+   */
+  it('mounts StonebridgePage at the canonical path', () => {
+    const route = findRoute(routes as readonly RouteNode[], STONEBRIDGE_TOWN_PATH)
+    expect(route, `${STONEBRIDGE_TOWN_PATH} is not in the app's route table`).toBeDefined()
+    const element = route?.element as { type?: unknown } | undefined
+    expect(element?.type).toBe(StonebridgePage)
+  })
+
+  it('is not behind the parent-only guard — a kid reaching the village is the point', () => {
+    const parentOnly = (routes as readonly RouteNode[])
+      .flatMap((node) => node.children ?? [])
+      .filter((node) => !node.path && node.children)
+      .flatMap((node) => node.children ?? [])
+      .map((node) => node.path)
+    expect(parentOnly).not.toContain(STONEBRIDGE_TOWN_PATH)
+  })
+
+  it('leaves the legacy hub, its aliases and Today exactly where they were', () => {
+    // The additive claim, asserted rather than remembered: the new page is a
+    // second door. `/avatar` still mounts the real hub (armor, customizer,
+    // ceremonies and its own village board), `/hero` and `/armor` still land
+    // there, and Today is untouched.
+    const hub = findRoute(routes as readonly RouteNode[], FORGE_HOST_PATH)
+    expect((hub?.element as { type?: unknown } | undefined)?.type).toBe(MyAvatarPage)
+    for (const alias of ['/hero', '/armor']) {
+      const node = findRoute(routes as readonly RouteNode[], alias)
+      expect(node, `${alias} is no longer routed`).toBeDefined()
+      expect(
+        (node?.element as { props?: { to?: string } } | undefined)?.props?.to,
+        `${alias} no longer redirects to the hub`,
+      ).toBe(FORGE_HOST_PATH)
+    }
+    const today = findRoute(routes as readonly RouteNode[], STONEBRIDGE_TODAY_PATH)
+    expect((today?.element as { type?: unknown } | undefined)?.type).toBe(TodayPage)
+  })
+
+  it('and the page’s own doors are the paths it names', () => {
+    // One definition for each destination the town page offers, so the page and
+    // the route table cannot drift.
+    const source = read('src/features/avatar/stonebridge/StonebridgePage.tsx')
+    expect(source).toContain('navigate(STONEBRIDGE_BOOKS_PATH)')
+    expect(source).toContain('navigate(STONEBRIDGE_TODAY_PATH)')
+    expect(source).toContain('navigate(FORGE_HOST_PATH)')
+    // And it never selects a child.
+    expect(source).not.toMatch(/setActiveChild/)
+  })
+
+  /**
+   * "One progress owner, one gallery, no 3D" — asked of what the module USES,
+   * not of what it says.
+   *
+   * The first version of this block matched the raw file for
+   * `StonebridgeMissionCard` and failed on the sentence in the page's own header
+   * explaining that it deliberately does not render one — a guard that reads
+   * prose reports a defect for an explanation, and the fix for that is never to
+   * delete the explanation. So the oracle is the module's import list and its
+   * rendered elements, taken from the source with comments removed: what a file
+   * imports and what it puts on screen is what it does.
+   *
+   * The behavioural half is where it belongs — `stonebridgeTown.route.test.tsx`
+   * renders the real page and asserts the card's own control (*🏰 Open
+   * Stonebridge*) is nowhere on it.
+   */
+  describe('what the town page actually imports and renders', () => {
+    const PAGE = 'src/features/avatar/stonebridge/StonebridgePage.tsx'
+
+    /** Module specifiers this file imports from. */
+    const imports = (code: string): string[] =>
+      [...code.matchAll(/\bfrom\s+['"]([^'"]+)['"]/g)].map((m) => m[1])
+
+    /** Component names this file renders as JSX. */
+    const rendered = (code: string): string[] =>
+      [...code.matchAll(/<([A-Z][A-Za-z0-9_]*)/g)].map((m) => m[1])
+
+    it('does not import or render the mission card — one hook owner per journey', () => {
+      const code = readCode(PAGE)
+      // The page owns the read itself…
+      expect(imports(code)).toContain('./useStonebridgeProgress')
+      expect(code).toContain('useStonebridgeProgress(familyId, childId)')
+      // …and the card, which would read it a second time, is neither imported
+      // nor rendered.
+      expect(imports(code).filter((s) => /StonebridgeMissionCard/.test(s))).toEqual([])
+      expect(rendered(code)).not.toContain('StonebridgeMissionCard')
+      // It renders the shared board directly instead.
+      expect(rendered(code)).toContain('StonebridgeVillage')
+    })
+
+    it('does not import or render the hub’s 3D character or its gallery', () => {
+      const code = readCode(PAGE)
+      for (const forbidden of ['VoxelCharacter', 'AvatarCharacterDisplay', 'ArmorPieceGallery']) {
+        expect(
+          rendered(code),
+          `the town page renders ${forbidden}`,
+        ).not.toContain(forbidden)
+        expect(
+          imports(code).filter((s) => s.includes(forbidden)),
+          `the town page imports ${forbidden}`,
+        ).toEqual([])
+      }
+      expect(imports(code)).not.toContain('three')
+      // The anchor id belongs to the hub's one gallery; the page points at the
+      // hub's PATH and never at a copy of its anchor.
+      expect(code).not.toContain('FORGE_GALLERY_ANCHOR_ID')
+      // No invented armor route either.
+      expect(code).not.toMatch(/['"]\/forge['"]/)
+    })
   })
 })
 

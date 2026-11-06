@@ -439,6 +439,32 @@ each move by one when the command is next run**, and `census problems` should st
 exists. The enforcement does not depend on this prose — the invariant test compares
 the derived candidate set against the table, not against these blocks.
 
+### Not re-derived 2026-11-05 (the direct Stonebridge entrance)
+
+**One candidate added: `src/features/avatar/stonebridge/StonebridgePage.tsx`** — the canonical
+`/stonebridge` town page, which is the same already-released village the Hero Hub's board shows,
+rendered as a page. Hook arm: it reads the shell's active child, holds `useState`, and names `childId`
+in argument position where it begins a Library journey. Classified **SAFE** in §5 with the lines that
+make it true, on the `StonebridgeMissionCard` reading — the view it holds is stamped
+`${familyId}_${childId}` and dropped **during render**, and it is not a writer.
+
+**The last Library phase missed `AppShell.tsx`'s classification and that is not repeated here**: the
+page is derived by the existing heuristic exactly as written, and the row below is the factual answer
+rather than a narrowing of the rule. Its new siblings are **not** candidates and that is checked
+rather than assumed: `forgeFocusHandoff.ts` holds its one request in module memory and exports a route
+watch that sets no state (no `useState`, so the first predicate is never met — the identity boundary it
+enforces is the shared epoch, not a record of its own); `libraryReturnFlow.ts` is module memory for the
+same reason; `villageSurface.ts` is a pure cosmetic lookup with no state, no child and no write; and
+`StonebridgeVillage.tsx` — which this slice gives a page presentation — still declares no `childId`
+prop and still performs no write, so the heuristic derives the same answer for it as before. No row is
+re-classified and none is removed.
+
+The run that built it had **no shell authorisation**, so `npm run census:child-switch` was not run and
+no number here was re-derived. Per `CLAUDE.md`'s derived-numbers rule the qualifier is written instead
+of the figure: **one row added, none removed, so `candidates`, `census rows` and the `SAFE` tally each
+move by one when the command is next run**, and `census problems` should stay 0 because the row
+exists.
+
 ## 5. The registry
 
 | Surface (file) | Child-scoped state it holds | What it writes, and to which collection | Reachable by a switch today? | Verdict | Severity |
@@ -456,6 +482,7 @@ the derived candidate set against the table, not against these blocks.
 | `src/features/avatar/AvatarPhotoUpload.tsx` | a staged photo preview awaiting "extract features" | `avatarProfiles/{childId}` + one paid `extractFeatures` call against the art quota | Selector (Hero Hub's own child chips) | **RESET** — the staged photo survived the switch while `handlePhotoTransform` read the live `childId` prop, so one boy's face seeded his brother's `characterFeatures` and spent his art quota doing it. The preview is now dropped during render through `avatarChildSwitch.stagedPhotoSwitchNotice`, and the notice says the budget was **not** spent — the one fact the screen cannot show. A transform already in flight needed no rule: it is a `useCallback` over `[familyId, childId, …]`, so it carries its child in its own closure. Fixed by FIX-232 (UX-331) | — |
 | `src/features/avatar/MyAvatarPage.tsx` | tuner state (`localProportions`, `heroAnimationTuning`, `armorDebugValues`) and a captured `screenshotData` | `avatarProfiles`, `dailyArmorSessions`, `artifacts`, `xpLedger` (via `addXpEvent`) | Selector (its own child chips, line 1361) | **RESET** — `screenshotData` was the half that crossed a rail: `saveToPortfolio` stamps an `artifacts` document with the live `childId` and the live child's **name** while the PNG is the previous boy's character. Cleared during render with the tuner and the two debug overlays; `localProportions` is left to the profile listener, which already re-seeds it, because a second writer there would race the first. `xpLedger` is untouched — `addXpEvent` is still the same event, the same **5** and the same dedup key, pinned with a positive control (`DOC-25`). Fixed by FIX-232 (UX-332) | — |
 | `src/features/avatar/stonebridge/StonebridgeMissionCard.tsx` | the open village board, and through it the open location visit and the replaying thank-you | nothing — every write belongs to `useStonebridgeProgress` | Selector (Hero Hub) | **SAFE** — it now holds a child-scoped view (`AV-02` gave the board visits, a replay and two destinations), but it holds nothing ACROSS a switch: the view is stamped `${familyId}_${childId}` and dropped **during render** on a change, so the board, the open location and the replaying thank-you all close in the same frame, a destination tap from the view that was replaced is refused rather than performed for the brother now on screen, and coming back opens a board with nothing already open on it. It still performs no write, and nothing earned is lost — there is no draft to mourn, only a view, so there is nothing to announce | — |
+| `src/features/avatar/stonebridge/StonebridgePage.tsx` | the focus a waiting Library return asks for, and which journey generation it answered (`town`) | nothing — every write belongs to `useStonebridgeProgress`, which this page calls once and does not change | Selector (shell child chip), from the nav's Stonebridge entry | **SAFE** — it holds a child-scoped view and holds nothing ACROSS a switch: `town` is stamped `${familyId}_${childId}` and dropped **during render**, so a pending return focus, the open location visit and the replaying thank-you all go in the same frame, and a Books or armor door tapped in the view that was replaced is refused on arrival rather than performed for the brother now on screen (the epoch check in `StonebridgeVillage`). It reads the selected child and never sets one, and nothing earned is lost — there is no draft to mourn, only a view, so there is nothing to announce | — |
 | `src/features/books/BookEditorPage.tsx` | the open book's pages, images and finish-dialog draft | `books/{bookId}`, `stickerLibrary` | Shell only (Books has no selector) | **SAFE** — every write is scoped to the **book** being edited, which carries its own `childId`; the one `stickerLibrary` write is family-scoped | — |
 | `src/features/books/BookGenerateChat.tsx` | chat composer text | delegated to `useBookGenerateChat` | Shell only | **SAFE** — `useBookGenerateChat` persists a draft book as soon as a story exists and every later save keeps that stored `childId`; before that there is no document to mis-file | — |
 | `src/features/books/BookReaderPage.tsx` | page index, reading timer, words encountered | `hours` + `artifacts`, both stamped `book.childId` | Shell only | **SAFE** — the reader's writes read `book.childId`, the document's own field, not the header | — |

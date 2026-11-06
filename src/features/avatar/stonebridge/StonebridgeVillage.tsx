@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Box from '@mui/material/Box'
 import Dialog from '@mui/material/Dialog'
 import IconButton from '@mui/material/IconButton'
@@ -18,22 +18,51 @@ import {
   type MissionComputation,
 } from './computeStonebridgeProgress'
 import type { StonebridgeDestinations } from './stonebridgeDestinations'
+import { villageSurface } from './villageSurface'
 import { kidPalette } from '../../../app/tokens'
+
+/**
+ * How the board is shown — the same board either way.
+ *
+ * `modal` is the legacy Hero-Hub presentation: a `fullScreen` Dialog over the
+ * mission card, with Escape, a backdrop, a focus trap and a close control.
+ * `page` is the canonical `/stonebridge` town page: the identical body, rendered
+ * in the route's own DOM, with no dialog to open, dismiss or escape — so there
+ * is nothing to close and no `onEntered`/`onExited` to wait for.
+ *
+ * Only the OUTER frame differs. The location visit and the replayed thank-you
+ * are real modals in both, and every focus hand-off still happens on a view's
+ * own `onExited` rather than on the tap (see the component header).
+ */
+export type StonebridgeVillagePresentation = 'modal' | 'page'
 
 interface StonebridgeVillageProps extends StonebridgeRecoveryState, StonebridgeDestinations {
   open: boolean
-  /** Close the board. */
+  /** Modal over the Hero Hub card, or the canonical town page. */
+  presentation?: StonebridgeVillagePresentation
+  /**
+   * Close the board.
+   *
+   * Never called in `page` presentation: a page is not dismissible, so it
+   * renders no close control and a departure performs on the location visit's
+   * exit instead of on the board's.
+   */
   onClose: () => void
   /**
-   * The board has finished closing and nobody is going anywhere: put the focus
-   * back on the control that opened it.
+   * Nobody is going anywhere: put the focus back where the caller keeps it.
    *
-   * Separate from {@link onClose}, and called from the board's own exit, because
-   * **a focus call made during the tap is taken straight back** — the dialog's
-   * focus trap is still mounted and enabled until React has committed the close,
-   * and it pulls any outside focus back inside. It is also not called at all
-   * when the board is closing on its way to a destination, which is the other
-   * half of "one thing moves the focus at a time".
+   * In `modal` presentation that is the control that opened the board, and it
+   * is separate from {@link onClose} and called from the board's own exit,
+   * because **a focus call made during the tap is taken straight back** — the
+   * dialog's focus trap is still mounted and enabled until React has committed
+   * the close, and it pulls any outside focus back inside. It is also not called
+   * at all when the board is closing on its way to a destination, which is the
+   * other half of "one thing moves the focus at a time".
+   *
+   * In `page` presentation nothing closes, so it is called from the refusal path
+   * only — and the caller points it at something on the page (its own heading),
+   * which is the page's equivalent of handing the keyboard back rather than
+   * leaving it on `document.body`.
    */
   onReturnFocus?: () => void
   isLincoln: boolean
@@ -55,7 +84,7 @@ interface StonebridgeVillageProps extends StonebridgeRecoveryState, StonebridgeD
   /** Derived counters for the active mission (null if every location is repaired). */
   active: MissionComputation | null
   /**
-   * A location tile to put the focus on once the board has finished opening.
+   * A location tile to put the focus on once the board is actually there.
    *
    * Set only when the board is being opened to serve a return from My Books:
    * the child asked to come back to a place, so the focus belongs on that place
@@ -68,9 +97,12 @@ interface StonebridgeVillageProps extends StonebridgeRecoveryState, StonebridgeD
   /**
    * The focus hand-off above has happened (or had no tile to land on).
    *
-   * Called once, from the board's own `onEntered`, so the request is consumed
-   * exactly once however it turned out — a tile that is not there must not
-   * leave a request behind to fire at the next board.
+   * Called once, so the request is consumed exactly once however it turned out —
+   * a tile that is not there must not leave a request behind to fire at the next
+   * board. In `modal` presentation the moment is the dialog's own `onEntered`;
+   * in `page` presentation there is no such event and waiting for one would hang
+   * the request forever, so it is the first commit in which the page's real DOM
+   * holds this child's board.
    */
   onFocusServed?: () => void
 }
@@ -84,12 +116,13 @@ type PendingLeave = {
   /**
    * The observed identity epoch at the moment of the TAP.
    *
-   * The scope string alone cannot answer this boundary: the board takes time to
-   * close, the journey is created only once it has, and an `A → B → A` inside
-   * that window leaves `scopeKey` reading `A` again with the shelf underneath
-   * having re-read for someone else and back. There is no flow yet for the
-   * store subscription to cancel, so the tap carries a monotonic token instead
-   * and the departure is refused if it moved.
+   * The scope string alone cannot answer this boundary: the view takes time to
+   * close, whatever the departure creates is created only once it has, and an
+   * `A → B → A` inside that window leaves `scopeKey` reading `A` again with the
+   * reads underneath having gone to someone else and back. There is nothing yet
+   * for a store subscription to cancel, so the tap carries a monotonic token
+   * instead and the departure is refused if it moved — for BOTH destinations,
+   * and the token is then handed to the host rather than re-read there.
    */
   identityEpoch: number
 }
@@ -113,7 +146,28 @@ interface VillageView {
 }
 
 /**
- * Full-screen Stonebridge village board, opened from the Hero-Hub mission card.
+ * The Stonebridge village board — the one board, shown two ways.
+ *
+ * ── Two presentations, one village ───────────────────────────────────────────
+ *
+ * `modal` (the original) is the full-screen Dialog opened from the Hero-Hub
+ * mission card. `page` is the canonical `/stonebridge` town page, which renders
+ * the identical body in the route's own DOM: the town and every reachable action
+ * are there on arrival, with no second *Open Stonebridge* to find and no 3D
+ * character on the page.
+ *
+ * The body is one value (`boardBody`) and the frame is the only difference, so
+ * there is no second village to keep in step — and no second progress owner
+ * either: this component reads nothing, and whichever host renders it is the one
+ * that called `useStonebridgeProgress`.
+ *
+ * What the page does NOT get is the dialog's machinery, because a page has none:
+ * no focus trap, no backdrop, no Escape, no close control, no `onEntered` and no
+ * `onExited`. So the two moments that waited on the board's transitions are
+ * moved rather than dropped — a departure performs on the LOCATION VISIT's exit
+ * (the last modal transition in play on a page), and a return's focus hand-off
+ * runs on the first commit in which the page's real DOM holds this child's
+ * board. The modal path is untouched on both.
  *
  * Shows every Bible location with state derived read-only from progress:
  *  • Repaired → repaired structure + raised banner; the visit replays that character's thank-you.
@@ -172,6 +226,7 @@ interface VillageView {
  */
 export default function StonebridgeVillage({
   open,
+  presentation = 'modal',
   onClose,
   onReturnFocus,
   isLincoln,
@@ -209,6 +264,9 @@ export default function StonebridgeVillage({
     setView({ scopeKey, selected: null, shown: null, replay: null })
   }
   const live = view.scopeKey === scopeKey ? view : null
+  /** This board's state is the current child's — the page focus gate below. */
+  const scopeSettled = view.scopeKey === scopeKey
+  const isPage = presentation === 'page'
 
   /** Tiles, by mission id, so a closed visit can give the focus back. */
   const tileRefs = useRef<Map<string, HTMLElement | null>>(new Map())
@@ -220,6 +278,15 @@ export default function StonebridgeVillage({
   const pendingLeaveRef = useRef<PendingLeave | null>(null)
   /** The board was dismissed, so the focus goes back to its opener on exit. */
   const pendingDismissRef = useRef(false)
+  /**
+   * The return request this board has already served, in `page` presentation.
+   *
+   * The modal path cannot serve twice because its moment is one event. A page
+   * has no event, so the hand-off runs from an effect — and the latch is what
+   * makes "once per journey" structural rather than a consequence of the
+   * caller's state landing before the effect runs again.
+   */
+  const pageFocusServedRef = useRef<string | null>(null)
 
   const reduceMotion = useMediaQuery('(prefers-reduced-motion: reduce)')
 
@@ -227,6 +294,20 @@ export default function StonebridgeVillage({
   const titleFont = isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive'
   /** …and everything else is plain and at least 14px (12px for small print). */
   const bodyFont = isLincoln ? undefined : '"Fredoka", cursive'
+
+  /**
+   * The frame's background AND its foreground, from one definition.
+   *
+   * Most of the text below names no colour and inherits — the subtitle, *Your
+   * Village*, *Pick a place from the list.*, *Each Place*, every tile's
+   * condition and counter, the Banner Hall body, each banner's name. Inheriting
+   * meant inheriting the APP THEME's text colour onto a panel chosen by the
+   * CHILD's look, which is black on black for a parent's light theme over the
+   * retro board. `villageSurface` is where that pair is decided, for both looks
+   * and both presentations; nothing that already names a colour is touched.
+   */
+  const frame = villageSurface(isLincoln, 'board')
+
   const board = deriveVillageBoard(completedMissions, currentMissionId)
   const bannerCount = raisedBanners.length
   /**
@@ -268,6 +349,87 @@ export default function StonebridgeVillage({
     onClose()
   }
 
+  /**
+   * A departure was refused on arrival — so the focus has to land somewhere.
+   *
+   * The board (or the visit, on a page) is gone, `disableRestoreFocus` means MUI
+   * moved nothing on its way out, and the refusal paths below used to simply
+   * return: the keyboard was left on `document.body`, with the next Tab starting
+   * again at the top of the page. Refusing the navigation was right; stranding
+   * the focus was not.
+   *
+   * It goes to the caller's own anchor — the control that opened this board in
+   * the hub, the page's heading on the town page — exactly the element a plain
+   * dismissal gives it back to. That element belongs to whoever is on screen
+   * NOW: the host re-renders for the current child, so this is the current
+   * scope's anchor and never the old child's detached node (the caller checks it
+   * is still in the document before focusing it, because a scope change can
+   * re-render the host into a branch that has no anchor at all). Nothing else
+   * happens: no visit is reopened, no board is reopened, no child is changed and
+   * no journey is created — the only thing the refusal still owes is the focus.
+   */
+  const refuseLeave = () => {
+    onReturnFocus?.()
+  }
+
+  /**
+   * Perform the destination a view was closing on its way to.
+   *
+   * One definition, two moments: the board's own exit in `modal` presentation
+   * and the location visit's exit on a page (whichever of them is the LAST modal
+   * transition to finish, because until one is over its focus trap owns the
+   * focus and MUI still has the rest of the page `aria-hidden` — a
+   * scroll-and-focus run then is both taken back and invisible).
+   *
+   * ── The boundary both destinations are held to ─────────────────────────────
+   *
+   * The tap and the arrival are different moments, and BOTH checks are about the
+   * gap between them:
+   *
+   *   • the **scope** the view was rendered for must still be the scope on
+   *     screen — a tap from a view that has since been replaced sends nobody
+   *     anywhere;
+   *   • the **identity epoch observed at the tap** must not have moved. The
+   *     scope string alone cannot answer this: a raw `A → B → A` inside the
+   *     closing transition leaves `scopeKey` reading `A` again while the reads
+   *     underneath went to the brother and back.
+   *
+   * The epoch check used to be applied to the Books departure only, on the
+   * reasoning that the Forge "starts nothing". That was wrong for the canonical
+   * town page, whose armor door is a NAVIGATION carrying a scoped request — and
+   * it sampled a fresh epoch of its own after the close, so the moved identity
+   * was invisible to it and a non-reduced-motion `A → B → A` still reached
+   * `/avatar`. Both destinations are guarded here, at the one moment that knows
+   * what was tapped, and the tap's epoch is handed to the host so a host that
+   * has to carry the departure across a route stamps it with the TAP's reading
+   * rather than with a later one.
+   *
+   * A refusal moves nothing but the focus: no navigation, no request, no journey
+   * — `refuseLeave` hands the keyboard back to the caller's own connected anchor
+   * exactly as a dismissal does.
+   */
+  const performPendingLeave = () => {
+    const pending = pendingLeaveRef.current
+    pendingLeaveRef.current = null
+    if (!pending) return
+    // A tap from a view that has since been replaced sends nobody anywhere…
+    if (pending.scopeKey !== scopeKey) {
+      refuseLeave()
+      return
+    }
+    // …and neither does one whose identity moved while the view closed, even
+    // where the scope string has come back to what it was.
+    if (pending.identityEpoch !== getLibraryIdentityEpoch()) {
+      refuseLeave()
+      return
+    }
+    if (pending.destination === 'books') {
+      onOpenBooks?.(pending.missionId, pending.identityEpoch)
+      return
+    }
+    onVisitForge?.(pending.identityEpoch)
+  }
+
   const closeLocation = () => {
     if (!live) return
     // `shown` is kept so the dialog transitions out instead of vanishing; the
@@ -279,12 +441,16 @@ export default function StonebridgeVillage({
   /**
    * The visit has finished closing.
    *
-   * The nested dialog's transition completes BEFORE the board's (React runs a
-   * child's effects first, so its exit starts first), which is what lets the
-   * two hand-offs stay separate: this one returns the focus to the tile, and
-   * the board's own exit — below — is the only thing that performs a
-   * destination. When a destination is pending the tile is skipped entirely,
-   * because that tile is about to be unmounted with the board.
+   * In `modal` presentation the nested dialog's transition completes BEFORE the
+   * board's (React runs a child's effects first, so its exit starts first),
+   * which is what lets the two hand-offs stay separate: this one returns the
+   * focus to the tile, and the board's own exit — below — is the only thing that
+   * performs a destination. When a destination is pending the tile is skipped
+   * entirely, because that tile is about to be unmounted with the board.
+   *
+   * On a PAGE there is no board exit behind this one, so this is the last modal
+   * transition in play and the destination is performed here instead. Same rule,
+   * one moment later or earlier: never on the tap.
    */
   const handleLocationExited = () => {
     const tile = tileToFocusRef.current
@@ -292,7 +458,14 @@ export default function StonebridgeVillage({
     setView((prev) => (prev.scopeKey === scopeKey ? { ...prev, shown: null } : prev))
     // On the way somewhere real, the focus belongs at the destination and this
     // tile is about to be unmounted with the board.
-    if (pendingLeaveRef.current) return
+    if (pendingLeaveRef.current) {
+      // On a PAGE this visit was the only thing trapping the focus — there is no
+      // board transition behind it — so its exit is the last safe moment and the
+      // departure is performed here. In `modal` presentation nothing changes:
+      // the board's own exit is still the one place it happens.
+      if (isPage) performPendingLeave()
+      return
+    }
     if (tile) tileRefs.current.get(tile)?.focus()
   }
 
@@ -357,33 +530,14 @@ export default function StonebridgeVillage({
     pendingDismissRef.current = false
     tileToFocusRef.current = null
     setView({ ...live, selected: null, replay: null })
-    onClose()
+    // A page has nothing to close, so the visit's own exit is what performs the
+    // departure (`handleLocationExited`). The modal closes the board, as before.
+    if (!isPage) onClose()
   }
 
   /**
-   * A departure was refused on arrival — so the focus has to land somewhere.
-   *
-   * The board is gone, `disableRestoreFocus` means MUI moved nothing on its way
-   * out, and the refusal paths below used to simply return: the keyboard was
-   * left on `document.body`, with the next Tab starting again at the top of the
-   * page. Refusing the navigation was right; stranding the focus was not.
-   *
-   * It goes to the caller's opener — the control that opened this board, handed
-   * over as `onReturnFocus`, exactly the element a plain dismissal gives it
-   * back to. That element belongs to whoever is on screen NOW: the hub re-renders
-   * for the current child, so this is the current scope's opener and never the
-   * old child's detached node (the caller checks it is still in the document
-   * before focusing it, because a scope change can re-render the hub into a
-   * branch that has no opener at all). Nothing else happens: no visit is
-   * reopened, no board is reopened, no child is changed and no journey is
-   * created — the only thing the refusal still owes is the focus.
-   */
-  const refuseLeave = () => {
-    onReturnFocus?.()
-  }
-
-  /**
-   * The board has finished closing — the one place either hand-off happens.
+   * The board has finished closing — the one place either hand-off happens, in
+   * `modal` presentation. (A page never closes; see `handleLocationExited`.)
    *
    * A destination is performed here rather than on the tap because until the
    * transition is over the dialog still traps the focus and MUI still has the
@@ -391,28 +545,10 @@ export default function StonebridgeVillage({
    * taken back and invisible.
    */
   const handleBoardExited = () => {
-    const pending = pendingLeaveRef.current
     const dismissed = pendingDismissRef.current
-    pendingLeaveRef.current = null
     pendingDismissRef.current = false
-    if (pending) {
-      // A tap from a view that has since been replaced sends nobody anywhere.
-      if (pending.scopeKey !== scopeKey) {
-        refuseLeave()
-        return
-      }
-      if (pending.destination === 'books') {
-        // …and neither does one whose identity moved while the board closed,
-        // even where the scope string has come back to what it was. Applied to
-        // the Books departure, which is the one that creates a journey; the
-        // Forge keeps its existing behaviour exactly — it focuses a gallery on
-        // this page under the gallery's own rules and starts nothing.
-        if (pending.identityEpoch !== getLibraryIdentityEpoch()) {
-          refuseLeave()
-          return
-        }
-        onOpenBooks?.(pending.missionId, pending.identityEpoch)
-      } else onVisitForge?.()
+    if (pendingLeaveRef.current) {
+      performPendingLeave()
       return
     }
     if (dismissed) onReturnFocus?.()
@@ -420,9 +556,9 @@ export default function StonebridgeVillage({
 
   /**
    * The board has finished OPENING — the only safe moment to hand the focus to
-   * a tile, for the same reason every other hand-off in this file waits: until
-   * the transition is over the dialog's focus trap is still settling and MUI
-   * still owns where the focus lands.
+   * a tile in `modal` presentation, for the same reason every other hand-off in
+   * this file waits: until the transition is over the dialog's focus trap is
+   * still settling and MUI still owns where the focus lands.
    *
    * Only ever for a return from My Books, and only for the child the board
    * belongs to. The request is consumed either way: a mission id with no tile on
@@ -436,34 +572,79 @@ export default function StonebridgeVillage({
     onFocusServed?.()
   }
 
-  return (
+  /**
+   * A scope change under an open page, with a departure already asked for.
+   *
+   * On a page the location visit is unmounted OUTRIGHT by the render-phase reset
+   * — there is no `open → false` transition, so no `onExited` runs and the
+   * pending departure would sit in its ref with the focus left on
+   * `document.body`. It is dropped here instead, and the focus is handed back
+   * exactly as a refusal on arrival hands it back.
+   *
+   * Page-only on purpose: in `modal` presentation the board itself closes on a
+   * scope change and its own exit already refuses the departure, which is the
+   * one place that may move the focus — doing it here as well would focus into a
+   * dialog whose trap is still closing, and the call would simply be taken back.
+   */
+  useEffect(() => {
+    if (!isPage) return
+    const pending = pendingLeaveRef.current
+    if (!pending || pending.scopeKey === scopeKey) return
+    pendingLeaveRef.current = null
+    onReturnFocus?.()
+  }, [isPage, scopeKey, onReturnFocus])
+
+  /**
+   * The page's half of the return focus hand-off.
+   *
+   * A page has no `onEntered` to wait for, and waiting for one would hold a
+   * return request forever. The equivalent moment is the first COMMIT in which
+   * the real page DOM holds this child's board — which is what an effect is: it
+   * runs after the tiles are in the document, so `tileRefs` is populated and the
+   * node can genuinely take the focus. Everything else about the rule is the
+   * modal's:
+   *
+   *   • **only for the current child** — `scopeSettled` is the same render-phase
+   *     reset the board uses, so a request is never served against a board that
+   *     still belongs to the previous child;
+   *   • **only when there is a page to serve it** — the host renders this
+   *     component only once the village read has produced a board, so a failed
+   *     or unsettled read reaches no effect at all and the request waits for the
+   *     existing *Try again* rather than being thrown away or faked;
+   *   • **once, whatever the outcome** — an unknown place consumes the request
+   *     and leaves the focus where it was, exactly as the modal does, and the
+   *     latch means a re-render cannot serve the same journey twice.
+   */
+  useEffect(() => {
+    if (!isPage) return
+    if (!focusMissionId || !scopeSettled) return
+    const token = `${scopeKey}:${focusMissionId}`
+    if (pageFocusServedRef.current === token) return
+    pageFocusServedRef.current = token
+    tileRefs.current.get(focusMissionId)?.focus()
+    onFocusServed?.()
+  }, [isPage, focusMissionId, scopeSettled, scopeKey, onFocusServed])
+
+  /**
+   * The board itself — identical in both presentations.
+   *
+   * Extracted so the two frames below are the ONLY difference between a page and
+   * a modal. A page that re-implemented the body would be a second village to
+   * keep in step, which is the one thing this slice is not allowed to create.
+   */
+  const boardBody = (
     <>
-      <Dialog
-        open={open}
-        onClose={dismiss}
-        fullScreen
-        transitionDuration={reduceMotion ? 0 : undefined}
-        TransitionProps={{ onEntered: handleBoardEntered, onExited: handleBoardExited }}
-        // The focus hand-off is this component's job on every path (see the
-        // header), so MUI must not also move it.
-        disableRestoreFocus
-        slotProps={{
-          paper: {
-            // The board's own controls stay addressable apart from the card's
-            // identical ones underneath it.
-            'aria-label': 'Stonebridge Village',
-            sx: {
-              backgroundImage: 'none',
-              bgcolor: isLincoln ? 'rgba(6,10,16,0.97)' : 'rgba(255,247,252,0.98)',
-            },
-          },
-        }}
-      >
         <Box sx={{ maxWidth: 720, mx: 'auto', px: 2, pt: 2, pb: 6, width: '100%' }}>
           {/* Header */}
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, mb: 1.5 }}>
             <Box>
-              <Typography sx={{ fontFamily: titleFont, fontSize: isLincoln ? '14px' : '20px', fontWeight: 700 }}>
+              <Typography
+                // A page's own title is a heading; inside the dialog the
+                // accessible name is the paper's `aria-label` and this stays the
+                // paragraph it has always been.
+                component={isPage ? 'h1' : 'p'}
+                sx={{ fontFamily: titleFont, fontSize: isLincoln ? '14px' : '20px', fontWeight: 700 }}
+              >
                 🏰 Stonebridge Village
               </Typography>
               <Typography
@@ -476,20 +657,26 @@ export default function StonebridgeVillage({
                     : 'Read to repair your first location.'}
               </Typography>
             </Box>
-            <IconButton
-              onClick={dismiss}
-              aria-label="Close Stonebridge village"
-              sx={{
-                // A 44px target, not a 34px one.
-                minWidth: 44,
-                minHeight: 44,
-                fontFamily: titleFont,
-                fontSize: isLincoln ? '14px' : '18px',
-                color: isLincoln ? kidPalette.xpGreen : '#7a3f67',
-              }}
-            >
-              ✕
-            </IconButton>
+            {/* A page is not dismissible — there is nothing behind it to go
+                back to, and a ✕ that navigated somewhere would be a second
+                answer to "where does this page lead" on top of the host's own
+                controls. The modal keeps its close exactly as it was. */}
+            {!isPage && (
+              <IconButton
+                onClick={dismiss}
+                aria-label="Close Stonebridge village"
+                sx={{
+                  // A 44px target, not a 34px one.
+                  minWidth: 44,
+                  minHeight: 44,
+                  fontFamily: titleFont,
+                  fontSize: isLincoln ? '14px' : '18px',
+                  color: isLincoln ? kidPalette.xpGreen : '#7a3f67',
+                }}
+              >
+                ✕
+              </IconButton>
+            )}
           </Box>
 
           {/* ── Honest recovery, INSIDE the board ───────────────────────
@@ -735,10 +922,62 @@ export default function StonebridgeVillage({
           onExited={handleReplayExited}
           {...recovery}
         />
-      </Dialog>
+    </>
+  )
 
-      {/* One location, visited. Opens over the board; carries the same honest
-          recovery, because everything under it is unreachable. */}
+  return (
+    <>
+      {isPage ? (
+        /* The town page's frame: the same body in the route's own DOM.
+           `role="region"` with the board's existing name keeps one addressable
+           landmark for it, as the dialog's `aria-label` does in the modal — and
+           there is no focus trap, no backdrop and no Escape, because none of
+           those belong to a page. The host owns the surrounding chrome. */
+        <Box
+          role="region"
+          aria-label="Stonebridge Village"
+          sx={{
+            bgcolor: frame.bg,
+            // Stated, not inherited — see `villageSurface`.
+            color: frame.fg,
+            borderRadius: isLincoln ? '8px' : '16px',
+          }}
+        >
+          {boardBody}
+        </Box>
+      ) : (
+        <Dialog
+          open={open}
+          onClose={dismiss}
+          fullScreen
+          transitionDuration={reduceMotion ? 0 : undefined}
+          TransitionProps={{ onEntered: handleBoardEntered, onExited: handleBoardExited }}
+          // The focus hand-off is this component's job on every path (see the
+          // header), so MUI must not also move it.
+          disableRestoreFocus
+          slotProps={{
+            paper: {
+              // The board's own controls stay addressable apart from the card's
+              // identical ones underneath it.
+              'aria-label': 'Stonebridge Village',
+              sx: {
+                backgroundImage: 'none',
+                bgcolor: frame.bg,
+                // A Paper carries the THEME's text colour by default, which is
+                // the half a dark board on a light theme got wrong. The same
+                // pair as the page frame, from the same definition.
+                color: frame.fg,
+              },
+            },
+          }}
+        >
+          {boardBody}
+        </Dialog>
+      )}
+
+      {/* One location, visited. A real modal in BOTH presentations — over the
+          board in the hub, over the page on the town route — and it carries the
+          same honest recovery, because everything under it is unreachable. */}
       {shownMission && shownState && (
         <StonebridgeLocationDialog
           open={visitOpen}

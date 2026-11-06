@@ -14,6 +14,7 @@ import { useChildSkillSnapshot } from '../core/hooks/useChildSkillSnapshot'
 import { useProfile } from '../core/profile/useProfile'
 import { UserProfile } from '../core/types/enums'
 import AvatarThumbnail from '../features/avatar/AvatarThumbnail'
+import { useForgeFocusRouteWatch } from '../features/avatar/stonebridge/forgeFocusHandoff'
 import {
   useLibraryReturnReadinessWatch,
   useLibraryReturnRouteWatch,
@@ -30,6 +31,12 @@ const navItems = [
   { label: 'Progress', to: '/progress', parentOnly: true },
   { label: 'Records', to: '/records', parentOnly: true },
   { label: 'Books', to: '/books' },
+  // The village, reachable in one tap from the menu both profiles share. The
+  // entry opens `/stonebridge`, which is the already-released village as a page
+  // — not a new feature, not a parent tool, and not a per-profile variant. A
+  // parent lands on the currently selected child's village and is never asked to
+  // choose one to get there.
+  { label: 'Stonebridge', to: '/stonebridge' },
   // Watch Library (FEAT-132): a top-level PARENT entry, next to the other
   // content-curation destinations rather than buried in Settings — curation is a
   // recurring job, not a one-time setting. Deliberately no kid entry: the
@@ -49,6 +56,11 @@ const kidNavItems = [
   { label: 'My Books', to: '/books' },
   { label: 'Books About Me', to: '/books-about-me' },
   { label: 'My Hero', to: '/avatar' },
+  // The same village entry the parent menu carries, next to My Hero rather than
+  // instead of it: `My Hero` still opens the hub with the armor, the customizer
+  // and its own village board on it. Every existing kid path and its content
+  // stays exactly where it was.
+  { label: 'Stonebridge', to: '/stonebridge' },
   // FEAT-186 (London audit #9, owner decision): no `My Stuff` entry for a kid.
   // It opened `/records/portfolio` — the PARENT Portfolio: "Demo Night
   // Highlights", Year/Month selects, a title search, Subject/Type filters and a
@@ -228,6 +240,14 @@ export function AppShell({ children }: AppShellProps) {
   // mounted across the hub — including the window in which the village board is
   // closing on its way to a departure that has not been created yet.
   useLibraryReturnReadinessWatch(childrenLoading, childrenLoadFailed)
+
+  // The town page's armor door is the same shape of module memory: a request to
+  // focus the hub's one gallery, made on a page that is about to be left. It
+  // lives only while the app is AT the hub, and the layout route is the one
+  // thing mounted across every move between them — so, like the journey above,
+  // its route transitions are watched here rather than in a component whose
+  // unmount would also fire on StrictMode's simulated remount.
+  useForgeFocusRouteWatch(location.pathname)
 
   const closeDrawer = useCallback(() => setDrawerOpen(false), [])
 

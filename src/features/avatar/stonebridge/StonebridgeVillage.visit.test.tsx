@@ -739,6 +739,39 @@ describe('the new copy holds the kid readability bar', () => {
     expectKidWording('Keep going', 'Stonebridge replay · dismiss button')
   })
 
+  it('and the town page’s own doors and states', () => {
+    // The canonical `/stonebridge` entry is a kid destination in the shared nav,
+    // so its copy is held to the same bar as the board it shows. "Stonebridge"
+    // itself is three syllables by the proxy and is deliberately not asserted —
+    // it is a place name on a heading, exactly as it is on the board.
+    expectKidWording('My Books', 'Stonebridge town · books door')
+    expectKidWording('Today', 'Stonebridge town · today door')
+    expectKidWording('My armor', 'Stonebridge town · armor door')
+    expectKidWording('Try again', 'Stonebridge town · retry button')
+    expectKidLine('Pick a child to see the village.', 'Stonebridge town · nobody selected')
+    expectKidWording('Loading your village…', 'Stonebridge town · loading')
+    expectKidWording('Trying again…', 'Stonebridge town · retrying')
+    expectKidLine("Couldn't load your village.", 'Stonebridge town · read failed')
+  })
+
+  it('and the page renders the strings this bar was applied to', () => {
+    // The other half, and the reason the bar is not paperwork: a string that
+    // passes the proxy but is not on the page proves nothing.
+    const page = readRendered('src/features/avatar/stonebridge/StonebridgePage.tsx')
+    for (const copy of [
+      'My Books',
+      'Today',
+      'My armor',
+      'Try again',
+      'Pick a child to see the village.',
+      'Loading your village…',
+      'Trying again…',
+      "Couldn't load your village.",
+    ]) {
+      expect(page, `StonebridgePage no longer renders "${copy}"`).toContain(copy)
+    }
+  })
+
   it('and the retired wording does not come back', () => {
     // A later edit that reverts either sentence fails here rather than shipping
     // a word the proxy already rejected once.
