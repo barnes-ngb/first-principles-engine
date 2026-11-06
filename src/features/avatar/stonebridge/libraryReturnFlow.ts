@@ -295,8 +295,8 @@ export function liveLibraryReturnFlow(
  * The phase check alone is not enough now that there are two entries: a
  * `returning` journey that belongs to the hub must not be adopted by the town
  * page it happens to pass through, and the other way round. The route
- * reconciliation ends such a journey, but it is reported from the layout route —
- * whose effects run AFTER a routed page's — so the host that would serve it asks
+ * reconciliation ends such a journey, but it is reported from the layout route
+ * and a routed page has effects of its own, so the host that would serve it asks
  * this first rather than relying on the order two effects happen to run in.
  *
  * One definition, used by both hosts, so "whose return is this" cannot be
