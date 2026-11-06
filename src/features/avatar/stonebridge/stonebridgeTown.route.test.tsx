@@ -90,17 +90,56 @@ const fx = vi.hoisted(() => ({
    */
   retryLoad: vi.fn(),
   setActiveChildId: vi.fn(),
+  /**
+   * What the town's own profile read reports.
+   *
+   * Default: a settled read that says this child has no saved character — the
+   * state every existing claim in this file was written under, and the one that
+   * puts no hero on the map.
+   */
+  hero: {
+    phase: 'missing',
+    document: null as unknown,
+    failure: null as unknown,
+    exposureKey: '',
+    retrying: false,
+    retry: vi.fn(),
+  },
 }))
 
 vi.mock('./useStonebridgeProgress', () => ({
   useStonebridgeProgress: () => fx.data,
 }))
 
-vi.mock('../useAvatarProfile', () => ({ useAvatarProfile: () => null }))
+/**
+ * The town's own profile read, stubbed — the page no longer uses the shared
+ * `useAvatarProfile` at all.
+ *
+ * The phase/failure tokens are restated here because mocking the module
+ * replaces it whole, and importing the real one would pull the Firestore SDK
+ * into a route test. The REAL tokens, bindings, stale-callback refusals and
+ * retries are driven against the real hook in `useTownHeroProfile.test.ts`;
+ * this file only needs the page's reaction to each phase.
+ */
+vi.mock('./useTownHeroProfile', () => ({
+  TownHeroPhase: {
+    Idle: 'idle',
+    Loading: 'loading',
+    Ready: 'ready',
+    Missing: 'missing',
+    Error: 'error',
+  },
+  TownHeroFailure: { Read: 'read', Mismatch: 'mismatch' },
+  useTownHeroProfile: () => fx.hero,
+}))
 
 vi.mock('../../../core/auth/useAuth', () => ({
   useFamilyId: () => 'fam-1',
   useAuth: () => ({ familyId: 'fam-1' }),
+}))
+
+vi.mock('../../../core/profile/useProfile', () => ({
+  useProfile: () => ({ profile: 'parents' }),
 }))
 
 vi.mock('../../../core/hooks/useActiveChild', () => ({
@@ -141,6 +180,39 @@ const LIBRARY_REPAIRED: StonebridgeProgressData = {
   retrying: false,
   retry: () => {},
 }
+
+/**
+ * A saved hero, as the town's own read reports one.
+ *
+ * Synthetic and minimal: this file's claims are about what the PAGE does with a
+ * settled read (draws a decorative hero, keeps every target, withdraws the
+ * motion behind a dialog). What the appearance is made of — mixed per-piece
+ * tiers, dyes, a face grid, unsafe colours, unequipped absence — is
+ * `heroAppearance.test.ts`, against the real builder.
+ */
+const SAVED_HERO = {
+  profile: {
+    childId: 'lincoln',
+    themeStyle: 'minecraft',
+    pieces: [],
+    currentTier: 'iron',
+    characterFeatures: {
+      skinTone: '#F5D6B8',
+      hairColor: '#6B4C32',
+      hairStyle: 'medium',
+      hairLength: 'ear_length',
+      eyeColor: '#4A6B7A',
+    },
+    equippedPieces: ['helmet', 'breastplate'],
+    forgedPieces: {
+      wood: { helmet: { forgedAt: '2026-01-01T00:00:00.000Z' } },
+      iron: { breastplate: { forgedAt: '2026-02-01T00:00:00.000Z' } },
+    },
+    totalXp: 400,
+    updatedAt: '2026-02-01T00:00:00.000Z',
+  },
+  hasSavedFeatures: true,
+} as unknown
 
 function emulateReducedMotion(reduce = true) {
   window.matchMedia = ((q: string) => ({
@@ -259,6 +331,21 @@ function tile(mission: { locationName: string }) {
   })
 }
 
+/**
+ * One of the town's three ordinary doors, wherever the page is keeping it.
+ *
+ * On a HEALTHY town they live behind one compact *Quick links* disclosure, so
+ * reaching one is two taps rather than one; in every state with no village on
+ * screen they are rendered directly and the disclosure is not there at all.
+ * This resolves either form, so the claims about where a door LEADS stay about
+ * that and not about the form.
+ */
+function townDoor(name: string) {
+  const toggle = screen.queryByRole('button', { name: 'Quick links' })
+  if (toggle && toggle.getAttribute('aria-expanded') !== 'true') fireEvent.click(toggle)
+  return screen.getByRole('button', { name })
+}
+
 /** Visit a location from the town page and take its Books door. */
 async function leaveFromLocation(mission: { locationName: string }) {
   fireEvent.click(tile(mission))
@@ -276,6 +363,14 @@ beforeEach(() => {
   fx.childrenLoadFailed = false
   fx.retryLoad.mockClear()
   fx.setActiveChildId.mockClear()
+  fx.hero = {
+    phase: 'missing',
+    document: null,
+    failure: null,
+    exposureKey: '',
+    retrying: false,
+    retry: vi.fn(),
+  }
   setActiveChildIdShared('lincoln')
   endLibraryReturnFlow()
   clearForgeFocusRequest()
@@ -371,11 +466,155 @@ describe('arriving at the town', () => {
     await waitFor(() => expect(tile(LIBRARY)).toHaveFocus())
   })
 
-  it('offers the ordinary doors beside it', () => {
+  it('offers the ordinary doors beside it, compactly', () => {
+    // The redundancy the owner named: three standing buttons for three actions
+    // the shell's own nav already carries, on every state of the page. On a
+    // healthy town they are one disclosure — closed, so the village is what the
+    // page is showing — and the doors themselves are unchanged behind it.
     renderTown()
+    const toggle = screen.getByRole('button', { name: 'Quick links' })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    for (const label of ['My Books', 'Today', 'My armor']) {
+      expect(screen.queryByRole('button', { name: label }), label).not.toBeInTheDocument()
+    }
+
+    fireEvent.click(toggle)
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
     for (const label of ['My Books', 'Today', 'My armor']) {
       expect(screen.getByRole('button', { name: label }), label).toBeInTheDocument()
     }
+  })
+
+  it('and the disclosure closes again with the child', async () => {
+    // Scoped UI state, like everything else the town holds: an open panel is
+    // not a fact about the family, and a sibling's town does not inherit it.
+    const { router } = renderTown()
+    fireEvent.click(screen.getByRole('button', { name: 'Quick links' }))
+    expect(screen.getByRole('button', { name: 'My Books' })).toBeInTheDocument()
+
+    // The brother, reported as the shell's resolved child — the same way every
+    // other switch in this file is performed.
+    fx.activeChild = { id: 'london', name: 'London' }
+    await act(async () => {
+      await router.navigate(STONEBRIDGE_TOWN_PATH)
+    })
+
+    expect(screen.getByRole('button', { name: 'Quick links' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    )
+    expect(screen.queryByRole('button', { name: 'My Books' })).not.toBeInTheDocument()
+  })
+
+  it('and a settled read with no saved character puts no hero on the map', () => {
+    // `missing` is the default fixture: a successful read that says this child
+    // has no saved hero yet. It is not a hero and is not drawn as one — and it
+    // says honestly that a personal character has not been saved yet.
+    renderTown()
+    expect(screen.queryByTestId('stonebridge-hero')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('hero-stage')).not.toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.getByText('No saved hero yet. You can make one in My armor.')).toBeInTheDocument()
+  })
+
+  it('a saved hero stands on the map, decoratively, over nobody’s target', () => {
+    fx.hero = { ...fx.hero, phase: 'ready', exposureKey: 'fam-1_lincoln|0|0@0', document: SAVED_HERO }
+    renderTown()
+    const town = townRegion()
+    const stage = town.getByTestId('hero-stage')
+
+    // Decorative, and structurally unable to take a tap or the keyboard.
+    expect(stage).toHaveAttribute('aria-hidden', 'true')
+    expect(stage.style.pointerEvents).toBe('none')
+    expect(within(stage).queryAllByRole('button')).toHaveLength(0)
+    // The picture keeps its one name and does not contain the hero layer.
+    expect(town.getByRole('img', { name: /^Stonebridge village:/ })).not.toContainElement(stage)
+    // And the places are still exactly one control each.
+    expect(town.getAllByRole('button', { name: /^Visit The Library Hut\./ })).toHaveLength(1)
+  })
+
+  it('and tapping a place still opens it immediately, with the motion withdrawn', () => {
+    emulateReducedMotion(false)
+    fx.hero = { ...fx.hero, phase: 'ready', exposureKey: 'fam-1_lincoln|0|0@0', document: SAVED_HERO }
+    renderTown()
+    const stage = townRegion().getByTestId('hero-stage')
+    expect(stage).toHaveAttribute('data-hero-running', 'true')
+
+    // No delay, no travel, no waiting for a walk: the dialog is open in the
+    // same tick as the tap, which is also what hides the map underneath it.
+    fireEvent.click(tile(LIBRARY))
+    expect(screen.getByRole('dialog', { name: 'The Library Hut' })).toBeInTheDocument()
+    expect(stage).toHaveAttribute('data-hero-running', 'false')
+  })
+
+  it('a hero read that FAILS says so, offers its own door, and blocks nothing', () => {
+    const retry = vi.fn()
+    fx.hero = { ...fx.hero, phase: 'error', failure: 'read', retry }
+    renderTown()
+
+    expect(screen.getByRole('alert')).toHaveTextContent("Couldn't load your hero.")
+    expect(screen.queryByTestId('stonebridge-hero')).not.toBeInTheDocument()
+    // The village is untouched by it, and so are the ordinary ways on.
+    expect(screen.getByRole('region', { name: 'Stonebridge Village' })).toBeInTheDocument()
+    expect(tile(LIBRARY)).toBeInTheDocument()
+    expect(townDoor('My Books')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show my hero' }))
+    expect(retry).toHaveBeenCalledTimes(1)
+  })
+
+  it('and a document that names another child is refused, with no retry offered', () => {
+    fx.hero = { ...fx.hero, phase: 'error', failure: 'mismatch', document: SAVED_HERO }
+    renderTown()
+
+    expect(screen.getByRole('alert')).toHaveTextContent('That hero is not yours.')
+    expect(screen.queryByTestId('stonebridge-hero')).not.toBeInTheDocument()
+    // Re-reading would say the same thing, so no door pretends otherwise.
+    expect(screen.queryByRole('button', { name: 'Show my hero' })).not.toBeInTheDocument()
+  })
+
+  it('and a village that is NOT healthy keeps the three doors in plain sight', () => {
+    // The other half of the trade, and the one that matters most: when there is
+    // no current village to look at, the way to useful work is not behind
+    // anything. Stale is the subtle case — the board IS on screen, with last
+    // known numbers and a notice — and it still gets the plain strip.
+    fx.data = { ...LIBRARY_REPAIRED, stale: true, retry: vi.fn() }
+    renderTown()
+    expect(screen.queryByRole('button', { name: 'Quick links' })).not.toBeInTheDocument()
+    for (const label of ['My Books', 'Today', 'My armor']) {
+      expect(screen.getByRole('button', { name: label }), label).toBeInTheDocument()
+    }
+  })
+
+  it.each(['loading', 'failed'] as const)('cached-child %s still shows three direct fallback doors', (state) => {
+    fx.childrenLoading = true
+    fx.childrenLoadFailed = state === 'failed'
+    fx.hero = { ...fx.hero, phase: 'idle' }
+    renderTown()
+    expect(screen.queryByRole('button', { name: 'Quick links' })).not.toBeInTheDocument()
+    for (const label of ['My Books', 'Today', 'My armor']) expect(screen.getByRole('button', { name: label })).toBeInTheDocument()
+    expect(screen.queryByTestId('stonebridge-hero')).not.toBeInTheDocument()
+    if (state === 'failed') {
+      expect(screen.getByRole('alert')).toHaveTextContent("Couldn't confirm the selected child.")
+      fireEvent.click(screen.getByRole('button', { name: 'Reload children' }))
+      expect(fx.retryLoad).toHaveBeenCalledTimes(1)
+    } else expect(screen.getByText('Checking the selected child…')).toBeInTheDocument()
+  })
+
+  it('reports hero loading without blocking useful places', () => {
+    fx.hero = { ...fx.hero, phase: 'loading' }
+    renderTown()
+    expect(screen.getByText('Loading your saved hero…')).toBeInTheDocument()
+    expect(tile(LIBRARY)).toBeInTheDocument()
+  })
+
+  it('qualifies a legacy/default saved appearance', () => {
+    fx.hero = { ...fx.hero, phase: 'ready', exposureKey: 'legacy', document: {
+      ...(SAVED_HERO as object), hasSavedFeatures: false,
+    } }
+    renderTown()
+    expect(screen.getByText(/Your saved hero uses some shared appearance defaults/)).toBeInTheDocument()
+    expect(screen.getByTestId('stonebridge-hero')).toBeInTheDocument()
   })
 
   it('a deep link straight to a place still lands on the town, not a journey', () => {
@@ -552,15 +791,18 @@ describe('the three readings of "no child yet"', () => {
     }
   })
 
-  it('and a known child whose read goes unknown under them keeps the board', () => {
-    // `isLoading` going true again for a child who IS resolved is a re-read, not
-    // an unknown identity: `activeChild` still answers, so this page is not in
-    // the branch at all and the village it is already showing stays.
+  it('a cached child whose read fails keeps the board, honest notice and direct fallback doors', () => {
+    // The cached child keeps the board reachable, while the failed identity
+    // read is reported honestly and the useful-work doors stay directly visible.
     fx.childrenLoading = true
     fx.childrenLoadFailed = true
     renderTown()
     expect(screen.getByRole('region', { name: 'Stonebridge Village' })).toBeInTheDocument()
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent("Couldn't confirm the selected child.")
+    expect(screen.queryByRole('button', { name: 'Quick links' })).not.toBeInTheDocument()
+    for (const label of ['My Books', 'Today', 'My armor']) {
+      expect(screen.getByRole('button', { name: label })).toBeInTheDocument()
+    }
   })
 })
 
@@ -952,11 +1194,13 @@ describe('the identity under the town', () => {
 describe('the town’s armor door reaches the real hub', () => {
   it('navigates to /avatar and leaves a request the hub can serve', async () => {
     const { router } = renderTown()
-    fireEvent.click(screen.getByRole('button', { name: 'My armor' }))
+    fireEvent.click(townDoor('My armor'))
 
     await screen.findByRole('heading', { name: 'Hero Hub' })
     expect(router.state.location.pathname).toBe(LIBRARY_RETURN_VILLAGE_PATH)
-    // No invented `/forge` route, and the request is for THIS child.
+    // No invented `/forge` route, and the request is for THIS child. The
+    // compact disclosure changed where the door is, not what it does: the
+    // epoch is still read at the tap and travels with the request.
     expect(consumeForgeFocus({ familyId: 'fam-1', childId: 'lincoln' })).toBe(true)
   })
 
@@ -1031,7 +1275,7 @@ describe('the town’s armor door reaches the real hub', () => {
     // profile read lands: the request arrives and waits. Leaving before it is
     // served retires it, so a later ordinary visit to the hub is ordinary.
     const { router } = renderTown()
-    fireEvent.click(screen.getByRole('button', { name: 'My armor' }))
+    fireEvent.click(townDoor('My armor'))
     await screen.findByRole('heading', { name: 'Hero Hub' })
 
     await act(async () => {
@@ -1043,7 +1287,7 @@ describe('the town’s armor door reaches the real hub', () => {
 
   it('and a child switch on the way makes the hub refuse it', async () => {
     renderTown()
-    fireEvent.click(screen.getByRole('button', { name: 'My armor' }))
+    fireEvent.click(townDoor('My armor'))
     await screen.findByRole('heading', { name: 'Hero Hub' })
 
     act(() => {

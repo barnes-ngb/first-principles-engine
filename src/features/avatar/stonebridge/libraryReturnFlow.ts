@@ -174,10 +174,33 @@ export function getLibraryIdentityEpoch(): number {
   return identityEpoch
 }
 
+/**
+ * Subscribers to identity MOVEMENT itself, not to the flow.
+ *
+ * Additive and read-only. `endLibraryReturnFlow` notifies the flow's listeners
+ * only when there WAS a flow, so a movement with no journey in hand — a profile
+ * change from parent to kid for the same child, say — is invisible to every
+ * flow subscriber. A surface whose read is bound to the epoch has to see that,
+ * so the epoch has its own listener set and `moveIdentity` notifies it on every
+ * movement, flow or no flow. Nothing about the flow, its phases, its counts or
+ * its predicates changes.
+ */
+const epochListeners = new Set<() => void>()
+
+export function subscribeLibraryIdentityEpoch(listener: () => void): () => void {
+  epochListeners.add(listener)
+  return () => {
+    epochListeners.delete(listener)
+  }
+}
+
 /** Record a movement: the epoch advances and any flow in hand is over. */
 function moveIdentity(): void {
   identityEpoch += 1
   endLibraryReturnFlow()
+  // After the flow has been ended, so a subscriber that reads both sees the
+  // same state the flow's own listeners were notified about.
+  for (const listener of epochListeners) listener()
 }
 
 /**
