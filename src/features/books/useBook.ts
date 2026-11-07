@@ -1285,7 +1285,7 @@ export function useBookshelf(
   }, [owner])
 
   /**
-   * Apply a completion, if it is still this hook's to apply.
+   * Apply an ANSWER, if it is still this hook's to apply.
    *
    * Three refusals, each for a sequence that really happens: unmounted,
    * superseded by a later read (a retry), and answered for an owner that has
@@ -1303,18 +1303,38 @@ export function useBookshelf(
     [],
   )
 
-  /** Ask one owner's query. Refuses to ask for anybody but the live owner. */
+  /**
+   * May this owner ask at all? Scope, page, and the owner this hook committed.
+   *
+   * Read-only, and deliberately asked BEFORE anything is cleared: a retry that
+   * is not admitted must not put the shelf that IS on screen back to pending on
+   * its way out. A callback a gone page still holds asks nothing either — the
+   * answer would have nowhere to land and the read would be paid for anyway.
+   */
+  const admits = useCallback(
+    (forOwner: ShelfReadOwner) =>
+      !!forOwner.scope && mounted.current && liveOwner.current?.id === forOwner.id,
+    [],
+  )
+
+  /**
+   * Ask one owner's query and report its ANSWER. Nothing else.
+   *
+   * No state is set before the request: an owner that has just been opened is
+   * already `Pending` — that is what the render derived for it — so a loader
+   * that re-states it would be a second source of truth for one fact, and from
+   * the automatic effect it is also the setState an effect may not make. The
+   * reset belongs to the one case where the current state really is something
+   * else: the explicit retry EVENT, below. Sequence and started bookkeeping are
+   * taken before the request, so the newest read always wins and an owner's
+   * automatic read is spent exactly once however it was asked for.
+   */
   const runRead = useCallback(
     async (forOwner: ShelfReadOwner) => {
-      if (!forOwner.scope) return
-      // A callback a gone page still holds asks nothing: the answer would have
-      // nowhere to land and the read would be paid for anyway.
-      if (!mounted.current) return
-      if (liveOwner.current?.id !== forOwner.id) return
+      if (!admits(forOwner)) return
       lastRead.current += 1
       const readSeq = lastRead.current
       startedFor.current = forOwner.id
-      apply(forOwner, readSeq, { phase: ShelfReadPhase.Pending, books: [], error: false })
       try {
         const books = forOwner.audienceIsFamily
           ? await readFamilyShelf(forOwner.familyId)
@@ -1327,7 +1347,7 @@ export function useBookshelf(
         apply(forOwner, readSeq, { phase: ShelfReadPhase.Error, books: [], error: true })
       }
     },
-    [apply],
+    [admits, apply],
   )
 
   useEffect(() => {
@@ -1340,18 +1360,30 @@ export function useBookshelf(
   useEffect(() => {
     // One automatic read per owner, and the owner object is what changes — so a
     // parent's selected child, which is not part of the family's question, asks
-    // nothing again, while a question left and returned to is asked afresh.
+    // nothing again, while a question left and returned to is asked afresh. It
+    // asks and it does not SAY anything: this owner's pending state is the one
+    // the render it arrived in already derived.
     if (startedFor.current === owner.id) return
     void runRead(owner)
   }, [owner, runRead])
 
   const retry = useCallback(() => {
-    // Bound to the INCARNATION this render belongs to, not to its key: a retry
-    // retained across a departure and a return is inert even though the same
-    // shelf is on screen again. `runRead` is where that refusal lives, against
-    // the owner this hook has actually committed.
+    /**
+     * The one ask that is a state change as well as a read, because it is the
+     * one whose current state is an answer: a failure a child is looking at, or
+     * rows from before. So it says *in flight* again, from an event, and then
+     * asks.
+     *
+     * Admission first, and the reset only after it. Bound to the INCARNATION
+     * this render belongs to and not to its key, so a retry retained across a
+     * departure and a return is inert even though the same shelf is on screen
+     * again — inert meaning it asks nothing AND resets nothing, which is why
+     * the order of these two lines is the postcondition and not a style.
+     */
+    if (!admits(owner)) return
+    setState((prev) => (prev.owner.id === owner.id ? openingState(prev.owner) : prev))
     void runRead(owner)
-  }, [owner, runRead])
+  }, [admits, owner, runRead])
 
   const createBook = useCallback(
     async (

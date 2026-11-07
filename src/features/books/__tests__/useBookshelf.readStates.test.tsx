@@ -30,7 +30,13 @@ import type { Book } from '../../../core/types'
  * threw away*), and the owner that has just committed owns it in that commit's
  * own layout window, before any passive effect has run (*the REPLACEMENT's own
  * retry*). Both are driven with React's own tools — a transition, a Suspense
- * boundary, a layout effect — and no second test framework.
+ * boundary, an urgent update that supersedes that transition, a layout effect —
+ * and no second test framework. The first of them is deliberately about an
+ * ABANDONED render and not about a suspended one: a transition that is left
+ * pending for ever would only ask whether React can repaint a subtree whose
+ * newest render has not finished, which is a question about React. So the
+ * attempt is cancelled by a render that commits, and what is then asserted is
+ * that the committed owner still has its read, its state and its retry.
  *
  * ── How the three queries are told apart ─────────────────────────────────────
  *
@@ -666,26 +672,35 @@ describe('a scope that moved under a mounted shelf', () => {
 })
 
 /**
- * A promise that never settles, created ONCE at module scope.
+ * A thenable that never settles, instrumented so an ATTEMPT is visible.
  *
- * Cached deliberately: a promise made during render is a new promise every
- * attempt, which React warns about and retries. This one suspends and stays
- * suspended, which is how a render gets thrown away and stays thrown away.
+ * Module-scoped on purpose — a thenable made during render is a new one every
+ * attempt, which React warns about — and counting instead of resolving is what
+ * makes the claim checkable: React subscribes to it every time it suspends on
+ * it, so `attempts` is how many times the render it belongs to was really
+ * tried. It resolves never, so none of those attempts can commit.
  */
-const NEVER_SETTLES: Promise<void> = new Promise<void>(() => {})
+const stalled = {
+  attempts: 0,
+  then() {
+    stalled.attempts += 1
+  },
+}
 
-/** Suspends for good, so the render it is part of is never committed. */
+/** Suspends, so the render it is part of cannot commit. */
 function NeverSettles() {
-  use(NEVER_SETTLES)
+  use(stalled as unknown as Promise<void>)
   return null
 }
 
-/** The shelf itself, with everything this file asserts in the DOM. */
-function ShelfProbe({ childId }: { childId: string }) {
+/** The shelf itself, with everything these cases assert in the DOM. */
+function ShelfProbe({ childId, epoch }: { childId: string; epoch: number }) {
   const shelf = useBookshelf(FAMILY, childId, false)
   return (
     <div
       data-testid="probe"
+      data-child={childId}
+      data-epoch={epoch}
       data-phase={shelf.phase}
       data-error={String(shelf.error)}
       data-titles={titles(shelf.books).join('|')}
@@ -697,37 +712,66 @@ function ShelfProbe({ childId }: { childId: string }) {
   )
 }
 
+interface ShelfView {
+  childId: string
+  stall: boolean
+  epoch: number
+}
+
 /**
- * A switch that cannot land: the new child and a sibling that suspends forever
- * arrive in ONE transition, inside one boundary, with the shelf rendered first.
+ * The switch, and the thing that takes it back — both INSIDE the boundary, in
+ * one state cell, which is what makes the second one a cancellation.
  *
- * So the hook's render phase runs for the new child and is then discarded — the
- * boundary keeps the content it had, because the update is a transition — which
- * is the real shape of an interrupted switch on a phone (a route's lazy chunk,
- * a suspending sibling, an abandoned transition) and the one thing a render-time
- * owner ref cannot survive.
+ * *switch child* is a transition that moves to London and mounts a sibling that
+ * suspends for good, so the attempt renders the hook for London and is thrown
+ * away; the boundary keeps what it had, because a transition does not reveal a
+ * fallback over content a child is already looking at.
+ *
+ * *keep this shelf* is an URGENT update, and it is the half the first driver of
+ * these cases was missing: without it London stays pending for ever and the
+ * only thing the assertions could have measured is whether React can repaint a
+ * subtree whose newest render is suspended — a question about React, not about
+ * this hook. Three things make it a real supersession. It is **last in the same
+ * queue** as the transition's update and its updater **ignores what it is
+ * handed**, so when React later re-renders that transition lane it recomputes
+ * to Lincoln and London is gone rather than parked. It carries an **epoch**, so
+ * the state value really changes and React cannot bail the render out — the
+ * committed `data-epoch` is the proof the render happened. And it drops
+ * `stall`, so nothing suspends and the render it forces is one that COMMITS.
  */
-function AbandonedSwitchHarness() {
-  const [childId, setChildId] = useState(LINCOLN)
-  const [stall, setStall] = useState(false)
+function SwitchableShelf() {
+  const [view, setView] = useState<ShelfView>({ childId: LINCOLN, stall: false, epoch: 0 })
   return (
     <>
       <button
         type="button"
         onClick={() => {
           startTransition(() => {
-            setChildId(LONDON)
-            setStall(true)
+            setView((prev) => ({ childId: LONDON, stall: true, epoch: prev.epoch }))
           })
         }}
       >
         switch child
       </button>
-      <Suspense fallback={<div data-testid="fallback" />}>
-        <ShelfProbe childId={childId} />
-        {stall ? <NeverSettles /> : null}
-      </Suspense>
+      <button
+        type="button"
+        onClick={() => {
+          setView((prev) => ({ childId: LINCOLN, stall: false, epoch: prev.epoch + 1 }))
+        }}
+      >
+        keep this shelf
+      </button>
+      <ShelfProbe childId={view.childId} epoch={view.epoch} />
+      {view.stall ? <NeverSettles /> : null}
     </>
+  )
+}
+
+function AbandonedSwitchHarness() {
+  return (
+    <Suspense fallback={<div data-testid="fallback" />}>
+      <SwitchableShelf />
+    </Suspense>
   )
 }
 
@@ -735,36 +779,66 @@ function probe(): HTMLElement {
   return screen.getByTestId('probe')
 }
 
+/**
+ * The owner has to belong to the COMMITTED render, not to the last one
+ * attempted.
+ *
+ * While it lived in a ref that render replaced in place, an attempt that was
+ * never committed retired the owner the screen still belonged to: the next
+ * render that DID commit found a key the ref disagreed with, opened a third
+ * incarnation, reset the shelf to pending and asked a second time (the pair
+ * this file holds is two reads; the old model made it four), while the read
+ * already in flight came back to an owner the hook no longer recognised and the
+ * retry a child could see was bound to an incarnation superseded by a render
+ * nobody ever saw. Nothing on screen had changed, so there was nothing for them
+ * to do about it.
+ *
+ * SENSITIVITY: against the old render-ref module both cases fail on their own
+ * assertions — `outstanding()` after *keep this shelf* is the extra own +
+ * Together pair instead of empty, the phase is reset, and the held answer and
+ * the retained retry are then both refused.
+ */
 describe('a render React threw away', () => {
-  /**
-   * The owner has to belong to the COMMITTED render, not to the last one
-   * attempted. While it lived in a ref the render replaced in place, a render
-   * that was never committed retired the owner the screen still belonged to:
-   * its in-flight read came back to an owner the hook no longer recognised and
-   * was refused, and the retry on screen was bound to an incarnation that had
-   * been superseded by a render nobody ever saw. Nothing on screen had changed,
-   * so there was nothing for a child to do about it.
-   */
+  beforeEach(() => {
+    stalled.attempts = 0
+  })
+
   it('leaves the committed shelf’s own read able to answer it', async () => {
     render(<AbandonedSwitchHarness />)
     const lincolnReads = detachReads()
     expect(lincolnReads.map((entry) => scopeOf(entry.target)).sort()).toEqual(['own', 'together'])
 
+    // ── London is attempted … ──────────────────────────────────────────────
     await act(async () => {
       fireEvent.click(screen.getByText('switch child'))
     })
-
-    // The transition did not land: Lincoln's shelf is still the one mounted,
-    // still waiting for its own answer, and nothing was asked for London.
+    expect(stalled.attempts).toBeGreaterThan(0)
+    // … and cannot land: no fallback over the content, the child on screen is
+    // unchanged, and London's query was never asked.
     expect(screen.queryByTestId('fallback')).toBeNull()
+    expect(probe().dataset.child).toBe(LINCOLN)
     expect(outstanding()).toEqual([])
-    expect(probe().dataset.phase).toBe(ShelfReadPhase.Pending)
 
+    // ── and then it is SUPERSEDED by a render that commits ─────────────────
+    await act(async () => {
+      fireEvent.click(screen.getByText('keep this shelf'))
+    })
+    // The render really happened — the epoch moved, so this is not a bail-out —
+    // and it kept Lincoln's own incarnation: same question, same pending state,
+    // no reset, and not one extra read.
+    expect(probe().dataset.epoch).toBe('1')
+    expect(probe().dataset.child).toBe(LINCOLN)
+    expect(probe().dataset.phase).toBe(ShelfReadPhase.Pending)
+    expect(outstanding()).toEqual([])
+
+    // ── so the read the committed owner asked for is still its answer ──────
     await answer(lincolnReads, [makeBook({ id: 'l-1', title: 'Lincoln’s book' })])
     await waitFor(() => {
       expect(probe().dataset.phase).toBe(ShelfReadPhase.Ready)
     })
     expect(probe().dataset.titles).toBe('Lincoln’s book')
+    expect(probe().dataset.child).toBe(LINCOLN)
+    expect(outstanding()).toEqual([])
   })
 
   it('and the retry that shelf is showing still asks its own question', async () => {
@@ -777,21 +851,36 @@ describe('a render React threw away', () => {
     await act(async () => {
       fireEvent.click(screen.getByText('switch child'))
     })
+    expect(stalled.attempts).toBeGreaterThan(0)
+    expect(probe().dataset.child).toBe(LINCOLN)
+    expect(outstanding()).toEqual([])
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('keep this shelf'))
+    })
+    // The failure a child is looking at is still theirs to act on: the thrown
+    // away attempt did not reset it to pending, and nothing was re-asked for
+    // them behind it.
+    expect(probe().dataset.epoch).toBe('1')
+    expect(probe().dataset.error).toBe('true')
+    expect(probe().dataset.phase).toBe(ShelfReadPhase.Error)
     expect(outstanding()).toEqual([])
 
     await act(async () => {
       fireEvent.click(screen.getByText('try again'))
     })
-    // The control a child can see belongs to the shelf that is on screen, and
-    // it re-asks THAT shelf's question — not the one the discarded render was
+    // The control they can see belongs to the shelf that is on screen, and it
+    // re-asks THAT shelf's question — not the one the discarded attempt was
     // about, and not nothing at all.
     expect(outstanding().sort()).toEqual(['own', 'together'])
     expect(JSON.stringify(fx.reads.map((entry) => entry.target))).not.toContain(LONDON)
+    expect(probe().dataset.phase).toBe(ShelfReadPhase.Pending)
 
     await answer(detachReads(), [makeBook({ id: 'l-1', title: 'After the retry' })])
     await waitFor(() => {
       expect(probe().dataset.titles).toBe('After the retry')
     })
+    expect(outstanding()).toEqual([])
   })
 })
 
