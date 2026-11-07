@@ -33,10 +33,16 @@ vi.mock('../../../core/profile/useProfile', () => ({
 
 let booksFixture: Book[] = []
 
+// The read's own answer, stated as the hook states it: a settled, successful
+// one. `phase` is the explicit half — a stub without it is read as *waiting*
+// rather than as a ready shelf, which is the fail-closed direction.
 vi.mock('../useBook', () => ({
   useBookshelf: () => ({
     books: booksFixture,
     loading: false,
+    phase: 'ready',
+    error: false,
+    retry: vi.fn(),
     createBook: vi.fn(),
     deleteBook: vi.fn(),
   }),
