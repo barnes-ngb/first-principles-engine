@@ -1,5 +1,5 @@
-import { useLayoutEffect } from 'react'
-import { act, renderHook, waitFor } from '@testing-library/react'
+import { Suspense, startTransition, use, useLayoutEffect, useRef, useState } from 'react'
+import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { Book } from '../../../core/types'
@@ -24,6 +24,13 @@ import type { Book } from '../../../core/types'
  * helpers, storage and the debounce — and runs the actual hook. Nothing here is
  * live: no SDK, no network, no family record, no media. Every book, child and
  * family is synthetic.
+ *
+ * Two of its claims are about WHEN the hook decides whose a read is rather than
+ * about what the read says: a render React commits owns it (*a render React
+ * threw away*), and the owner that has just committed owns it in that commit's
+ * own layout window, before any passive effect has run (*the REPLACEMENT's own
+ * retry*). Both are driven with React's own tools — a transition, a Suspense
+ * boundary, a layout effect — and no second test framework.
  *
  * ── How the three queries are told apart ─────────────────────────────────────
  *
@@ -597,6 +604,50 @@ describe('a scope that moved under a mounted shelf', () => {
     })
   })
 
+  it('while the REPLACEMENT’s own retry is admitted in that same window', async () => {
+    /**
+     * The other half of the same window, and the reason admission is aligned
+     * with the commit rather than with the flush after it: the owner that has
+     * just committed owns the read NOW. A hook that only learns whose it is in a
+     * passive effect would refuse the control the screen is already showing —
+     * so this asks in the layout window and counts what was issued THERE,
+     * before any passive effect could have asked for it.
+     */
+    const askedInLayout: number[] = []
+    const { result, rerender } = renderHook(
+      ({ childId, askOnLayout }: { childId: string; askOnLayout: boolean }) => {
+        const shelf = useBookshelf(FAMILY, childId, false)
+        const fired = useRef(false)
+        useLayoutEffect(() => {
+          if (!askOnLayout || fired.current) return
+          fired.current = true
+          shelf.retry()
+          // Both halves of the union are issued synchronously by the call, so
+          // what is outstanding at this line is what the retry itself asked.
+          askedInLayout.push(fx.reads.length)
+        })
+        return shelf
+      },
+      { initialProps: { childId: LINCOLN, askOnLayout: false } },
+    )
+    detachReads()
+
+    rerender({ childId: LONDON, askOnLayout: true })
+
+    expect(askedInLayout).toEqual([2])
+    const asked = JSON.stringify(fx.reads.map((r) => r.target))
+    expect(asked).toContain(LONDON)
+    expect(asked).not.toContain(LINCOLN)
+    // And exactly ONE pair: the owner's automatic read is the read the retry
+    // already spent, not a second one behind it.
+    expect(outstanding().sort()).toEqual(['own', 'together'])
+
+    await answer(detachReads(), [makeBook({ id: 'o-1', title: 'London’s book', childId: LONDON })])
+    await waitFor(() => {
+      expect(titles(result.current.books)).toEqual(['London’s book'])
+    })
+  })
+
   it('and a retry held after the shelf is gone asks nothing at all', async () => {
     const { result, unmount } = renderHook(() => useBookshelf(FAMILY, LINCOLN, false))
     await refuse(detachReads())
@@ -611,6 +662,136 @@ describe('a scope that moved under a mounted shelf', () => {
     })
     // An unmounted page's read has nowhere to land and would be paid for anyway.
     expect(outstanding()).toEqual([])
+  })
+})
+
+/**
+ * A promise that never settles, created ONCE at module scope.
+ *
+ * Cached deliberately: a promise made during render is a new promise every
+ * attempt, which React warns about and retries. This one suspends and stays
+ * suspended, which is how a render gets thrown away and stays thrown away.
+ */
+const NEVER_SETTLES: Promise<void> = new Promise<void>(() => {})
+
+/** Suspends for good, so the render it is part of is never committed. */
+function NeverSettles() {
+  use(NEVER_SETTLES)
+  return null
+}
+
+/** The shelf itself, with everything this file asserts in the DOM. */
+function ShelfProbe({ childId }: { childId: string }) {
+  const shelf = useBookshelf(FAMILY, childId, false)
+  return (
+    <div
+      data-testid="probe"
+      data-phase={shelf.phase}
+      data-error={String(shelf.error)}
+      data-titles={titles(shelf.books).join('|')}
+    >
+      <button type="button" onClick={shelf.retry}>
+        try again
+      </button>
+    </div>
+  )
+}
+
+/**
+ * A switch that cannot land: the new child and a sibling that suspends forever
+ * arrive in ONE transition, inside one boundary, with the shelf rendered first.
+ *
+ * So the hook's render phase runs for the new child and is then discarded — the
+ * boundary keeps the content it had, because the update is a transition — which
+ * is the real shape of an interrupted switch on a phone (a route's lazy chunk,
+ * a suspending sibling, an abandoned transition) and the one thing a render-time
+ * owner ref cannot survive.
+ */
+function AbandonedSwitchHarness() {
+  const [childId, setChildId] = useState(LINCOLN)
+  const [stall, setStall] = useState(false)
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => {
+          startTransition(() => {
+            setChildId(LONDON)
+            setStall(true)
+          })
+        }}
+      >
+        switch child
+      </button>
+      <Suspense fallback={<div data-testid="fallback" />}>
+        <ShelfProbe childId={childId} />
+        {stall ? <NeverSettles /> : null}
+      </Suspense>
+    </>
+  )
+}
+
+function probe(): HTMLElement {
+  return screen.getByTestId('probe')
+}
+
+describe('a render React threw away', () => {
+  /**
+   * The owner has to belong to the COMMITTED render, not to the last one
+   * attempted. While it lived in a ref the render replaced in place, a render
+   * that was never committed retired the owner the screen still belonged to:
+   * its in-flight read came back to an owner the hook no longer recognised and
+   * was refused, and the retry on screen was bound to an incarnation that had
+   * been superseded by a render nobody ever saw. Nothing on screen had changed,
+   * so there was nothing for a child to do about it.
+   */
+  it('leaves the committed shelf’s own read able to answer it', async () => {
+    render(<AbandonedSwitchHarness />)
+    const lincolnReads = detachReads()
+    expect(lincolnReads.map((entry) => scopeOf(entry.target)).sort()).toEqual(['own', 'together'])
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('switch child'))
+    })
+
+    // The transition did not land: Lincoln's shelf is still the one mounted,
+    // still waiting for its own answer, and nothing was asked for London.
+    expect(screen.queryByTestId('fallback')).toBeNull()
+    expect(outstanding()).toEqual([])
+    expect(probe().dataset.phase).toBe(ShelfReadPhase.Pending)
+
+    await answer(lincolnReads, [makeBook({ id: 'l-1', title: 'Lincoln’s book' })])
+    await waitFor(() => {
+      expect(probe().dataset.phase).toBe(ShelfReadPhase.Ready)
+    })
+    expect(probe().dataset.titles).toBe('Lincoln’s book')
+  })
+
+  it('and the retry that shelf is showing still asks its own question', async () => {
+    render(<AbandonedSwitchHarness />)
+    await refuse(detachReads())
+    await waitFor(() => {
+      expect(probe().dataset.error).toBe('true')
+    })
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('switch child'))
+    })
+    expect(outstanding()).toEqual([])
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('try again'))
+    })
+    // The control a child can see belongs to the shelf that is on screen, and
+    // it re-asks THAT shelf's question — not the one the discarded render was
+    // about, and not nothing at all.
+    expect(outstanding().sort()).toEqual(['own', 'together'])
+    expect(JSON.stringify(fx.reads.map((entry) => entry.target))).not.toContain(LONDON)
+
+    await answer(detachReads(), [makeBook({ id: 'l-1', title: 'After the retry' })])
+    await waitFor(() => {
+      expect(probe().dataset.titles).toBe('After the retry')
+    })
   })
 })
 

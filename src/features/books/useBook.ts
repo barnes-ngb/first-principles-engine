@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   addDoc,
   deleteDoc,
@@ -172,19 +172,13 @@ function shelfQueryScope(
 }
 
 /**
- * One OWNER of the read — one incarnation of one question.
+ * WHAT is being asked, derived from this render's inputs alone.
  *
- * A new object every time the owner changes, which is what the admission checks
- * compare: the key alone cannot do it, because a scope that is left and
- * returned to (`A → B → A`, or `A → no child → A`) produces the same string
- * for two different questions, and a callback retained from the first must be
- * inert while the second asks for itself. Created during RENDER, so a retained
- * callback fired from a layout effect of the replacement commit already sees
- * the replacement rather than the owner it was made for.
+ * Pure and anonymous: it carries no identity of its own, so two renders that
+ * compute the same question are the same question — and whether that question
+ * is a NEW asking of it is `ShelfReadOwner`'s business, below.
  */
-interface ShelfReadOwner {
-  /** Monotonic and never reused. */
-  readonly id: number
+interface ShelfQuestion {
   /** The query's scope, or why there is none — see `ownerKeyFor`. */
   readonly key: string
   /** The query to ask, or `''` when there is nothing honest to ask. */
@@ -192,10 +186,33 @@ interface ShelfReadOwner {
   readonly familyId: string
   readonly childId: string
   readonly audienceIsFamily: boolean
-  /** The phase this owner begins in, before anything has been asked. */
+  /** The phase this question begins in, before anything has been asked. */
   readonly phase: ShelfReadPhase
-  /** Has this owner's one automatic read been asked for? */
-  requested: boolean
+}
+
+/**
+ * One OWNER of the read — one incarnation of one question.
+ *
+ * A new object with a new id every time the owner changes, which is what the
+ * admission checks compare: the key alone cannot do it, because a scope that is
+ * left and returned to (`A → B → A`, or `A → no child → A`) produces the same
+ * string for two different questions, and a callback retained from the first
+ * must be inert while the second asks for itself.
+ *
+ * **Immutable, and owned by STATE** (`ShelfReadState.owner`). It used to live in
+ * a ref that render replaced in place, which made a render that React never
+ * commits — one thrown away behind a suspended sibling, one abandoned
+ * transition — able to retire the owner the screen still belongs to: the
+ * committed read's answer was then refused as somebody else's and its retry
+ * went inert, with nothing on screen having changed. State cannot do that: a
+ * discarded render's state update is discarded with it, so the committed
+ * incarnation keeps its request, its answer and its retry. Nothing here is
+ * written during render, which is also why the hook is lint-clean under
+ * `react-hooks/refs` rather than exempted from it.
+ */
+interface ShelfReadOwner extends ShelfQuestion {
+  /** Monotonic within one mounted hook, and never reused. */
+  readonly id: number
 }
 
 /**
@@ -207,9 +224,23 @@ function ownerKeyFor(scope: string, phase: ShelfReadPhase): string {
   return scope || `none|${phase}`
 }
 
+/**
+ * The next incarnation of a question — pure, so a thrown-away render computes
+ * the same id as the retained one and ids are never skipped or shared.
+ *
+ * Every field the read itself uses is pinned by `key`: the scope string already
+ * carries the family and the audience, and carries the child exactly when the
+ * query filters on one. A family owner's `childId` is therefore the one field
+ * that can go stale while the key holds, and the family read does not look at
+ * it — which is the same reason a parent's selected child may not re-ask it.
+ */
+function nextOwner(previousId: number, question: ShelfQuestion): ShelfReadOwner {
+  return { id: previousId + 1, ...question }
+}
+
 interface ShelfReadState {
   /** The incarnation these rows belong to. They are shown under no other. */
-  readonly ownerId: number
+  readonly owner: ShelfReadOwner
   readonly phase: ShelfReadPhase
   readonly books: Book[]
   readonly error: boolean
@@ -217,7 +248,7 @@ interface ShelfReadState {
 
 /** The state an owner starts in: asking, waiting, or unable to ask. */
 function openingState(owner: ShelfReadOwner): ShelfReadState {
-  return { ownerId: owner.id, phase: owner.phase, books: [], error: false }
+  return { owner, phase: owner.phase, books: [], error: false }
 }
 
 /** The parent's shelf: the whole family, newest first, no child filter. */
@@ -1184,61 +1215,90 @@ export function useBookshelf(
       ? ShelfReadPhase.Unknown
       : ShelfReadPhase.Unsettled
   const ownerKey = ownerKeyFor(scope, openingPhase)
-
-  /**
-   * The owner of this render, opened during the render that changed it.
-   *
-   * Deliberately not in an effect: a callback retained from the previous owner
-   * can be fired in the layout window of the replacement commit — before any
-   * passive effect has run — and admission has to be aligned with the commit
-   * rather than with the flush after it, or the replaced callback asks the
-   * question its owner no longer owns. A render that is thrown away opens an
-   * owner that is then simply never asked.
-   */
-  const ownerRef = useRef<ShelfReadOwner | null>(null)
-  if (!ownerRef.current || ownerRef.current.key !== ownerKey) {
-    ownerRef.current = {
-      id: (ownerRef.current?.id ?? 0) + 1,
-      key: ownerKey,
-      scope,
-      familyId,
-      childId,
-      audienceIsFamily,
-      phase: openingPhase,
-      requested: false,
-    }
+  const question: ShelfQuestion = {
+    key: ownerKey,
+    scope,
+    familyId,
+    childId,
+    audienceIsFamily,
+    phase: openingPhase,
   }
-  const owner = ownerRef.current
+
+  const [state, setState] = useState<ShelfReadState>(() => openingState(nextOwner(0, question)))
+  /**
+   * The owner of this render, and the rows it is allowed to show.
+   *
+   * When the question has moved, this render already belongs to the NEW
+   * incarnation: the previous owner's rows are gone in the SAME render — before
+   * any effect runs — so a row this shelf may no longer show is never drawn,
+   * never counted and never actionable through it. Setting state during render
+   * is React's derive-from-input path: this render is thrown away and re-rendered
+   * with exactly the value below, so the owner object the commit keeps is the one
+   * every callback here closed over.
+   */
+  const ownerMoved = state.owner.key !== ownerKey
+  const read = ownerMoved ? openingState(nextOwner(state.owner.id, question)) : state
+  if (ownerMoved) setState(read)
+  const owner = read.owner
 
   /** The latest read ASKED, so an earlier one's answer is never taken. */
   const lastRead = useRef(0)
+  /**
+   * Which incarnation's one automatic read has been asked for — bookkeeping
+   * kept out of rendering, where the `requested` flag used to be mutated on the
+   * owner itself. A render that is never committed must neither spend an
+   * owner's read nor consume the committed owner's.
+   */
+  const startedFor = useRef(0)
+  /**
+   * The owner this hook has COMMITTED — the only one allowed to spend a read.
+   *
+   * Written in the commit's own layout phase and not in a passive effect: a
+   * callback retained from the previous owner can be fired in the layout window
+   * of the replacement commit, before any passive effect has run, and admission
+   * has to be aligned with the commit rather than with the flush after it.
+   *
+   * What that window looks like, stated rather than hoped for. React runs a
+   * commit's layout TEARDOWNS before its setups, so from the moment the owner
+   * changes until this effect re-runs there is no live owner at all and every
+   * retained callback — the replaced owner's included — asks nothing. After it,
+   * the new owner's own retry is live for the rest of that same commit, which is
+   * the half a passive effect would have got wrong. The one thing that is merely
+   * deferred rather than exact: a retry fired from a layout effect that runs
+   * EARLIER in this commit than this one (a child's, since a parent's hook sets
+   * up after its children) finds the window empty and asks nothing — the owner's
+   * one automatic read then asks for it in the passive flush that follows. And
+   * because `apply` asks STATE rather than this ref for the final word, no answer
+   * admitted anywhere in that window can land on an owner the screen has left.
+   */
+  const liveOwner = useRef<ShelfReadOwner | null>(null)
   const mounted = useRef(false)
 
-  const [state, setState] = useState<ShelfReadState>(() => openingState(owner))
-  /**
-   * The previous owner's rows are gone in the SAME render the owner changes —
-   * before any effect runs — so a row this shelf may no longer show is never
-   * drawn, never counted and never actionable through it. Setting state during
-   * render is the derive-from-input path: React throws this render away and
-   * re-renders with the opening state below.
-   */
-  if (state.ownerId !== owner.id) setState(openingState(owner))
-  const read = state.ownerId === owner.id ? state : openingState(owner)
+  useLayoutEffect(() => {
+    liveOwner.current = owner
+    return () => {
+      // Between a commit's teardowns and its setups there is no live owner at
+      // all, and after unmount there is none again: a retained callback fired in
+      // either window asks nothing.
+      liveOwner.current = null
+    }
+  }, [owner])
 
   /**
    * Apply a completion, if it is still this hook's to apply.
    *
-   * Four refusals, each for a sequence that really happens: unmounted,
-   * superseded by a later read (a retry), answered for an owner that has been
-   * replaced — including one whose key has since come back — and an answer
-   * about rows the state has already moved on from.
+   * Three refusals, each for a sequence that really happens: unmounted,
+   * superseded by a later read (a retry), and answered for an owner that has
+   * been replaced — including one whose key has since come back. The last one is
+   * the UPDATE itself, because the committed state is what the screen is: an
+   * answer whose incarnation is not the one in state changes nothing, and a
+   * render that was thrown away never put its owner there to begin with.
    */
   const apply = useCallback(
-    (forOwner: ShelfReadOwner, readSeq: number, next: Omit<ShelfReadState, 'ownerId'>) => {
+    (forOwner: ShelfReadOwner, readSeq: number, next: Omit<ShelfReadState, 'owner'>) => {
       if (!mounted.current) return
       if (readSeq !== lastRead.current) return
-      if (ownerRef.current !== forOwner) return
-      setState((prev) => (prev.ownerId === forOwner.id ? { ownerId: forOwner.id, ...next } : prev))
+      setState((prev) => (prev.owner.id === forOwner.id ? { owner: prev.owner, ...next } : prev))
     },
     [],
   )
@@ -1250,10 +1310,10 @@ export function useBookshelf(
       // A callback a gone page still holds asks nothing: the answer would have
       // nowhere to land and the read would be paid for anyway.
       if (!mounted.current) return
-      if (ownerRef.current !== forOwner) return
+      if (liveOwner.current?.id !== forOwner.id) return
       lastRead.current += 1
       const readSeq = lastRead.current
-      forOwner.requested = true
+      startedFor.current = forOwner.id
       apply(forOwner, readSeq, { phase: ShelfReadPhase.Pending, books: [], error: false })
       try {
         const books = forOwner.audienceIsFamily
@@ -1281,15 +1341,15 @@ export function useBookshelf(
     // One automatic read per owner, and the owner object is what changes — so a
     // parent's selected child, which is not part of the family's question, asks
     // nothing again, while a question left and returned to is asked afresh.
-    if (owner.requested) return
+    if (startedFor.current === owner.id) return
     void runRead(owner)
   }, [owner, runRead])
 
   const retry = useCallback(() => {
     // Bound to the INCARNATION this render belongs to, not to its key: a retry
     // retained across a departure and a return is inert even though the same
-    // shelf is on screen again.
-    if (ownerRef.current !== owner) return
+    // shelf is on screen again. `runRead` is where that refusal lives, against
+    // the owner this hook has actually committed.
     void runRead(owner)
   }, [owner, runRead])
 
@@ -1326,7 +1386,7 @@ export function useBookshelf(
        * a read that failed or has not come back.
        */
       setState((prev) =>
-        prev.ownerId === owner.id ? { ...prev, books: [created, ...prev.books] } : prev,
+        prev.owner.id === owner.id ? { ...prev, books: [created, ...prev.books] } : prev,
       )
       return docRef.id
     },
@@ -1339,7 +1399,7 @@ export function useBookshelf(
       await deleteDoc(doc(booksCollection(familyId), bookId))
       // Same ownership rule as the create above; the write itself is unchanged.
       setState((prev) =>
-        prev.ownerId === owner.id
+        prev.owner.id === owner.id
           ? { ...prev, books: prev.books.filter((b) => b.id !== bookId) }
           : prev,
       )

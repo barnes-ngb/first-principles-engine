@@ -160,8 +160,14 @@ vi.mock('../../avatar/stonebridge/BannerRaiseCelebration', () => ({ default: () 
  * half-made generation IS. The real chat's behaviour is its own suites'; what
  * is asserted here is that the shelf never takes this instance away.
  */
-vi.mock('../BookGenerateChat', () => ({
-  default: ({ resumeBookId }: { resumeBookId?: string }) => {
+vi.mock('../BookGenerateChat', () => {
+  /**
+   * Named, and named with a CAPITAL: a stub that holds hooks is a component, and
+   * `default: () => …` is a function called `default` as far as the rules of
+   * hooks are concerned — which is an error, not a style note, because the rule
+   * cannot check a hook it does not believe is in a component.
+   */
+  function GenerateChatStub({ resumeBookId }: { resumeBookId?: string }) {
     const [session] = useState(() => {
       fx.chatMounts += 1
       return `chat-${fx.chatMounts}`
@@ -176,8 +182,9 @@ vi.mock('../BookGenerateChat', () => ({
         />
       </div>
     )
-  },
-}))
+  }
+  return { default: GenerateChatStub }
+})
 vi.mock('../EvaluationBookBanner', () => ({ default: () => null }))
 vi.mock('../PrintSettingsDialog', () => ({ default: () => null }))
 vi.mock('../useEvaluationBookSuggestions', () => ({
@@ -203,15 +210,18 @@ vi.mock('../../business/useCatalogProducts', () => ({
  * the page decides: WHETHER a timer is mounted at all on a shelf that has never
  * loaded, and whether a read frame can replace the one that is mounted.
  */
-vi.mock('../../../components/CreativeTimer', () => ({
-  default: () => {
+vi.mock('../../../components/CreativeTimer', () => {
+  // Same reason as the chat stub above: it holds a hook, so it is a component
+  // with a component's name.
+  function CreativeTimerStub() {
     const [session] = useState(() => {
       fx.timerMounts += 1
       return `timer-${fx.timerMounts}`
     })
     return <div data-testid="creative-timer" data-session={session} />
-  },
-}))
+  }
+  return { default: CreativeTimerStub }
+})
 
 // `vi.mock` is hoisted above these, so everything below is the real thing.
 import BookshelfPage from '../BookshelfPage'
