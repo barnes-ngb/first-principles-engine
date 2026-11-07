@@ -24,6 +24,7 @@ import { DIAMOND_EVENTS } from '../../core/types'
 import { createEmptyPage, generateImageId } from './bookTypes'
 import { cleanSketchBackground } from './cleanSketch'
 import { reorderPageImages } from './draggableImageUtils'
+import { ShelfReadPhase, shelfIdentityKnown, type ShelfIdentityState } from './shelfRead'
 
 export interface BookPageChange {
   before: BookPage
@@ -118,34 +119,15 @@ interface UseBookResult {
   usedAiGeneration: boolean
 }
 
-/**
- * What the shelf's own query can honestly say about itself.
- *
- * Four answers, kept apart because collapsing any two of them makes the shelf
- * lie: a read nobody has asked for is not a read in flight, a read that FAILED
- * is not an empty shelf, and an empty shelf is not a failure. The page draws
- * one frame per answer and no frame for a fact it does not have.
- */
-export const ShelfReadPhase = {
-  /** No family, or no audience to read for. Nothing asked, nothing known. */
-  Unsettled: 'unsettled',
-  /** Asked and not answered yet. */
-  Pending: 'pending',
-  /** Answered — `books` IS the answer, including a genuinely empty one. */
-  Ready: 'ready',
-  /** Refused or dropped. Never presented as a result. */
-  Error: 'error',
-} as const
-export type ShelfReadPhase = (typeof ShelfReadPhase)[keyof typeof ShelfReadPhase]
-
 interface UseBookshelfResult {
   /** Only ever the rows of the query owner this result is for. */
   books: Book[]
   /** Unchanged for every existing reader: the read is in flight. */
   loading: boolean
-  /** Which of the four answers above this is. */
+  /** Which of `ShelfReadPhase`'s five answers this is. */
   phase: ShelfReadPhase
-  /** The read FAILED. Never true beside an affirmative answer. */
+  /** THIS read failed. Never true beside an affirmative answer, and never the
+   *  word for an identity that is merely unknown — that is its own phase. */
   error: boolean
   /**
    * Ask the CURRENT owner's query again.
@@ -169,35 +151,73 @@ interface UseBookshelfResult {
  * WHOSE books a read is for — the query's own permission scope.
  *
  * Family + audience, plus the child only when the child is what the query
- * FILTERS ON. A parent reads the whole family (`loadAll`), so the selected
- * child is not part of that question: moving the app-bar chip must not reload
- * the shelf, blank it, fail it or take a dialog down with it. A child's shelf
- * is their own id, so a different child is a different question.
+ * FILTERS ON. A parent reads the whole family (`loadAll`), so neither the
+ * selected child nor that child's readiness is part of that question: moving
+ * the app-bar chip must not reload the shelf, blank it, fail it or take a
+ * dialog down with it. A child's shelf is their own id, so a different child is
+ * a different question — and a child who is not KNOWN is no question at all.
  *
- * `''` means there is nothing to read for yet — which is not an empty shelf.
+ * `''` means there is nothing honest to ask.
  */
-function shelfQueryScope(familyId: string, childId: string, loadAll: boolean): string {
+function shelfQueryScope(
+  familyId: string,
+  childId: string,
+  loadAll: boolean,
+  identityKnown: boolean,
+): string {
   if (!familyId) return ''
   if (loadAll) return `${familyId}|family`
+  if (!identityKnown) return ''
   return childId ? `${familyId}|child|${childId}` : ''
 }
 
-interface ShelfReadState {
-  /** The query owner these rows belong to. They are shown under no other. */
+/**
+ * One OWNER of the read — one incarnation of one question.
+ *
+ * A new object every time the owner changes, which is what the admission checks
+ * compare: the key alone cannot do it, because a scope that is left and
+ * returned to (`A → B → A`, or `A → no child → A`) produces the same string
+ * for two different questions, and a callback retained from the first must be
+ * inert while the second asks for itself. Created during RENDER, so a retained
+ * callback fired from a layout effect of the replacement commit already sees
+ * the replacement rather than the owner it was made for.
+ */
+interface ShelfReadOwner {
+  /** Monotonic and never reused. */
+  readonly id: number
+  /** The query's scope, or why there is none — see `ownerKeyFor`. */
+  readonly key: string
+  /** The query to ask, or `''` when there is nothing honest to ask. */
   readonly scope: string
+  readonly familyId: string
+  readonly childId: string
+  readonly audienceIsFamily: boolean
+  /** The phase this owner begins in, before anything has been asked. */
+  readonly phase: ShelfReadPhase
+  /** Has this owner's one automatic read been asked for? */
+  requested: boolean
+}
+
+/**
+ * Why there is no query, when there is none — so that a change of REASON is a
+ * change of owner too. Unsettled and unknown are different frames, and an
+ * unknown identity that becomes merely unsettled (a retry starting) must move.
+ */
+function ownerKeyFor(scope: string, phase: ShelfReadPhase): string {
+  return scope || `none|${phase}`
+}
+
+interface ShelfReadState {
+  /** The incarnation these rows belong to. They are shown under no other. */
+  readonly ownerId: number
   readonly phase: ShelfReadPhase
   readonly books: Book[]
   readonly error: boolean
 }
 
-/** The state a scope starts in: asking, or not asking anything at all. */
-function emptyShelfRead(scope: string): ShelfReadState {
-  return {
-    scope,
-    phase: scope ? ShelfReadPhase.Pending : ShelfReadPhase.Unsettled,
-    books: [],
-    error: false,
-  }
+/** The state an owner starts in: asking, waiting, or unable to ask. */
+function openingState(owner: ShelfReadOwner): ShelfReadState {
+  return { ownerId: owner.id, phase: owner.phase, books: [], error: false }
 }
 
 /** The parent's shelf: the whole family, newest first, no child filter. */
@@ -1147,80 +1167,108 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
   }
 }
 
-export function useBookshelf(familyId: string, childId: string, loadAll?: boolean): UseBookshelfResult {
+export function useBookshelf(
+  familyId: string,
+  childId: string,
+  loadAll?: boolean,
+  identity?: ShelfIdentityState,
+): UseBookshelfResult {
   const audienceIsFamily = !!loadAll
-  const scope = shelfQueryScope(familyId, childId, audienceIsFamily)
+  // The family's audience does not depend on which child is selected, so it
+  // does not depend on that child being known either.
+  const identityKnown = audienceIsFamily || shelfIdentityKnown(identity)
+  const scope = shelfQueryScope(familyId, childId, audienceIsFamily, identityKnown)
+  const openingPhase = scope
+    ? ShelfReadPhase.Pending
+    : !audienceIsFamily && familyId && identity?.failed
+      ? ShelfReadPhase.Unknown
+      : ShelfReadPhase.Unsettled
+  const ownerKey = ownerKeyFor(scope, openingPhase)
 
-  const [state, setState] = useState<ShelfReadState>(() => emptyShelfRead(scope))
   /**
-   * The read this hook is currently answering for. Monotonic and never reused,
-   * so a late completion, a retry callback that has been replaced, and an
-   * A → B → A return to the SAME scope are all told apart by it.
+   * The owner of this render, opened during the render that changed it.
+   *
+   * Deliberately not in an effect: a callback retained from the previous owner
+   * can be fired in the layout window of the replacement commit — before any
+   * passive effect has run — and admission has to be aligned with the commit
+   * rather than with the flush after it, or the replaced callback asks the
+   * question its owner no longer owns. A render that is thrown away opens an
+   * owner that is then simply never asked.
    */
-  const generation = useRef(0)
-  const mounted = useRef(false)
-  /** The inputs as of the last commit — what a read or a retry asks about. */
-  const live = useRef({ scope, familyId, childId, audienceIsFamily })
-  /** The owner the last read was STARTED for, so one owner is asked once. */
-  const started = useRef('')
+  const ownerRef = useRef<ShelfReadOwner | null>(null)
+  if (!ownerRef.current || ownerRef.current.key !== ownerKey) {
+    ownerRef.current = {
+      id: (ownerRef.current?.id ?? 0) + 1,
+      key: ownerKey,
+      scope,
+      familyId,
+      childId,
+      audienceIsFamily,
+      phase: openingPhase,
+      requested: false,
+    }
+  }
+  const owner = ownerRef.current
 
+  /** The latest read ASKED, so an earlier one's answer is never taken. */
+  const lastRead = useRef(0)
+  const mounted = useRef(false)
+
+  const [state, setState] = useState<ShelfReadState>(() => openingState(owner))
   /**
    * The previous owner's rows are gone in the SAME render the owner changes —
-   * before any effect runs — so a row from an audience this shelf may no longer
-   * show is never drawn, never counted and never actionable through it. Setting
-   * state during render is the derive-from-input path: React throws this render
-   * away and re-renders with the reset below.
+   * before any effect runs — so a row this shelf may no longer show is never
+   * drawn, never counted and never actionable through it. Setting state during
+   * render is the derive-from-input path: React throws this render away and
+   * re-renders with the opening state below.
    */
-  if (state.scope !== scope) setState(emptyShelfRead(scope))
-  const read = state.scope === scope ? state : emptyShelfRead(scope)
+  if (state.ownerId !== owner.id) setState(openingState(owner))
+  const read = state.ownerId === owner.id ? state : openingState(owner)
 
   /**
    * Apply a completion, if it is still this hook's to apply.
    *
-   * Three refusals, each for a real sequence: unmounted, superseded by a later
-   * read (a retry, or a scope that moved and came back), or an answer about an
-   * owner the state has already left.
+   * Four refusals, each for a sequence that really happens: unmounted,
+   * superseded by a later read (a retry), answered for an owner that has been
+   * replaced — including one whose key has since come back — and an answer
+   * about rows the state has already moved on from.
    */
   const apply = useCallback(
-    (readScope: string, readGeneration: number, next: Omit<ShelfReadState, 'scope'>) => {
+    (forOwner: ShelfReadOwner, readSeq: number, next: Omit<ShelfReadState, 'ownerId'>) => {
       if (!mounted.current) return
-      if (readGeneration !== generation.current) return
-      setState((prev) => (prev.scope === readScope ? { scope: readScope, ...next } : prev))
+      if (readSeq !== lastRead.current) return
+      if (ownerRef.current !== forOwner) return
+      setState((prev) => (prev.ownerId === forOwner.id ? { ownerId: forOwner.id, ...next } : prev))
     },
     [],
   )
 
-  /** Ask the live owner's query. Stable, so a re-render cannot re-trigger it. */
-  const runRead = useCallback(async () => {
-    const asked = live.current
-    if (!asked.scope) return
-    // A retry a gone page still holds asks nothing: the answer would have
-    // nowhere to land, and the read would be paid for anyway.
-    if (!mounted.current) return
-    generation.current += 1
-    const readGeneration = generation.current
-    started.current = asked.scope
-    apply(asked.scope, readGeneration, {
-      phase: ShelfReadPhase.Pending,
-      books: [],
-      error: false,
-    })
-    try {
-      const books = asked.audienceIsFamily
-        ? await readFamilyShelf(asked.familyId)
-        : await readChildShelf(asked.familyId, asked.childId)
-      apply(asked.scope, readGeneration, { phase: ShelfReadPhase.Ready, books, error: false })
-    } catch (err) {
-      console.error('Bookshelf read failed:', err)
-      // A refused or dropped read is reported as one. It is not an empty shelf,
-      // and a union that lost half of itself is not a shelf at all.
-      apply(asked.scope, readGeneration, {
-        phase: ShelfReadPhase.Error,
-        books: [],
-        error: true,
-      })
-    }
-  }, [apply])
+  /** Ask one owner's query. Refuses to ask for anybody but the live owner. */
+  const runRead = useCallback(
+    async (forOwner: ShelfReadOwner) => {
+      if (!forOwner.scope) return
+      // A callback a gone page still holds asks nothing: the answer would have
+      // nowhere to land and the read would be paid for anyway.
+      if (!mounted.current) return
+      if (ownerRef.current !== forOwner) return
+      lastRead.current += 1
+      const readSeq = lastRead.current
+      forOwner.requested = true
+      apply(forOwner, readSeq, { phase: ShelfReadPhase.Pending, books: [], error: false })
+      try {
+        const books = forOwner.audienceIsFamily
+          ? await readFamilyShelf(forOwner.familyId)
+          : await readChildShelf(forOwner.familyId, forOwner.childId)
+        apply(forOwner, readSeq, { phase: ShelfReadPhase.Ready, books, error: false })
+      } catch (err) {
+        console.error('Bookshelf read failed:', err)
+        // A refused or dropped read is reported as one. It is not an empty
+        // shelf, and a union that lost half of itself is not a shelf at all.
+        apply(forOwner, readSeq, { phase: ShelfReadPhase.Error, books: [], error: true })
+      }
+    },
+    [apply],
+  )
 
   useEffect(() => {
     mounted.current = true
@@ -1229,25 +1277,21 @@ export function useBookshelf(familyId: string, childId: string, loadAll?: boolea
     }
   }, [])
 
-  // Declared before the read below, so the read it triggers asks about the
-  // inputs of the commit that triggered it.
   useEffect(() => {
-    live.current = { scope, familyId, childId, audienceIsFamily }
-  }, [scope, familyId, childId, audienceIsFamily])
-
-  useEffect(() => {
-    if (!scope) return
-    // One read per owner. An input that is not part of the question — a
-    // parent's selected child — is not a reason to ask it again.
-    if (started.current === scope) return
-    void runRead()
-  }, [scope, familyId, childId, audienceIsFamily, runRead])
+    // One automatic read per owner, and the owner object is what changes — so a
+    // parent's selected child, which is not part of the family's question, asks
+    // nothing again, while a question left and returned to is asked afresh.
+    if (owner.requested) return
+    void runRead(owner)
+  }, [owner, runRead])
 
   const retry = useCallback(() => {
-    // Bound to the scope the render that produced this callback was showing.
-    if (live.current.scope !== scope) return
-    void runRead()
-  }, [scope, runRead])
+    // Bound to the INCARNATION this render belongs to, not to its key: a retry
+    // retained across a departure and a return is inert even though the same
+    // shelf is on screen again.
+    if (ownerRef.current !== owner) return
+    void runRead(owner)
+  }, [owner, runRead])
 
   const createBook = useCallback(
     async (
@@ -1277,16 +1321,16 @@ export function useBookshelf(familyId: string, childId: string, loadAll?: boolea
       const created = { ...newBook, id: docRef.id }
       /**
        * The optimistic row joins the view it was made in and no other: a create
-       * that lands after the audience changed must not inject a row into the
-       * new owner's shelf. The phase is untouched — a created book is not an
-       * answer to a read that failed or has not come back.
+       * that lands after the owner changed must not inject a row into the new
+       * one's shelf. The phase is untouched — a created book is not an answer to
+       * a read that failed or has not come back.
        */
       setState((prev) =>
-        prev.scope === scope ? { ...prev, books: [created, ...prev.books] } : prev,
+        prev.ownerId === owner.id ? { ...prev, books: [created, ...prev.books] } : prev,
       )
       return docRef.id
     },
-    [familyId, childId, scope],
+    [familyId, childId, owner],
   )
 
   const deleteBook = useCallback(
@@ -1295,12 +1339,12 @@ export function useBookshelf(familyId: string, childId: string, loadAll?: boolea
       await deleteDoc(doc(booksCollection(familyId), bookId))
       // Same ownership rule as the create above; the write itself is unchanged.
       setState((prev) =>
-        prev.scope === scope
+        prev.ownerId === owner.id
           ? { ...prev, books: prev.books.filter((b) => b.id !== bookId) }
           : prev,
       )
     },
-    [familyId, scope],
+    [familyId, owner],
   )
 
   return {

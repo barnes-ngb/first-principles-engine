@@ -1,3 +1,4 @@
+import { useLayoutEffect } from 'react'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -85,7 +86,10 @@ vi.mock('../../../core/hooks/useDebounce', () => ({ useDebounce: () => vi.fn() }
 vi.mock('../../../core/xp/addXpEvent', () => ({ addXpEvent: vi.fn() }))
 vi.mock('../../../core/xp/addDiamondEvent', () => ({ addDiamondEvent: vi.fn() }))
 
-import { ShelfReadPhase, useBookshelf } from '../useBook'
+// The phase vocabulary comes from the pure contract module, not from the hook's
+// own file — the same import the page makes, and the reason it is separate.
+import { ShelfReadPhase } from '../shelfRead'
+import { useBookshelf } from '../useBook'
 
 const FAMILY = 'fam-1'
 const LINCOLN = 'lincoln'
@@ -463,6 +467,136 @@ describe('a scope that moved under a mounted shelf', () => {
     expect(result.current.error).toBe(false)
   })
 
+  it('asks again after the child id goes missing and comes back', async () => {
+    /**
+     * The owner can be withdrawn and restored without anything else changing —
+     * a children re-read, a profile settling, a chip clearing — and the scope
+     * STRING is identical on both sides of it. The question was still
+     * withdrawn, so coming back is a new question: it is asked, and only its
+     * own answer is taken.
+     */
+    const { result, rerender } = renderHook(
+      ({ childId }: { childId: string }) => useBookshelf(FAMILY, childId, false),
+      { initialProps: { childId: LINCOLN } },
+    )
+    const firstVisit = detachReads()
+
+    rerender({ childId: '' })
+    // Nothing to ask for, and nothing claimed: not empty, not failed.
+    expect(outstanding()).toEqual([])
+    expect(result.current.phase).toBe(ShelfReadPhase.Unsettled)
+    expect(result.current.books).toEqual([])
+    expect(result.current.error).toBe(false)
+
+    rerender({ childId: LINCOLN })
+    // Asked afresh — the bug this pins left the shelf pending forever, because
+    // the owner it had already asked for carried the same key.
+    expect(outstanding().sort()).toEqual(['own', 'together'])
+    const secondVisit = detachReads()
+
+    // The read from before the gap lands. It answers a question nobody asked.
+    await answer(firstVisit, [makeBook({ id: 'stale', title: 'From before the gap' })])
+    expect(result.current.books).toEqual([])
+    expect(result.current.phase).toBe(ShelfReadPhase.Pending)
+
+    await answer(secondVisit, [makeBook({ id: 'fresh', title: 'From after it' })])
+    await waitFor(() => {
+      expect(titles(result.current.books)).toEqual(['From after it'])
+    })
+  })
+
+  it('and a FAILURE from before that gap does not fail the shelf after it', async () => {
+    const { result, rerender } = renderHook(
+      ({ childId }: { childId: string }) => useBookshelf(FAMILY, childId, false),
+      { initialProps: { childId: LINCOLN } },
+    )
+    const firstVisit = detachReads()
+
+    rerender({ childId: '' })
+    rerender({ childId: LINCOLN })
+    const secondVisit = detachReads()
+
+    await refuse(firstVisit)
+    expect(result.current.error).toBe(false)
+    expect(result.current.phase).toBe(ShelfReadPhase.Pending)
+
+    await answer(secondVisit, [])
+    await waitFor(() => {
+      expect(result.current.phase).toBe(ShelfReadPhase.Ready)
+    })
+    expect(result.current.error).toBe(false)
+  })
+
+  it('ignores a retry retained across a departure and a RETURN to the same shelf', async () => {
+    /**
+     * The sharper half of the retry rule: comparing the scope string is not
+     * enough, because `A → B → A` brings the string back. The callback belongs
+     * to the incarnation that produced it, which is over.
+     */
+    const { result, rerender } = renderHook(
+      ({ childId }: { childId: string }) => useBookshelf(FAMILY, childId, false),
+      { initialProps: { childId: LINCOLN } },
+    )
+    await refuse(detachReads())
+    await waitFor(() => {
+      expect(result.current.error).toBe(true)
+    })
+    const firstVisitRetry = result.current.retry
+
+    rerender({ childId: LONDON })
+    detachReads()
+    rerender({ childId: LINCOLN })
+    // Lincoln's shelf is being asked again, by this visit's own read.
+    expect(outstanding().sort()).toEqual(['own', 'together'])
+    const thisVisit = detachReads()
+
+    await act(async () => {
+      firstVisitRetry()
+    })
+    // The retained callback asked nothing, even though its shelf is on screen.
+    expect(outstanding()).toEqual([])
+
+    await answer(thisVisit, [makeBook({ id: 'b1', title: 'This visit’s answer' })])
+    await waitFor(() => {
+      expect(titles(result.current.books)).toEqual(['This visit’s answer'])
+    })
+  })
+
+  it('and one fired in the replacement’s LAYOUT window asks for nobody', async () => {
+    /**
+     * The window a passive effect cannot cover: the replacement has committed,
+     * its layout effects are running, and no passive effect has caught up yet.
+     * A callback retained from the previous owner, fired in there, used to ask
+     * the previous owner's query — two reads nobody is waiting for, landing
+     * ahead of the reads that matter.
+     */
+    const { result, rerender } = renderHook(
+      ({ childId, onLayout }: { childId: string; onLayout?: () => void }) => {
+        const shelf = useBookshelf(FAMILY, childId, false)
+        useLayoutEffect(() => {
+          onLayout?.()
+        })
+        return shelf
+      },
+      { initialProps: { childId: LINCOLN, onLayout: undefined as (() => void) | undefined } },
+    )
+    const staleRetry = result.current.retry
+    detachReads()
+
+    rerender({ childId: LONDON, onLayout: staleRetry })
+
+    // Exactly the replacement's own pair, and nothing asked about Lincoln.
+    expect(outstanding().sort()).toEqual(['own', 'together'])
+    const asked = JSON.stringify(fx.reads.map((r) => r.target))
+    expect(asked).toContain(LONDON)
+    expect(asked).not.toContain(LINCOLN)
+
+    await answer(detachReads(), [makeBook({ id: 'o-1', title: 'London’s book', childId: LONDON })])
+    await waitFor(() => {
+      expect(titles(result.current.books)).toEqual(['London’s book'])
+    })
+  })
+
   it('and a retry held after the shelf is gone asks nothing at all', async () => {
     const { result, unmount } = renderHook(() => useBookshelf(FAMILY, LINCOLN, false))
     await refuse(detachReads())
@@ -477,6 +611,94 @@ describe('a scope that moved under a mounted shelf', () => {
     })
     // An unmounted page's read has nowhere to land and would be paid for anyway.
     expect(outstanding()).toEqual([])
+  })
+})
+
+describe('the identity a child’s shelf would be read FOR', () => {
+  /**
+   * `useChildren` keeps the previous answer's child object beside an unsettled
+   * or FAILED re-read, so the id a shelf would read for survives a read that
+   * cannot vouch for it. The surface passes those two flags in — this hook
+   * never reads identity itself — and a child's query is only asked for a child
+   * who is actually known.
+   */
+  it('is required for a child’s query: an unsettled read asks nothing and claims nothing', async () => {
+    const { result, rerender } = renderHook(
+      ({ loading }: { loading: boolean }) =>
+        useBookshelf(FAMILY, LINCOLN, false, { loading }),
+      { initialProps: { loading: false } },
+    )
+    await answer(detachReads(), [makeBook({ id: 'b1', title: 'Theirs' })])
+    await waitFor(() => {
+      expect(titles(result.current.books)).toEqual(['Theirs'])
+    })
+
+    rerender({ loading: true })
+    // The rows go with the identity that vouched for them, in the same render.
+    expect(result.current.books).toEqual([])
+    expect(result.current.phase).toBe(ShelfReadPhase.Unsettled)
+    expect(result.current.error).toBe(false)
+    expect(outstanding()).toEqual([])
+
+    rerender({ loading: false })
+    // Known again, so the question can be asked again — and it is asked, not
+    // assumed from the answer the old identity gave.
+    expect(outstanding().sort()).toEqual(['own', 'together'])
+    await answer(detachReads(), [makeBook({ id: 'b1', title: 'Theirs' })])
+    await waitFor(() => {
+      expect(titles(result.current.books)).toEqual(['Theirs'])
+    })
+  })
+
+  it('and a FAILED identity read is its own answer, with its own recovery', async () => {
+    const { result, rerender } = renderHook(
+      ({ failed }: { failed: boolean }) =>
+        // The real pair: a failure comes WITH `loading` still true.
+        useBookshelf(FAMILY, LINCOLN, false, { loading: failed, failed }),
+      { initialProps: { failed: false } },
+    )
+    await answer(detachReads(), [makeBook({ id: 'b1', title: 'Theirs' })])
+    await waitFor(() => {
+      expect(result.current.phase).toBe(ShelfReadPhase.Ready)
+    })
+
+    rerender({ failed: true })
+    // Unknown, said as unknown: not an empty shelf, not this read's failure,
+    // and not a spinner that cannot end.
+    expect(result.current.phase).toBe(ShelfReadPhase.Unknown)
+    expect(result.current.books).toEqual([])
+    expect(result.current.error).toBe(false)
+    expect(result.current.loading).toBe(false)
+    expect(outstanding()).toEqual([])
+
+    // This read's own retry has nothing to ask: the recovery belongs to the
+    // children read, and the surface offers that one instead.
+    await act(async () => {
+      result.current.retry()
+    })
+    expect(outstanding()).toEqual([])
+  })
+
+  it('but a parent’s family query does not depend on it at all', async () => {
+    const { result, rerender } = renderHook(
+      ({ loading, failed }: { loading: boolean; failed: boolean }) =>
+        useBookshelf(FAMILY, LINCOLN, true, { loading, failed }),
+      { initialProps: { loading: false, failed: false } },
+    )
+    expect(outstanding()).toEqual(['all'])
+    await answer(detachReads(), [makeBook({ id: 'l-1', title: 'Somebody’s' })])
+    await waitFor(() => {
+      expect(result.current.phase).toBe(ShelfReadPhase.Ready)
+    })
+
+    rerender({ loading: true, failed: true })
+    // The family's permission scope is the family. Which child is selected, and
+    // whether that selection is confirmed, is not part of the question — so the
+    // parent's shelf is not blanked, re-read or failed by it.
+    expect(outstanding()).toEqual([])
+    expect(titles(result.current.books)).toEqual(['Somebody’s'])
+    expect(result.current.phase).toBe(ShelfReadPhase.Ready)
+    expect(result.current.error).toBe(false)
   })
 })
 

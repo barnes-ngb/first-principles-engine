@@ -35,9 +35,14 @@ vi.mock('../../../core/profile/useProfile', () => ({
 
 let booksFixture: Book[] = []
 vi.mock('../useBook', () => ({
+  // A settled, successful read; `phase` explicit, since a stub without one is
+  // read as *waiting* rather than as a ready shelf.
   useBookshelf: () => ({
     books: booksFixture,
     loading: false,
+    phase: 'ready',
+    error: false,
+    retry: vi.fn(),
     createBook: createBookMock,
     deleteBook: vi.fn(),
   }),

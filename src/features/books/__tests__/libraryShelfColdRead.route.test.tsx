@@ -598,34 +598,41 @@ describe('a failed read invents nothing', () => {
  * nothing else, and `App.tsx`'s `ProfileGate` renders the same `<AppRouter />`
  * for every non-null profile — so the shelf is RE-RENDERED under a new audience
  * rather than remounted. A static route element is re-rendered by nothing here,
- * which is why these two claims render the page themselves and re-render it.
+ * which is why these claims render the page themselves and re-render it.
  */
 describe('a scope that moves under the mounted shelf', () => {
-  function renderShelf() {
-    const view = render(
-      <MemoryRouter initialEntries={['/books']}>
-        <BookshelfPage />
-      </MemoryRouter>,
-    )
-    return {
-      ...view,
-      again: () =>
-        view.rerender(
-          <MemoryRouter initialEntries={['/books']}>
-            <BookshelfPage />
-          </MemoryRouter>,
-        ),
-    }
+  function Where() {
+    const location = useLocation()
+    return <span data-testid="shelf-where">{location.pathname}</span>
   }
 
-  it('keeps the error frame but drops the way back when the identity read fails', async () => {
+  /**
+   * A FRESH element every time, deliberately: re-rendering the identical
+   * element object makes React bail out of the subtree, so a stale tree would
+   * assert that nothing changed by never asking the page to render again.
+   */
+  const shelfTree = () => (
+    <MemoryRouter initialEntries={['/books']}>
+      <BookshelfPage />
+      <Where />
+    </MemoryRouter>
+  )
+
+  function renderShelf() {
+    const view = render(shelfTree())
+    return { ...view, again: () => view.rerender(shelfTree()) }
+  }
+
+  it('an identity read that fails is said honestly, through ITS retry, and ends the journey', async () => {
     /**
-     * Two independent reads, two independent answers. The shelf's own read
-     * failed — so the error and its one door stay — while the children read
-     * then fails too, which is an affirmative answer that the identity is
-     * UNKNOWN and ends the journey through the banner's own readiness watch.
-     * A way back offered against an identity nobody can vouch for is the
-     * `GATE` verdict's whole point, and ending it is more than hiding it.
+     * Two reads, two owners, two answers. The shelf's own read failed first, so
+     * the shelf says so and offers its own door. Then the children read fails —
+     * which is an affirmative answer that the child is UNKNOWN, not a pause —
+     * so WHOSE shelf this is becomes the honest thing to say, the recovery
+     * offered is the children read's own existing `retryLoad`, and the journey
+     * is over through the banner's unchanged readiness watch. A way back
+     * offered against an identity nobody can vouch for is the `GATE` verdict's
+     * whole point, and ending it is more than hiding it.
      */
     const journey = beginLibraryReturnFlow({
       familyId: 'fam-1',
@@ -639,23 +646,72 @@ describe('a scope that moves under the mounted shelf', () => {
     const { again } = renderShelf()
     await refuseTheShelfRead()
 
-    // The recovery, with the way back beside it while the identity holds.
-    expect(await waitFor(() => screen.getByRole('alert'))).toBeInTheDocument()
+    // This read's own failure, with the way back beside it while the identity
+    // still holds.
+    expect(await waitFor(() => screen.getByText('Couldn’t load your books.'))).toBeInTheDocument()
     expect(wayBack()).toBeInTheDocument()
 
     await act(async () => {
+      // `useChildren` reports a failure with `isLoading` still true, and keeps
+      // the previous child object beside it — the shape that used to leave the
+      // retained id being read for.
       fx.childrenLoading = true
       fx.childrenLoadFailed = true
       again()
       await Promise.resolve()
     })
 
-    // The shelf still says what happened to its own read, and still offers the
-    // retry; what is gone is the journey.
-    expect(screen.getByRole('alert')).toBeInTheDocument()
-    expect(screen.getAllByRole('button', { name: 'Try again' })).toHaveLength(1)
+    // One alert, and it is now about the identity rather than about this read.
+    expect(screen.getByText('Couldn’t check whose books these are.')).toBeInTheDocument()
+    expect(screen.queryByText('Couldn’t load your books.')).not.toBeInTheDocument()
+    expect(screen.getAllByRole('alert')).toHaveLength(1)
+    expect(screen.queryByText('No books yet!')).not.toBeInTheDocument()
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
     expect(wayBack()).not.toBeInTheDocument()
     expect(getLibraryReturnFlow()).toBeNull()
+
+    // Exactly one recovery, and it is the children read's own. Nothing about
+    // the books is re-asked, because there is nobody to ask for.
+    const recover = screen.getAllByRole('button', { name: 'Try again' })
+    expect(recover).toHaveLength(1)
+    // The local rule this control is held to; the real measurement is Chrome's.
+    expect(window.getComputedStyle(recover[0]).minHeight).toBe('44px')
+    fireEvent.click(recover[0])
+    expect(fx.retryLoad).toHaveBeenCalledTimes(1)
+    expect(outstanding()).toEqual([])
+    expect(getLibraryReturnFlow()).toBeNull()
+  })
+
+  it('and while that identity read is merely unsettled, the shelf waits instead of claiming anything', async () => {
+    const { again } = renderShelf()
+    await answerTheShelfRead([makeBook({ id: 'b1', title: 'A kid’s book' })])
+    expect(await screen.findByText('A kid’s book')).toBeInTheDocument()
+
+    await act(async () => {
+      fx.childrenLoading = true
+      again()
+      await Promise.resolve()
+    })
+
+    // Not an empty shelf, not an error, and not the retained row either: the
+    // child this shelf would read for is not confirmed at this moment.
+    expect(screen.queryByText('A kid’s book')).not.toBeInTheDocument()
+    expect(screen.getByRole('status')).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.queryByText('No books yet!')).not.toBeInTheDocument()
+    expect(outstanding()).toEqual([])
+
+    // It settles on the same child: one fresh read, and the rows are theirs
+    // again. (Fresh because the question was withdrawn, not because the answer
+    // changed — an unconfirmed child is not a child.)
+    await act(async () => {
+      fx.childrenLoading = false
+      again()
+      await Promise.resolve()
+    })
+    expect(outstanding().sort()).toEqual(['own', 'together'])
+    await answerTheShelfRead([makeBook({ id: 'b1', title: 'A kid’s book' })])
+    expect(await screen.findByText('A kid’s book')).toBeInTheDocument()
   })
 
   /** Open the door and pick the AI path, then type into what it opened. */
@@ -671,25 +727,31 @@ describe('a scope that moves under the mounted shelf', () => {
     return screen.getByTestId(testId).getAttribute('data-session')
   }
 
-  it('a parent’s selected child is not a new question — nothing reloads and nothing is lost', async () => {
-    /**
-     * The correction this test exists for: the family query's permission scope
-     * is the family and the audience. The selected child filters the ANSWER, so
-     * moving the app-bar chip must not re-ask the question, must not blank or
-     * fail the shelf, and must not reach an open generation or a running timer.
-     */
+  /** The parent's shelf, answered with one book each for two children. */
+  async function parentShelfWithBothChildren() {
     fx.profile = 'parents'
     fx.isChildProfile = false
-    const { again } = renderShelf()
-
+    const view = renderShelf()
     expect(outstanding()).toEqual(['all'])
     await answerTheShelfRead([
       makeBook({ id: 'l-1', title: 'Lincoln’s book', childId: LINCOLN.id }),
       makeBook({ id: 'o-1', title: 'London’s book', childId: LONDON.id }),
     ])
     expect(await screen.findByText('Lincoln’s book')).toBeInTheDocument()
+    return view
+  }
+
+  it('a parent’s selected child is not a new question — nothing reloads', async () => {
+    /**
+     * The family query's permission scope is the family and the audience. The
+     * selected child filters the ANSWER, so moving the app-bar chip must not
+     * re-ask the question, blank the shelf or fail it.
+     *
+     * Nothing is open over the page here on purpose: these are claims about
+     * what a person can see and reach, so they are made by role.
+     */
+    const { again } = await parentShelfWithBothChildren()
     const timerSession = sessionOf('creative-timer')
-    const chatSession = await openGenerateChatWith('Once upon a mine')
 
     await act(async () => {
       fx.activeChild = LONDON
@@ -708,33 +770,22 @@ describe('a scope that moves under the mounted shelf', () => {
     // The counts are still the family's, and still true. (The tab is named
     // rather than the "All (2)" chip, which the creator filter also carries.)
     expect(screen.getByRole('button', { name: /^Made by hand \(2\)$/ })).toBeInTheDocument()
-    // The same generation, with the words still in it, and the same timer
-    // session — not a new instance that merely looks like one.
-    expect(sessionOf('generate-chat')).toBe(chatSession)
-    expect(screen.getByLabelText('story so far')).toHaveValue('Once upon a mine')
+    // And the same timer session, not a new instance that looks like one.
     expect(sessionOf('creative-timer')).toBe(timerSession)
     expect(fx.timerMounts).toBe(1)
-    expect(fx.chatMounts).toBe(1)
   })
 
-  it('an audience replacement hides the old rows at once, and still keeps the session', async () => {
+  it('an audience replacement hides the old rows at once, and recovers into the new ones', async () => {
     /**
      * The actual permission-scope replacement, which is a different event from
      * the chip moving: Mom hands the phone over and the profile becomes a
      * child's, so the query stops being the family's. The rows she could see
      * are gone in the first render of the new owner — before any effect, before
-     * the new read lands — while everything that is not the shelf stays.
+     * the new read lands. Again nothing is open over the page: this is the
+     * reachable workflow, up to and including the tap on *Try again*.
      */
-    fx.profile = 'parents'
-    fx.isChildProfile = false
-    const { again } = renderShelf()
-    await answerTheShelfRead([
-      makeBook({ id: 'l-1', title: 'Lincoln’s book', childId: LINCOLN.id }),
-      makeBook({ id: 'o-1', title: 'London’s book', childId: LONDON.id }),
-    ])
-    expect(await screen.findByText('Lincoln’s book')).toBeInTheDocument()
+    const { again } = await parentShelfWithBothChildren()
     const timerSession = sessionOf('creative-timer')
-    const chatSession = await openGenerateChatWith('A half-made story')
 
     await act(async () => {
       fx.profile = 'london'
@@ -752,31 +803,120 @@ describe('a scope that moves under the mounted shelf', () => {
     expect(screen.queryByRole('button', { name: /^All \(\d+\)$/ })).not.toBeInTheDocument()
     expect(screen.queryByText('No books yet!')).not.toBeInTheDocument()
     expect(screen.getByRole('status')).toBeInTheDocument()
-    // The generation and the timer session are untouched by a read frame.
-    expect(sessionOf('generate-chat')).toBe(chatSession)
-    expect(screen.getByLabelText('story so far')).toHaveValue('A half-made story')
     expect(sessionOf('creative-timer')).toBe(timerSession)
 
-    // Refused: the truth, one door, and still the same two neighbours.
+    // Refused: the truth, one door at the size this app holds controls to.
     await refuseTheShelfRead()
-    expect(await waitFor(() => screen.getByRole('alert'))).toBeInTheDocument()
-    expect(screen.getAllByRole('button', { name: 'Try again' })).toHaveLength(1)
+    expect(await waitFor(() => screen.getByText('Couldn’t load your books.'))).toBeInTheDocument()
+    const recover = screen.getAllByRole('button', { name: 'Try again' })
+    expect(recover).toHaveLength(1)
+    // The local rule this control is held to; the real measurement is Chrome's.
+    expect(window.getComputedStyle(recover[0]).minHeight).toBe('44px')
     expect(sessionOf('creative-timer')).toBe(timerSession)
-    expect(sessionOf('generate-chat')).toBe(chatSession)
-    expect(screen.getByLabelText('story so far')).toHaveValue('A half-made story')
 
     // Try again asks the CHILD's question — the owner on screen now — and the
     // answer is theirs alone.
-    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    fireEvent.click(recover[0])
     await waitFor(() => {
       expect(outstanding().sort()).toEqual(['own', 'together'])
     })
     await answerTheShelfRead([makeBook({ id: 'o-1', title: 'London’s book', childId: LONDON.id })])
     expect(await screen.findByText('London’s book')).toBeInTheDocument()
     expect(screen.queryByText('Lincoln’s book')).not.toBeInTheDocument()
-    // One timer and one generation throughout: no remount anywhere in this
-    // sequence, which is what a lost session would look like.
+    // One timer throughout: no remount anywhere in this sequence, which is what
+    // a lost session would look like.
     expect(fx.timerMounts).toBe(1)
+    expect(screen.getByTestId('shelf-where')).toHaveTextContent('/books')
+  })
+
+  /**
+   * MOUNT CONTRACT, not a user workflow.
+   *
+   * With the Make-a-book dialog open, MUI marks the rest of the page
+   * `aria-hidden` — correctly, because none of it is reachable while a modal is
+   * up. So this claim is deliberately made WITHOUT role queries and without
+   * clicking anything behind the modal: what it asserts is that a query
+   * transition does not take an already-mounted composer or timer with it,
+   * which is a fact about mounting and not about what a person can tap.
+   *
+   * The real composer → continue → save → close → retry workflow is Chrome's.
+   */
+  it('a query transition does not remount an open composer or the timer (mount contract)', async () => {
+    const { again } = await parentShelfWithBothChildren()
+    const timerSession = sessionOf('creative-timer')
+    const chatSession = await openGenerateChatWith('A half-made story')
+
+    // The chip moves: not a new question, and nothing to lose by it.
+    await act(async () => {
+      fx.activeChild = LONDON
+      again()
+      await Promise.resolve()
+    })
+    expect(sessionOf('generate-chat')).toBe(chatSession)
+    expect(screen.getByLabelText('story so far')).toHaveValue('A half-made story')
+    expect(sessionOf('creative-timer')).toBe(timerSession)
+
+    // The audience is replaced, so the shelf behind the dialog is re-read …
+    await act(async () => {
+      fx.profile = 'london'
+      fx.isChildProfile = true
+      again()
+      await Promise.resolve()
+    })
+    expect(sessionOf('generate-chat')).toBe(chatSession)
+    expect(screen.getByLabelText('story so far')).toHaveValue('A half-made story')
+    expect(sessionOf('creative-timer')).toBe(timerSession)
+
+    // … and refused. The read frame behind the dialog is the shelf's business;
+    // the paid generation in front of it is not the read's to discard.
+    await refuseTheShelfRead()
+    expect(sessionOf('generate-chat')).toBe(chatSession)
+    expect(screen.getByLabelText('story so far')).toHaveValue('A half-made story')
+    expect(sessionOf('creative-timer')).toBe(timerSession)
     expect(fx.chatMounts).toBe(1)
+    expect(fx.timerMounts).toBe(1)
+  })
+
+  it('a read door over a row the shelf may no longer show is not a door', async () => {
+    /**
+     * The menu outlives the row. A parent opened a sibling's book menu, handed
+     * the phone over, and *Read* was still there over a book the new reader may
+     * not open — and it navigated. The menu is a door only while its row is
+     * part of the answer the shelf is showing.
+     */
+    const { again } = await parentShelfWithBothChildren()
+
+    const card = screen.getByText('London’s book').parentElement as HTMLElement
+    fireEvent.click(within(card).getByRole('button'))
+    expect(screen.getByRole('menuitem', { name: 'Read' })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: 'Edit' })).toBeInTheDocument()
+
+    // The chip moving does not change the answer, so the parent's own menu over
+    // their own family's row stays exactly as it was.
+    await act(async () => {
+      fx.activeChild = LONDON
+      again()
+      await Promise.resolve()
+    })
+    expect(screen.getByRole('menuitem', { name: 'Read' })).toBeInTheDocument()
+
+    // The audience IS replaced: the row is not part of the new answer, so the
+    // doors over it are gone rather than waiting to be tapped.
+    await act(async () => {
+      fx.profile = 'london'
+      fx.isChildProfile = true
+      again()
+      await Promise.resolve()
+    })
+    // Awaited because a closing MUI menu animates out; what matters is that it
+    // is gone and that nothing could be tapped in the meantime — the items are
+    // no longer rendered as doors the moment the answer changed.
+    await waitFor(() => {
+      expect(screen.queryByRole('menuitem', { name: 'Read' })).not.toBeInTheDocument()
+    })
+    expect(screen.queryByRole('menuitem', { name: 'Edit' })).not.toBeInTheDocument()
+    expect(screen.queryByText('London’s book')).not.toBeInTheDocument()
+    // Nothing navigated on its own either.
+    expect(screen.getByTestId('shelf-where')).toHaveTextContent('/books')
   })
 })

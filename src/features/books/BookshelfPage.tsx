@@ -36,7 +36,7 @@ import StorefrontIcon from '@mui/icons-material/Storefront'
 import CreativeTimer from '../../components/CreativeTimer'
 import Page from '../../components/Page'
 import LibraryReturnBanner from '../avatar/stonebridge/LibraryReturnBanner'
-import { EmptyState, ErrorState, LoadingState } from '../../components/states'
+import { EmptyState, LoadingState } from '../../components/states'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useProfile } from '../../core/profile/useProfile'
@@ -47,7 +47,8 @@ import { COVER_STYLES } from './bookTypes'
 import CatalogPromoteDialog from '../business/CatalogPromoteDialog'
 import { useCatalogProducts } from '../business/useCatalogProducts'
 import { bookToCatalogInitial, canPromoteBook, isSourceInCatalog } from '../business/catalogOnramps'
-import { ShelfReadPhase, useBookshelf } from './useBook'
+import { useBookshelf } from './useBook'
+import { ShelfFrame, resolveShelfFrame } from './shelfRead'
 import BookGenerateChat from './BookGenerateChat'
 import { makeBookPdf } from './makeBookPdf'
 import { buildGrandparentBriefHtml } from './grandparentBrief'
@@ -67,44 +68,81 @@ type BookFilter = 'all' | 'creative' | 'generated' | 'sight-word'
 type CreatorFilter = 'all' | 'parent' | 'kids'
 
 /**
- * What the SHELF — the counts, the filters and the grid — is showing.
+ * The shelf's own recovery block: one sentence and, where there is something to
+ * re-ask, one control.
  *
- * Only the shelf: the way back to the village, the page title, the doors and
- * every dialog are outside this, because a read that has not landed is not a
- * reason to take the rest of the page away.
+ * Local on purpose. The shared `ErrorState`'s action is a `size="small"` button
+ * inside an Alert, which measured 64 × 31px on a phone — under the 44px this
+ * app holds every control to — and widening it there would change every
+ * surface that uses it. So the Alert and its calm colours stay and only the
+ * action is the shelf's own: a real 44px `<Button>`, allowed its own row rather
+ * than squeezing the sentence beside it. One definition for both failures the
+ * shelf can report, so they cannot drift apart.
  */
-const ShelfFrame = {
-  /** No answer yet — asked and waiting, or nothing to ask for. */
-  Waiting: 'waiting',
-  /** The read was refused or dropped. */
-  Failed: 'failed',
-  /** An answer, which may be a genuinely empty shelf. */
-  Settled: 'settled',
-} as const
-type ShelfFrame = (typeof ShelfFrame)[keyof typeof ShelfFrame]
-
-/**
- * Which frame a read's answer means.
- *
- * `phase` is the read's own word for itself. `loading` is consulted only when
- * there is no phase at all, which is what a test double of `useBookshelf`
- * supplies: the shelf suites that stub the hook hand back the two-state answer
- * this page used to take, and they must keep meaning exactly what they meant.
- */
-function resolveShelfFrame(read: { phase?: ShelfReadPhase; loading?: boolean }): ShelfFrame {
-  if (read.phase === ShelfReadPhase.Error) return ShelfFrame.Failed
-  if (read.phase === ShelfReadPhase.Pending || read.phase === ShelfReadPhase.Unsettled) {
-    return ShelfFrame.Waiting
-  }
-  if (read.phase) return ShelfFrame.Settled
-  return read.loading ? ShelfFrame.Waiting : ShelfFrame.Settled
+function ShelfNotice({
+  message,
+  onRetry,
+}: {
+  message: string
+  /** Omitted when there is genuinely nothing to ask again. */
+  onRetry?: () => void
+}) {
+  return (
+    <Alert
+      severity="error"
+      // The shared Alert's own calm colours and `role="alert"`, with the layout
+      // this surface needs: the sentence at 14px, and an action that is allowed
+      // its own row on a narrow phone rather than being squeezed beside it.
+      sx={{
+        alignItems: 'center',
+        flexWrap: 'wrap',
+        rowGap: 1,
+        '& .MuiAlert-message': { fontSize: '14px', lineHeight: 1.45 },
+        '& .MuiAlert-action': { pt: 0, ml: 'auto' },
+      }}
+      action={
+        onRetry ? (
+          <Button
+            color="inherit"
+            variant="outlined"
+            onClick={onRetry}
+            sx={{
+              minHeight: 44,
+              minWidth: 44,
+              px: 2,
+              fontSize: '14px',
+              fontWeight: 700,
+              textTransform: 'none',
+            }}
+          >
+            Try again
+          </Button>
+        ) : undefined
+      }
+    >
+      {message}
+    </Alert>
+  )
 }
 
 export default function BookshelfPage() {
   const navigate = useNavigate()
   const familyId = useFamilyId()
-  const { activeChild, children: allChildren, setActiveChildId, isChildProfile } =
-    useActiveChild()
+  /**
+   * The child, and the state of the read that resolves them — all from the one
+   * call this page already makes. No second identity reader, no new flag, and
+   * `retryLoad` is the children-load owner's own door rather than a re-read of
+   * this page's making (the `StonebridgePage` precedent).
+   */
+  const {
+    activeChild,
+    children: allChildren,
+    setActiveChildId,
+    isChildProfile,
+    isLoading: childrenLoading,
+    loadFailed: childrenLoadFailed,
+    retryLoad: retryChildrenRead,
+  } = useActiveChild()
   const childName = activeChild?.name ?? ''
   const childId = activeChild?.id ?? ''
   const isLincoln = childName.toLowerCase() === 'lincoln'
@@ -114,13 +152,17 @@ export default function BookshelfPage() {
 
   const {
     books,
-    loading,
     phase: shelfPhase,
     retry: retryShelfRead,
     createBook,
     deleteBook,
-  } = useBookshelf(familyId, childId, isParent)
-  const shelfFrame = resolveShelfFrame({ phase: shelfPhase, loading })
+  } = useBookshelf(familyId, childId, isParent, {
+    // A CHILD's shelf may only be read for a child who is actually known; the
+    // parent's family query is not scoped to the selection and is unaffected.
+    loading: childrenLoading,
+    failed: childrenLoadFailed,
+  })
+  const shelfFrame = resolveShelfFrame(shelfPhase)
   const shelfSettled = shelfFrame === ShelfFrame.Settled
   /**
    * Has this shelf ever had a settled answer?
@@ -374,6 +416,22 @@ export default function BookshelfPage() {
     })
   }, [books, bookFilter, creatorFilter, themeFilter, childFilter, stickerTagFilter])
 
+  /**
+   * The row the open menu belongs to, as the CURRENT settled answer sees it.
+   *
+   * Read synchronously from this render rather than from the state the menu was
+   * opened against, because the menu outlives the row: a shelf whose audience
+   * has been replaced — a parent handing the phone to a child — left *Read* and
+   * *Edit* on screen over a book the new reader may not open, and they
+   * navigated. So the menu is a door only while its row is part of the answer
+   * the shelf is showing, and the actions ask this rather than the id they were
+   * opened with. A parent's selected child does not change the answer, so their
+   * family menu is untouched by the chip (UX-108's custody is unchanged: this
+   * gates the READ doors only, and the delete/print/catalog items keep their
+   * own existing lookups and dialogs).
+   */
+  const menuBook = shelfSettled ? (books.find((b) => b.id === menuBookId) ?? null) : null
+
   return (
     <Page>
       {/* The timer's own slot, first and always here, so the component that is
@@ -615,7 +673,16 @@ export default function BookshelfPage() {
           timer survive a frame change. */}
       {!shelfSettled ? (
         shelfFrame === ShelfFrame.Failed ? (
-          <ErrorState message="Couldn’t load your books." onRetry={retryShelfRead} />
+          <ShelfNotice message="Couldn’t load your books." onRetry={retryShelfRead} />
+        ) : shelfFrame === ShelfFrame.IdentityUnknown ? (
+          /* The children read failed, so WHOSE shelf this is is unknown. Its
+             own read owns the recovery — this offers that read's existing
+             retry and nothing of its own, and says the true thing rather than
+             showing an empty shelf or a spinner that cannot end. */
+          <ShelfNotice
+            message="Couldn’t check whose books these are."
+            onRetry={retryChildrenRead}
+          />
         ) : (
           <LoadingState fullHeight />
         )
@@ -979,10 +1046,11 @@ export default function BookshelfPage() {
         </Box>
       )}
 
-      {/* Book context menu */}
+      {/* Book context menu. Open only while its row is part of the answer the
+          shelf is currently showing — see `menuBook`. */}
       <Menu
         anchorEl={menuAnchor}
-        open={!!menuAnchor}
+        open={!!menuAnchor && !!menuBook}
         onClose={() => {
           setMenuAnchor(null)
           setMenuBookId(null)
@@ -992,7 +1060,7 @@ export default function BookshelfPage() {
         <MenuItem
           onClick={() => {
             setMenuAnchor(null)
-            if (menuBookId) navigate(`/books/${menuBookId}/read`)
+            if (menuBook?.id) navigate(`/books/${menuBook.id}/read`)
             setMenuBookId(null)
           }}
         >
@@ -1003,11 +1071,11 @@ export default function BookshelfPage() {
         </MenuItem>
         {/* Story Call (FEAT-95) — screen-shared read-aloud to a grandparent. Finished
             books only; kid-reachable by design (this is a kid surface). */}
-        {sortedBooks.find((b) => b.id === menuBookId)?.status === 'complete' && (
+        {menuBook?.status === 'complete' && (
           <MenuItem
             onClick={() => {
               setMenuAnchor(null)
-              if (menuBookId) navigate(`/books/${menuBookId}/read?call=1`)
+              if (menuBook?.id) navigate(`/books/${menuBook.id}/read?call=1`)
               setMenuBookId(null)
             }}
           >
@@ -1020,7 +1088,7 @@ export default function BookshelfPage() {
         <MenuItem
           onClick={() => {
             setMenuAnchor(null)
-            if (menuBookId) navigate(`/books/${menuBookId}`)
+            if (menuBook?.id) navigate(`/books/${menuBook.id}`)
             setMenuBookId(null)
           }}
         >
@@ -1047,18 +1115,20 @@ export default function BookshelfPage() {
         </MenuItem>
         {/* Add to catalog (FEAT-82) — parent-only, finished books only (§6). */}
         {(() => {
-          const menuBook = sortedBooks.find((b) => b.id === menuBookId)
-          if (!menuBook || !canPromoteBook(menuBook, isParent)) return null
+          // Its own existing lookup and dialog, unchanged — renamed only so it
+          // does not shadow the read-door gate above.
+          const catalogCandidate = sortedBooks.find((b) => b.id === menuBookId)
+          if (!catalogCandidate || !canPromoteBook(catalogCandidate, isParent)) return null
           const inCatalog = isSourceInCatalog(catalogProducts, {
             kind: 'book',
-            id: menuBook.id ?? '',
+            id: catalogCandidate.id ?? '',
           })
           return (
             <MenuItem
               disabled={inCatalog}
               onClick={() => {
                 setMenuAnchor(null)
-                setPromoteBook(menuBook)
+                setPromoteBook(catalogCandidate)
                 setMenuBookId(null)
               }}
             >
