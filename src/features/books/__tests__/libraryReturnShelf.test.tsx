@@ -65,10 +65,16 @@ vi.mock('../../../core/profile/useProfile', () => ({
 }))
 
 let booksFixture: Book[] = []
+// A settled, successful read — `phase` stated explicitly, because a stub
+// without one is read as *waiting* rather than as a ready shelf. The way back
+// is offered in every frame; these claims are about the settled one.
 vi.mock('../useBook', () => ({
   useBookshelf: () => ({
     books: booksFixture,
     loading: false,
+    phase: 'ready',
+    error: false,
+    retry: vi.fn(),
     createBook: vi.fn(),
     deleteBook: vi.fn(),
   }),
