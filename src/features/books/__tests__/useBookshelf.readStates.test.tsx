@@ -693,9 +693,28 @@ function NeverSettles() {
   return null
 }
 
-/** The shelf itself, with everything these cases assert in the DOM. */
-function ShelfProbe({ childId, epoch }: { childId: string; epoch: number }) {
-  const shelf = useBookshelf(FAMILY, childId, false)
+/**
+ * Everything these cases assert, in the DOM — and NOTHING else.
+ *
+ * A pure view over a shelf read it is handed. The hook itself lives in
+ * `SwitchableShelf`, beside the state cell that moves the question, because
+ * that is the lifecycle this file is about: a render that React throws away is
+ * an attempt at ONE function, and a hook sitting in a child of the suspended
+ * subtree is a different arrangement from the surface's — where the thing
+ * holding the scope and the thing reading for it are the same component. With
+ * the hook down here the attempt that cannot commit never belonged to the same
+ * function as the switch, and the supersession the cases measure would be
+ * measuring React's subtree bookkeeping rather than this hook's owner.
+ */
+function ShelfProbe({
+  shelf,
+  childId,
+  epoch,
+}: {
+  shelf: ReturnType<typeof useBookshelf>
+  childId: string
+  epoch: number
+}) {
   return (
     <div
       data-testid="probe"
@@ -741,6 +760,12 @@ interface ShelfView {
  */
 function SwitchableShelf() {
   const [view, setView] = useState<ShelfView>({ childId: LINCOLN, stall: false, epoch: 0 })
+  /**
+   * The read is asked HERE, in the same function as the cell that moves it —
+   * the surface's own arrangement, and the one whose render attempt is the
+   * attempt these cases throw away.
+   */
+  const shelf = useBookshelf(FAMILY, view.childId, false)
   return (
     <>
       <button
@@ -761,7 +786,7 @@ function SwitchableShelf() {
       >
         keep this shelf
       </button>
-      <ShelfProbe childId={view.childId} epoch={view.epoch} />
+      <ShelfProbe shelf={shelf} childId={view.childId} epoch={view.epoch} />
       {view.stall ? <NeverSettles /> : null}
     </>
   )

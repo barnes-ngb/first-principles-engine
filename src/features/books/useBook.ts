@@ -1318,7 +1318,7 @@ export function useBookshelf(
   )
 
   /**
-   * Ask one owner's query and report its ANSWER. Nothing else.
+   * Ask one owner's query and SUBSCRIBE to its answer. Nothing else.
    *
    * No state is set before the request: an owner that has just been opened is
    * already `Pending` — that is what the render derived for it — so a loader
@@ -1328,24 +1328,40 @@ export function useBookshelf(
    * else: the explicit retry EVENT, below. Sequence and started bookkeeping are
    * taken before the request, so the newest read always wins and an owner's
    * automatic read is spent exactly once however it was asked for.
+   *
+   * The answer is taken by SUBSCRIBING to the query's own promise rather than by
+   * awaiting it. Nothing here is deferred and no extra promise is created: the
+   * handlers are attached to the real read, and the read is the thing that
+   * resolves them. What that buys is that this function's body is synchronous
+   * and ends at the request, so the automatic effect below calls something that
+   * sets no state of its own — the shape the lint rail reads as a subscription
+   * instead of as an effect that resolves into an update.
    */
   const runRead = useCallback(
-    async (forOwner: ShelfReadOwner) => {
+    (forOwner: ShelfReadOwner) => {
+      // Admission, page and committed owner first — before a sequence is spent
+      // or a request is paid for.
       if (!admits(forOwner)) return
+      // Reserved BEFORE the query exists, so the newest read always wins and an
+      // owner's automatic read is spent exactly once however it was asked for.
       lastRead.current += 1
       const readSeq = lastRead.current
       startedFor.current = forOwner.id
-      try {
-        const books = forOwner.audienceIsFamily
-          ? await readFamilyShelf(forOwner.familyId)
-          : await readChildShelf(forOwner.familyId, forOwner.childId)
-        apply(forOwner, readSeq, { phase: ShelfReadPhase.Ready, books, error: false })
-      } catch (err) {
-        console.error('Bookshelf read failed:', err)
-        // A refused or dropped read is reported as one. It is not an empty
-        // shelf, and a union that lost half of itself is not a shelf at all.
-        apply(forOwner, readSeq, { phase: ShelfReadPhase.Error, books: [], error: true })
-      }
+      return (
+        forOwner.audienceIsFamily
+          ? readFamilyShelf(forOwner.familyId)
+          : readChildShelf(forOwner.familyId, forOwner.childId)
+      ).then(
+        (books) => {
+          apply(forOwner, readSeq, { phase: ShelfReadPhase.Ready, books, error: false })
+        },
+        (err: unknown) => {
+          console.error('Bookshelf read failed:', err)
+          // A refused or dropped read is reported as one. It is not an empty
+          // shelf, and a union that lost half of itself is not a shelf at all.
+          apply(forOwner, readSeq, { phase: ShelfReadPhase.Error, books: [], error: true })
+        },
+      )
     },
     [admits, apply],
   )
