@@ -36,7 +36,7 @@ import StorefrontIcon from '@mui/icons-material/Storefront'
 import CreativeTimer from '../../components/CreativeTimer'
 import Page from '../../components/Page'
 import LibraryReturnBanner from '../avatar/stonebridge/LibraryReturnBanner'
-import { EmptyState, LoadingState } from '../../components/states'
+import { EmptyState, ErrorState, LoadingState } from '../../components/states'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useProfile } from '../../core/profile/useProfile'
@@ -47,7 +47,7 @@ import { COVER_STYLES } from './bookTypes'
 import CatalogPromoteDialog from '../business/CatalogPromoteDialog'
 import { useCatalogProducts } from '../business/useCatalogProducts'
 import { bookToCatalogInitial, canPromoteBook, isSourceInCatalog } from '../business/catalogOnramps'
-import { useBookshelf } from './useBook'
+import { ShelfReadPhase, useBookshelf } from './useBook'
 import BookGenerateChat from './BookGenerateChat'
 import { makeBookPdf } from './makeBookPdf'
 import { buildGrandparentBriefHtml } from './grandparentBrief'
@@ -66,6 +66,40 @@ import { draftOwnerLabel, planDraftResume, resolveDraftOwnership } from './draft
 type BookFilter = 'all' | 'creative' | 'generated' | 'sight-word'
 type CreatorFilter = 'all' | 'parent' | 'kids'
 
+/**
+ * What the SHELF — the counts, the filters and the grid — is showing.
+ *
+ * Only the shelf: the way back to the village, the page title, the doors and
+ * every dialog are outside this, because a read that has not landed is not a
+ * reason to take the rest of the page away.
+ */
+const ShelfFrame = {
+  /** No answer yet — asked and waiting, or nothing to ask for. */
+  Waiting: 'waiting',
+  /** The read was refused or dropped. */
+  Failed: 'failed',
+  /** An answer, which may be a genuinely empty shelf. */
+  Settled: 'settled',
+} as const
+type ShelfFrame = (typeof ShelfFrame)[keyof typeof ShelfFrame]
+
+/**
+ * Which frame a read's answer means.
+ *
+ * `phase` is the read's own word for itself. `loading` is consulted only when
+ * there is no phase at all, which is what a test double of `useBookshelf`
+ * supplies: the shelf suites that stub the hook hand back the two-state answer
+ * this page used to take, and they must keep meaning exactly what they meant.
+ */
+function resolveShelfFrame(read: { phase?: ShelfReadPhase; loading?: boolean }): ShelfFrame {
+  if (read.phase === ShelfReadPhase.Error) return ShelfFrame.Failed
+  if (read.phase === ShelfReadPhase.Pending || read.phase === ShelfReadPhase.Unsettled) {
+    return ShelfFrame.Waiting
+  }
+  if (read.phase) return ShelfFrame.Settled
+  return read.loading ? ShelfFrame.Waiting : ShelfFrame.Settled
+}
+
 export default function BookshelfPage() {
   const navigate = useNavigate()
   const familyId = useFamilyId()
@@ -78,7 +112,30 @@ export default function BookshelfPage() {
   const { profile } = useProfile()
   const isParent = profile === UserProfile.Parents
 
-  const { books, loading, createBook, deleteBook } = useBookshelf(familyId, childId, isParent)
+  const {
+    books,
+    loading,
+    phase: shelfPhase,
+    retry: retryShelfRead,
+    createBook,
+    deleteBook,
+  } = useBookshelf(familyId, childId, isParent)
+  const shelfFrame = resolveShelfFrame({ phase: shelfPhase, loading })
+  const shelfSettled = shelfFrame === ShelfFrame.Settled
+  /**
+   * Has this shelf ever had a settled answer?
+   *
+   * The creative timer is a WRITE surface for compliance `hours`, so it is not
+   * on a shelf that has never loaded: a cold pending or failed read must not
+   * offer a session to start. Once there has been an answer it stays mounted
+   * for the life of this page — a warm re-read, a refusal or a *Try again* must
+   * not remount it, because a remount is a running session turned back into a
+   * resume prompt and a lifetime that restarts. So this never returns to false,
+   * it sits in a slot of its own that nothing is inserted before, and whose
+   * minutes a session belongs to stays the timer's own `ownerChildId` BIND.
+   */
+  const [shelfSettledOnce, setShelfSettledOnce] = useState(false)
+  if (!shelfSettledOnce && shelfSettled) setShelfSettledOnce(true)
   const [childFilter, setChildFilter] = useState<string>('all')
   const { suggestions: evalSuggestions } = useEvaluationBookSuggestions(
     isParent ? familyId : '',
@@ -317,20 +374,18 @@ export default function BookshelfPage() {
     })
   }, [books, bookFilter, creatorFilter, themeFilter, childFilter, stickerTagFilter])
 
-  if (loading) {
-    return (
-      <Page>
-        <LoadingState fullHeight />
-      </Page>
-    )
-  }
-
   return (
     <Page>
-      <CreativeTimer
-        defaultSubject={SubjectBucket.Art}
-        defaultDescription="Book creation"
-      />
+      {/* The timer's own slot, first and always here, so the component that is
+          mounted into it is never moved or replaced by a read frame. It is
+          empty until this shelf has answered once (see `shelfSettledOnce`). */}
+      {shelfSettledOnce ? (
+        <CreativeTimer
+          key="shelf-creative-timer"
+          defaultSubject={SubjectBucket.Art}
+          defaultDescription="Book creation"
+        />
+      ) : null}
       {/* The one way back to Stonebridge, and only for a child who came from
           there (FEAT — Library return). Above the title because it is a way
           *out* of this page: a back control a child has to scroll to find is a
@@ -357,29 +412,37 @@ export default function BookshelfPage() {
         <EvaluationBookBanner suggestions={evalSuggestions} childName={childName} />
       )}
 
-      {/* Filter tabs + parent actions */}
+      {/* Filter tabs + parent actions.
+
+          The ROW stays in every frame — Stickers and the parent's three doors
+          are ways to useful work, and a child whose shelf will not load must
+          still be able to reach them. The counts inside it do not: a tab
+          reading "All (0)" over a read that has not landed or has failed is a
+          number the page does not have. */}
       <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-        <ToggleButtonGroup
-          value={bookFilter}
-          exclusive
-          onChange={(_, val) => {
-            if (val) setBookFilter(val)
-          }}
-          size="small"
-        >
-          <ToggleButton value="all" sx={{ textTransform: 'none', minHeight: 36 }}>
-            All ({books.length})
-          </ToggleButton>
-          <ToggleButton value="creative" sx={{ textTransform: 'none', minHeight: 36 }}>
-            Made by hand ({books.filter((b) => b.bookType !== 'sight-word' && b.bookType !== 'generated').length})
-          </ToggleButton>
-          <ToggleButton value="generated" sx={{ textTransform: 'none', minHeight: 36 }}>
-            Written by AI ({books.filter((b) => b.bookType === 'generated').length})
-          </ToggleButton>
-          <ToggleButton value="sight-word" sx={{ textTransform: 'none', minHeight: 36 }}>
-            Sight-word books ({books.filter((b) => b.bookType === 'sight-word').length})
-          </ToggleButton>
-        </ToggleButtonGroup>
+        {shelfSettled && (
+          <ToggleButtonGroup
+            value={bookFilter}
+            exclusive
+            onChange={(_, val) => {
+              if (val) setBookFilter(val)
+            }}
+            size="small"
+          >
+            <ToggleButton value="all" sx={{ textTransform: 'none', minHeight: 36 }}>
+              All ({books.length})
+            </ToggleButton>
+            <ToggleButton value="creative" sx={{ textTransform: 'none', minHeight: 36 }}>
+              Made by hand ({books.filter((b) => b.bookType !== 'sight-word' && b.bookType !== 'generated').length})
+            </ToggleButton>
+            <ToggleButton value="generated" sx={{ textTransform: 'none', minHeight: 36 }}>
+              Written by AI ({books.filter((b) => b.bookType === 'generated').length})
+            </ToggleButton>
+            <ToggleButton value="sight-word" sx={{ textTransform: 'none', minHeight: 36 }}>
+              Sight-word books ({books.filter((b) => b.bookType === 'sight-word').length})
+            </ToggleButton>
+          </ToggleButtonGroup>
+        )}
         <Box sx={{ flex: 1 }} />
         {/* Stickers entry — visible to kids and parents (FEAT-33 slice 1) */}
         <Button
@@ -424,8 +487,9 @@ export default function BookshelfPage() {
         )}
       </Stack>
 
-      {/* Creator filter (parent view: all / mom's books / kids' books) */}
-      {isParent && (
+      {/* Creator filter (parent view: all / mom's books / kids' books).
+          Count-bearing, so it waits for an answer like the tabs above. */}
+      {isParent && shelfSettled && (
         <Stack direction="row" spacing={1} sx={{ mb: 1 }} alignItems="center">
           <Typography variant="caption" color="text.secondary" sx={{ alignSelf: 'center', mr: 0.5 }}>
             Made by:
@@ -454,8 +518,10 @@ export default function BookshelfPage() {
         </Stack>
       )}
 
-      {/* Child filter (parent view only) */}
-      {isParent && allChildren.length > 1 && (
+      {/* Child filter (parent view only) — also count-bearing. It filters the
+          parent's family-wide answer and is not what that query asks for, so a
+          change here neither re-reads nor reloads anything. */}
+      {isParent && shelfSettled && allChildren.length > 1 && (
         <Stack direction="row" spacing={1} sx={{ mb: 1 }}>
           <Chip
             label="All"
@@ -540,7 +606,20 @@ export default function BookshelfPage() {
         </Stack>
       )}
 
-      {books.length === 0 ? (
+      {/* ── The shelf itself, in whichever answer the read has given ──────
+          Waiting and Failed are the read's own frames and claim nothing else:
+          a refused read is never drawn as an empty shelf, and its one door
+          asks the SAME query again — it navigates nowhere and chooses no
+          child. Everything above and below this slot is untouched by the
+          read, which is why the way back, the doors, the dialogs and the
+          timer survive a frame change. */}
+      {!shelfSettled ? (
+        shelfFrame === ShelfFrame.Failed ? (
+          <ErrorState message="Couldn’t load your books." onRetry={retryShelfRead} />
+        ) : (
+          <LoadingState fullHeight />
+        )
+      ) : books.length === 0 ? (
         /* Empty state */
         <EmptyState
           icon={<MenuBookIcon />}

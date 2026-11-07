@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import {
   MemoryRouter,
@@ -64,6 +65,16 @@ const fx = vi.hoisted(() => ({
   retryLoad: vi.fn(),
   /** The village's progress, as its own hook would report it. */
   progress: null as unknown as StonebridgeProgressData,
+  /**
+   * How many times each stubbed neighbour has MOUNTED.
+   *
+   * Presence proves nothing about identity: a remounted timer is a new session
+   * with a new lifetime, and a remounted chat is a generation gone. So each
+   * stub takes a token once per mount and renders it, and the claims below
+   * compare the token rather than asking whether something is on screen.
+   */
+  timerMounts: 0,
+  chatMounts: 0,
 }))
 
 // ── The Firestore boundary, and nothing else about Firestore ────────────────
@@ -142,13 +153,30 @@ vi.mock('../../avatar/stonebridge/useTownHeroProfile', () => ({
 }))
 vi.mock('../../avatar/stonebridge/BannerRaiseCelebration', () => ({ default: () => null }))
 
-// ── The shelf's neighbours, as markers ──────────────────────────────────────
+// ── The shelf's neighbours, as marked stand-ins ─────────────────────────────
+/**
+ * The generate chat, standing in with the two things this file needs it to
+ * have: a mount token, and a piece of local typed state of its own — what a
+ * half-made generation IS. The real chat's behaviour is its own suites'; what
+ * is asserted here is that the shelf never takes this instance away.
+ */
 vi.mock('../BookGenerateChat', () => ({
-  default: ({ resumeBookId }: { resumeBookId?: string }) => (
-    <div data-testid="generate-chat" data-resume-id={resumeBookId ?? 'none'}>
-      generate chat
-    </div>
-  ),
+  default: ({ resumeBookId }: { resumeBookId?: string }) => {
+    const [session] = useState(() => {
+      fx.chatMounts += 1
+      return `chat-${fx.chatMounts}`
+    })
+    const [draft, setDraft] = useState('')
+    return (
+      <div data-testid="generate-chat" data-session={session} data-resume-id={resumeBookId ?? 'none'}>
+        <input
+          aria-label="story so far"
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+        />
+      </div>
+    )
+  },
 }))
 vi.mock('../EvaluationBookBanner', () => ({ default: () => null }))
 vi.mock('../PrintSettingsDialog', () => ({ default: () => null }))
@@ -166,8 +194,23 @@ vi.mock('../../business/useCatalogProducts', () => ({
     updateProduct: vi.fn(),
   }),
 }))
+/**
+ * The creative timer, standing in with a mount token of its own.
+ *
+ * The real one writes compliance `hours` and binds a running session to the
+ * child it was started for (`UX-327`); `libraryReturn.noExtraWrites.test.tsx`
+ * runs that real component. What this file owns is narrower and is exactly what
+ * the page decides: WHETHER a timer is mounted at all on a shelf that has never
+ * loaded, and whether a read frame can replace the one that is mounted.
+ */
 vi.mock('../../../components/CreativeTimer', () => ({
-  default: () => <div data-testid="creative-timer">creative timer</div>,
+  default: () => {
+    const [session] = useState(() => {
+      fx.timerMounts += 1
+      return `timer-${fx.timerMounts}`
+    })
+    return <div data-testid="creative-timer" data-session={session} />
+  },
 }))
 
 // `vi.mock` is hoisted above these, so everything below is the real thing.
@@ -383,6 +426,8 @@ beforeEach(() => {
   fx.childrenLoadFailed = false
   fx.setActiveChildId.mockClear()
   fx.retryLoad.mockClear()
+  fx.timerMounts = 0
+  fx.chatMounts = 0
   fx.progress = LIBRARY_REPAIRED
   setActiveChildIdShared(LINCOLN.id)
   endLibraryReturnFlow()
@@ -394,7 +439,7 @@ afterEach(() => {
 })
 
 describe('arriving at the shelf from the village, with the read still in flight', () => {
-  it('is the shelf — with its title, its timer and the way back — not a bare spinner', async () => {
+  it('is the shelf — with its title and the way back — not a bare spinner', async () => {
     renderJourney()
     await leaveTheLibraryForTheShelf()
 
@@ -403,7 +448,19 @@ describe('arriving at the shelf from the village, with the read still in flight'
     // belongs to is live.
     expect(screen.getByRole('heading', { name: 'My Books' })).toBeInTheDocument()
     expect(wayBack()).toBeInTheDocument()
-    expect(screen.getByTestId('creative-timer')).toBeInTheDocument()
+    // The ways to useful work are reachable while the shelf is not.
+    expect(screen.getByRole('button', { name: 'Stickers' })).toBeInTheDocument()
+  })
+
+  it('and NOT the creative timer, which a shelf that has never loaded may not offer', async () => {
+    renderJourney()
+    await leaveTheLibraryForTheShelf()
+
+    // The timer writes compliance hours. A cold pending read is not a shelf,
+    // and offering a session to start on one would put a lifetime and a credit
+    // behind a page that has not answered anything yet.
+    expect(screen.queryByTestId('creative-timer')).not.toBeInTheDocument()
+    expect(fx.timerMounts).toBe(0)
   })
 
   it('says it is still reading, and never that the shelf is empty', async () => {
@@ -441,7 +498,9 @@ describe('when that read is refused', () => {
     // The way back is exactly as eligible as it was a frame ago — the journey,
     // the identity and the origin have not changed.
     expect(wayBack()).toBeInTheDocument()
-    expect(screen.getByTestId('creative-timer')).toBeInTheDocument()
+    // Still no timer: a read that failed has not made this a shelf either.
+    expect(screen.queryByTestId('creative-timer')).not.toBeInTheDocument()
+    expect(fx.timerMounts).toBe(0)
     // Recovery does not take the child anywhere by itself.
     expect(screen.getByTestId('where')).toHaveTextContent('/books')
   })
@@ -491,6 +550,10 @@ describe('when that read is refused', () => {
     expect(screen.getAllByTestId('new-book-tile')).toHaveLength(1)
     expect(wayBack()).toBeInTheDocument()
     expect(screen.getByTestId('where')).toHaveTextContent('/books')
+    // NOW there is a shelf, so the timer is offered — mounted once, for the
+    // first time, by the answer rather than by the arrival.
+    expect(screen.getByTestId('creative-timer')).toBeInTheDocument()
+    expect(fx.timerMounts).toBe(1)
   })
 
   it('answers an honestly empty shelf as empty, with the way back still there', async () => {
@@ -505,6 +568,9 @@ describe('when that read is refused', () => {
     // The empty shelf's own door, and the way back above it.
     expect(makeBookDoors()).toHaveLength(1)
     expect(wayBack()).toBeInTheDocument()
+    // An answered shelf is a shelf, even with nothing on it yet, so the timer
+    // is offered here exactly as it is over a full one.
+    expect(screen.getByTestId('creative-timer')).toBeInTheDocument()
   })
 })
 
@@ -592,7 +658,26 @@ describe('a scope that moves under the mounted shelf', () => {
     expect(getLibraryReturnFlow()).toBeNull()
   })
 
-  it('stops showing a parent’s family-wide books the moment the shelf is a child’s', async () => {
+  /** Open the door and pick the AI path, then type into what it opened. */
+  async function openGenerateChatWith(story: string) {
+    fireEvent.click(await screen.findByTestId('new-book-tile'))
+    fireEvent.click(screen.getByTestId('make-book-choice-with-shelly'))
+    const chat = screen.getByTestId('generate-chat')
+    fireEvent.change(screen.getByLabelText('story so far'), { target: { value: story } })
+    return chat.getAttribute('data-session')
+  }
+
+  function sessionOf(testId: string) {
+    return screen.getByTestId(testId).getAttribute('data-session')
+  }
+
+  it('a parent’s selected child is not a new question — nothing reloads and nothing is lost', async () => {
+    /**
+     * The correction this test exists for: the family query's permission scope
+     * is the family and the audience. The selected child filters the ANSWER, so
+     * moving the app-bar chip must not re-ask the question, must not blank or
+     * fail the shelf, and must not reach an open generation or a running timer.
+     */
     fx.profile = 'parents'
     fx.isChildProfile = false
     const { again } = renderShelf()
@@ -602,11 +687,55 @@ describe('a scope that moves under the mounted shelf', () => {
       makeBook({ id: 'l-1', title: 'Lincoln’s book', childId: LINCOLN.id }),
       makeBook({ id: 'o-1', title: 'London’s book', childId: LONDON.id }),
     ])
-    // The parent's own audience IS the family: both books, and that is correct.
     expect(await screen.findByText('Lincoln’s book')).toBeInTheDocument()
-    expect(screen.getByText('London’s book')).toBeInTheDocument()
+    const timerSession = sessionOf('creative-timer')
+    const chatSession = await openGenerateChatWith('Once upon a mine')
 
-    // Mom hands the phone to London, who switches to his own profile.
+    await act(async () => {
+      fx.activeChild = LONDON
+      again()
+      await Promise.resolve()
+    })
+
+    // Nothing was asked again — and if a later change ever makes this emit a
+    // query, it may only ever be the family's own.
+    for (const scope of outstanding()) expect(scope).toBe('all')
+    // The family's answer is still the answer, with no pending or failed frame.
+    expect(screen.getByText('Lincoln’s book')).toBeInTheDocument()
+    expect(screen.getByText('London’s book')).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    // The counts are still the family's, and still true. (The tab is named
+    // rather than the "All (2)" chip, which the creator filter also carries.)
+    expect(screen.getByRole('button', { name: /^Made by hand \(2\)$/ })).toBeInTheDocument()
+    // The same generation, with the words still in it, and the same timer
+    // session — not a new instance that merely looks like one.
+    expect(sessionOf('generate-chat')).toBe(chatSession)
+    expect(screen.getByLabelText('story so far')).toHaveValue('Once upon a mine')
+    expect(sessionOf('creative-timer')).toBe(timerSession)
+    expect(fx.timerMounts).toBe(1)
+    expect(fx.chatMounts).toBe(1)
+  })
+
+  it('an audience replacement hides the old rows at once, and still keeps the session', async () => {
+    /**
+     * The actual permission-scope replacement, which is a different event from
+     * the chip moving: Mom hands the phone over and the profile becomes a
+     * child's, so the query stops being the family's. The rows she could see
+     * are gone in the first render of the new owner — before any effect, before
+     * the new read lands — while everything that is not the shelf stays.
+     */
+    fx.profile = 'parents'
+    fx.isChildProfile = false
+    const { again } = renderShelf()
+    await answerTheShelfRead([
+      makeBook({ id: 'l-1', title: 'Lincoln’s book', childId: LINCOLN.id }),
+      makeBook({ id: 'o-1', title: 'London’s book', childId: LONDON.id }),
+    ])
+    expect(await screen.findByText('Lincoln’s book')).toBeInTheDocument()
+    const timerSession = sessionOf('creative-timer')
+    const chatSession = await openGenerateChatWith('A half-made story')
+
     await act(async () => {
       fx.profile = 'london'
       fx.isChildProfile = true
@@ -615,47 +744,39 @@ describe('a scope that moves under the mounted shelf', () => {
       await Promise.resolve()
     })
 
-    // His own read is in flight …
+    // The child's own pair is in flight, and the previous audience's rows are
+    // not on screen, not counted and not tappable.
     expect(outstanding().sort()).toEqual(['own', 'together'])
-    // … and until it lands, the previous audience's shelf is not his shelf.
     expect(screen.queryByText('Lincoln’s book')).not.toBeInTheDocument()
+    expect(screen.queryByText('London’s book')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^All \(\d+\)$/ })).not.toBeInTheDocument()
+    expect(screen.queryByText('No books yet!')).not.toBeInTheDocument()
+    expect(screen.getByRole('status')).toBeInTheDocument()
+    // The generation and the timer session are untouched by a read frame.
+    expect(sessionOf('generate-chat')).toBe(chatSession)
+    expect(screen.getByLabelText('story so far')).toHaveValue('A half-made story')
+    expect(sessionOf('creative-timer')).toBe(timerSession)
 
+    // Refused: the truth, one door, and still the same two neighbours.
+    await refuseTheShelfRead()
+    expect(await waitFor(() => screen.getByRole('alert'))).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: 'Try again' })).toHaveLength(1)
+    expect(sessionOf('creative-timer')).toBe(timerSession)
+    expect(sessionOf('generate-chat')).toBe(chatSession)
+    expect(screen.getByLabelText('story so far')).toHaveValue('A half-made story')
+
+    // Try again asks the CHILD's question — the owner on screen now — and the
+    // answer is theirs alone.
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    await waitFor(() => {
+      expect(outstanding().sort()).toEqual(['own', 'together'])
+    })
     await answerTheShelfRead([makeBook({ id: 'o-1', title: 'London’s book', childId: LONDON.id })])
     expect(await screen.findByText('London’s book')).toBeInTheDocument()
     expect(screen.queryByText('Lincoln’s book')).not.toBeInTheDocument()
-  })
-
-  it('does not unmount a generate chat that is already open', async () => {
-    /**
-     * The forbidden shortcut, pinned: a whole-page early return on a pending
-     * read would take an open BookGenerateChat — a paid generation in local
-     * state — down with it. Withholding the SHELF is the fix; unmounting the
-     * page is not.
-     */
-    fx.profile = 'parents'
-    fx.isChildProfile = false
-    const { again } = renderShelf()
-    await answerTheShelfRead([makeBook({ id: 'l-1', title: 'Lincoln’s book' })])
-
-    fireEvent.click(await screen.findByTestId('new-book-tile'))
-    fireEvent.click(screen.getByTestId('make-book-choice-with-shelly'))
-    expect(screen.getByTestId('generate-chat')).toBeInTheDocument()
-
-    // The selected child changes under the open dialog, so the shelf re-reads.
-    await act(async () => {
-      fx.activeChild = LONDON
-      again()
-      await Promise.resolve()
-    })
-    expect(fx.reads.length).toBeGreaterThan(0)
-
-    // The work in that dialog belongs to the session that started it and is
-    // still on screen while the shelf behind it is reading.
-    expect(screen.getByTestId('generate-chat')).toBeInTheDocument()
-
-    // And it survives a REFUSED re-read too — the state a page-level error
-    // frame would have replaced.
-    await refuseTheShelfRead()
-    expect(screen.getByTestId('generate-chat')).toBeInTheDocument()
+    // One timer and one generation throughout: no remount anywhere in this
+    // sequence, which is what a lost session would look like.
+    expect(fx.timerMounts).toBe(1)
+    expect(fx.chatMounts).toBe(1)
   })
 })

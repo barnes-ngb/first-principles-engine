@@ -14,14 +14,15 @@ import type { Book } from '../../../core/types'
  * it `loading: false` with a ready array. That is right for what they claim —
  * the door, the way back, whose draft resumes — and it means **nothing in the
  * repo drives this hook's read at all**. So the states a real Firestore boundary
- * produces, which is every state a child meets on a cold phone, are unasserted:
- * a read still in flight, a read that REJECTED, and a read whose scope moved
- * under a mounted shelf.
+ * produces, which is every state a child meets on a cold phone, were
+ * unasserted: a read in flight, a read that REJECTED, a read whose owner moved
+ * under a mounted shelf, and a completion that lands after it stopped being
+ * anybody's answer.
  *
- * This file mocks only the boundary — the Firestore SDK, the collection helpers,
- * storage and the debounce — and runs the actual hook. Nothing here is live: no
- * SDK, no network, no family record, no media. Every book, child and family is
- * synthetic.
+ * This file mocks only the boundary — the Firestore SDK, the collection
+ * helpers, storage and the debounce — and runs the actual hook. Nothing here is
+ * live: no SDK, no network, no family record, no media. Every book, child and
+ * family is synthetic.
  *
  * ── How the three queries are told apart ─────────────────────────────────────
  *
@@ -32,17 +33,16 @@ import type { Book } from '../../../core/types'
  *   • **own** — `where('childId', '==', childId)`
  *   • **together** — `where('contributorIds', 'array-contains', childId)`
  *   • **all** — the parent's family-wide read, which carries NO child
- *     constraint. That is not leakage and is not treated as such here; it is
- *     the parent's own audience, and this file only asserts that it stays
- *     family-wide and is never confused with a child-scoped read.
+ *     constraint. That is the parent's own audience, not leakage: the selected
+ *     child is not part of that question, so changing it may not re-ask it.
  *
  * ── What is NOT claimed here ─────────────────────────────────────────────────
  *
  * Nothing about what the page draws (its sibling
  * `libraryShelfColdRead.route.test.tsx` renders the real shelf over a real
- * router), nothing about Firestore rules or real permissions, and nothing about
- * phone / tablet / desktop layout, focus or enlarged text — those are the
- * independent pass.
+ * router), nothing about Firestore rules or real permissions, nothing about the
+ * whole App's own error boundary, and nothing about phone / tablet / desktop
+ * layout, focus or enlarged text — those are the independent pass.
  */
 
 type Snapshot = { docs: { id: string; data: () => Book }[] }
@@ -85,7 +85,7 @@ vi.mock('../../../core/hooks/useDebounce', () => ({ useDebounce: () => vi.fn() }
 vi.mock('../../../core/xp/addXpEvent', () => ({ addXpEvent: vi.fn() }))
 vi.mock('../../../core/xp/addDiamondEvent', () => ({ addDiamondEvent: vi.fn() }))
 
-import { useBookshelf } from '../useBook'
+import { ShelfReadPhase, useBookshelf } from '../useBook'
 
 const FAMILY = 'fam-1'
 const LINCOLN = 'lincoln'
@@ -112,6 +112,13 @@ function readFor(scope: Scope) {
   return match
 }
 
+/** Take the outstanding reads away, to be answered later than their successor. */
+function detachReads() {
+  const held = [...fx.reads]
+  fx.reads.length = 0
+  return held
+}
+
 function snapshot(books: Book[]): Snapshot {
   return {
     docs: books.map((book) => ({
@@ -121,6 +128,19 @@ function snapshot(books: Book[]): Snapshot {
       data: () => book,
     })),
   }
+}
+
+/** Answer a detached pair, whatever order they were taken in. */
+async function answer(held: ReturnType<typeof detachReads>, books: Book[]) {
+  await act(async () => {
+    for (const entry of held) entry.resolve(snapshot(books))
+  })
+}
+
+async function refuse(held: ReturnType<typeof detachReads>) {
+  await act(async () => {
+    for (const entry of held) entry.reject(new Error('permission-denied'))
+  })
 }
 
 function makeBook(overrides: Partial<Book> = {}): Book {
@@ -136,32 +156,8 @@ function makeBook(overrides: Partial<Book> = {}): Book {
   } as Book
 }
 
-/**
- * The hook's result as a SHAPE, not as its current type.
- *
- * `UseBookshelfResult` carries `books` / `loading` / `createBook` / `deleteBook`
- * and nothing about a failure, so naming `error` or `retry` against the typed
- * result would make this file fail to COMPILE rather than fail. A test that does
- * not build is not a reproduction of anything, and the point is to run the same
- * assertions against the old source and the repaired one. So the two fields the
- * repair owes are asked for structurally: `tsc` is satisfied either way and what
- * reports is the behaviour.
- *
- * The names are this reproduction's PROPOSAL for the read's result, not a
- * settled contract — the page-level claims in the sibling file are the ones
- * written in the child's own terms.
- */
-interface ShelfRead {
-  books: Book[]
-  loading: boolean
-  /** Truthy when the query-owned read failed. Absent on the old source. */
-  error?: unknown
-  /** Re-issues this scope's read. Absent on the old source. */
-  retry?: unknown
-}
-
-function read(result: unknown): ShelfRead {
-  return result as ShelfRead
+function titles(books: Book[]): string[] {
+  return books.map((b) => b.title)
 }
 
 beforeEach(() => {
@@ -184,68 +180,65 @@ describe('a cold shelf read that REJECTED', () => {
 
   it('stops loading when the read comes back refused', async () => {
     const { result } = renderHook(() => useBookshelf(FAMILY, LINCOLN, false))
-    expect(read(result.current).loading).toBe(true)
+    expect(result.current.loading).toBe(true)
+    expect(result.current.phase).toBe(ShelfReadPhase.Pending)
 
     // The own read is refused — a rules rejection, an offline phone, a dropped
-    // query. `Promise.all` means the pair is refused with it.
-    await act(async () => {
-      readFor('own').reject(new Error('permission-denied'))
-      readFor('together').resolve(snapshot([]))
-    })
+    // query. `Promise.all` means the pair is refused with it, which is the
+    // point: half a union is not a shelf.
+    await refuse(detachReads())
 
-    // The defect: `loading` is initialised once and only ever cleared on the
-    // success path, so a refused read leaves the shelf loading forever. A child
-    // sees a spinner with no end, no sentence and nothing to tap.
     await waitFor(() => {
-      expect(read(result.current).loading).toBe(false)
+      expect(result.current.loading).toBe(false)
     })
+    expect(result.current.phase).toBe(ShelfReadPhase.Error)
   })
 
   it('says the read failed rather than reporting an empty shelf', async () => {
     const { result } = renderHook(() => useBookshelf(FAMILY, LINCOLN, false))
 
+    const held = detachReads()
     await act(async () => {
-      readFor('own').reject(new Error('permission-denied'))
-      readFor('together').resolve(snapshot([]))
+      held[0].reject(new Error('permission-denied'))
+      held[1].resolve(snapshot([makeBook({ id: 'shared', title: 'Half an answer' })]))
     })
 
     // A failed read is not an affirmative empty result — the GATE verdict, and
-    // the same rule the weekly-review and village surfaces already hold.
+    // the same rule the weekly-review and village surfaces already hold. The
+    // half that DID answer is not kept either: a partial union drawn as a shelf
+    // reads as books that have been deleted.
     await waitFor(() => {
-      expect(read(result.current).error).toBeTruthy()
+      expect(result.current.error).toBe(true)
     })
-    expect(read(result.current).books).toEqual([])
+    expect(result.current.phase).toBe(ShelfReadPhase.Error)
+    expect(result.current.books).toEqual([])
   })
 
   it('offers a retry that re-issues the same two queries and then shows the books', async () => {
     const { result } = renderHook(() => useBookshelf(FAMILY, LINCOLN, false))
 
-    await act(async () => {
-      readFor('own').reject(new Error('permission-denied'))
-      readFor('together').resolve(snapshot([]))
-    })
+    await refuse(detachReads())
     await waitFor(() => {
-      expect(typeof read(result.current).retry).toBe('function')
+      expect(result.current.error).toBe(true)
     })
 
-    const retry = read(result.current).retry as () => void
-    fx.reads.length = 0
+    const retry = result.current.retry
     await act(async () => {
       retry()
     })
     // The retry re-asks the SAME scope — not a widened one, and not the
-    // parent's family-wide query.
+    // parent's family-wide query — and says so while it is in flight.
     expect(outstanding().sort()).toEqual(['own', 'together'])
+    expect(result.current.phase).toBe(ShelfReadPhase.Pending)
+    expect(result.current.error).toBe(false)
 
-    await act(async () => {
-      readFor('own').resolve(snapshot([makeBook({ id: 'b1', title: 'After the retry' })]))
-      readFor('together').resolve(snapshot([]))
-    })
+    await answer(detachReads(), [makeBook({ id: 'b1', title: 'After the retry' })])
     await waitFor(() => {
-      expect(read(result.current).books.map((b) => b.title)).toEqual(['After the retry'])
+      expect(titles(result.current.books)).toEqual(['After the retry'])
     })
-    expect(read(result.current).error).toBeFalsy()
-    expect(read(result.current).loading).toBe(false)
+    expect(result.current.phase).toBe(ShelfReadPhase.Ready)
+    expect(result.current.error).toBe(false)
+    expect(result.current.loading).toBe(false)
   })
 })
 
@@ -268,10 +261,10 @@ describe('what a settled read already does, and must keep doing', () => {
     })
 
     await waitFor(() => {
-      expect(read(result.current).books.map((b) => b.title)).toEqual(['Ours', 'Mine'])
+      expect(titles(result.current.books)).toEqual(['Ours', 'Mine'])
     })
-    expect(read(result.current).books.map((b) => b.id)).toEqual(['shared-1', 'own-1'])
-    expect(read(result.current).loading).toBe(false)
+    expect(result.current.books.map((b) => b.id)).toEqual(['shared-1', 'own-1'])
+    expect(result.current.phase).toBe(ShelfReadPhase.Ready)
   })
 
   it('reads the whole family for a parent, with no child constraint at all', async () => {
@@ -286,34 +279,42 @@ describe('what a settled read already does, and must keep doing', () => {
     expect(target).not.toContain('"childId"')
     expect(target).not.toContain('array-contains')
 
-    await act(async () => {
-      readFor('all').resolve(
-        snapshot([
-          makeBook({ id: 'l-1', title: 'Lincoln’s', childId: LINCOLN }),
-          makeBook({ id: 'o-1', title: 'London’s', childId: LONDON }),
-        ]),
-      )
-    })
+    await answer(detachReads(), [
+      makeBook({ id: 'l-1', title: 'Lincoln’s', childId: LINCOLN }),
+      makeBook({ id: 'o-1', title: 'London’s', childId: LONDON }),
+    ])
     await waitFor(() => {
-      expect(read(result.current).books).toHaveLength(2)
+      expect(result.current.books).toHaveLength(2)
     })
   })
 
-  it('does not call a parent’s family-wide shelf a failure when the selected child changes', async () => {
+  it('treats a parent’s selected child as no new question at all', async () => {
     const { result, rerender } = renderHook(
       ({ childId }: { childId: string }) => useBookshelf(FAMILY, childId, true),
       { initialProps: { childId: LINCOLN } },
     )
-    await act(async () => {
-      readFor('all').resolve(snapshot([makeBook({ id: 'l-1', title: 'Lincoln’s' })]))
+    await answer(detachReads(), [
+      makeBook({ id: 'l-1', title: 'Lincoln’s', childId: LINCOLN }),
+      makeBook({ id: 'o-1', title: 'London’s', childId: LONDON }),
+    ])
+    await waitFor(() => {
+      expect(result.current.phase).toBe(ShelfReadPhase.Ready)
     })
 
-    fx.reads.length = 0
     rerender({ childId: LONDON })
-    // Still the family-wide read, and a parent who is still a parent has lost
-    // no permission: nothing here may report an error or an empty family.
-    expect(outstanding()).toEqual(['all'])
-    expect(read(result.current).error).toBeFalsy()
+
+    /**
+     * The chip moved; the question did not. The selected child is not part of
+     * the family query's permission scope, so this must not re-ask it, must not
+     * blank the shelf, must not go pending and must not fail — the page keeps a
+     * mounted chat, an open dialog and its rows. A requery is not forbidden
+     * outright, but anything asked here has to still be the FAMILY's question.
+     */
+    for (const scope of outstanding()) expect(scope).toBe('all')
+    expect(titles(result.current.books)).toEqual(['Lincoln’s', 'London’s'])
+    expect(result.current.phase).toBe(ShelfReadPhase.Ready)
+    expect(result.current.error).toBe(false)
+    expect(result.current.loading).toBe(false)
   })
 })
 
@@ -324,48 +325,189 @@ describe('a scope that moved under a mounted shelf', () => {
      * app bar's `ProfileMenu` calls `selectProfile` and navigates nowhere, and
      * `App.tsx`'s `ProfileGate` renders the same `<AppRouter />` for every
      * non-null profile. So a parent standing on `/books` who switches to a
-     * child's profile keeps this very hook mounted while `loadAll` goes false
-     * and `childId` becomes the child's.
+     * child's profile keeps this very hook mounted while the audience goes from
+     * the family to that child.
      *
-     * The old source retains the previous answer's array and clears `loading`
-     * only on success, so between the switch and the child's own read landing
-     * the shelf is still listing every sibling's books — under a child profile
-     * that may not query them at all.
+     * The rows of the audience it has left are gone in the first render of the
+     * new one — not after an effect, and not when the new read lands — so a
+     * forbidden row is never drawn, counted or tapped.
      */
     const { result, rerender } = renderHook(
       ({ childId, loadAll }: { childId: string; loadAll: boolean }) =>
         useBookshelf(FAMILY, childId, loadAll),
       { initialProps: { childId: LINCOLN, loadAll: true } },
     )
-    await act(async () => {
-      readFor('all').resolve(
-        snapshot([
-          makeBook({ id: 'l-1', title: 'Lincoln’s book', childId: LINCOLN }),
-          makeBook({ id: 'o-1', title: 'London’s book', childId: LONDON }),
-        ]),
-      )
-    })
+    await answer(detachReads(), [
+      makeBook({ id: 'l-1', title: 'Lincoln’s book', childId: LINCOLN }),
+      makeBook({ id: 'o-1', title: 'London’s book', childId: LONDON }),
+    ])
     await waitFor(() => {
-      expect(read(result.current).books).toHaveLength(2)
+      expect(result.current.books).toHaveLength(2)
     })
 
-    fx.reads.length = 0
     rerender({ childId: LONDON, loadAll: false })
-    // The new scope's own reads, still in flight.
+
+    // The new audience's own reads, still in flight …
     expect(outstanding().sort()).toEqual(['own', 'together'])
+    // … and nothing from the previous one is presented as this child's shelf,
+    // nor as an empty one: an unanswered read is pending, never ready.
+    expect(titles(result.current.books)).not.toContain('Lincoln’s book')
+    expect(result.current.books).toEqual([])
+    expect(result.current.phase).toBe(ShelfReadPhase.Pending)
+    expect(result.current.error).toBe(false)
 
-    // Nothing from the previous scope may be presented as this child's shelf
-    // while that is true.
-    expect(read(result.current).books.map((b) => b.title)).not.toContain('Lincoln’s book')
-    expect(read(result.current).books).toEqual([])
-
-    // And when the child's own read lands, it is theirs and only theirs.
-    await act(async () => {
-      readFor('own').resolve(snapshot([makeBook({ id: 'o-1', title: 'London’s book', childId: LONDON })]))
-      readFor('together').resolve(snapshot([]))
-    })
+    await answer(detachReads(), [makeBook({ id: 'o-1', title: 'London’s book', childId: LONDON })])
     await waitFor(() => {
-      expect(read(result.current).books.map((b) => b.title)).toEqual(['London’s book'])
+      expect(titles(result.current.books)).toEqual(['London’s book'])
+    })
+  })
+
+  it('refuses a success that lands after the audience changed', async () => {
+    const { result, rerender } = renderHook(
+      ({ childId }: { childId: string }) => useBookshelf(FAMILY, childId, false),
+      { initialProps: { childId: LINCOLN } },
+    )
+    const lincolnReads = detachReads()
+
+    rerender({ childId: LONDON })
+    expect(outstanding().sort()).toEqual(['own', 'together'])
+    const londonReads = detachReads()
+
+    // Lincoln's read answers now. It is nobody's answer any more.
+    await answer(lincolnReads, [makeBook({ id: 'l-1', title: 'Lincoln’s book' })])
+    expect(result.current.books).toEqual([])
+    expect(result.current.phase).toBe(ShelfReadPhase.Pending)
+
+    await answer(londonReads, [makeBook({ id: 'o-1', title: 'London’s book', childId: LONDON })])
+    await waitFor(() => {
+      expect(titles(result.current.books)).toEqual(['London’s book'])
+    })
+  })
+
+  it('and a FAILURE that lands after it, which must not fail the new one', async () => {
+    const { result, rerender } = renderHook(
+      ({ childId }: { childId: string }) => useBookshelf(FAMILY, childId, false),
+      { initialProps: { childId: LINCOLN } },
+    )
+    const lincolnReads = detachReads()
+
+    rerender({ childId: LONDON })
+    const londonReads = detachReads()
+
+    await refuse(lincolnReads)
+    // London's shelf is still waiting for London's answer. The refusal belonged
+    // to a question nobody is asking any more, so it reports nothing here.
+    expect(result.current.error).toBe(false)
+    expect(result.current.phase).toBe(ShelfReadPhase.Pending)
+
+    await answer(londonReads, [])
+    await waitFor(() => {
+      expect(result.current.phase).toBe(ShelfReadPhase.Ready)
+    })
+    // A genuinely empty shelf, which is the one state that may say so.
+    expect(result.current.books).toEqual([])
+    expect(result.current.error).toBe(false)
+  })
+
+  it('asks again on A → B → A, and takes only the newest answer', async () => {
+    const { result, rerender } = renderHook(
+      ({ childId }: { childId: string }) => useBookshelf(FAMILY, childId, false),
+      { initialProps: { childId: LINCOLN } },
+    )
+    const firstVisit = detachReads()
+
+    rerender({ childId: LONDON })
+    const away = detachReads()
+
+    rerender({ childId: LINCOLN })
+    // The same scope STRING as the first visit, and still a different read:
+    // coming back is a question asked again, not an answer already given.
+    expect(outstanding().sort()).toEqual(['own', 'together'])
+    const secondVisit = detachReads()
+
+    await answer(firstVisit, [makeBook({ id: 'stale', title: 'From the first visit' })])
+    expect(result.current.books).toEqual([])
+    expect(result.current.phase).toBe(ShelfReadPhase.Pending)
+
+    await answer(secondVisit, [makeBook({ id: 'fresh', title: 'From this visit' })])
+    await waitFor(() => {
+      expect(titles(result.current.books)).toEqual(['From this visit'])
+    })
+    // London's reads were never answered at all, and nothing waited for them.
+    expect(away).toHaveLength(2)
+  })
+
+  it('ignores a retry callback a replaced render still holds', async () => {
+    const { result, rerender } = renderHook(
+      ({ childId }: { childId: string }) => useBookshelf(FAMILY, childId, false),
+      { initialProps: { childId: LINCOLN } },
+    )
+    await refuse(detachReads())
+    await waitFor(() => {
+      expect(result.current.error).toBe(true)
+    })
+
+    // The control a child can actually see belongs to Lincoln's failed read.
+    const staleRetry = result.current.retry
+
+    rerender({ childId: LONDON })
+    detachReads()
+
+    await act(async () => {
+      staleRetry()
+    })
+    // It asked nothing: a retry must never re-read for whoever is on screen
+    // now, and it must not touch their state either.
+    expect(outstanding()).toEqual([])
+    expect(result.current.phase).toBe(ShelfReadPhase.Pending)
+    expect(result.current.error).toBe(false)
+  })
+
+  it('and a retry held after the shelf is gone asks nothing at all', async () => {
+    const { result, unmount } = renderHook(() => useBookshelf(FAMILY, LINCOLN, false))
+    await refuse(detachReads())
+    await waitFor(() => {
+      expect(result.current.error).toBe(true)
+    })
+
+    const retry = result.current.retry
+    unmount()
+    act(() => {
+      retry()
+    })
+    // An unmounted page's read has nowhere to land and would be paid for anyway.
+    expect(outstanding()).toEqual([])
+  })
+})
+
+describe('a scope there is nothing to read for', () => {
+  it('is unsettled, which is neither an empty shelf nor a failure', () => {
+    const { result } = renderHook(() => useBookshelf('', '', false))
+
+    expect(outstanding()).toEqual([])
+    expect(result.current.phase).toBe(ShelfReadPhase.Unsettled)
+    expect(result.current.books).toEqual([])
+    expect(result.current.error).toBe(false)
+    expect(result.current.loading).toBe(false)
+  })
+
+  it('and a family with no child resolved yet asks nothing until there is one', async () => {
+    const { result, rerender } = renderHook(
+      ({ childId }: { childId: string }) => useBookshelf(FAMILY, childId, false),
+      { initialProps: { childId: '' } },
+    )
+    // The shape a cold `useChildren` really produces: a family, and no child
+    // resolved from the list yet. There is no honest query to ask.
+    expect(outstanding()).toEqual([])
+    expect(result.current.phase).toBe(ShelfReadPhase.Unsettled)
+
+    rerender({ childId: LINCOLN })
+    expect(outstanding().sort()).toEqual(['own', 'together'])
+    expect(result.current.phase).toBe(ShelfReadPhase.Pending)
+
+    await answer(detachReads(), [makeBook({ id: 'b1', title: 'At last' })])
+    await waitFor(() => {
+      expect(titles(result.current.books)).toEqual(['At last'])
     })
   })
 })

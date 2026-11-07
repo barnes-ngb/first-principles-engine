@@ -118,9 +118,43 @@ interface UseBookResult {
   usedAiGeneration: boolean
 }
 
+/**
+ * What the shelf's own query can honestly say about itself.
+ *
+ * Four answers, kept apart because collapsing any two of them makes the shelf
+ * lie: a read nobody has asked for is not a read in flight, a read that FAILED
+ * is not an empty shelf, and an empty shelf is not a failure. The page draws
+ * one frame per answer and no frame for a fact it does not have.
+ */
+export const ShelfReadPhase = {
+  /** No family, or no audience to read for. Nothing asked, nothing known. */
+  Unsettled: 'unsettled',
+  /** Asked and not answered yet. */
+  Pending: 'pending',
+  /** Answered — `books` IS the answer, including a genuinely empty one. */
+  Ready: 'ready',
+  /** Refused or dropped. Never presented as a result. */
+  Error: 'error',
+} as const
+export type ShelfReadPhase = (typeof ShelfReadPhase)[keyof typeof ShelfReadPhase]
+
 interface UseBookshelfResult {
+  /** Only ever the rows of the query owner this result is for. */
   books: Book[]
+  /** Unchanged for every existing reader: the read is in flight. */
   loading: boolean
+  /** Which of the four answers above this is. */
+  phase: ShelfReadPhase
+  /** The read FAILED. Never true beside an affirmative answer. */
+  error: boolean
+  /**
+   * Ask the CURRENT owner's query again.
+   *
+   * A callback a replaced render still holds does nothing at all — it does not
+   * re-read for whoever is on screen now (the `UX-345` hazard `retrySave`
+   * already closed for the document write).
+   */
+  retry: () => void
   createBook: (
     title: string,
     coverStyle: Book['coverStyle'],
@@ -129,6 +163,82 @@ interface UseBookshelfResult {
     attribution?: { createdBy: 'parent' | string; createdFor: string },
   ) => Promise<string>
   deleteBook: (bookId: string) => Promise<void>
+}
+
+/**
+ * WHOSE books a read is for — the query's own permission scope.
+ *
+ * Family + audience, plus the child only when the child is what the query
+ * FILTERS ON. A parent reads the whole family (`loadAll`), so the selected
+ * child is not part of that question: moving the app-bar chip must not reload
+ * the shelf, blank it, fail it or take a dialog down with it. A child's shelf
+ * is their own id, so a different child is a different question.
+ *
+ * `''` means there is nothing to read for yet — which is not an empty shelf.
+ */
+function shelfQueryScope(familyId: string, childId: string, loadAll: boolean): string {
+  if (!familyId) return ''
+  if (loadAll) return `${familyId}|family`
+  return childId ? `${familyId}|child|${childId}` : ''
+}
+
+interface ShelfReadState {
+  /** The query owner these rows belong to. They are shown under no other. */
+  readonly scope: string
+  readonly phase: ShelfReadPhase
+  readonly books: Book[]
+  readonly error: boolean
+}
+
+/** The state a scope starts in: asking, or not asking anything at all. */
+function emptyShelfRead(scope: string): ShelfReadState {
+  return {
+    scope,
+    phase: scope ? ShelfReadPhase.Pending : ShelfReadPhase.Unsettled,
+    books: [],
+    error: false,
+  }
+}
+
+/** The parent's shelf: the whole family, newest first, no child filter. */
+async function readFamilyShelf(familyId: string): Promise<Book[]> {
+  const allQ = query(booksCollection(familyId), orderBy('updatedAt', 'desc'))
+  const snap = await getDocs(allQ)
+  return snap.docs.map((d) => ({ ...d.data(), id: d.id }))
+}
+
+/**
+ * A child's shelf: their own books unioned with the Together books they
+ * contributed to, deduped (own wins) and sorted newest first.
+ *
+ * `Promise.all` is load-bearing: either both halves answer or the read failed.
+ * Half a union drawn as a shelf reads as books that have been deleted.
+ */
+async function readChildShelf(familyId: string, childId: string): Promise<Book[]> {
+  const ownQ = query(
+    booksCollection(familyId),
+    where('childId', '==', childId),
+    orderBy('updatedAt', 'desc'),
+  )
+  const togetherQ = query(
+    booksCollection(familyId),
+    where('contributorIds', 'array-contains', childId),
+    orderBy('updatedAt', 'desc'),
+  )
+  const [ownSnap, togetherSnap] = await Promise.all([getDocs(ownQ), getDocs(togetherQ)])
+
+  const bookMap = new Map<string, Book>()
+  for (const d of ownSnap.docs) {
+    bookMap.set(d.id, { ...d.data(), id: d.id })
+  }
+  for (const d of togetherSnap.docs) {
+    if (!bookMap.has(d.id)) {
+      bookMap.set(d.id, { ...d.data(), id: d.id })
+    }
+  }
+  return [...bookMap.values()].sort(
+    (a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''),
+  )
 }
 
 /** Push the current URL onto previousVersions (max 5). */
@@ -1038,59 +1148,106 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
 }
 
 export function useBookshelf(familyId: string, childId: string, loadAll?: boolean): UseBookshelfResult {
-  const [books, setBooks] = useState<Book[]>([])
-  const [loading, setLoading] = useState(!!familyId && (!!childId || !!loadAll))
+  const audienceIsFamily = !!loadAll
+  const scope = shelfQueryScope(familyId, childId, audienceIsFamily)
+
+  const [state, setState] = useState<ShelfReadState>(() => emptyShelfRead(scope))
+  /**
+   * The read this hook is currently answering for. Monotonic and never reused,
+   * so a late completion, a retry callback that has been replaced, and an
+   * A → B → A return to the SAME scope are all told apart by it.
+   */
+  const generation = useRef(0)
+  const mounted = useRef(false)
+  /** The inputs as of the last commit — what a read or a retry asks about. */
+  const live = useRef({ scope, familyId, childId, audienceIsFamily })
+  /** The owner the last read was STARTED for, so one owner is asked once. */
+  const started = useRef('')
+
+  /**
+   * The previous owner's rows are gone in the SAME render the owner changes —
+   * before any effect runs — so a row from an audience this shelf may no longer
+   * show is never drawn, never counted and never actionable through it. Setting
+   * state during render is the derive-from-input path: React throws this render
+   * away and re-renders with the reset below.
+   */
+  if (state.scope !== scope) setState(emptyShelfRead(scope))
+  const read = state.scope === scope ? state : emptyShelfRead(scope)
+
+  /**
+   * Apply a completion, if it is still this hook's to apply.
+   *
+   * Three refusals, each for a real sequence: unmounted, superseded by a later
+   * read (a retry, or a scope that moved and came back), or an answer about an
+   * owner the state has already left.
+   */
+  const apply = useCallback(
+    (readScope: string, readGeneration: number, next: Omit<ShelfReadState, 'scope'>) => {
+      if (!mounted.current) return
+      if (readGeneration !== generation.current) return
+      setState((prev) => (prev.scope === readScope ? { scope: readScope, ...next } : prev))
+    },
+    [],
+  )
+
+  /** Ask the live owner's query. Stable, so a re-render cannot re-trigger it. */
+  const runRead = useCallback(async () => {
+    const asked = live.current
+    if (!asked.scope) return
+    // A retry a gone page still holds asks nothing: the answer would have
+    // nowhere to land, and the read would be paid for anyway.
+    if (!mounted.current) return
+    generation.current += 1
+    const readGeneration = generation.current
+    started.current = asked.scope
+    apply(asked.scope, readGeneration, {
+      phase: ShelfReadPhase.Pending,
+      books: [],
+      error: false,
+    })
+    try {
+      const books = asked.audienceIsFamily
+        ? await readFamilyShelf(asked.familyId)
+        : await readChildShelf(asked.familyId, asked.childId)
+      apply(asked.scope, readGeneration, { phase: ShelfReadPhase.Ready, books, error: false })
+    } catch (err) {
+      console.error('Bookshelf read failed:', err)
+      // A refused or dropped read is reported as one. It is not an empty shelf,
+      // and a union that lost half of itself is not a shelf at all.
+      apply(asked.scope, readGeneration, {
+        phase: ShelfReadPhase.Error,
+        books: [],
+        error: true,
+      })
+    }
+  }, [apply])
 
   useEffect(() => {
-    if (!familyId || (!childId && !loadAll)) return
-    let cancelled = false
-    const load = async () => {
-      if (loadAll) {
-        // Parent view: load ALL books for the family
-        const allQ = query(
-          booksCollection(familyId),
-          orderBy('updatedAt', 'desc'),
-        )
-        const snap = await getDocs(allQ)
-        if (cancelled) return
-        const all = snap.docs.map((d) => ({ ...d.data(), id: d.id }))
-        setBooks(all)
-        setLoading(false)
-        return
-      }
-
-      // Load books where childId matches OR child is a contributor (Together Books)
-      const ownQ = query(
-        booksCollection(familyId),
-        where('childId', '==', childId),
-        orderBy('updatedAt', 'desc'),
-      )
-      const togetherQ = query(
-        booksCollection(familyId),
-        where('contributorIds', 'array-contains', childId),
-        orderBy('updatedAt', 'desc'),
-      )
-      const [ownSnap, togetherSnap] = await Promise.all([getDocs(ownQ), getDocs(togetherQ)])
-      if (cancelled) return
-
-      const bookMap = new Map<string, Book>()
-      for (const d of ownSnap.docs) {
-        bookMap.set(d.id, { ...d.data(), id: d.id })
-      }
-      for (const d of togetherSnap.docs) {
-        if (!bookMap.has(d.id)) {
-          bookMap.set(d.id, { ...d.data(), id: d.id })
-        }
-      }
-      const all = [...bookMap.values()].sort(
-        (a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''),
-      )
-      setBooks(all)
-      setLoading(false)
+    mounted.current = true
+    return () => {
+      mounted.current = false
     }
-    void load()
-    return () => { cancelled = true }
-  }, [familyId, childId, loadAll])
+  }, [])
+
+  // Declared before the read below, so the read it triggers asks about the
+  // inputs of the commit that triggered it.
+  useEffect(() => {
+    live.current = { scope, familyId, childId, audienceIsFamily }
+  }, [scope, familyId, childId, audienceIsFamily])
+
+  useEffect(() => {
+    if (!scope) return
+    // One read per owner. An input that is not part of the question — a
+    // parent's selected child — is not a reason to ask it again.
+    if (started.current === scope) return
+    void runRead()
+  }, [scope, familyId, childId, audienceIsFamily, runRead])
+
+  const retry = useCallback(() => {
+    // Bound to the scope the render that produced this callback was showing.
+    if (live.current.scope !== scope) return
+    void runRead()
+  }, [scope, runRead])
 
   const createBook = useCallback(
     async (
@@ -1118,22 +1275,44 @@ export function useBookshelf(familyId: string, childId: string, loadAll?: boolea
       }
       const docRef = await addDoc(booksCollection(familyId), newBook as Book)
       const created = { ...newBook, id: docRef.id }
-      setBooks((prev) => [created, ...prev])
+      /**
+       * The optimistic row joins the view it was made in and no other: a create
+       * that lands after the audience changed must not inject a row into the
+       * new owner's shelf. The phase is untouched — a created book is not an
+       * answer to a read that failed or has not come back.
+       */
+      setState((prev) =>
+        prev.scope === scope ? { ...prev, books: [created, ...prev.books] } : prev,
+      )
       return docRef.id
     },
-    [familyId, childId],
+    [familyId, childId, scope],
   )
 
   const deleteBook = useCallback(
     async (bookId: string) => {
       if (!familyId) return
       await deleteDoc(doc(booksCollection(familyId), bookId))
-      setBooks((prev) => prev.filter((b) => b.id !== bookId))
+      // Same ownership rule as the create above; the write itself is unchanged.
+      setState((prev) =>
+        prev.scope === scope
+          ? { ...prev, books: prev.books.filter((b) => b.id !== bookId) }
+          : prev,
+      )
     },
-    [familyId],
+    [familyId, scope],
   )
 
-  return { books, loading, createBook, deleteBook }
+  return {
+    books: read.books,
+    // Exactly what it always meant: the read is in flight.
+    loading: read.phase === ShelfReadPhase.Pending,
+    phase: read.phase,
+    error: read.error,
+    retry,
+    createBook,
+    deleteBook,
+  }
 }
 
 /** Hook to load the most recent draft book for a child (for "Continue your book" card). */
