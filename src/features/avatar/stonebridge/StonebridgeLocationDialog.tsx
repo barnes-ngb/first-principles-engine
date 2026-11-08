@@ -10,9 +10,11 @@ import useMediaQuery from '@mui/material/useMediaQuery'
 
 import StonebridgeLocationArt from './StonebridgeLocationArt'
 import StonebridgeRecoveryNotice, { type StonebridgeRecoveryState } from './StonebridgeRecoveryNotice'
+import VillageStepsHelp from './VillageStepsHelp'
 import { VillageLocationState, type MissionComputation } from './computeStonebridgeProgress'
 import { LIBRARY_MISSION_ID, offersBooksDoor } from './stonebridgeDestinations'
 import { villageSurface } from './villageSurface'
+import { VILLAGE_STEPS_LINE, villageStepsLabel } from './villageStepsCopy'
 import type { StonebridgeMission } from './missions'
 
 /** The one location whose visit offers the armor gallery (the Forge). */
@@ -26,6 +28,13 @@ interface StonebridgeLocationDialogProps extends StonebridgeRecoveryState {
   state: VillageLocationState
   /** Counters for the active mission — only read when `state` is active. */
   active: MissionComputation | null
+  /**
+   * `${familyId}_${childId}` — whose visit this is.
+   *
+   * Used for one thing: the step help closes when the scope changes, the same
+   * converging render-phase reset the board uses. Nothing here reads it.
+   */
+  scopeKey: string
   isLincoln: boolean
   /** Skip the open/close transition for someone who asked for less motion. */
   reduceMotion: boolean
@@ -81,6 +90,7 @@ export default function StonebridgeLocationDialog({
   mission,
   state,
   active,
+  scopeKey,
   isLincoln,
   reduceMotion,
   onClose,
@@ -221,8 +231,14 @@ export default function StonebridgeLocationDialog({
           {conditionLine}
         </Typography>
 
-        {/* The location being repaired now: the same counters as the card, and
-            the same framing. Nothing new is counted by opening this. */}
+        {/* The location being repaired now: the same counters as the card and
+            the board, said in the same words, and the same framing. Nothing
+            new is counted by opening this, and the optional help below adds no
+            record either — see `VillageStepsHelp`.
+
+            This is the topmost view when it is open, so the explanation of the
+            number has to be reachable HERE: everything under a modal is
+            unreachable, which is the same reason the recovery door is above. */}
         {isActive && active && (
           <>
             <Typography
@@ -241,14 +257,27 @@ export default function StonebridgeLocationDialog({
               sx={{
                 fontFamily: bodyFont,
                 fontSize: '14px',
-                fontWeight: 700,
+                lineHeight: 1.45,
                 color: bodyColor,
-                opacity: 0.78,
+                opacity: 0.88,
                 mt: 0.5,
               }}
             >
-              {active.current} / {active.target} done
+              {VILLAGE_STEPS_LINE}
             </Typography>
+            <Typography
+              sx={{
+                fontFamily: bodyFont,
+                fontSize: '14px',
+                fontWeight: 700,
+                color: bodyColor,
+                opacity: 0.88,
+                mt: 0.5,
+              }}
+            >
+              {villageStepsLabel(active.current, active.target)}
+            </Typography>
+            <VillageStepsHelp isLincoln={isLincoln} scopeKey={scopeKey} />
           </>
         )}
 

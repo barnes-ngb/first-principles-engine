@@ -8,6 +8,13 @@ import { expectKidLine, expectKidWording } from '../../../test/kidReadability'
 import { LIBRARY_RETURN_LABEL, LIBRARY_RETURN_LINE } from './libraryReturnCopy'
 import { STONEBRIDGE_MISSIONS, getMission } from './missions'
 import type { StonebridgeProgressData } from './useStonebridgeProgress'
+import {
+  VILLAGE_STEPS_HELP_LABEL,
+  VILLAGE_STEPS_HELP_LINES,
+  VILLAGE_STEPS_LINE,
+  villageStepsCompact,
+  villageStepsLabel,
+} from './villageStepsCopy'
 // `vi.mock` is hoisted above this, so the card renders against the stubbed hook.
 import StonebridgeMissionCard from './StonebridgeMissionCard'
 
@@ -232,7 +239,13 @@ describe('the board at the start, part-way and finished', () => {
     // The card itself: repaired art, a warm done state, and no progress bar.
     expect(screen.getByText('You fixed each place.')).toBeInTheDocument()
     expect(screen.getByText('Your banners are all up.')).toBeInTheDocument()
-    expect(screen.queryByText('18 / 18 done')).not.toBeInTheDocument()
+    expect(screen.queryByText(villageStepsLabel(18, 18))).not.toBeInTheDocument()
+    // No number left to explain, so no line and no help either — a warm done
+    // state, not a quota that happens to be met.
+    expect(screen.queryByText(VILLAGE_STEPS_LINE)).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: VILLAGE_STEPS_HELP_LABEL }),
+    ).not.toBeInTheDocument()
     expect(screen.queryByText(BANNER_HALL.framing)).not.toBeInTheDocument()
     expect(
       screen.getByRole('img', {
@@ -255,7 +268,7 @@ describe('the board at the start, part-way and finished', () => {
 
     // The finished one is behind him; the queued one is the work in hand.
     expect(screen.getByText(WATCHTOWER.framing)).toBeInTheDocument()
-    expect(screen.getByText('0 / 6 done')).toBeInTheDocument()
+    expect(screen.getByText(villageStepsLabel(0, 6))).toBeInTheDocument()
     expect(screen.queryByText('You fixed each place.')).not.toBeInTheDocument()
     expect(
       screen.getByRole('img', {
@@ -279,7 +292,8 @@ describe('a visit says what is true of the place', () => {
     const visit = within(screen.getByRole('dialog', { name: 'The Old Bridge' }))
     expect(visit.getByText('You are fixing this now.')).toBeInTheDocument()
     expect(visit.getByText(OLD_BRIDGE.framing)).toBeInTheDocument()
-    expect(visit.getByText('2 / 5 done')).toBeInTheDocument()
+    expect(visit.getByText(villageStepsLabel(2, 5))).toBeInTheDocument()
+    expect(visit.getByText(VILLAGE_STEPS_LINE)).toBeInTheDocument()
     expect(visit.getByRole('button', { name: 'Open My Books' })).toBeInTheDocument()
   })
 
@@ -746,7 +760,7 @@ describe('the Map and the Places list, one live control set at a time', () => {
     // The same visit the list opened, because it is the same opener.
     const visit = within(screen.getByRole('dialog', { name: 'The Library Hut' }))
     expect(visit.getByText('You are fixing this now.')).toBeInTheDocument()
-    expect(visit.getByText('3 / 8 done')).toBeInTheDocument()
+    expect(visit.getByText(villageStepsLabel(3, 8))).toBeInTheDocument()
     expect(visit.getByRole('button', { name: 'Open My Books' })).toBeInTheDocument()
   })
 
@@ -889,6 +903,65 @@ describe('the Map and the Places list, one live control set at a time', () => {
       expect(places().getByText(mission.locationName)).toBeInTheDocument()
     }
     expect(places().getAllByText('✓ Fixed · tap to see it')).toHaveLength(2)
+  })
+
+  it('gives the one number a visible unit legend in BOTH views, and an optional help', () => {
+    fx.data = PARTIAL
+    renderCard()
+    openBoard()
+    const board = boardRegion()
+    const places = () => within(board.getByTestId('village-places'))
+    const legend = () => within(board.getByTestId('village-steps'))
+
+    // The legend: the number said in full, plus the one sentence that says
+    // what feeds it — no tap required for either.
+    expect(legend().getByText(villageStepsLabel(3, 8))).toBeInTheDocument()
+    expect(legend().getByText(VILLAGE_STEPS_LINE)).toBeInTheDocument()
+    // The map view's places legend keeps its compact number, with the unit on
+    // it, so the digits are readable away from the line above.
+    expect(
+      places().getByText(`Being fixed now. ${villageStepsCompact(3, 8)}`),
+    ).toBeInTheDocument()
+
+    // The places view says the same compact number on the tile itself, and the
+    // legend above it has not gone anywhere.
+    fireEvent.click(board.getByRole('button', { name: 'Show the places list' }))
+    expect(places().getByText(villageStepsCompact(3, 8))).toBeInTheDocument()
+    expect(legend().getByText(villageStepsLabel(3, 8))).toBeInTheDocument()
+
+    // One help control, in the board's own flow — never nested inside a place
+    // button, where one tap would have to mean two things.
+    expect(
+      places().queryByRole('button', { name: VILLAGE_STEPS_HELP_LABEL }),
+    ).not.toBeInTheDocument()
+    fireEvent.click(board.getByRole('button', { name: VILLAGE_STEPS_HELP_LABEL }))
+    for (const line of VILLAGE_STEPS_HELP_LINES) {
+      expect(board.getByText(line)).toBeVisible()
+    }
+  })
+
+  it('and the place being fixed now is described by that legend, not renamed by it', () => {
+    fx.data = PARTIAL
+    renderCard()
+    openBoard()
+    const board = boardRegion()
+    fireEvent.click(board.getByRole('button', { name: 'Show the places list' }))
+
+    // The two control sets must keep saying the same thing about a place, so
+    // the count reaches a screen reader as a DESCRIPTION rather than by
+    // growing the list control's name past the map target's.
+    const control = board.getByRole('button', { name: 'Visit The Library Hut. Being fixed now.' })
+    const describedBy = control.getAttribute('aria-describedby')
+    expect(describedBy).toBeTruthy()
+    expect(document.getElementById(describedBy!)).toHaveTextContent(villageStepsLabel(3, 8))
+
+    // A fixed place and an upcoming one have no number, so neither points at it.
+    expect(
+      board.getByRole('button', { name: 'Visit The Old Bridge. Fixed.' }),
+    ).not.toHaveAttribute('aria-describedby')
+    expect(
+      board.getByRole('button', { name: 'Visit The Forge. Not started yet.' }),
+    ).not.toHaveAttribute('aria-describedby')
   })
 })
 

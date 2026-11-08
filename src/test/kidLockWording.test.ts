@@ -151,12 +151,19 @@ const TOUCHED: Touched[] = [
     source: 'Hmm, that did not save. Try again.',
     kind: 'line',
   },
-  // before: "{n} / {n} reading actions"
+  // before: "{n} / {n} reading actions", then "{n} / {n} done" (this run).
+  //
+  // "done" was readable and said nothing: a bare pair of digits reads as books
+  // finished, which is not what is counted. The unit is now named, and the
+  // string moved OUT of the card into `villageStepsCopy` because three
+  // surfaces say it — so the presence check follows it to the one file that
+  // owns it, and `villageStepsCopy.test.ts` is what proves all three render
+  // from there rather than spelling their own.
   {
     where: 'Banner Rally · mission progress',
-    file: 'src/features/avatar/stonebridge/StonebridgeMissionCard.tsx',
-    source: '{active.current} / {active.target} done',
-    rendered: '2 / 5 done',
+    file: 'src/features/avatar/stonebridge/villageStepsCopy.ts',
+    source: 'Village steps for this repair: ${current} / ${target}',
+    rendered: 'Village steps for this repair: 2 / 5',
     kind: 'label',
   },
   // before: "✓ Repaired · tap to revisit"
@@ -248,6 +255,16 @@ const RETIRED: { phrase: string; files: string[] }[] = [
   {
     phrase: 'reading actions',
     files: ['src/features/avatar/stonebridge/StonebridgeMissionCard.tsx'],
+  },
+  {
+    // This run's retirement: the unit-less counter, in the two surfaces that
+    // rendered it. The board's own compact form never said "done" and now
+    // carries the unit word instead — see `villageStepsCopy`.
+    phrase: '{active.target} done',
+    files: [
+      'src/features/avatar/stonebridge/StonebridgeMissionCard.tsx',
+      'src/features/avatar/stonebridge/StonebridgeLocationDialog.tsx',
+    ],
   },
   {
     phrase: 'pieces equipped',

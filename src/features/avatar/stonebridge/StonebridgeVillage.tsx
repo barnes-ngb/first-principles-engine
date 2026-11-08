@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import Box from '@mui/material/Box'
 import Dialog from '@mui/material/Dialog'
 import IconButton from '@mui/material/IconButton'
@@ -9,6 +9,7 @@ import StonebridgeLocationArt from './StonebridgeLocationArt'
 import StonebridgeLocationDialog from './StonebridgeLocationDialog'
 import StonebridgeRecoveryNotice, { type StonebridgeRecoveryState } from './StonebridgeRecoveryNotice'
 import BannerRaiseCelebration from './BannerRaiseCelebration'
+import VillageStepsHelp from './VillageStepsHelp'
 import VillageScene, { type VillageSceneHero } from './VillageScene'
 import { getMission } from './missions'
 import { getLibraryIdentityEpoch } from './libraryReturnFlow'
@@ -19,6 +20,7 @@ import {
 } from './computeStonebridgeProgress'
 import type { StonebridgeDestinations } from './stonebridgeDestinations'
 import { villageSurface } from './villageSurface'
+import { VILLAGE_STEPS_LINE, villageStepsCompact, villageStepsLabel } from './villageStepsCopy'
 import {
   VillagePlacesView,
   createOpenerRegistry,
@@ -404,6 +406,23 @@ export default function StonebridgeVillage({
    * `completedMissions`.
    */
   const allRepaired = completedMissions.includes(currentMissionId)
+
+  /**
+   * The id of the visible step legend, so the one tile that shows a COMPACT
+   * number can point at the line that gives it its unit.
+   *
+   * It is a description and not part of the control's name on purpose: the
+   * accessible name of a place control is `placeControlName` in both control
+   * sets, and a name that grew a count on the list but not on the map would be
+   * the two sets saying different things about the same place.
+   */
+  const stepsLegendId = useId()
+  /**
+   * There is a repair in progress to count — so the legend, the line and the
+   * optional help are shown. A finished rally has no number and gets none of
+   * them (the warm done state below is what it has instead).
+   */
+  const showSteps = !!active && !allRepaired
 
   /** The location the visit dialog is rendering — through its exit, too. */
   const shownMission = live?.shown ? getMission(live.shown) : undefined
@@ -929,6 +948,49 @@ export default function StonebridgeVillage({
           >
             🏘️ Each Place
           </Typography>
+
+          {/* ── What the numbers below are ──────────────────────────────
+              The compact `3 / 8 steps` on the place being fixed now is the
+              only number on this board, and in the Map view it is a line of
+              plain text in a legend. This is the visible unit legend that
+              gives it its word, in BOTH views and above both of them, so the
+              digits are never the whole explanation.
+
+              Three things, in the order a child needs them: the number said
+              in full, the one sentence that says what feeds it, and an
+              optional *What adds steps?* It is here in the board's own flow
+              rather than on a tile, because a help control inside a place
+              button would make one tap mean two things. */}
+          {showSteps && active && (
+            <Box data-testid="village-steps" sx={{ mb: 1.5 }}>
+              <Typography
+                id={stepsLegendId}
+                sx={{
+                  fontFamily: bodyFont,
+                  fontSize: '14px',
+                  fontWeight: 700,
+                  lineHeight: 1.45,
+                  overflowWrap: 'break-word',
+                }}
+              >
+                {villageStepsLabel(active.current, active.target)}
+              </Typography>
+              <Typography
+                sx={{
+                  fontFamily: bodyFont,
+                  fontSize: '14px',
+                  lineHeight: 1.45,
+                  overflowWrap: 'break-word',
+                  opacity: 0.85,
+                  mt: 0.25,
+                }}
+              >
+                {VILLAGE_STEPS_LINE}
+              </Typography>
+              <VillageStepsHelp isLincoln={isLincoln} scopeKey={scopeKey} />
+            </Box>
+          )}
+
           {mapIsLive ? (
             <Box
               component="ul"
@@ -993,9 +1055,14 @@ export default function StonebridgeVillage({
                         mt: 0.25,
                       }}
                     >
-                      {/* The same sentence the control's own name ends with. */}
+                      {/* The same sentence the control's own name ends with,
+                          and — on the one place being fixed now — the compact
+                          count with its unit, so this line is readable on its
+                          own when the legend above has scrolled away. */}
                       {placeCondition(state)}
-                      {isActive && active ? ` ${active.current} / ${active.target}` : ''}
+                      {isActive && active
+                        ? ` ${villageStepsCompact(active.current, active.target)}`
+                        : ''}
                     </Typography>
                   </Box>
                 )
@@ -1029,6 +1096,13 @@ export default function StonebridgeVillage({
                     // label underneath is the same two facts, for everyone
                     // else, and the map's target says it identically.
                     aria-label={placeControlName(mission.locationName, state)}
+                    // An `aria-label` REPLACES the content, so the compact
+                    // count drawn inside this button is not in its name. The
+                    // place being fixed now is therefore DESCRIBED by the
+                    // legend above — the number reaches a screen reader
+                    // without this control set's name growing past the map
+                    // target's, which is the one thing both sets share.
+                    aria-describedby={isActive && showSteps ? stepsLegendId : undefined}
                     sx={{
                       display: 'block',
                       width: '100%',
@@ -1116,7 +1190,7 @@ export default function StonebridgeVillage({
                           component="span"
                           sx={{ display: 'block', fontFamily: bodyFont, fontSize: '13px', fontWeight: 700, opacity: 0.85, mt: 0.25, textAlign: 'right' }}
                         >
-                          {active.current} / {active.target}
+                          {villageStepsCompact(active.current, active.target)}
                         </Typography>
                       </Box>
                     )}
@@ -1274,6 +1348,10 @@ export default function StonebridgeVillage({
           mission={shownMission}
           state={shownState}
           active={active}
+          // Whose visit this is: the only state the visit holds of its own is
+          // the step help's open/closed, and it closes with the scope rather
+          // than outliving a child change inside a view that is about to go.
+          scopeKey={scopeKey}
           isLincoln={isLincoln}
           reduceMotion={reduceMotion}
           onClose={closeLocation}
