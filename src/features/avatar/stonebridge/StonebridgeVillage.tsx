@@ -408,21 +408,19 @@ export default function StonebridgeVillage({
   const allRepaired = completedMissions.includes(currentMissionId)
 
   /**
-   * The id of the visible step legend, so the one tile that shows a COMPACT
-   * number can point at the line that gives it its unit.
+   * The visible step legend's id, and the one place it describes.
    *
-   * It is a description and not part of the control's name on purpose: the
-   * accessible name of a place control is `placeControlName` in both control
-   * sets, and a name that grew a count on the list but not on the map would be
-   * the two sets saying different things about the same place.
+   * A description, never part of a control's name: `placeControlName` is the
+   * accessible name in BOTH control sets, and a name that grew a count on the
+   * list but not on the map would be the two sets disagreeing about one place.
+   * One definition here, read by the map targets and the Places tiles alike.
+   *
+   * A finished rally has no number, so it gets no legend, no line and no help —
+   * the warm done state is what it has instead.
    */
   const stepsLegendId = useId()
-  /**
-   * There is a repair in progress to count — so the legend, the line and the
-   * optional help are shown. A finished rally has no number and gets none of
-   * them (the warm done state below is what it has instead).
-   */
   const showSteps = !!active && !allRepaired
+  const stepsMissionId = showSteps ? currentMissionId : null
 
   /** The location the visit dialog is rendering — through its exit, too. */
   const shownMission = live?.shown ? getMission(live.shown) : undefined
@@ -875,6 +873,10 @@ export default function StonebridgeVillage({
             interactive={mapIsLive}
             onOpenLocation={openLocation}
             registerTarget={(missionId, node) => openers.register(missionId, node)}
+            // Description only, from the same legend the list points at.
+            activeSteps={
+              stepsMissionId ? { missionId: stepsMissionId, descriptionId: stepsLegendId } : null
+            }
           />
 
           {/* ── Map or list — one live set of place controls ────────────
@@ -949,18 +951,13 @@ export default function StonebridgeVillage({
             🏘️ Each Place
           </Typography>
 
-          {/* ── What the numbers below are ──────────────────────────────
-              The compact `3 / 8 steps` on the place being fixed now is the
-              only number on this board, and in the Map view it is a line of
-              plain text in a legend. This is the visible unit legend that
-              gives it its word, in BOTH views and above both of them, so the
-              digits are never the whole explanation.
-
-              Three things, in the order a child needs them: the number said
-              in full, the one sentence that says what feeds it, and an
-              optional *What adds steps?* It is here in the board's own flow
-              rather than on a tile, because a help control inside a place
-              button would make one tap mean two things. */}
+          {/* ── The step legend ────────────────────────────────────────
+              The visible unit legend for the compact number on the place
+              being fixed now: the count in full, the one sentence that says
+              what feeds it, and the optional explanation. Above both views,
+              and in the board's own flow rather than on a tile — a help
+              control inside a place button would make one tap mean two
+              things. */}
           {showSteps && active && (
             <Box data-testid="village-steps" sx={{ mb: 1.5 }}>
               <Typography
@@ -1056,9 +1053,9 @@ export default function StonebridgeVillage({
                       }}
                     >
                       {/* The same sentence the control's own name ends with,
-                          and — on the one place being fixed now — the compact
-                          count with its unit, so this line is readable on its
-                          own when the legend above has scrolled away. */}
+                          plus the compact count WITH its unit on the one place
+                          being fixed now, so this line stands on its own away
+                          from the legend. */}
                       {placeCondition(state)}
                       {isActive && active
                         ? ` ${villageStepsCompact(active.current, active.target)}`
@@ -1098,11 +1095,9 @@ export default function StonebridgeVillage({
                     aria-label={placeControlName(mission.locationName, state)}
                     // An `aria-label` REPLACES the content, so the compact
                     // count drawn inside this button is not in its name. The
-                    // place being fixed now is therefore DESCRIBED by the
-                    // legend above — the number reaches a screen reader
-                    // without this control set's name growing past the map
-                    // target's, which is the one thing both sets share.
-                    aria-describedby={isActive && showSteps ? stepsLegendId : undefined}
+                    // same legend describes it instead — the map target gets
+                    // the identical treatment.
+                    aria-describedby={stepsMissionId === mission.id ? stepsLegendId : undefined}
                     sx={{
                       display: 'block',
                       width: '100%',

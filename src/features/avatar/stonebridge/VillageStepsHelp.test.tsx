@@ -1,7 +1,8 @@
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 
+import { observeLibraryReturnIdentity } from './libraryReturnFlow'
 import VillageStepsHelp from './VillageStepsHelp'
 import { VILLAGE_STEPS_HELP_LABEL, VILLAGE_STEPS_HELP_LINES } from './villageStepsCopy'
 
@@ -9,13 +10,18 @@ import { VILLAGE_STEPS_HELP_LABEL, VILLAGE_STEPS_HELP_LINES } from './villageSte
  * *What adds steps?* — how it opens, how it closes, and what it leaves alone.
  *
  * Real browser focus, real touch targets and the three viewport widths are
- * Sol's independent pass; what is asserted here is the behaviour jsdom can
- * actually tell the truth about: the disclosure contract, Escape, the focus
- * hand-off back to the control, and that a change of child closes it without
+ * Sol's independent pass; what is asserted here is what jsdom can tell the
+ * truth about: the disclosure contract, Escape, the focus hand-off back to the
+ * control, and the two kinds of identity movement that close it — without
  * remounting the surface it sits in.
  */
 
 const toggle = () => screen.getByRole('button', { name: VILLAGE_STEPS_HELP_LABEL })
+
+/** A settled identity, so the movements below are movements. */
+beforeEach(() => {
+  act(() => observeLibraryReturnIdentity('fam-1|parents|lincoln'))
+})
 
 describe('the step help is closed until it is asked for', () => {
   it('offers one control, collapsed, and says so', () => {
@@ -77,7 +83,7 @@ describe('the step help is closed until it is asked for', () => {
   })
 })
 
-describe('an open panel does not follow a child change', () => {
+describe('an open panel does not follow an identity movement', () => {
   it('closes when the scope changes, and the control stays the same control', async () => {
     const user = userEvent.setup()
     const { rerender } = render(<VillageStepsHelp isLincoln scopeKey="fam_lincoln" />)
@@ -95,7 +101,25 @@ describe('an open panel does not follow a child change', () => {
     expect(toggle()).toBe(opened)
   })
 
-  it('and stays open across an ordinary re-render of the same scope', async () => {
+  it('closes on a profile movement the scope string cannot see', async () => {
+    const user = userEvent.setup()
+    render(<VillageStepsHelp isLincoln scopeKey="fam-1_lincoln" />)
+
+    await user.click(toggle())
+    const opened = toggle()
+    expect(opened).toHaveAttribute('aria-expanded', 'true')
+
+    // Parent → the child's own profile: same family, same child, so `scopeKey`
+    // is byte-for-byte what it was. The identity EPOCH is what moved.
+    act(() => observeLibraryReturnIdentity('fam-1|lincoln|lincoln'))
+
+    expect(toggle()).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.getByText(VILLAGE_STEPS_HELP_LINES[0])).not.toBeVisible()
+    // Observed, not remounted: the same control node is still on screen.
+    expect(toggle()).toBe(opened)
+  })
+
+  it('and stays open across a cosmetic re-render — a look is not an identity', async () => {
     const user = userEvent.setup()
     const { rerender } = render(<VillageStepsHelp isLincoln scopeKey="fam_lincoln" />)
 

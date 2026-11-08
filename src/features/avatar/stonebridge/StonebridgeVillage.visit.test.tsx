@@ -940,28 +940,53 @@ describe('the Map and the Places list, one live control set at a time', () => {
     }
   })
 
-  it('and the place being fixed now is described by that legend, not renamed by it', () => {
+  it('describes the place being fixed now with that legend in BOTH control sets', () => {
     fx.data = PARTIAL
     renderCard()
     openBoard()
     const board = boardRegion()
+    const legendText = villageStepsLabel(3, 8)
+
+    /** Which element, if any, is describing this control. */
+    const describedBy = (control: HTMLElement) => {
+      const id = control.getAttribute('aria-describedby')
+      return id ? document.getElementById(id) : null
+    }
+
+    // The map's building for the place being fixed now. This was the hole the
+    // browser pass found: the list explained its number and the map did not.
+    const mapTarget = board.getByTestId('map-target-library_hut')
+    expect(describedBy(mapTarget)).toHaveTextContent(legendText)
+    // Named identically to the list's control, and not renamed by the count —
+    // a description carries the number, so the two sets still agree.
+    expect(mapTarget).toHaveAttribute('aria-label', 'Visit The Library Hut. Being fixed now.')
+    expect(describedBy(board.getByTestId('map-target-old_bridge'))).toBeNull()
+    expect(describedBy(board.getByTestId('map-target-the_forge'))).toBeNull()
+
+    // And the Places list's control for the same place, from the same legend.
     fireEvent.click(board.getByRole('button', { name: 'Show the places list' }))
-
-    // The two control sets must keep saying the same thing about a place, so
-    // the count reaches a screen reader as a DESCRIPTION rather than by
-    // growing the list control's name past the map target's.
-    const control = board.getByRole('button', { name: 'Visit The Library Hut. Being fixed now.' })
-    const describedBy = control.getAttribute('aria-describedby')
-    expect(describedBy).toBeTruthy()
-    expect(document.getElementById(describedBy!)).toHaveTextContent(villageStepsLabel(3, 8))
-
-    // A fixed place and an upcoming one have no number, so neither points at it.
+    const tileControl = board.getByRole('button', {
+      name: 'Visit The Library Hut. Being fixed now.',
+    })
+    expect(describedBy(tileControl)).toHaveTextContent(legendText)
+    expect(describedBy(board.getByRole('button', { name: 'Visit The Old Bridge. Fixed.' }))).toBeNull()
     expect(
-      board.getByRole('button', { name: 'Visit The Old Bridge. Fixed.' }),
-    ).not.toHaveAttribute('aria-describedby')
-    expect(
-      board.getByRole('button', { name: 'Visit The Forge. Not started yet.' }),
-    ).not.toHaveAttribute('aria-describedby')
+      describedBy(board.getByRole('button', { name: 'Visit The Forge. Not started yet.' })),
+    ).toBeNull()
+  })
+
+  it('and a finished rally describes nothing, because it has no number', () => {
+    fx.data = FINAL
+    renderCard()
+    openBoard()
+    const board = boardRegion()
+
+    expect(board.queryByTestId('village-steps')).not.toBeInTheDocument()
+    for (const mission of STONEBRIDGE_MISSIONS) {
+      expect(board.getByTestId(`map-target-${mission.id}`)).not.toHaveAttribute(
+        'aria-describedby',
+      )
+    }
   })
 })
 

@@ -52,11 +52,9 @@ describe('STONEBRIDGE_MISSIONS', () => {
 
   it('no framing claims a unit the counter does not count', () => {
     // A step is a credited book read or a finished Mine quest. Two framings
-    // used to promise one per PAGE and one per STORY read, which the reader's
-    // own book/day dedup does not give — so a child could read all evening and
-    // watch a number that did not move. Titles, thank-yous and formation beats
-    // are canon and are deliberately not swept: they celebrate effort already
-    // spent and promise no arithmetic.
+    // promised one per PAGE and one per STORY read, which the reader's book/day
+    // dedup does not give. Titles, thank-yous and formation beats are canon and
+    // are deliberately not swept — they promise no arithmetic.
     for (const m of STONEBRIDGE_MISSIONS) {
       expect(m.framing, `${m.id} framing`).not.toMatch(/\bpages?\b/i)
       expect(m.framing, `${m.id} framing`).not.toMatch(/\bminutes?\b/i)

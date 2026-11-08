@@ -152,13 +152,9 @@ const TOUCHED: Touched[] = [
     kind: 'line',
   },
   // before: "{n} / {n} reading actions", then "{n} / {n} done" (this run).
-  //
-  // "done" was readable and said nothing: a bare pair of digits reads as books
-  // finished, which is not what is counted. The unit is now named, and the
-  // string moved OUT of the card into `villageStepsCopy` because three
-  // surfaces say it — so the presence check follows it to the one file that
-  // owns it, and `villageStepsCopy.test.ts` is what proves all three render
-  // from there rather than spelling their own.
+  // "done" named no unit; the counter is credited book reads plus finished
+  // Mine quests. The string now lives in `villageStepsCopy`, which three
+  // surfaces read, so the presence check follows it there.
   {
     where: 'Banner Rally · mission progress',
     file: 'src/features/avatar/stonebridge/villageStepsCopy.ts',

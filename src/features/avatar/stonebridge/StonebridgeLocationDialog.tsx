@@ -231,14 +231,11 @@ export default function StonebridgeLocationDialog({
           {conditionLine}
         </Typography>
 
-        {/* The location being repaired now: the same counters as the card and
-            the board, said in the same words, and the same framing. Nothing
-            new is counted by opening this, and the optional help below adds no
-            record either — see `VillageStepsHelp`.
-
-            This is the topmost view when it is open, so the explanation of the
-            number has to be reachable HERE: everything under a modal is
-            unreachable, which is the same reason the recovery door is above. */}
+        {/* The location being repaired now: the same counters and the same
+            words as the card and the board. Nothing is counted by opening
+            this, and the help below adds no record either. It is repeated
+            here because this is the topmost view — everything under a modal is
+            unreachable, which is why the recovery door is above too. */}
         {isActive && active && (
           <>
             <Typography

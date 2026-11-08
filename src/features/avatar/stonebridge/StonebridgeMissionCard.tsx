@@ -185,10 +185,8 @@ export default function StonebridgeMissionCard({
   /**
    * …and the sentences that explain the number are plain, at 14px.
    *
-   * The card's own short labels keep the pixel theme; the step legend and its
-   * line are things a child READS, so they follow the board's and the visit's
-   * convention rather than the 9px retro face (UX-481's rule, one definition in
-   * three places).
+   * The card's short labels keep the pixel theme; the step legend and its line
+   * are read, so they follow the board's and the visit's convention.
    */
   const bodyFont = isLincoln ? undefined : '"Fredoka", cursive'
 
@@ -375,11 +373,9 @@ export default function StonebridgeMissionCard({
                 }}
               />
             </Box>
-            {/* The number, named. FEAT-186 cut "reading actions" — a parent's
-                noun — down to "done", which left the bar saying nothing about
-                WHAT it counts, and "N / M done" reads as finished books. The
-                counter is credited book reads plus finished Mine quests, so
-                the unit is *steps* and the words for it live in one place
+            {/* The number, named. The counter is credited book reads plus
+                finished Mine quests, which "N / M done" did not say; the unit
+                is *steps* and its words live in one place
                 (`villageStepsCopy`) that the board and the visit read too. */}
             <Typography
               sx={{

@@ -128,6 +128,19 @@ interface VillageSceneProps {
    * focus to.
    */
   registerTarget?: (missionId: string, node: HTMLElement | null) => void
+  /**
+   * The caller's visible step legend, and which place it describes.
+   *
+   * Describes only — a place control's accessible NAME stays
+   * `placeControlName` in both control sets, so the map and the Places list go
+   * on saying the same thing about the same place. Without it the Map's active
+   * building offered no route to the number the list shows beside its tile.
+   *
+   * Optional and absent by default: a caller that passes none renders exactly
+   * what it rendered before. The id and the mission are the caller's own (one
+   * legend, one definition); nothing here reads progress.
+   */
+  activeSteps?: { missionId: string; descriptionId: string } | null
 }
 
 export default function VillageScene({
@@ -137,6 +150,7 @@ export default function VillageScene({
   interactive = false,
   onOpenLocation,
   registerTarget,
+  activeSteps = null,
 }: VillageSceneProps) {
   const titleFont = isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive'
   const bodyFont = isLincoln ? undefined : '"Fredoka", cursive'
@@ -308,6 +322,13 @@ export default function VillageScene({
                   onClick={() => onOpenLocation?.(cell.missionId)}
                   // Which place, and what is true of it — the one vocabulary.
                   aria-label={placeControlName(entry.mission.locationName, entry.state)}
+                  // Described by the caller's visible legend, on the one place
+                  // being fixed now. The name above is untouched.
+                  aria-describedby={
+                    activeSteps && activeSteps.missionId === cell.missionId
+                      ? activeSteps.descriptionId
+                      : undefined
+                  }
                   // The derived box, inline: it is a different value for every
                   // target and a per-target style class for each of them buys
                   // nothing. It also means the geometry a test reads is the
