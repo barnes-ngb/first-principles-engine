@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { expectKidLine, expectKidWording } from '../../../test/kidReadability'
 import type { StonebridgeProgressData } from './useStonebridgeProgress'
 import { getMission } from './missions'
+import { villageStepsLabel } from './villageStepsCopy'
 // `vi.mock` is hoisted above this, so the card renders against the stubbed hook.
 import StonebridgeMissionCard from './StonebridgeMissionCard'
 
@@ -94,7 +95,7 @@ describe('Stonebridge card — a read that failed', () => {
 
     // The banners he earned are still there…
     expect(screen.getByText('🚩 2 banners raised')).toBeInTheDocument()
-    expect(screen.getByText('3 / 8 done')).toBeInTheDocument()
+    expect(screen.getByText(villageStepsLabel(3, 8))).toBeInTheDocument()
     // …and the card does not pretend the numbers are fresh.
     expect(screen.getByText('Showing your last village.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /try again/i })).toBeInTheDocument()
@@ -148,7 +149,7 @@ describe('Stonebridge card — a healthy card says none of it', () => {
   it('shows no notice and no retry when the read and the save are fine', () => {
     renderCard()
 
-    expect(screen.getByText('3 / 8 done')).toBeInTheDocument()
+    expect(screen.getByText(villageStepsLabel(3, 8))).toBeInTheDocument()
     expect(screen.queryByText('Showing your last village.')).not.toBeInTheDocument()
     expect(screen.queryByText('Your village did not save.')).not.toBeInTheDocument()
     expect(screen.queryByText("Couldn't load your village.")).not.toBeInTheDocument()

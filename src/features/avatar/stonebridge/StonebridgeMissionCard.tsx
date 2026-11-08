@@ -7,6 +7,8 @@ import { useStonebridgeProgress } from './useStonebridgeProgress'
 import StonebridgeLocationArt from './StonebridgeLocationArt'
 import BannerRaiseCelebration from './BannerRaiseCelebration'
 import StonebridgeVillage from './StonebridgeVillage'
+import VillageStepsHelp from './VillageStepsHelp'
+import { VILLAGE_STEPS_LINE, villageStepsLabel } from './villageStepsCopy'
 import {
   LibraryReturnOrigin,
   getLibraryReturnFlow,
@@ -180,6 +182,13 @@ export default function StonebridgeMissionCard({
   }
 
   const titleFont = isLincoln ? '"Press Start 2P", monospace' : '"Fredoka", cursive'
+  /**
+   * …and the sentences that explain the number are plain, at 14px.
+   *
+   * The card's short labels keep the pixel theme; the step legend and its line
+   * are read, so they follow the board's and the visit's convention.
+   */
+  const bodyFont = isLincoln ? undefined : '"Fredoka", cursive'
 
   /** The one retry door, in both the no-data card and the notice below. */
   const retryButton = (
@@ -364,22 +373,36 @@ export default function StonebridgeMissionCard({
                 }}
               />
             </Box>
+            {/* The number, named. The counter is credited book reads plus
+                finished Mine quests, which "N / M done" did not say; the unit
+                is *steps* and its words live in one place
+                (`villageStepsCopy`) that the board and the visit read too. */}
             <Typography
               sx={{
-                fontFamily: titleFont,
-                fontSize: isLincoln ? '9px' : '12px',
-                opacity: 0.78,
+                fontFamily: bodyFont,
+                fontSize: '14px',
+                fontWeight: 700,
+                lineHeight: 1.45,
+                overflowWrap: 'break-word',
+                opacity: 0.88,
                 mt: 0.5,
-                textAlign: 'right',
               }}
             >
-              {/* FEAT-186: "reading actions" is a parent's noun for a counter that
-                  is really book reads + quest completions — so "books read" would
-                  be untrue and "actions" is above a six-year-old. The bar above it
-                  already says what is being counted; the number just needs a word
-                  a kid can read. */}
-              {active.current} / {active.target} done
+              {villageStepsLabel(active.current, active.target)}
             </Typography>
+            <Typography
+              sx={{
+                fontFamily: bodyFont,
+                fontSize: '14px',
+                lineHeight: 1.45,
+                overflowWrap: 'break-word',
+                opacity: 0.85,
+                mt: 0.25,
+              }}
+            >
+              {VILLAGE_STEPS_LINE}
+            </Typography>
+            <VillageStepsHelp isLincoln={isLincoln} scopeKey={scopeKey} />
           </>
         )}
 

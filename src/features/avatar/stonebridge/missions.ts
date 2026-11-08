@@ -109,7 +109,7 @@ export const STONEBRIDGE_MISSIONS: StonebridgeMission[] = [
     id: 'library_hut',
     locationName: 'The Library Hut',
     title: 'Save the Library Hut',
-    framing: 'Every page you read helps Old Tomas rescue the Library Hut.',
+    framing: 'Your reading and quests help Old Tomas rescue the Library Hut.',
     // ~2 weeks of reads/quests.
     target: 8,
     art: {
@@ -154,7 +154,7 @@ export const STONEBRIDGE_MISSIONS: StonebridgeMission[] = [
     id: 'lantern_path',
     locationName: 'The Lantern Path',
     title: 'Light the Lantern Path',
-    framing: 'Each story you read lights another lantern on the path home.',
+    framing: 'Your reading and quests light the lanterns on the path home.',
     target: 12,
     art: {
       emoji: '🏮',
