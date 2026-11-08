@@ -421,8 +421,11 @@ describe('the repaired Library is still a door to the real books', () => {
     fireEvent.click(tile(LIBRARY))
     const visit = within(screen.getByRole('dialog', { name: 'The Library Hut' }))
     expect(visit.getByRole('button', { name: 'Open My Books' })).toBeInTheDocument()
-    // Nothing was invented to go with it: no bar, no counters, no re-earn.
-    expect(visit.queryByText(/\d+ \/ \d+ done/)).not.toBeInTheDocument()
+    // Nothing was invented to go with it: no bar, no counters, no re-earn —
+    // and no step explanation either, because a repaired place has no number
+    // to explain and the help may not read as a new thing to do here.
+    expect(visit.queryByText(/Village steps for this repair/)).not.toBeInTheDocument()
+    expect(visit.queryByRole('button', { name: 'What adds steps?' })).not.toBeInTheDocument()
   })
 })
 

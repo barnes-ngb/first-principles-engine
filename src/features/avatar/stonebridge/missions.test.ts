@@ -50,6 +50,20 @@ describe('STONEBRIDGE_MISSIONS', () => {
     }
   })
 
+  it('no framing claims a unit the counter does not count', () => {
+    // A step is a credited book read or a finished Mine quest. Two framings
+    // promised one per PAGE and one per STORY read, which the reader's book/day
+    // dedup does not give. Titles, thank-yous and formation beats are canon and
+    // are deliberately not swept — they promise no arithmetic.
+    for (const m of STONEBRIDGE_MISSIONS) {
+      expect(m.framing, `${m.id} framing`).not.toMatch(/\bpages?\b/i)
+      expect(m.framing, `${m.id} framing`).not.toMatch(/\bminutes?\b/i)
+      expect(m.framing, `${m.id} framing`).not.toMatch(
+        /\b(?:every|each)\s+(?:page|story|book|chapter)\b/i,
+      )
+    }
+  })
+
   it('first mission is the Old Bridge, last is Banner Hall', () => {
     expect(STONEBRIDGE_MISSIONS[0].id).toBe('old_bridge')
     expect(STONEBRIDGE_MISSIONS[6].id).toBe('banner_hall')
