@@ -44,6 +44,11 @@ import { useComprehensionQuestions } from './useComprehensionQuestions'
 import ComprehensionQuestions from './ComprehensionQuestions'
 import AskMePanel from './AskMePanel'
 import { buildReadingCompletionContent, buildReadingHoursNotes } from './readingLog.logic'
+import {
+  readerSessionMatches,
+  resolveReaderSession,
+  type ReaderSessionIdentity,
+} from './readerSession'
 import { STORY_CALL_AUDIENCES } from './storyCallLabels'
 
 // ── Reading session helpers ──────────────────────────────────────
@@ -81,20 +86,28 @@ async function logReadingHours(
   })
 }
 
-/** Create a portfolio artifact when a book is read to completion */
+/**
+ * Create a portfolio artifact when a book is read to completion.
+ *
+ * `readerChildId` / `readerName` are the SESSION's captured reader (see
+ * `readerSession.ts`) rather than the book's owner and the live header: the id
+ * and the words are two halves of one claim, and they used to be able to name
+ * different children on a sibling-owned contributor book.
+ */
 async function logReadingCompletion(
   familyId: string,
   book: Book,
-  childName: string,
+  readerChildId: string,
+  readerName: string,
   audience?: string,
 ): Promise<void> {
   const coverUrl = book.coverImageUrl ?? book.pages.find(p => p.images.length > 0)?.images[0]?.url
 
   await addDoc(artifactsCollection(familyId), {
-    childId: book.childId,
+    childId: readerChildId,
     title: `Read "${book.title}"`,
     type: coverUrl ? EvidenceType.Photo : EvidenceType.Note,
-    content: buildReadingCompletionContent(book, childName, audience),
+    content: buildReadingCompletionContent(book, readerName, audience),
     createdAt: new Date().toISOString(),
     tags: {
       engineStage: EngineStage.Share,
@@ -111,14 +124,33 @@ const SWIPE_THRESHOLD = 50
 /** Story Call audience chips — "Who did you read to?" (skippable). Labels: {@link STORY_CALL_AUDIENCES}. */
 const AUDIENCE_OPTIONS = STORY_CALL_AUDIENCES
 
+/**
+ * The reader mounts `useBook` to READ a document, so it opts out of that hook's
+ * editing-hours emission and of nothing else — the reading hours below stay the
+ * only hours lane this screen has, and the book's cumulative `totalMinutes`
+ * still accumulates (see `UseBookOptions.suppressEditingHours`).
+ *
+ * Module-level and frozen: it is a property of this screen, not of a render.
+ */
+const READER_BOOK_OPTIONS = { suppressEditingHours: true } as const
+
 export default function BookReaderPage() {
   const { bookId } = useParams<{ bookId: string }>()
   const navigate = useNavigate()
   const familyId = useFamilyId()
-  const { activeChild } = useActiveChild()
+  const {
+    activeChild,
+    isChildProfile,
+    isLoading: identityLoading,
+    loadFailed: identityLoadFailed,
+  } = useActiveChild()
   const childName = activeChild?.name ?? ''
   const childId = activeChild?.id ?? ''
   const isLincoln = childName.toLowerCase() === 'lincoln'
+  // A failed children read keeps `isLoading` true on purpose (`useChildren`), so
+  // "settled" means ANSWERED WITH CHILDREN and the failure is its own word.
+  const identityFailed = identityLoadFailed === true
+  const identitySettled = identityLoading !== true && !identityFailed
 
   // Story Call mode (?call=1): a screen-shared read-aloud to a far-away grandparent.
   // Presentation only — larger art/text, parent/utility chrome hidden, Ask-Me back
@@ -126,7 +158,7 @@ export default function BookReaderPage() {
   const [searchParams] = useSearchParams()
   const isCallMode = searchParams.get('call') === '1'
 
-  const { book, loading } = useBook(familyId, bookId)
+  const { book, loading } = useBook(familyId, bookId, READER_BOOK_OPTIONS)
   const isSightWordBook = (book?.sightWords?.length ?? 0) > 0
   const { progressMap, recordInteraction } = useSightWordProgress(
     familyId,
@@ -252,28 +284,101 @@ export default function BookReaderPage() {
     pagesViewedRef.current.add(currentPage)
   }, [currentPage])
 
+  // ── WHOSE reading this is ─────────────────────────────────────────────────
+  //
+  // Captured ONCE — the first time a reader is legitimately resolved — and
+  // immutable for the rest of the session. `readerSession.ts` holds the rule and
+  // the reasons; what lives here is only the capture.
+  //
+  // It is STATE, captured DURING RENDER rather than from an effect, which is
+  // React's derive-from-input path and the shape `useBookshelf` uses for shelf
+  // ownership: state is what the commit keeps, so a render React throws away
+  // cannot spend the capture, and the commit the screen belongs to keeps its
+  // reader, its Share text and its exit records. A ref written during render
+  // would not be part of the commit, and an effect that set state here would be
+  // a second source of truth for one fact.
+  const resolvedReader = useMemo(
+    () =>
+      resolveReaderSession({
+        familyId,
+        book,
+        isChildProfile: isChildProfile === true,
+        activeChildId: childId,
+        activeChildName: childName,
+        identitySettled,
+        identityFailed,
+      }),
+    [familyId, book, isChildProfile, childId, childName, identitySettled, identityFailed],
+  )
+  const [capturedReader, setCapturedReader] = useState<ReaderSessionIdentity | null>(null)
+  const readerSession = capturedReader ?? resolvedReader
+  if (!capturedReader && readerSession) setCapturedReader(readerSession)
+
+  // The committed capture, for the unmount writer — which runs after the last
+  // render and cannot read state. Written from an effect, so only a COMMITTED
+  // render can set it, and written once, so nothing later can move it.
+  const readerSessionRef = useRef<ReaderSessionIdentity | null>(null)
+  useEffect(() => {
+    if (!readerSessionRef.current && readerSession) readerSessionRef.current = readerSession
+  }, [readerSession])
+
+  // The session's EVOLVING facts: which document is on screen, and how long it
+  // is. Deliberately NOT ownership — that is the capture above. The unmount
+  // writer reads these from here so its effect can depend on nothing at all and
+  // therefore cannot run its cleanup early when a book property settles
+  // mid-session (`totalPages` grows the moment the sight-word page appears).
+  const liveReadRef = useRef<{ familyId: string; book: Book | null; totalPages: number }>({
+    familyId,
+    book,
+    totalPages,
+  })
+  useEffect(() => {
+    liveReadRef.current = { familyId, book, totalPages }
+  }, [familyId, book, totalPages])
+
   // Writes the Share artifact exactly once — optionally stamped with the Story Call
-  // audience. A ref mirror lets the unmount fallback call the latest writer.
+  // audience — and always for the session's captured reader: the artifact's
+  // `childId` and the child named in its words are two halves of ONE claim, and
+  // on a sibling-owned contributor book they used to name different children.
   const writeCompletion = useCallback(
     (audience?: string) => {
       if (completionWrittenRef.current || !book) return
+      const session = readerSession
+      // Nobody legitimately resolved yet, or this host has moved to another
+      // document: refuse rather than guess. A late capture is not lost — this
+      // callback is re-made when the session commits, and the exit path asks
+      // again — but it is never answered with the book owner's id.
+      if (!session || !readerSessionMatches(session, familyId, book)) return
       completionWrittenRef.current = true
-      void logReadingCompletion(familyId, book, childName, audience)
+      void logReadingCompletion(
+        session.familyId,
+        book,
+        session.readerChildId,
+        session.readerName,
+        audience,
+      )
     },
-    [familyId, book, childName],
+    [familyId, book, readerSession],
   )
+  // A ref mirror lets the unmount fallback call the latest writer. Written from
+  // an effect rather than during render, so a render React discards cannot
+  // install a writer the commit never had.
   const writeCompletionRef = useRef(writeCompletion)
-  writeCompletionRef.current = writeCompletion
+  useEffect(() => {
+    writeCompletionRef.current = writeCompletion
+  }, [writeCompletion])
 
   // Detect book completion — reaching the last page (back cover).
   // Non-call mode writes the Share artifact immediately (unchanged behavior). Call mode
   // DEFERS the write until reader exit so it carries the FINAL audience selection — a
   // grandparent can correct a mis-tapped chip and both records (artifact + hours) agree.
   useEffect(() => {
-    if (currentPage === totalPages - 1 && !completedRef.current && book) {
-      completedRef.current = true
-      if (!isCallMode) writeCompletion()
-    }
+    if (currentPage === totalPages - 1 && book) completedRef.current = true
+    // Both halves are once-only (`completionWrittenRef`), so asking again after
+    // the session commits is how a read completed before the reader resolved
+    // still gets its artifact — rather than being written to a guess at the time
+    // or dropped for the rest of the session.
+    if (completedRef.current && !isCallMode) writeCompletion()
   }, [currentPage, totalPages, book, isCallMode, writeCompletion])
 
   // Story Call audience chip → record the selection (mutable — re-tapping corrects it).
@@ -294,12 +399,36 @@ export default function BookReaderPage() {
     void generateQuestions(book, childName, childAge)
   }, [isCallMode, currentPage, totalPages, book, childName, childAge, generateQuestions])
 
-  // Log reading hours and award XP when leaving the reader
+  // ── Log reading hours and award XP when leaving the reader ────────────────
+  //
+  // Unmount ONLY, and now literally so: the deps are empty and everything the
+  // writer reads is a ref. It used to depend on `book?.childId`, `book?.title`,
+  // `book?.id` and `totalPages`, which meant a book property SETTLING mid-read
+  // ran this cleanup — `totalPages` grows the moment the sight-word page
+  // appears — and the run both consumed the once-only flag and wrote (or, below
+  // the floor, silently swallowed) the session's records in the middle of it.
+  // Nothing about the elapsed arithmetic moved: `sessionStart` is still the
+  // mount-time value of `sessionStartRef`, and the rounding and the one-minute
+  // floor are the same two lines.
+  //
+  // WHO the records belong to is the captured session (`readerSessionRef`), not
+  // the book's `childId` and not the live header. WHAT they say about the read is
+  // the live document (`liveReadRef`) — and the two must agree about which
+  // document this is, or the session has nothing it may honestly write.
   useEffect(() => {
     const sessionStart = sessionStartRef.current
     const pagesViewed = pagesViewedRef.current
     return () => {
-      if (hoursLoggedRef.current || !book) return
+      if (hoursLoggedRef.current) return
+      const session = readerSessionRef.current
+      const live = liveReadRef.current
+      // No legitimate reader (an unresolved or failed child read, or a book that
+      // never landed), or this host has since moved to another book or family:
+      // write nothing. A session is never redirected onto a replacement child,
+      // family or document, and an unknown actor is never guessed from the
+      // book's owner — which, on a contributor book, is the sibling.
+      if (!session || !live.book || !readerSessionMatches(session, live.familyId, live.book)) return
+      const liveBook = live.book
       hoursLoggedRef.current = true
 
       // Story Call: in call mode the completion write is deferred to here so it carries
@@ -311,40 +440,43 @@ export default function BookReaderPage() {
       if (elapsed < 1) return
 
       void logReadingHours(
-        familyId,
-        book.childId,
+        session.familyId,
+        session.readerChildId,
         elapsed,
-        book.title,
+        liveBook.title,
         completedRef.current,
         pagesViewed.size,
-        totalPages,
-        book.sightWords?.length ?? 0,
+        live.totalPages,
+        liveBook.sightWords?.length ?? 0,
         audienceRef.current,
       )
 
-      // Award XP for reading session (once per book per day)
+      // Award XP for reading session (once per book per day). The dedup key is
+      // unchanged; the ledger's own doc id is `{childId}_{dedupKey}`, so pointing
+      // the award at the reader keeps the per-child-per-book-per-day guard
+      // exactly as it was — and lets each brother earn once for the same book.
       const date = new Date().toISOString().slice(0, 10)
       void addXpEvent(
-        familyId,
-        book.childId,
+        session.familyId,
+        session.readerChildId,
         'BOOK_READ',
         15,
-        `book_${book.id ?? 'unknown'}_${date}`,
+        `book_${liveBook.id ?? 'unknown'}_${date}`,
       ).catch((err) => console.error('[XP] Award failed:', err))
 
       // Award 3 diamonds for reading a book
       void addDiamondEvent({
-        familyId,
-        childId: book.childId,
+        familyId: session.familyId,
+        childId: session.readerChildId,
         amount: 3,
         type: DIAMOND_EVENTS.BOOK_READ,
-        reason: `Read: ${book.title ?? 'book'}`,
-        dedupKey: `book_${book.id ?? 'unknown'}_${date}-diamond`,
+        reason: `Read: ${liveBook.title ?? 'book'}`,
+        dedupKey: `book_${liveBook.id ?? 'unknown'}_${date}-diamond`,
       }).catch((err) => console.error('[Diamond] Award failed:', err))
     }
-    // Only run cleanup on unmount
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [familyId, book?.childId, book?.title, book?.id, totalPages])
+    // Only run cleanup on unmount — every mutable input is read from a ref, so
+    // there is nothing here to depend on.
+  }, [])
 
   const handleWordTap = useCallback((word: string, action: 'help' | 'known') => {
     void recordInteraction(word, action)

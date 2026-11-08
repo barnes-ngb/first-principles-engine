@@ -388,7 +388,35 @@ export function shouldTriggerBookCompletionRewards(
   return nextStatus === 'complete' && previousStatus !== 'complete'
 }
 
-export function useBook(familyId: string, bookId: string | undefined): UseBookResult {
+/** How a host uses this hook, where that changes what the hook may claim. */
+export interface UseBookOptions {
+  /**
+   * Opt THIS host out of the unmount **editing-hours** emission — and out of
+   * nothing else (owner decision, 2026-11-08).
+   *
+   * `logBookHours` is a claim about work done: it writes the session's elapsed
+   * minutes as `Book: "…" (page editing)` Language Arts hours, plus the
+   * `Book illustrations` Art hours when AI art was used. That is right for the
+   * editor it was written for and wrong for `BookReaderPage`, which mounts this
+   * hook to READ a document and edits nothing — so a two-minute read emitted two
+   * minutes of page-editing hours on top of the reading hours the reader writes
+   * itself, and the canonical fold counted four minutes for a two-minute read.
+   *
+   * Absent (the default) is the behaviour this hook has always had, so no editor
+   * call site changes. It suppresses ONE emission: the `totalMinutes` /
+   * `updatedAt` merge, its arithmetic, the flush-before-merge order and the rest
+   * of the cleanup are identical in both modes, because the book's cumulative
+   * total is the BOOK's own context — time really was spent on this book — and
+   * is deliberately left as the book-owned legacy figure it has always been.
+   */
+  suppressEditingHours?: boolean
+}
+
+export function useBook(
+  familyId: string,
+  bookId: string | undefined,
+  options?: UseBookOptions,
+): UseBookResult {
   const [book, setBook] = useState<Book | null>(null)
   const documentScope = useMemo(() => ({ familyId, bookId }), [familyId, bookId])
   // Mutation authority, including calls batched before React renders. This is
@@ -433,6 +461,18 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
   // Session time tracking
   const sessionStartRef = useRef<number>(Date.now())
   const hoursLoggedRef = useRef(false)
+  /**
+   * Whether this host emits editing hours — read ONCE, at mount, and bound to
+   * the session for the rest of its life.
+   *
+   * A host is an editor or a reader for the whole of its life, so this is not a
+   * live input: reading it live would put a value that can change between the
+   * first render and the unmount in charge of what the session's minutes CLAIM,
+   * which is the same hazard as crediting minutes to whoever is selected when the
+   * clock stops. `useRef`'s argument is evaluated for the first render only,
+   * which is exactly the capture wanted here.
+   */
+  const suppressEditingHoursRef = useRef(options?.suppressEditingHours === true)
 
   // Reset session timer on mount
   useEffect(() => {
@@ -559,6 +599,15 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
   //
   // Neither write changed — this is the order, and nothing else. No hours math,
   // no fold, no rounding moved.
+  //
+  // ── The one thing a READER opts out of (`UseBookOptions`) ─────────────────
+  //
+  // The `totalMinutes` merge below runs in BOTH modes: it is the book's own
+  // cumulative context, and a read is time spent on the book. Only the
+  // `logBookHours` emission — which says the minutes were spent EDITING pages,
+  // and claims Art hours alongside them — is suppressed for a host that edits
+  // nothing. The effect itself, its deps, the merge, the arithmetic and the
+  // order are untouched.
   useEffect(() => {
     return () => {
       const elapsed = Math.round((Date.now() - sessionStartRef.current) / 60000)
@@ -570,7 +619,9 @@ export function useBook(familyId: string, bookId: string | undefined): UseBookRe
           const docRef = doc(booksCollection(familyId), bookId)
           void setDoc(docRef, { totalMinutes: newTotal, updatedAt: new Date().toISOString() }, { merge: true })
         }
-        void logBookHours(familyId, book.childId, elapsed, book.title, usedAiGeneration)
+        if (!suppressEditingHoursRef.current) {
+          void logBookHours(familyId, book.childId, elapsed, book.title, usedAiGeneration)
+        }
       }
     }
     // Only run cleanup on unmount — intentionally stable deps
