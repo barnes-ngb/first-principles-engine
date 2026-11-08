@@ -118,15 +118,21 @@ lane (`usePlannerAskHandoff.ts` +1,274, `plannerAskHandoff.ts` +605, `composerCu
 
 Main chunk **4,510.54 kB**, **+122.14 kB** in one window; two consecutive windows now add **+279 kB**
 (10-04 → 10-25 → 11-08: 4,231.15 → 4,388.40 → 4,510.54). `lazy(` count **0**. This window's growth is mostly the
-Stonebridge village (`router.tsx` imports `StonebridgePage` statically at line 27, route `/stonebridge`). Unlike
-the avatar hub, `grep -rl "from 'three'" src/features/avatar/stonebridge` returns **nothing** — the village is
-SVG/DOM, not Three.js — so **a route-level lazy of `/stonebridge` is not entangled with the
-`AvatarThumbnail` → Three.js problem** that blocks `/avatar` (`ARCH-08`). That makes it the cleanest first slice
-of `ARCH-05`: one `React.lazy` for a route that imports ~8k lines of its own code (59 files in the stonebridge
-tree). No reduction figure is asserted — none was measured; the measured chunk graph recommended on 10-04 is
-still the way to size it. **Proposed action:** owner decision; start with `/stonebridge`, then the
-parent-only Curriculum / completion surfaces named on 10-25. Recorded on `ARCH-05`'s row as this audit's
-re-verification.
+Stonebridge village (59 files under `src/features/avatar/stonebridge/`, §Headline).
+`grep -rl "from 'three'" src/features/avatar/stonebridge` returns **nothing** — the village tree is SVG/DOM, not
+Three.js. **But it has two eager entry points, so a single-route split does not defer it** (Codex round 1 on
+this PR, verified): `router.tsx:27` imports `StonebridgePage` statically (route `/stonebridge`), **and**
+`router.tsx:26` imports `MyAvatarPage` (route `/avatar`), which statically imports `StonebridgeMissionCard`
+(`MyAvatarPage.tsx:83`, rendered at :1487), which statically imports `StonebridgeVillage` and
+`useStonebridgeProgress` (`StonebridgeMissionCard.tsx`, import block). `React.lazy` on `/stonebridge` alone
+would therefore move only page-specific code; the shared village implementation stays in the initial chunk
+through the Hero Hub. Deferring the village needs **both** doors: lazy `/stonebridge` *and* a dynamic import of
+the village inside the mission card (or lifting the shared tree behind one lazy boundary). `AppShell.tsx`,
+`App.tsx` and `BookshelfPage.tsx` also reference the stonebridge tree and were not read for weight this cycle.
+No reduction figure is asserted — none was measured. **Proposed action:** the measured chunk graph recommended
+on 10-04 is now a prerequisite, not a nicety — it is the only way to tell shared village code from the
+page-only chunk and to size either split. Architectural decision for the owner; start from the graph, then the
+parent-only Curriculum / completion surfaces named on 10-25.
 
 ### 1.5 Test coverage (`TEST-01`)
 
@@ -255,8 +261,8 @@ read-aloud row (2.2) carries no minutes of its own to the fold. **Invariant hold
 
 **Filed:** `ARCH-56` (§1.2), `DOC-31` (§1.3 — `CLAUDE.md`'s tech-debt line for `ShellyChatPage.tsx` is stale).
 **Status re-verifications (no row rewritten):** `ARCH-02` OPEN (eighth cycle, **+107L**, first growth since the
-seam was named); `ARCH-05`/`ARCH-08` OPEN — main chunk **+122 kB**, 0 `lazy(`, and a Three-free first slice
-(`/stonebridge`) identified; `ARCH-03` OPEN (+72L); `ARCH-44` OPEN (line-flat); `ARCH-43` OPEN (17 sites);
+seam was named); `ARCH-05`/`ARCH-08` OPEN — main chunk **+122 kB**, 0 `lazy(`, and the Stonebridge village
+tree is Three-free but reachable from two eager doors (`/stonebridge` and the Hero Hub mission card, §1.4); `ARCH-03` OPEN (+72L); `ARCH-44` OPEN (line-flat); `ARCH-43` OPEN (17 sites);
 `ARCH-55` OPEN (line-flat); `DATA-01` FIXED; `DATA-02` NEEDS-DATA; `DATA-13` OPEN; `DOC-29` OPEN (half true,
 §2.1); `TEST-01` OPEN. **Mechanical fixes applied:** the header `Last audit` bump and the `DOCUMENT_INDEX.md`
 entry only.
@@ -266,8 +272,8 @@ entry only.
 because the paragraph is a debt judgement ("Stable") the owner should re-make, not a stat number.
 
 **Recommended `PROMPT_FIX` order:**
-1. `ARCH-05`/`ARCH-08` — lazy-load `/stonebridge` as the first measured slice (§1.4); the bundle is the largest
-   it has been at any audit.
+1. `ARCH-05`/`ARCH-08` — produce the measured chunk graph first (§1.4), then split the Stonebridge village
+   behind **both** of its doors; the bundle is the largest it has been at any audit.
 2. `DATA-13` — route the four Missouri literals through `stateCompliance.ts` (trivial, unblocks TX).
 3. `DOC-29` + `DOC-31` — one docs run: add `programCompletionWrites.ts` to the authority table and refresh the
    `ShellyChatPage.tsx` debt line.
