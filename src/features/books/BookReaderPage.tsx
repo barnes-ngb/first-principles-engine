@@ -1,4 +1,13 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  Fragment,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { addDoc } from 'firebase/firestore'
 import Box from '@mui/material/Box'
@@ -22,6 +31,7 @@ import Page from '../../components/Page'
 import { EmptyState, LoadingState } from '../../components/states'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
+import { ProfileContext } from '../../core/profile/context'
 import { computeAge } from '../../core/profile/childIdentity'
 import { artifactsCollection, hoursCollection } from '../../core/firebase/firestore'
 import type { Book, BookPage } from '../../core/types'
@@ -46,10 +56,15 @@ import AskMePanel from './AskMePanel'
 import { buildReadingCompletionContent, buildReadingHoursNotes } from './readingLog.logic'
 import {
   nextReaderSession,
+  readerDocumentKey,
+  readerIdentityKey,
+  readerSessionAdmits,
   readerSessionCovers,
   readerSessionKey,
   readerSessionLabel,
+  ReaderOwnership,
   resolveReaderSession,
+  type ReaderQuestion,
   type ReaderSession,
 } from './readerSession'
 import { STORY_CALL_AUDIENCES } from './storyCallLabels'
@@ -150,6 +165,12 @@ export default function BookReaderPage() {
   const childName = activeChild?.name ?? ''
   const childId = activeChild?.id ?? ''
   const isLincoln = childName.toLowerCase() === 'lincoln'
+  // The RAW profile, read straight from context rather than through
+  // `useProfile`, which throws without a provider — this is one optional string
+  // used to describe a question boundary, and it must not become a new reason
+  // for a mounted screen or a test harness to fail. It is never an answer to
+  // WHO read: that stays `resolveReaderSession`'s, from the resolved child.
+  const rawProfile = useContext(ProfileContext)?.profile ?? null
   // A failed children read keeps `isLoading` true on purpose (`useChildren`), so
   // "settled" means ANSWERED WITH CHILDREN and the failure is its own word.
   const identityFailed = identityLoadFailed === true
@@ -268,20 +289,6 @@ export default function BookReaderPage() {
     [touchStart],
   )
 
-  const handleTouchEnd = useCallback(
-    (e: React.TouchEvent) => {
-      if (touchStart === null) return
-      const diff = e.changedTouches[0].clientX - touchStart
-      if (Math.abs(diff) > SWIPE_THRESHOLD) {
-        if (diff > 0 && currentPage > 0) setCurrentPage((p) => p - 1)
-        if (diff < 0 && currentPage < totalPages - 1) setCurrentPage((p) => p + 1)
-      }
-      setTouchStart(null)
-      setSwipeOffset(0)
-    },
-    [touchStart, currentPage, totalPages],
-  )
-
   // ── One session per COMMITTED scope ───────────────────────────────────────
   //
   // `readerSession.ts` holds the rule and the reasons; what lives here is the
@@ -291,40 +298,177 @@ export default function BookReaderPage() {
   // spend an incarnation, and the commit the screen belongs to keeps its reader,
   // its clock, its Share text and its exit records. A ref written during render
   // would not be part of the commit at all.
+  // ── 1. The RAW question, which is knowable before anything resolves ───────
+  //
+  // This is what tells an ENDED session apart from one that has not started
+  // yet. A committed move of family, route book or locked profile/child is KNOWN
+  // at once, so it ends the running session THERE — letting the old clock run on
+  // through an unresolved replacement would bill the first reader for time he
+  // was not reading, and hiding the stale document while doing it makes that
+  // worse rather than better. What the raw question may never do is NAME the new
+  // reader; that stays `resolveReaderSession`'s answer, from the resolved child.
+  const documentKey = readerDocumentKey(familyId, bookId)
+  const identityKey = readerIdentityKey(isChildProfile === true, rawProfile, childId)
+  const [askedQuestion, setAskedQuestion] = useState<ReaderQuestion>(() => ({
+    id: 1,
+    documentKey,
+    identityKey,
+    staleBook: null,
+  }))
+  const documentMoved = askedQuestion.documentKey !== documentKey
+  const questionMoved = documentMoved || askedQuestion.identityKey !== identityKey
+  const question: ReaderQuestion = questionMoved
+    ? {
+        id: askedQuestion.id + 1,
+        documentKey,
+        identityKey,
+        // The document still in hand at the moment the document question moved
+        // belongs to the question that is LEAVING. An identity-only move changes
+        // no document, so whatever was already proven stays proven.
+        staleBook: documentMoved ? book : askedQuestion.staleBook,
+      }
+    : askedQuestion
+
+  // ── 2. Provenance: is this document THIS question's? ──────────────────────
+  //
+  // `useBook` hands back the previous family's document for the one render
+  // before its own load effect clears it, and the route's book id is unchanged
+  // by a family move — so a matching id proves nothing. Identity by reference
+  // does: the document that was in hand when the question moved is the one thing
+  // this question's book cannot be.
+  const documentProven = !!book && book !== question.staleBook
+
+  // ── 3. The session, if this question has one yet ──────────────────────────
   const resolvedReader = useMemo(
     () =>
       resolveReaderSession({
         familyId,
         book,
+        documentProven,
         isChildProfile: isChildProfile === true,
         activeChildId: childId,
         activeChildName: childName,
         identitySettled,
         identityFailed,
       }),
-    [familyId, book, isChildProfile, childId, childName, identitySettled, identityFailed],
+    [
+      familyId,
+      book,
+      documentProven,
+      isChildProfile,
+      childId,
+      childName,
+      identitySettled,
+      identityFailed,
+    ],
   )
   const [committed, setCommitted] = useState<ReaderSession | null>(null)
-  // A scope that is merely UNRESOLVABLE — the replacement book has not landed,
-  // a children read is in flight again — ends nothing: the running session keeps
-  // running, because there is no new scope to attribute a change to yet. Only a
-  // DIFFERENT resolved scope replaces it.
+  // Ids are monotonic across a PENDING GAP as well as across a replacement, so a
+  // handler retained from an earlier incarnation can never match the live one —
+  // `A → B → A` issues a third id even though the first and third scopes are the
+  // same string.
+  const [issuedSessions, setIssuedSessions] = useState(0)
   const resolvedKey = resolvedReader ? readerSessionKey(resolvedReader) : ''
-  const replacement =
-    resolvedReader && (!committed || committed.key !== resolvedKey)
-      ? nextReaderSession(committed?.id ?? 0, resolvedReader)
+  const stillRunning =
+    !!committed &&
+    committed.questionId === question.id &&
+    !!resolvedReader &&
+    committed.key === resolvedKey
+  const session = stillRunning
+    ? committed
+    : resolvedReader
+      ? nextReaderSession(issuedSessions, question.id, resolvedReader)
       : null
-  const session = replacement ?? committed
-  if (replacement) {
-    setCommitted(replacement)
-    // A replacement session inherits none of the first one's display state. The
-    // page index goes back to the cover only when the DOCUMENT changed — a
-    // different book is a different set of pages, and keeping the old index also
-    // let a short replacement open on its own back cover and count as read.
+
+  if (questionMoved) setAskedQuestion(question)
+  if (session !== committed) {
+    setCommitted(session)
+    if (session) setIssuedSessions(session.id)
+  }
+  if (questionMoved) {
+    // A new question inherits none of the previous one's display state. The page
+    // index goes back to the cover only when the DOCUMENT moved — a different
+    // book is a different set of pages, and keeping the old index also let a
+    // short replacement open on its own back cover and count as read.
     setTotalWordsEncountered(0)
     setSelectedAudience(null)
-    if (committed && committed.bookId !== replacement.bookId) setCurrentPage(0)
+    if (documentMoved) setCurrentPage(0)
   }
+
+  /**
+   * The LIVE session, for handlers that are already on screen and tappable.
+   *
+   * Written in a layout effect and cleared in its cleanup, which is the shape
+   * `useBookshelf` uses for the same problem: React runs a commit's teardowns
+   * before its setups, so from the moment the session changes until this runs
+   * again there is NO live session and every retained handler asks nothing. A
+   * passive effect would leave a window in which the new commit is on screen,
+   * its controls are usable, and the authority ref still names the session that
+   * has left.
+   */
+  const liveSessionRef = useRef<ReaderSession | null>(null)
+  useLayoutEffect(() => {
+    liveSessionRef.current = session
+    return () => {
+      liveSessionRef.current = null
+    }
+  }, [session])
+
+  /**
+   * May a handler rendered under `incarnation` act now? Asked at the TAP.
+   *
+   * Stable, so every handler below can close over the session it was rendered
+   * with and still be re-created only when that session changes.
+   */
+  const admits = useCallback(
+    (incarnation: ReaderSession | null) =>
+      readerSessionAdmits(liveSessionRef.current, incarnation),
+    [],
+  )
+
+  /**
+   * May the WORD lane write for this render's reader?
+   *
+   * The word hook is keyed to the live selected child, which moves the instant a
+   * profile is switched — before, and independently of, any reader being
+   * resolved. So a child-mode word tap is admitted only when the running session
+   * is the one that owns that child: during a pending replacement there is no
+   * session and nothing may be written for either boy. A parent's word lane is
+   * the legacy live child and is deferred with the rest of FEAT-95.
+   */
+  const wordOwnerIsLive =
+    !!session &&
+    (session.ownership !== ReaderOwnership.ChildReader || session.readerChildId === childId)
+
+  // ── Pagination is a record-producing action, so it is fenced too ───────────
+  //
+  // Reaching the back cover is what completes a read, so the page a handler
+  // moves to decides whether a Share artifact exists. These are the handlers a
+  // retained closure reaches: the dot indicators and the swipe. Each carries the
+  // session it was rendered under and is refused when that session is no longer
+  // the live one — or when no reader is resolved at all, which is a refusal to
+  // record rather than a guess.
+  const goToPage = useCallback(
+    (index: number) => {
+      if (!admits(session)) return
+      setCurrentPage(index)
+    },
+    [admits, session],
+  )
+
+  const handleTouchEnd = useCallback(
+    (e: React.TouchEvent) => {
+      if (touchStart === null) return
+      const diff = e.changedTouches[0].clientX - touchStart
+      if (Math.abs(diff) > SWIPE_THRESHOLD && admits(session)) {
+        if (diff > 0 && currentPage > 0) setCurrentPage((p) => p - 1)
+        if (diff < 0 && currentPage < totalPages - 1) setCurrentPage((p) => p + 1)
+      }
+      setTouchStart(null)
+      setSwipeOffset(0)
+    },
+    [touchStart, currentPage, totalPages, admits, session],
+  )
 
   /**
    * The running session's own snapshot — the family, the document and the facts
@@ -361,6 +505,9 @@ export default function BookReaderPage() {
     if (seenPagesRef.current.sessionId !== sessionId) {
       seenPagesRef.current = { sessionId, pages: new Set() }
     }
+    // Same authority as a word tap: no resolved reader, or a word hook keyed to
+    // somebody the running session does not own, means nothing is recorded.
+    if (!wordOwnerIsLive) return
     const contentPageIndex = currentPage - contentPageOffset
     if (contentPageIndex < 0 || contentPageIndex >= book.pages.length) return
     if (seenPagesRef.current.pages.has(contentPageIndex)) return
@@ -375,7 +522,15 @@ export default function BookReaderPage() {
     for (const word of uniqueWords) {
       void recordInteraction(word, 'seen')
     }
-  }, [currentPage, isSightWordBook, book, recordInteraction, contentPageOffset, session])
+  }, [
+    currentPage,
+    isSightWordBook,
+    book,
+    recordInteraction,
+    contentPageOffset,
+    session,
+    wordOwnerIsLive,
+  ])
 
   // Track which pages THIS session has viewed, same stamping rule.
   useEffect(() => {
@@ -538,10 +693,16 @@ export default function BookReaderPage() {
 
   // Story Call audience chip → record the selection (mutable — re-tapping corrects it).
   // The write is deferred to exit so the last tap wins in BOTH the artifact and hours.
-  const handleAudience = useCallback((audience: string) => {
-    audienceRef.current = audience
-    setSelectedAudience(audience)
-  }, [])
+  // Fenced like the rest: the audience is part of two records, so a chip retained
+  // from a session that has ended may not stamp the one now running.
+  const handleAudience = useCallback(
+    (audience: string) => {
+      if (!admits(session)) return
+      audienceRef.current = audience
+      setSelectedAudience(audience)
+    },
+    [admits, session],
+  )
 
   // Call mode: auto-generate the Ask-Me questions once the back cover is reached —
   // a grandparent reads them aloud, so there's no tap-to-generate affordance. Fires
@@ -554,9 +715,15 @@ export default function BookReaderPage() {
     void generateQuestions(book, childName, childAge)
   }, [isCallMode, currentPage, totalPages, book, childName, childAge, generateQuestions])
 
+  // A word tap writes `sightWordProgress/{childId}_{word}` for whoever the word
+  // hook is keyed to, so it is fenced on the SAME committed authority as the
+  // reading and completion lanes: an obsolete tap writes nothing, and a tap
+  // during a pending child replacement writes nothing for either boy — the
+  // selector has already moved, and a selector is not a resolved reader.
   const handleWordTap = useCallback((word: string, action: 'help' | 'known') => {
+    if (!admits(session) || !wordOwnerIsLive) return
     void recordInteraction(word, action)
-  }, [recordInteraction])
+  }, [recordInteraction, admits, session, wordOwnerIsLive])
 
   // ── TTS Read Aloud ─────────────────────────────────────────────
   const handleReadPage = useCallback(() => {
@@ -1052,7 +1219,7 @@ export default function BookReaderPage() {
               key={i}
               role="button"
               aria-label={`Go to page ${i + 1}`}
-              onClick={() => setCurrentPage(i)}
+              onClick={() => goToPage(i)}
               sx={{
                 width: currentPage === i ? 10 : 7,
                 height: currentPage === i ? 10 : 7,

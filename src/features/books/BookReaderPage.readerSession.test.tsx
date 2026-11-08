@@ -259,6 +259,52 @@ const countedMinutes = (childId: string) =>
 
 const today = () => new Date().toISOString().slice(0, 10)
 
+/**
+ * The REAL React `onClick` the given dot was rendered with, retained so it can
+ * be invoked after the session it belongs to has ended — the stale-dispatch
+ * probe. It reads the handler off the DOM node rather than re-querying, so this
+ * really is the closure that render produced.
+ */
+function retainedOnClick(start: Element): () => void {
+  let node: Element | null = start
+  while (node) {
+    const bag = node as unknown as Record<string, unknown>
+    const key = Object.keys(bag).find((k) => k.startsWith('__reactProps$'))
+    const props = key ? (bag[key] as { onClick?: () => void }) : undefined
+    if (typeof props?.onClick === 'function') return props.onClick
+    node = node.parentElement
+  }
+  throw new Error('no rendered React onClick found — this probe must hold a real handler')
+}
+
+function retainedDotHandler(index: number): () => void {
+  const dots = screen.getAllByRole('button', { name: /go to page/i })
+  return retainedOnClick(dots[index])
+}
+
+/** The Web Speech API the word chips use. Absent from jsdom. */
+function stubSpeech() {
+  Object.defineProperty(globalThis, 'SpeechSynthesisUtterance', {
+    value: class {
+      rate = 1
+      constructor(public text: string) {}
+    },
+    configurable: true,
+    writable: true,
+  })
+  Object.defineProperty(globalThis, 'speechSynthesis', {
+    value: { speak: () => {}, cancel: () => {} },
+    configurable: true,
+    writable: true,
+  })
+}
+
+/** Tap a sight word and choose "Hear it" — the real help interaction. */
+function tapWordForHelp(word: string) {
+  fireEvent.click(screen.getByText(word))
+  fireEvent.click(screen.getByRole('button', { name: /Hear it/ }))
+}
+
 /** Jump to a page via the accessible dot indicators. */
 function goToPage(index: number) {
   const dots = screen.getAllByRole('button', { name: /go to page/i })
@@ -301,6 +347,8 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks()
+  Reflect.deleteProperty(globalThis, 'SpeechSynthesisUtterance')
+  Reflect.deleteProperty(globalThis, 'speechSynthesis')
 })
 
 describe('BookReaderPage — the reader of record (child profile)', () => {
@@ -698,6 +746,234 @@ describe('BookReaderPage — one session per committed scope', () => {
     expect(londonRow).toBeDefined()
     expect(String(londonRow?.notes)).not.toContain('completed')
     expect(String(londonRow?.notes)).not.toContain('Mimi')
+  })
+})
+
+describe('BookReaderPage — a handler from a session that has ended cannot act', () => {
+  /**
+   * The stale-dispatch probe, run for each of the three committed transitions.
+   *
+   * An incarnation counter on its own does not fence DISPATCH: the retained
+   * handler still runs, and what it does — move to the back cover — is what
+   * creates a completion Share. So the handler carries the session it was
+   * rendered under and is refused at the tap, while the live handler on the
+   * screen the person is actually looking at still works.
+   */
+  const probeStaleDispatch = async (move: () => void, back: () => void, awayTitle: RegExp) => {
+    putBook('family-1', 'book-1', siblingOwnedBook())
+    const { unmount, rerender } = await openReader()
+    // Retained from the FIRST A, while still on the cover.
+    const staleLastPage = retainedDotHandler(3)
+    minutes(2)
+
+    move()
+    rerender(<BookReaderPage />)
+    await waitForBook(awayTitle)
+    minutes(2)
+
+    back()
+    rerender(<BookReaderPage />)
+    await waitForBook(/Brave Dog/)
+    const artifactsBefore = artifactRows().length
+
+    // The obsolete handler fires in the returned-A session.
+    staleLastPage()
+    expect(artifactRows()).toHaveLength(artifactsBefore)
+
+    // The live control on the current screen still completes the read.
+    goToBackCover()
+    expect(artifactRows()).toHaveLength(artifactsBefore + 1)
+    expect(artifactRows()[artifactsBefore]).toMatchObject({ childId: LINCOLN.id })
+    expect(String(artifactRows()[artifactsBefore].content)).toContain('The Brave Dog')
+    unmount()
+  }
+
+  it('refuses a retained last-page handler after a book move and back', async () => {
+    putBook('family-1', 'book-2', siblingOwnedBook({ title: 'The Second Book' }))
+    await probeStaleDispatch(
+      () => { m.bookId = 'book-2' },
+      () => { m.bookId = 'book-1' },
+      /Second Book/,
+    )
+  })
+
+  it('refuses a retained last-page handler after a family move and back', async () => {
+    putBook('family-2', 'book-1', siblingOwnedBook({ title: 'A Second Household Book' }))
+    await probeStaleDispatch(
+      () => { m.familyId = 'family-2' },
+      () => { m.familyId = 'family-1' },
+      /Second Household/,
+    )
+  })
+
+  it('refuses a retained last-page handler after a profile move and back', async () => {
+    await probeStaleDispatch(
+      () => {
+        m.identity = { isChildProfile: true, activeChild: LONDON, isLoading: false, loadFailed: false }
+      },
+      () => {
+        m.identity = { isChildProfile: true, activeChild: LINCOLN, isLoading: false, loadFailed: false }
+      },
+      /Brave Dog/,
+    )
+  })
+
+  it('refuses an audience chip retained from a session that has ended', async () => {
+    m.search = 'call=1'
+    putBook('family-1', 'book-1', siblingOwnedBook())
+    const { unmount, rerender } = await openReader()
+    goToBackCover()
+    const staleMimi = retainedOnClick(screen.getByText('Mimi'))
+    minutes(2)
+
+    m.identity = { isChildProfile: true, activeChild: LONDON, isLoading: false, loadFailed: false }
+    rerender(<BookReaderPage />)
+    staleMimi()
+    minutes(2)
+    unmount()
+
+    // Lincoln's completed session has no audience (the chip was never tapped
+    // while it was live), and London's session was not stamped by it either.
+    expect(artifactRows()).toHaveLength(1)
+    expect(String(artifactRows()[0].content)).not.toContain('Mimi')
+    expect(hoursRows().every((row) => !String(row.notes).includes('Mimi'))).toBe(true)
+  })
+})
+
+describe('BookReaderPage — a replacement document must prove it loaded', () => {
+  it('writes the original family’s read once, and nothing at all for a replacement that never answers', async () => {
+    putBook('family-1', 'book-1', siblingOwnedBook({ title: 'Together synthetic story' }))
+    putBook('family-2', 'book-1', siblingOwnedBook({ title: 'Unanswered replacement-family book' }))
+    const { unmount, rerender } = await openReader(/Together synthetic story/)
+    minutes(2)
+
+    // The new family's document read is HELD, so the only book in hand on the
+    // first render of the new scope is the previous family's.
+    m.parked = () => {}
+    m.familyId = 'family-2'
+    rerender(<BookReaderPage />)
+    minutes(2)
+    unmount()
+
+    // The original session ended AT the boundary: two minutes, not four.
+    expect(hoursRows()).toHaveLength(1)
+    expect(hoursRows()[0]).toMatchObject({ childId: LINCOLN.id, minutes: 2 })
+    expect(hoursFamilies()).toEqual(['family-1'])
+    expect(String(hoursRows()[0].notes)).toContain('Together synthetic story')
+    expect(m.xp).toHaveBeenCalledTimes(1)
+    expect(m.xp.mock.calls[0][0]).toBe('family-1')
+
+    // The late answer arrives after the reader is gone and changes nothing. In
+    // particular no row ever carried the previous family's title under the new
+    // family, which is what a matching book id alone allowed.
+    const release = m.parked
+    m.parked = null
+    release?.()
+    await waitFor(() => expect(hoursRows()).toHaveLength(1))
+    expect(hoursRows().some((row) => String(row.notes).includes('Unanswered'))).toBe(false)
+    expect(m.xp).toHaveBeenCalledTimes(1)
+  })
+
+  it('records the replacement normally once its own document really lands', async () => {
+    putBook('family-1', 'book-1', siblingOwnedBook({ title: 'Together synthetic story' }))
+    putBook('family-2', 'book-1', siblingOwnedBook({ title: 'Replacement family book' }))
+    const { unmount, rerender } = await openReader(/Together synthetic story/)
+    minutes(2)
+
+    m.parked = () => {}
+    m.familyId = 'family-2'
+    rerender(<BookReaderPage />)
+    minutes(2)
+    const release = m.parked
+    m.parked = null
+    release?.()
+    await waitForBook(/Replacement family book/)
+    goToBackCover()
+    minutes(2)
+    unmount()
+
+    expect(hoursRows()).toHaveLength(2)
+    expect(hoursFamilies()).toEqual(['family-1', 'family-2'])
+    // The first read is exactly its own two minutes — it ended at the boundary
+    // and did not keep running through the replacement's load.
+    expect(hoursRows()[0]).toMatchObject({ minutes: 2 })
+    // The replacement's clock starts AT the boundary, so the two minutes its own
+    // document took to answer belong to it, exactly as the wait for the first
+    // document belongs to the session the route opened. It inherits none of the
+    // first session's elapsed: 2 waiting + 2 reading, not 2 + 2 + 2.
+    expect(hoursRows()[1]).toMatchObject({ childId: LINCOLN.id, minutes: 4 })
+    expect(String(hoursRows()[1].notes)).toContain('Replacement family book')
+  })
+})
+
+describe('BookReaderPage — a pending reader owns no words', () => {
+  it('refuses word writes while a committed child replacement is unresolved, then allows the resolved one', async () => {
+    stubSpeech()
+    putBook('family-1', 'book-1', siblingOwnedBook())
+    const { unmount, rerender } = await openReader()
+    goToPage(2)
+    tapWordForHelp('The')
+    minutes(2)
+
+    expect(m.words).toContain(`${LINCOLN.id}_the:help`)
+
+    // The profile and the selected child have really moved, and the whole child
+    // object is already in hand — but the children read says nothing yet.
+    m.identity = { isChildProfile: true, activeChild: LONDON, isLoading: true, loadFailed: false }
+    rerender(<BookReaderPage />)
+    tapWordForHelp('The')
+
+    // Nothing is written for either boy: the selector moved, the reader did not.
+    expect(m.words.some((w) => w.startsWith(`${LONDON.id}_`))).toBe(false)
+    // And Lincoln's own session ended at that boundary, with its real minutes.
+    expect(hoursRows()).toHaveLength(1)
+    expect(hoursRows()[0]).toMatchObject({ childId: LINCOLN.id, minutes: 2 })
+
+    // Resolved: the replacement reader owns his own words and his own read.
+    m.identity = { isChildProfile: true, activeChild: LONDON, isLoading: false, loadFailed: false }
+    rerender(<BookReaderPage />)
+    tapWordForHelp('The')
+    minutes(2)
+    unmount()
+
+    expect(m.words).toContain(`${LONDON.id}_the:help`)
+    expect(hoursRows()).toHaveLength(2)
+    expect(hoursRows()[1]).toMatchObject({ childId: LONDON.id, minutes: 2 })
+  })
+
+  it('refuses the whole record-producing boundary when the child read has FAILED', async () => {
+    stubSpeech()
+    putBook('family-1', 'book-1', siblingOwnedBook())
+    m.identity = { isChildProfile: true, activeChild: LONDON, isLoading: true, loadFailed: true }
+    const { unmount } = await openReader()
+    // A failed read is not an affirmative identity, so no dispatch is admitted:
+    // the pagination that would complete a read does not even move, which is why
+    // the content page's words never appear and nothing is written for anyone.
+    goToPage(2)
+    expect(screen.queryByText('The')).not.toBeInTheDocument()
+    minutes(2)
+    unmount()
+
+    expect(m.words).toHaveLength(0)
+    expect(hoursRows()).toHaveLength(0)
+    expect(artifactRows()).toHaveLength(0)
+  })
+
+  it('keeps a parent’s legacy word lane, which does not wait on the child read', async () => {
+    stubSpeech()
+    putBook('family-1', 'book-1', siblingOwnedBook())
+    m.identity = { isChildProfile: false, activeChild: LONDON, isLoading: true, loadFailed: false }
+    const { unmount } = await openReader()
+    goToPage(2)
+    tapWordForHelp('The')
+    minutes(2)
+    unmount()
+
+    // Legacy and deferred: the parent's word write is the live selected child's,
+    // and a known book owner's session is not gated on the child list.
+    expect(m.words).toContain(`${LONDON.id}_the:help`)
+    expect(hoursRows()).toHaveLength(1)
+    expect(hoursRows()[0]).toMatchObject({ childId: LONDON.id, minutes: 2 })
   })
 })
 

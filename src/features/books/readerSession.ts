@@ -81,10 +81,69 @@ export interface ReaderSessionIdentity {
 
 /** One committed session: an identity, plus which incarnation of it this is. */
 export interface ReaderSession extends ReaderSessionIdentity {
-  /** Monotonic within one mounted reader, and never reused. */
+  /**
+   * Monotonic within one mounted reader, and never reused — including across a
+   * gap in which no session was resolved at all, so a retained handler from an
+   * earlier incarnation can never be mistaken for the live one.
+   */
   readonly id: number
   /** The committed scope. Two sessions with the same key are the same scope. */
   readonly key: string
+  /** The raw question (`ReaderQuestion`) this session answers. */
+  readonly questionId: number
+}
+
+/**
+ * The RAW question the screen is asking, which is knowable before any of it is
+ * resolved — and is therefore what tells an ENDED session apart from one that
+ * has not started yet.
+ *
+ * Two keys, because they fail differently. `documentKey` is the family and the
+ * route's book id: when it moves, the document on screen is about to be
+ * replaced, and the one still being rendered belongs to the question that is
+ * leaving (`staleBook`). `identityKey` is the raw profile and selected child:
+ * when it moves, the reader is about to be somebody else, which is KNOWN even
+ * while the children read says nothing — which is the whole point. A raw
+ * identity can say *this question has ended*; it can never say *and here is who
+ * the new reader is*. That answer only comes from `resolveReaderSession`.
+ */
+export interface ReaderQuestion {
+  /** Monotonic within one mounted reader. 1 is the question the route opened. */
+  readonly id: number
+  readonly documentKey: string
+  readonly identityKey: string
+  /**
+   * The document the PREVIOUS document-question was showing — the one a hook
+   * scoped to another family can still be handing back on the first render after
+   * the move. A book is proven for this question only by not being this.
+   */
+  readonly staleBook: Pick<Book, 'id'> | null
+}
+
+/** The family and route book id. A change means a different document. */
+export function readerDocumentKey(familyId: string, bookId: string | undefined): string {
+  return `${familyId}|${bookId ?? ''}`
+}
+
+/**
+ * The raw reader question: a locked child profile and which child is selected,
+ * or simply "a parent". A parent's selected child is deliberately absent — it is
+ * not part of a book-owner question, so moving the header chip neither ends a
+ * parent's session nor starts a new one.
+ *
+ * `profile` is the raw profile from context, which is known synchronously. It is
+ * part of the BOUNDARY only: a committed move to London's profile ends Lincoln's
+ * session the moment it happens, rather than letting his clock run on through a
+ * replacement that has not resolved.
+ */
+export function readerIdentityKey(
+  isChildProfile: boolean,
+  profile: string | null,
+  activeChildId: string,
+): string {
+  return isChildProfile
+    ? `child|${profile ?? ''}|${activeChildId}`
+    : `parent|${profile ?? ''}`
 }
 
 /**
@@ -104,6 +163,18 @@ export interface ReaderIdentityInputs {
   readonly familyId: string
   /** The loaded book document, or `null`/`undefined` while it has not landed. */
   readonly book: Pick<Book, 'id' | 'childId'> | null | undefined
+  /**
+   * This document is PROVEN to have been loaded for the question now being
+   * asked, rather than being the previous one still in hand.
+   *
+   * It is a separate answer because a matching `id` cannot give it: the route's
+   * book id is unchanged by a FAMILY move, so `book.id === bookId` holds for a
+   * document belonging to the household that has just been left — and a session
+   * captured on it writes another family's title, minutes and awards. A
+   * document-scoped hook hands its previous value back for the one render before
+   * its own load effect clears it, and that render is the whole hazard.
+   */
+  readonly documentProven: boolean
   /** A locked child profile is reading (`useActiveChild.isChildProfile`). */
   readonly isChildProfile: boolean
   readonly activeChildId: string
@@ -130,6 +201,9 @@ export function resolveReaderSession(
 ): ReaderSessionIdentity | null {
   const { familyId, book } = inputs
   if (!familyId || !book?.id) return null
+  // Provenance before identity: an unproven document cannot be the subject of
+  // any session, however well resolved the reader is.
+  if (!inputs.documentProven) return null
 
   if (inputs.isChildProfile) {
     if (!inputs.identitySettled || inputs.identityFailed) return null
@@ -156,9 +230,33 @@ export function resolveReaderSession(
 /** The next incarnation of a scope. Ids are monotonic and never reused. */
 export function nextReaderSession(
   previousId: number,
+  questionId: number,
   identity: ReaderSessionIdentity,
 ): ReaderSession {
-  return { ...identity, id: previousId + 1, key: readerSessionKey(identity) }
+  return {
+    ...identity,
+    id: previousId + 1,
+    key: readerSessionKey(identity),
+    questionId,
+  }
+}
+
+/**
+ * May a handler created under `incarnation` act NOW?
+ *
+ * The question a retained callback has to be asked. A real UI handler keeps the
+ * session it was rendered under in its own closure, and the live session is
+ * written in a LAYOUT effect — so between a commit's teardowns and its setups
+ * there is no live session at all, and a control that is already on screen and
+ * tappable cannot borrow the authority of the one that has just left. An
+ * incarnation counter alone does not fence dispatch; this comparison is what
+ * does, and it is asked at the tap rather than at the render.
+ */
+export function readerSessionAdmits(
+  live: ReaderSession | null,
+  incarnation: ReaderSession | null,
+): boolean {
+  return !!live && !!incarnation && live.id === incarnation.id
 }
 
 /**
