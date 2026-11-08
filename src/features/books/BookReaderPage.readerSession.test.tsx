@@ -1,74 +1,88 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import type { ReactNode } from 'react'
+import { StrictMode, type ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { computeHoursSummary } from '../records/records.logic'
 import type { HoursEntry } from '../../core/types'
 
 /**
- * WHOSE reading a reading session is (reader-session integrity).
+ * WHOSE reading a reading session is, and WHEN one session becomes another.
  *
  * The reproduced defect, in one sentence: a locked child profile can open a
  * **sibling-owned** contributor / Together book off his own shelf, and every
- * record the session writes — the `hours` entry, the `BOOK_READ` XP, the
- * diamonds and the Share artifact's `childId` — was addressed to
- * `book.childId`, the OTHER boy, while the Share artifact's own words named the
- * child who actually read. Two true halves of one record disagreeing.
+ * record the session wrote — the `hours` entry, the `BOOK_READ` XP, the diamonds
+ * and the Share artifact's `childId` — was addressed to `book.childId`, the
+ * OTHER boy, while the Share artifact's own words named the child who actually
+ * read. Two halves of one record naming different children.
  *
  * And the minutes were counted twice. `BookReaderPage` mounts `useBook`, whose
  * unmount cleanup writes a *"(page editing)"* `hours` entry for the session's
  * elapsed minutes — correct for the editor it was written for, wrong for a
  * reader that edited nothing. So a two-minute read folded to FOUR counted
- * minutes through the canonical path (`computeHoursSummary`). The owner
- * approved suppressing exactly that second emission (2026-11-08).
+ * minutes through the canonical path (`computeHoursSummary`). The owner approved
+ * suppressing exactly that second emission (2026-11-08).
  *
- * These tests drive the REAL `useBook` through the REAL page — Firestore and
- * the two central award writers are the only things stubbed — so the numbers
- * asserted here are the payloads the writers would actually receive, folded by
- * the same counting path the Records page uses (DATA-11).
+ * The second half of this file is the LIFECYCLE, which is where the first
+ * candidate was wrong in the opposite direction: a reader captured once per
+ * mount cannot survive the three things this host really does while mounted — a
+ * route-parameter move to another book, a family change, and a locked-profile
+ * change — and a capture that cannot move finalises against a document it no
+ * longer describes, losing BOTH reads. One session per committed scope; the
+ * original is finalised against its own snapshot; the replacement starts with
+ * its own clock and none of the first one's state.
+ *
+ * Driven through the REAL page and the REAL `useBook` — Firestore and the two
+ * central award writers are the only things stubbed — so the numbers asserted
+ * here are the payloads the writers would actually receive, folded by the same
+ * counting path the Records page uses (DATA-11).
  *
  * POSITIVE CONTROLS, both directions:
  *  - revert the ACTOR choice (address the writes to `book.childId` again) and
- *    every attribution assertion below fails;
+ *    every attribution assertion fails;
  *  - revert the reader HOURS mode (drop `suppressEditingHours` at the `useBook`
- *    call) and the counted-time assertions fail independently of the first,
- *    because the fold goes back to four minutes for a two-minute read.
+ *    call) and the counted-time assertions fail independently, because the fold
+ *    goes back to four minutes for a two-minute read.
  */
 
 // ── Hoisted, mutable mock state ──────────────────────────────────────────────
 
 const m = vi.hoisted(() => {
-  const ops: Array<{ kind: string; collection: string; data: Record<string, unknown> }> = []
+  const ops: Array<{
+    kind: string
+    collection: string
+    family: string
+    data: Record<string, unknown>
+  }> = []
   return {
     ops,
+    /** Every word interaction, stamped with the child the hook was keyed to. */
+    words: [] as string[],
     search: '',
-    /** The `books/{bookId}` document the reader opens, and how it answers. */
-    book: null as Record<string, unknown> | null,
-    /** When set, `getDoc` waits for this to be released before answering. */
-    pendingBook: null as null | { release: () => void },
+    familyId: 'family-1',
+    bookId: 'book-1' as string | undefined,
+    /** `${familyId}|${bookId}` → the document, or absent for "no such book". */
+    books: new Map<string, Record<string, unknown>>(),
+    /** While set, `getDoc` parks until released — a book that has not landed. */
+    parked: null as null | (() => void),
     identity: {
       isChildProfile: true,
       activeChild: undefined as undefined | { id: string; name: string; birthdate?: string },
       isLoading: false,
       loadFailed: false,
     },
-    addDoc: vi.fn(),
-    setDoc: vi.fn(),
-    getDoc: vi.fn(),
     xp: vi.fn(),
     diamond: vi.fn(),
     sightWordProgress: vi.fn(),
-    recordInteraction: vi.fn(),
   }
 })
 
 vi.mock('react-router-dom', () => ({
   useNavigate: () => vi.fn(),
-  useParams: () => ({ bookId: 'book-1' }),
+  useParams: () => ({ bookId: m.bookId }),
   useSearchParams: () => [new URLSearchParams(m.search), vi.fn()],
 }))
 
-vi.mock('../../core/auth/useAuth', () => ({ useFamilyId: () => 'family-1' }))
+vi.mock('../../core/auth/useAuth', () => ({ useFamilyId: () => m.familyId }))
 
 vi.mock('../../core/hooks/useActiveChild', () => ({
   useActiveChild: () => ({
@@ -83,14 +97,22 @@ vi.mock('../../core/hooks/useActiveChild', () => ({
   }),
 }))
 
-vi.mock('../useSightWordProgress', () => ({
-  useSightWordProgress: (...args: unknown[]) => {
-    m.sightWordProgress(...args)
-    return { progressMap: new Map(), recordInteraction: m.recordInteraction }
+// The word lane, keyed exactly as the real hook keys its documents
+// (`sightWordProgress/{childId}_{word}`) so a write can be attributed.
+vi.mock('./useSightWordProgress', () => ({
+  useSightWordProgress: (familyId: string, childId: string) => {
+    m.sightWordProgress(familyId, childId)
+    return {
+      progressMap: new Map(),
+      recordInteraction: (word: string, action: string) => {
+        m.words.push(`${childId}_${word}:${action}`)
+        return Promise.resolve()
+      },
+    }
   },
 }))
 
-vi.mock('../useComprehensionQuestions', () => ({
+vi.mock('./useComprehensionQuestions', () => ({
   useComprehensionQuestions: () => ({
     questions: [],
     loading: false,
@@ -100,21 +122,39 @@ vi.mock('../useComprehensionQuestions', () => ({
   }),
 }))
 
-// Firestore: every write is recorded with the collection it was addressed to, so
-// a reading-hours row, an editing-hours row and a Share artifact are told apart.
+// Firestore: every write records the collection AND the family it was addressed
+// to, so a reading row, an editing row and a Share artifact are told apart — and
+// so a row written for a session that began in another family can be seen to
+// have gone to THAT family.
 vi.mock('firebase/firestore', () => ({
-  addDoc: (collection: { name: string }, data: Record<string, unknown>) => {
-    m.ops.push({ kind: 'addDoc', collection: collection?.name ?? '?', data })
-    m.addDoc(collection, data)
+  addDoc: (collection: { name: string; familyId: string }, data: Record<string, unknown>) => {
+    m.ops.push({
+      kind: 'addDoc',
+      collection: collection?.name ?? '?',
+      family: collection?.familyId ?? '?',
+      data,
+    })
     return Promise.resolve({ id: 'written' })
   },
-  setDoc: (ref: { collection?: string }, data: Record<string, unknown>) => {
-    m.ops.push({ kind: 'setDoc', collection: ref?.collection ?? '?', data })
-    m.setDoc(ref, data)
+  setDoc: (ref: { collection?: string; familyId?: string }, data: Record<string, unknown>) => {
+    m.ops.push({
+      kind: 'setDoc',
+      collection: ref?.collection ?? '?',
+      family: ref?.familyId ?? '?',
+      data,
+    })
     return Promise.resolve()
   },
-  doc: (collection: { name: string }, id: string) => ({ collection: collection?.name, id }),
-  getDoc: (...args: unknown[]) => m.getDoc(...args),
+  doc: (collection: { name: string; familyId: string }, id: string) => ({
+    collection: collection?.name,
+    familyId: collection?.familyId,
+    id,
+  }),
+  getDoc: async (ref: { familyId: string; id: string }) => {
+    if (m.parked) await new Promise<void>((done) => { m.parked = done })
+    const found = m.books.get(`${ref.familyId}|${ref.id}`)
+    return { id: ref.id, exists: () => !!found, data: () => found }
+  },
   getDocs: vi.fn(),
   deleteDoc: vi.fn(),
   orderBy: vi.fn(),
@@ -129,9 +169,9 @@ vi.mock('firebase/storage', () => ({
 }))
 
 vi.mock('../../core/firebase/firestore', () => ({
-  artifactsCollection: () => ({ name: 'artifacts' }),
-  booksCollection: () => ({ name: 'books' }),
-  hoursCollection: () => ({ name: 'hours' }),
+  artifactsCollection: (familyId: string) => ({ name: 'artifacts', familyId }),
+  booksCollection: (familyId: string) => ({ name: 'books', familyId }),
+  hoursCollection: (familyId: string) => ({ name: 'hours', familyId }),
   stripUndefined: (value: unknown) => value,
 }))
 vi.mock('../../core/firebase/storage', () => ({ storage: {} }))
@@ -180,25 +220,36 @@ function bookDoc(overrides?: Record<string, unknown>) {
 }
 
 /** A Together book London owns and Lincoln contributed to — on BOTH shelves. */
-function siblingOwnedBook() {
+function siblingOwnedBook(overrides?: Record<string, unknown>) {
   return bookDoc({
     childId: LONDON.id,
     isTogetherBook: true,
     contributorIds: [LINCOLN.id, LONDON.id],
+    ...overrides,
   })
 }
 
-// ── Clock control (the elapsed-minutes floor and rounding are unchanged) ─────
+const putBook = (familyId: string, bookId: string, doc: Record<string, unknown>) =>
+  m.books.set(`${familyId}|${bookId}`, { ...doc, id: bookId })
+
+// ── Clock control ────────────────────────────────────────────────────────────
+//
+// The elapsed rule is UNCHANGED and is `Math.round(ms / 60000)`, then a
+// rounded-minute floor of 1 — so 29s rounds to 0 and writes nothing, 30s and 45s
+// both round to 1, and 90s rounds to 2. These tests pin that rule rather than
+// assuming a truncating floor.
 
 let clock = 0
+const seconds = (n: number) => { clock += n * 1000 }
 const minutes = (n: number) => { clock += n * 60_000 }
 
 // ── Readers over what the writers were actually handed ───────────────────────
 
-const hoursRows = () =>
-  m.ops.filter((op) => op.kind === 'addDoc' && op.collection === 'hours').map((op) => op.data)
-const artifactRows = () =>
-  m.ops.filter((op) => op.kind === 'addDoc' && op.collection === 'artifacts').map((op) => op.data)
+const rowsIn = (collection: string) =>
+  m.ops.filter((op) => op.kind === 'addDoc' && op.collection === collection)
+const hoursRows = () => rowsIn('hours').map((op) => op.data)
+const hoursFamilies = () => rowsIn('hours').map((op) => op.family)
+const artifactRows = () => rowsIn('artifacts').map((op) => op.data)
 const bookMerges = () =>
   m.ops.filter((op) => op.kind === 'setDoc' && op.collection === 'books').map((op) => op.data)
 
@@ -206,15 +257,26 @@ const bookMerges = () =>
 const countedMinutes = (childId: string) =>
   computeHoursSummary([], hoursRows() as unknown as HoursEntry[], [], childId).totalMinutes
 
-/** Jump to the last page (back cover) via the accessible dot indicators. */
+const today = () => new Date().toISOString().slice(0, 10)
+
+/** Jump to a page via the accessible dot indicators. */
+function goToPage(index: number) {
+  const dots = screen.getAllByRole('button', { name: /go to page/i })
+  fireEvent.click(dots[index])
+}
 function goToBackCover() {
   const dots = screen.getAllByRole('button', { name: /go to page/i })
   fireEvent.click(dots[dots.length - 1])
 }
 
-async function openReader() {
+/** The title of whichever book is currently expected on screen. */
+async function waitForBook(title: RegExp) {
+  await waitFor(() => expect(screen.getAllByText(title).length).toBeGreaterThan(0))
+}
+
+async function openReader(title: RegExp = /Brave Dog/) {
   const view = render(<BookReaderPage />)
-  if (m.book) await waitFor(() => expect(screen.getAllByText(/Brave Dog/).length).toBeGreaterThan(0))
+  await waitForBook(title)
   return view
 }
 
@@ -222,22 +284,19 @@ beforeEach(() => {
   clock = Date.parse('2026-11-08T15:00:00.000Z')
   vi.spyOn(Date, 'now').mockImplementation(() => clock)
   m.ops.length = 0
+  m.words.length = 0
   m.search = ''
-  m.book = bookDoc()
-  m.pendingBook = null
+  m.familyId = 'family-1'
+  m.bookId = 'book-1'
+  m.books = new Map()
+  putBook('family-1', 'book-1', bookDoc())
+  m.parked = null
   m.identity = { isChildProfile: true, activeChild: LINCOLN, isLoading: false, loadFailed: false }
-  m.addDoc.mockClear()
-  m.setDoc.mockClear()
   m.xp.mockReset()
   m.xp.mockResolvedValue(0)
   m.diamond.mockReset()
   m.diamond.mockResolvedValue(undefined)
   m.sightWordProgress.mockClear()
-  m.recordInteraction.mockClear()
-  m.getDoc.mockImplementation(async () => {
-    if (m.pendingBook) await new Promise<void>((done) => { m.pendingBook = { release: done } })
-    return { id: 'book-1', exists: () => m.book !== null, data: () => m.book }
-  })
 })
 
 afterEach(() => {
@@ -246,7 +305,7 @@ afterEach(() => {
 
 describe('BookReaderPage — the reader of record (child profile)', () => {
   it('credits a sibling-owned contributor book to the child who actually read it, once', async () => {
-    m.book = siblingOwnedBook()
+    putBook('family-1', 'book-1', siblingOwnedBook())
     const { unmount } = await openReader()
     goToBackCover()
     minutes(2)
@@ -258,6 +317,7 @@ describe('BookReaderPage — the reader of record (child profile)', () => {
       childId: LINCOLN.id,
       minutes: 2,
       subjectBucket: 'LanguageArts',
+      date: today(),
     })
     expect(String(hoursRows()[0].notes)).toContain('completed')
     expect(String(hoursRows()[0].notes)).not.toContain('page editing')
@@ -278,7 +338,7 @@ describe('BookReaderPage — the reader of record (child profile)', () => {
       LINCOLN.id,
       'BOOK_READ',
       15,
-      `book_book-1_${new Date().toISOString().slice(0, 10)}`,
+      `book_book-1_${today()}`,
     ])
     expect(m.diamond).toHaveBeenCalledTimes(1)
     expect(m.diamond.mock.calls[0][0]).toMatchObject({
@@ -303,11 +363,39 @@ describe('BookReaderPage — the reader of record (child profile)', () => {
     expect(bookMerges().some((d) => d.totalMinutes === 9)).toBe(true)
   })
 
-  it('writes nothing below the one-minute floor for a PARTIAL read, and the Share artifact only for a completed one', async () => {
-    // Partial, below floor: no hours, no awards, no Share artifact.
-    m.book = siblingOwnedBook()
+  it('keeps the unchanged rounding rule: 29s writes nothing, 30s and 45s are one minute, 90s is two', async () => {
+    const below = await openReader()
+    goToBackCover()
+    seconds(29)
+    below.unmount()
+    expect(hoursRows()).toHaveLength(0)
+
+    m.ops.length = 0
+    const half = await openReader()
+    goToBackCover()
+    seconds(30)
+    half.unmount()
+    expect(hoursRows()[0]).toMatchObject({ minutes: 1 })
+
+    m.ops.length = 0
+    const threeQuarters = await openReader()
+    goToBackCover()
+    seconds(45)
+    threeQuarters.unmount()
+    expect(hoursRows()[0]).toMatchObject({ minutes: 1 })
+
+    m.ops.length = 0
+    const long = await openReader()
+    goToBackCover()
+    seconds(90)
+    long.unmount()
+    expect(hoursRows()[0]).toMatchObject({ minutes: 2 })
+  })
+
+  it('below the rounded-minute floor: a PARTIAL read writes nothing, a COMPLETED one writes only the Share artifact', async () => {
+    putBook('family-1', 'book-1', siblingOwnedBook())
     const partial = await openReader()
-    clock += 30_000
+    seconds(29)
     partial.unmount()
 
     expect(hoursRows()).toHaveLength(0)
@@ -316,12 +404,10 @@ describe('BookReaderPage — the reader of record (child profile)', () => {
     expect(m.diamond).not.toHaveBeenCalled()
     expect(bookMerges()).toHaveLength(0)
 
-    // Completed but still below floor: the Share artifact IS written, for the
-    // reader, and the hours/XP floor is untouched.
     m.ops.length = 0
     const completed = await openReader()
     goToBackCover()
-    clock += 30_000
+    seconds(29)
     completed.unmount()
 
     expect(artifactRows()).toHaveLength(1)
@@ -333,7 +419,7 @@ describe('BookReaderPage — the reader of record (child profile)', () => {
 
   it('stamps the Story Call audience on the reader’s own records', async () => {
     m.search = 'call=1'
-    m.book = siblingOwnedBook()
+    putBook('family-1', 'book-1', siblingOwnedBook())
     const { unmount } = await openReader()
     goToBackCover()
     fireEvent.click(screen.getByText('Mimi'))
@@ -349,8 +435,31 @@ describe('BookReaderPage — the reader of record (child profile)', () => {
     expect(String(artifactRows()[0].content)).toContain('Read aloud to Papa on a video call')
   })
 
+  it('survives the StrictMode mount rehearsal that the app really runs under', async () => {
+    // `main.tsx` wraps the app in `StrictMode`, which in development tears an
+    // effect down and sets it up again on the initial mount. A once-only flag
+    // spent by that rehearsal would leave a real read writing nothing at all.
+    putBook('family-1', 'book-1', siblingOwnedBook())
+    const { unmount } = render(
+      <StrictMode>
+        <BookReaderPage />
+      </StrictMode>,
+    )
+    await waitForBook(/Brave Dog/)
+    goToBackCover()
+    minutes(2)
+    unmount()
+
+    expect(hoursRows()).toHaveLength(1)
+    expect(hoursRows()[0]).toMatchObject({ childId: LINCOLN.id, minutes: 2 })
+    expect(artifactRows()).toHaveLength(1)
+    expect(artifactRows()[0]).toMatchObject({ childId: LINCOLN.id })
+    expect(m.xp).toHaveBeenCalledTimes(1)
+    expect(m.diamond).toHaveBeenCalledTimes(1)
+  })
+
   it('gives a second real session its own minutes under the same daily dedup key', async () => {
-    m.book = siblingOwnedBook()
+    putBook('family-1', 'book-1', siblingOwnedBook())
     const first = await openReader()
     goToBackCover()
     minutes(2)
@@ -368,7 +477,7 @@ describe('BookReaderPage — the reader of record (child profile)', () => {
 
     // Per-child-per-book-per-day dedup stays the WRITER's job, unchanged: the
     // reader asks twice with the same key and the ledger refuses the second.
-    const key = `book_book-1_${new Date().toISOString().slice(0, 10)}`
+    const key = `book_book-1_${today()}`
     expect(m.xp.mock.calls.map((call) => call[4])).toEqual([key, key])
     expect(m.xp.mock.calls.every((call) => call[1] === LINCOLN.id)).toBe(true)
   })
@@ -376,7 +485,7 @@ describe('BookReaderPage — the reader of record (child profile)', () => {
 
 describe('BookReaderPage — an actor that is not resolved is not guessed', () => {
   it('writes nothing while the child read has not settled', async () => {
-    m.book = siblingOwnedBook()
+    putBook('family-1', 'book-1', siblingOwnedBook())
     m.identity = { isChildProfile: true, activeChild: undefined, isLoading: true, loadFailed: false }
     const { unmount } = await openReader()
     goToBackCover()
@@ -390,7 +499,7 @@ describe('BookReaderPage — an actor that is not resolved is not guessed', () =
   })
 
   it('writes nothing when the child read FAILED — a failure is not an identity', async () => {
-    m.book = siblingOwnedBook()
+    putBook('family-1', 'book-1', siblingOwnedBook())
     m.identity = { isChildProfile: true, activeChild: undefined, isLoading: true, loadFailed: true }
     const { unmount } = await openReader()
     goToBackCover()
@@ -402,7 +511,7 @@ describe('BookReaderPage — an actor that is not resolved is not guessed', () =
   })
 
   it('credits the whole session once a DELAYED actor resolves mid-read', async () => {
-    m.book = siblingOwnedBook()
+    putBook('family-1', 'book-1', siblingOwnedBook())
     m.identity = { isChildProfile: true, activeChild: undefined, isLoading: true, loadFailed: false }
     const { unmount, rerender } = await openReader()
     minutes(1)
@@ -413,20 +522,21 @@ describe('BookReaderPage — an actor that is not resolved is not guessed', () =
     unmount()
 
     expect(hoursRows()).toHaveLength(1)
-    // The elapsed rounding and the session's own start are untouched: the
-    // session is two minutes long, not the one minute since the actor landed.
+    // The clock is NOT restarted because data settled: the session is two
+    // minutes long, not the one minute since the actor landed.
     expect(hoursRows()[0]).toMatchObject({ childId: LINCOLN.id, minutes: 2 })
     expect(artifactRows()[0]).toMatchObject({ childId: LINCOLN.id })
   })
 
   it('credits the whole session once a DELAYED book resolves mid-read', async () => {
-    m.book = siblingOwnedBook()
-    m.pendingBook = { release: () => {} }
+    putBook('family-1', 'book-1', siblingOwnedBook())
+    m.parked = () => {}
     const { unmount } = render(<BookReaderPage />)
     minutes(1)
-    m.pendingBook?.release()
-    m.pendingBook = null
-    await waitFor(() => expect(screen.getAllByText(/Brave Dog/).length).toBeGreaterThan(0))
+    const release = m.parked
+    m.parked = null
+    release?.()
+    await waitForBook(/Brave Dog/)
     goToBackCover()
     minutes(1)
     unmount()
@@ -436,8 +546,9 @@ describe('BookReaderPage — an actor that is not resolved is not guessed', () =
   })
 
   it('writes nothing at all when the book never resolves', async () => {
-    m.book = null
+    m.books = new Map()
     const { unmount } = render(<BookReaderPage />)
+    await waitFor(() => expect(screen.getByText(/Book not found/)).toBeInTheDocument())
     minutes(2)
     unmount()
 
@@ -447,46 +558,152 @@ describe('BookReaderPage — an actor that is not resolved is not guessed', () =
   })
 })
 
-describe('BookReaderPage — the committed session is not redirected', () => {
-  it('keeps the original reader when the active child changes mid-session', async () => {
-    m.book = siblingOwnedBook()
+describe('BookReaderPage — one session per committed scope', () => {
+  it('finalises the first book and records the replacement when the route moves to another book', async () => {
+    putBook('family-1', 'book-1', siblingOwnedBook())
+    putBook('family-1', 'book-2', siblingOwnedBook({ title: 'The Second Book', totalMinutes: 0 }))
     const { unmount, rerender } = await openReader()
     goToBackCover()
     minutes(2)
-    // A global identity change lands while the reader is still open. The
-    // reading already happened, and it was Lincoln's.
-    m.identity = { isChildProfile: true, activeChild: LONDON, isLoading: false, loadFailed: false }
+
+    // A route-parameter navigation to another book's reader, host still mounted.
+    m.bookId = 'book-2'
     rerender(<BookReaderPage />)
+    await waitForBook(/Second Book/)
+    goToBackCover()
+    minutes(2)
     unmount()
 
-    expect(hoursRows()).toHaveLength(1)
-    expect(hoursRows()[0]).toMatchObject({ childId: LINCOLN.id })
-    expect(countedMinutes(LONDON.id)).toBe(0)
-    expect(m.xp.mock.calls[0][1]).toBe(LINCOLN.id)
+    // BOTH reads are recorded, each against its own book, for the real reader.
+    expect(hoursRows()).toHaveLength(2)
+    expect(hoursRows()[0]).toMatchObject({ childId: LINCOLN.id, minutes: 2 })
+    expect(String(hoursRows()[0].notes)).toContain('The Brave Dog')
+    expect(hoursRows()[1]).toMatchObject({ childId: LINCOLN.id, minutes: 2 })
+    expect(String(hoursRows()[1].notes)).toContain('The Second Book')
+    expect(countedMinutes(LINCOLN.id)).toBe(4)
+
+    // Each session's awards name its own book; neither is redirected.
+    expect(m.xp.mock.calls.map((call) => call[4])).toEqual([
+      `book_book-1_${today()}`,
+      `book_book-2_${today()}`,
+    ])
+    // Two Share artifacts, one per completed book, both for the reader.
+    expect(artifactRows()).toHaveLength(2)
+    expect(artifactRows().every((row) => row.childId === LINCOLN.id)).toBe(true)
+    expect(String(artifactRows()[1].content)).toContain('The Second Book')
   })
 
-  it('is one session across A → B → A, not a new one on the way back', async () => {
-    m.book = siblingOwnedBook()
+  it('keeps a finished session addressed to the family it was read in', async () => {
+    putBook('family-1', 'book-1', siblingOwnedBook())
+    putBook('family-2', 'book-1', siblingOwnedBook({ title: 'A Second Household Book' }))
     const { unmount, rerender } = await openReader()
     goToBackCover()
+    minutes(2)
+
+    m.familyId = 'family-2'
+    rerender(<BookReaderPage />)
+    await waitForBook(/Second Household/)
+    goToBackCover()
+    minutes(2)
+    unmount()
+
+    expect(hoursRows()).toHaveLength(2)
+    // The first read stays in the household it happened in; it is not
+    // redirected, and not merged with the replacement's state.
+    expect(hoursFamilies()).toEqual(['family-1', 'family-2'])
+    expect(String(hoursRows()[0].notes)).toContain('The Brave Dog')
+    expect(String(hoursRows()[1].notes)).toContain('A Second Household Book')
+    expect(m.xp.mock.calls.map((call) => call[0])).toEqual(['family-1', 'family-2'])
+    expect(m.xp.mock.calls.every((call) => call[1] === LINCOLN.id)).toBe(true)
+  })
+
+  it('ends the first reader’s session and starts the replacement’s on a committed child change', async () => {
+    putBook('family-1', 'book-1', siblingOwnedBook())
+    const { unmount, rerender } = await openReader()
+    // A content page, so the word lane actually records something.
+    goToPage(2)
+    minutes(2)
+    expect(m.words.some((w) => w.startsWith(`${LINCOLN.id}_the`))).toBe(true)
+    expect(m.words.some((w) => w.startsWith(`${LONDON.id}_`))).toBe(false)
+
+    // The locked profile really changes — a committed scope change.
+    m.identity = { isChildProfile: true, activeChild: LONDON, isLoading: false, loadFailed: false }
+    rerender(<BookReaderPage />)
+    minutes(2)
+    unmount()
+
+    // Two sessions, two rows, each naming the child who read it.
+    expect(hoursRows()).toHaveLength(2)
+    expect(hoursRows()[0]).toMatchObject({ childId: LINCOLN.id, minutes: 2 })
+    expect(hoursRows()[1]).toMatchObject({ childId: LONDON.id, minutes: 2 })
+    expect(countedMinutes(LINCOLN.id)).toBe(2)
+    expect(countedMinutes(LONDON.id)).toBe(2)
+
+    // The word lane moved with the session boundary, not independently of it:
+    // every word write names the child whose session was running at the time.
+    expect(m.words.some((w) => w.startsWith(`${LONDON.id}_the`))).toBe(true)
+    expect(m.sightWordProgress).toHaveBeenCalledWith('family-1', LINCOLN.id)
+    expect(m.sightWordProgress).toHaveBeenCalledWith('family-1', LONDON.id)
+
+    // Neither session completed (no back cover), so neither claims a Share.
+    expect(artifactRows()).toHaveLength(0)
+  })
+
+  it('treats A → B → A as three sessions, not one eternal mounted one', async () => {
+    putBook('family-1', 'book-1', siblingOwnedBook())
+    const { unmount, rerender } = await openReader()
     minutes(1)
     m.identity = { isChildProfile: true, activeChild: LONDON, isLoading: false, loadFailed: false }
     rerender(<BookReaderPage />)
     minutes(1)
     m.identity = { isChildProfile: true, activeChild: LINCOLN, isLoading: false, loadFailed: false }
     rerender(<BookReaderPage />)
+    minutes(1)
     unmount()
 
-    expect(hoursRows()).toHaveLength(1)
-    expect(hoursRows()[0]).toMatchObject({ childId: LINCOLN.id, minutes: 2 })
+    expect(hoursRows().map((row) => [row.childId, row.minutes])).toEqual([
+      [LINCOLN.id, 1],
+      [LONDON.id, 1],
+      [LINCOLN.id, 1],
+    ])
+    // The third session is its own session and asks for its own award; the
+    // per-child daily dedup key is unchanged, so the ledger — not the reader —
+    // is what refuses the repeat.
+    expect(m.xp).toHaveBeenCalledTimes(3)
+    expect(m.xp.mock.calls.map((call) => call[4])).toEqual(
+      new Array(3).fill(`book_book-1_${today()}`),
+    )
+  })
+
+  it('does not let a replacement session inherit the previous one’s completion or audience', async () => {
+    m.search = 'call=1'
+    putBook('family-1', 'book-1', siblingOwnedBook())
+    const { unmount, rerender } = await openReader()
+    goToBackCover()
+    fireEvent.click(screen.getByText('Mimi'))
+    minutes(2)
+
+    m.identity = { isChildProfile: true, activeChild: LONDON, isLoading: false, loadFailed: false }
+    rerender(<BookReaderPage />)
+    minutes(2)
+    unmount()
+
+    // Lincoln's session completed and was read to Mimi; London's did neither —
+    // he never left the back cover he inherited the view of.
     expect(artifactRows()).toHaveLength(1)
-    expect(m.xp).toHaveBeenCalledTimes(1)
+    expect(artifactRows()[0]).toMatchObject({ childId: LINCOLN.id })
+    expect(String(artifactRows()[0].content)).toContain('Read aloud to Mimi')
+
+    const londonRow = hoursRows().find((row) => row.childId === LONDON.id)
+    expect(londonRow).toBeDefined()
+    expect(String(londonRow?.notes)).not.toContain('completed')
+    expect(String(londonRow?.notes)).not.toContain('Mimi')
   })
 })
 
 describe('BookReaderPage — a parent reader keeps the legacy book-owner record', () => {
   it('addresses the records to the book’s own child, and still counts the read once', async () => {
-    m.book = bookDoc({ childId: LINCOLN.id })
+    putBook('family-1', 'book-1', bookDoc({ childId: LINCOLN.id }))
     m.identity = { isChildProfile: false, activeChild: LONDON, isLoading: false, loadFailed: false }
     const { unmount } = await openReader()
     goToBackCover()
@@ -504,5 +721,38 @@ describe('BookReaderPage — a parent reader keeps the legacy book-owner record'
     expect(countedMinutes(LINCOLN.id)).toBe(2)
     expect(countedMinutes(LONDON.id)).toBe(0)
     expect(m.xp.mock.calls[0][1]).toBe(LINCOLN.id)
+  })
+
+  it('does not wait on the child list: a KNOWN book owner is already the answer', async () => {
+    // The book is loaded and its owner is a sibling of the selected child; the
+    // children read has not come back at all. A parent's own reading was being
+    // dropped entirely while this unrelated read was in flight.
+    putBook('family-1', 'book-1', siblingOwnedBook())
+    m.identity = { isChildProfile: false, activeChild: undefined, isLoading: true, loadFailed: false }
+    const { unmount } = await openReader()
+    goToBackCover()
+    minutes(2)
+    unmount()
+
+    expect(hoursRows()).toHaveLength(1)
+    expect(hoursRows()[0]).toMatchObject({ childId: LONDON.id, minutes: 2 })
+    expect(artifactRows()[0]).toMatchObject({ childId: LONDON.id })
+    expect(m.xp.mock.calls[0][1]).toBe(LONDON.id)
+  })
+
+  it('does not end a parent’s session when the selected child changes', async () => {
+    putBook('family-1', 'book-1', bookDoc({ childId: LINCOLN.id }))
+    m.identity = { isChildProfile: false, activeChild: LONDON, isLoading: false, loadFailed: false }
+    const { unmount, rerender } = await openReader()
+    minutes(1)
+    m.identity = { isChildProfile: false, activeChild: LINCOLN, isLoading: false, loadFailed: false }
+    rerender(<BookReaderPage />)
+    minutes(1)
+    unmount()
+
+    // One session, two minutes, the book's owner — the selected child is not
+    // part of a book-owner session's scope.
+    expect(hoursRows()).toHaveLength(1)
+    expect(hoursRows()[0]).toMatchObject({ childId: LINCOLN.id, minutes: 2 })
   })
 })

@@ -609,6 +609,12 @@ export function useBook(
   // nothing. The effect itself, its deps, the merge, the arithmetic and the
   // order are untouched.
   useEffect(() => {
+    // Read the mount-bound mode HERE, in the effect body, and let the cleanup
+    // close over the primitive. The value cannot change — `suppressEditingHours`
+    // is captured at mount — so this is the same answer either way, and the
+    // cleanup no longer reads a ref whose value a reader of this code (or the
+    // hooks lint) would have to take on trust.
+    const suppressEditingHours = suppressEditingHoursRef.current
     return () => {
       const elapsed = Math.round((Date.now() - sessionStartRef.current) / 60000)
       if (elapsed >= 1 && !hoursLoggedRef.current && book) {
@@ -619,7 +625,7 @@ export function useBook(
           const docRef = doc(booksCollection(familyId), bookId)
           void setDoc(docRef, { totalMinutes: newTotal, updatedAt: new Date().toISOString() }, { merge: true })
         }
-        if (!suppressEditingHoursRef.current) {
+        if (!suppressEditingHours) {
           void logBookHours(familyId, book.childId, elapsed, book.title, usedAiGeneration)
         }
       }

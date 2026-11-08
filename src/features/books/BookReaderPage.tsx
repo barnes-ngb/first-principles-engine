@@ -45,9 +45,12 @@ import ComprehensionQuestions from './ComprehensionQuestions'
 import AskMePanel from './AskMePanel'
 import { buildReadingCompletionContent, buildReadingHoursNotes } from './readingLog.logic'
 import {
-  readerSessionMatches,
+  nextReaderSession,
+  readerSessionCovers,
+  readerSessionKey,
+  readerSessionLabel,
   resolveReaderSession,
-  type ReaderSessionIdentity,
+  type ReaderSession,
 } from './readerSession'
 import { STORY_CALL_AUDIENCES } from './storyCallLabels'
 
@@ -160,6 +163,14 @@ export default function BookReaderPage() {
 
   const { book, loading } = useBook(familyId, bookId, READER_BOOK_OPTIONS)
   const isSightWordBook = (book?.sightWords?.length ?? 0) > 0
+  // The word lane and the hours lane share one committed boundary rather than
+  // two: a CHILD session's scope key contains its reader (`readerSessionKey`),
+  // so a committed locked-profile change ENDS the running session and starts a
+  // replacement — which is why the live child here is always the running child
+  // session's own reader, and a word tap and the reading record it sits beside
+  // can no longer name different children. Before any reader is resolved this is
+  // `''`, which is the same refusal the session makes. A parent's word ownership
+  // is the legacy live child and is deferred with the rest of FEAT-95.
   const { progressMap, recordInteraction } = useSightWordProgress(
     familyId,
     childId,
@@ -187,16 +198,27 @@ export default function BookReaderPage() {
   const [showPrintSettings, setShowPrintSettings] = useState(false)
   const [printSkipNotice, setPrintSkipNotice] = useState<string | null>(null)
   const [totalWordsEncountered, setTotalWordsEncountered] = useState(0)
-  const seenPagesRef = useRef<Set<number>>(new Set())
+  /** Pages whose words this session has already recorded, stamped with it. */
+  const seenPagesRef = useRef<{ sessionId: number; pages: Set<number> }>({
+    sessionId: 0,
+    pages: new Set(),
+  })
 
   // TTS read-aloud state
   const [isReading, setIsReading] = useState(false)
 
-  // Session tracking
+  // Session tracking. `sessionStartRef` is the RUNNING session's start: the
+  // mount for the first one, and the boundary for a replacement — never reset
+  // because data settled.
   const sessionStartRef = useRef<number>(Date.now())
-  const pagesViewedRef = useRef<Set<number>>(new Set())
+  /** Which pages the running session has seen, stamped with whose session. */
+  const pagesViewedRef = useRef<{ sessionId: number; pages: Set<number> }>({
+    sessionId: 0,
+    pages: new Set(),
+  })
   const completedRef = useRef(false)
-  const hoursLoggedRef = useRef(false)
+  /** The last session finalised, so each is finalised exactly once. */
+  const finalizedSessionRef = useRef(0)
   const callQuestionsRequestedRef = useRef(false)
   const completionWrittenRef = useRef(false)
   const audienceRef = useRef<string | undefined>(undefined)
@@ -260,43 +282,15 @@ export default function BookReaderPage() {
     [touchStart, currentPage, totalPages],
   )
 
-  // Record sight word encounters when viewing a page
-  useEffect(() => {
-    if (!isSightWordBook || !book) return
-    const contentPageIndex = currentPage - contentPageOffset
-    if (contentPageIndex < 0 || contentPageIndex >= book.pages.length) return
-    if (seenPagesRef.current.has(contentPageIndex)) return
-    seenPagesRef.current.add(contentPageIndex)
-
-    const page = book.pages[contentPageIndex]
-    const wordsOnPage = page.sightWordsOnPage ?? []
-    const uniqueWords = [...new Set(wordsOnPage.map(w => w.toLowerCase()))]
-    setTotalWordsEncountered(prev => prev + uniqueWords.length)
-
-    // Batch record 'seen' for each unique word on this page
-    for (const word of uniqueWords) {
-      void recordInteraction(word, 'seen')
-    }
-  }, [currentPage, isSightWordBook, book, recordInteraction, contentPageOffset])
-
-  // Track which pages have been viewed
-  useEffect(() => {
-    pagesViewedRef.current.add(currentPage)
-  }, [currentPage])
-
-  // ── WHOSE reading this is ─────────────────────────────────────────────────
+  // ── One session per COMMITTED scope ───────────────────────────────────────
   //
-  // Captured ONCE — the first time a reader is legitimately resolved — and
-  // immutable for the rest of the session. `readerSession.ts` holds the rule and
-  // the reasons; what lives here is only the capture.
-  //
-  // It is STATE, captured DURING RENDER rather than from an effect, which is
-  // React's derive-from-input path and the shape `useBookshelf` uses for shelf
-  // ownership: state is what the commit keeps, so a render React throws away
-  // cannot spend the capture, and the commit the screen belongs to keeps its
-  // reader, its Share text and its exit records. A ref written during render
-  // would not be part of the commit, and an effect that set state here would be
-  // a second source of truth for one fact.
+  // `readerSession.ts` holds the rule and the reasons; what lives here is the
+  // lifecycle. The session is STATE derived DURING RENDER — React's
+  // derive-from-input path, the shape `useBookshelf` uses for shelf ownership —
+  // because state is what the commit keeps: a render React throws away cannot
+  // spend an incarnation, and the commit the screen belongs to keeps its reader,
+  // its clock, its Share text and its exit records. A ref written during render
+  // would not be part of the commit at all.
   const resolvedReader = useMemo(
     () =>
       resolveReaderSession({
@@ -310,76 +304,237 @@ export default function BookReaderPage() {
       }),
     [familyId, book, isChildProfile, childId, childName, identitySettled, identityFailed],
   )
-  const [capturedReader, setCapturedReader] = useState<ReaderSessionIdentity | null>(null)
-  const readerSession = capturedReader ?? resolvedReader
-  if (!capturedReader && readerSession) setCapturedReader(readerSession)
+  const [committed, setCommitted] = useState<ReaderSession | null>(null)
+  // A scope that is merely UNRESOLVABLE — the replacement book has not landed,
+  // a children read is in flight again — ends nothing: the running session keeps
+  // running, because there is no new scope to attribute a change to yet. Only a
+  // DIFFERENT resolved scope replaces it.
+  const resolvedKey = resolvedReader ? readerSessionKey(resolvedReader) : ''
+  const replacement =
+    resolvedReader && (!committed || committed.key !== resolvedKey)
+      ? nextReaderSession(committed?.id ?? 0, resolvedReader)
+      : null
+  const session = replacement ?? committed
+  if (replacement) {
+    setCommitted(replacement)
+    // A replacement session inherits none of the first one's display state. The
+    // page index goes back to the cover only when the DOCUMENT changed — a
+    // different book is a different set of pages, and keeping the old index also
+    // let a short replacement open on its own back cover and count as read.
+    setTotalWordsEncountered(0)
+    setSelectedAudience(null)
+    if (committed && committed.bookId !== replacement.bookId) setCurrentPage(0)
+  }
 
-  // The committed capture, for the unmount writer — which runs after the last
-  // render and cannot read state. Written from an effect, so only a COMMITTED
-  // render can set it, and written once, so nothing later can move it.
-  const readerSessionRef = useRef<ReaderSessionIdentity | null>(null)
+  /**
+   * The running session's own snapshot — the family, the document and the facts
+   * its records will be written from, stamped with WHOSE session they are.
+   *
+   * Updated only on a committed render whose document the session actually
+   * covers, so a render already showing a REPLACEMENT book cannot overwrite what
+   * the original session is finalised against. A latest-document ref is not a
+   * session snapshot, which is exactly how a book or family move lost both
+   * reads.
+   */
+  const snapshotRef = useRef<{
+    sessionId: number
+    book: Book | null
+    totalPages: number
+    legacyChildName: string
+  }>({ sessionId: 0, book: null, totalPages: 0, legacyChildName: '' })
   useEffect(() => {
-    if (!readerSessionRef.current && readerSession) readerSessionRef.current = readerSession
-  }, [readerSession])
+    if (!session || !readerSessionCovers(session, familyId, book)) return
+    snapshotRef.current = {
+      sessionId: session.id,
+      book,
+      totalPages,
+      legacyChildName: childName,
+    }
+  }, [session, familyId, book, totalPages, childName])
 
-  // The session's EVOLVING facts: which document is on screen, and how long it
-  // is. Deliberately NOT ownership — that is the capture above. The unmount
-  // writer reads these from here so its effect can depend on nothing at all and
-  // therefore cannot run its cleanup early when a book property settles
-  // mid-session (`totalPages` grows the moment the sight-word page appears).
-  const liveReadRef = useRef<{ familyId: string; book: Book | null; totalPages: number }>({
-    familyId,
-    book,
-    totalPages,
-  })
+  // Record sight word encounters when viewing a page. Stamped with the session,
+  // so a replacement reader records the page he is actually looking at rather
+  // than inheriting the pages his brother had already been credited with.
   useEffect(() => {
-    liveReadRef.current = { familyId, book, totalPages }
-  }, [familyId, book, totalPages])
+    if (!isSightWordBook || !book) return
+    const sessionId = session?.id ?? 0
+    if (seenPagesRef.current.sessionId !== sessionId) {
+      seenPagesRef.current = { sessionId, pages: new Set() }
+    }
+    const contentPageIndex = currentPage - contentPageOffset
+    if (contentPageIndex < 0 || contentPageIndex >= book.pages.length) return
+    if (seenPagesRef.current.pages.has(contentPageIndex)) return
+    seenPagesRef.current.pages.add(contentPageIndex)
 
-  // Writes the Share artifact exactly once — optionally stamped with the Story Call
-  // audience — and always for the session's captured reader: the artifact's
-  // `childId` and the child named in its words are two halves of ONE claim, and
-  // on a sibling-owned contributor book they used to name different children.
-  const writeCompletion = useCallback(
-    (audience?: string) => {
-      if (completionWrittenRef.current || !book) return
-      const session = readerSession
-      // Nobody legitimately resolved yet, or this host has moved to another
-      // document: refuse rather than guess. A late capture is not lost — this
-      // callback is re-made when the session commits, and the exit path asks
-      // again — but it is never answered with the book owner's id.
-      if (!session || !readerSessionMatches(session, familyId, book)) return
-      completionWrittenRef.current = true
-      void logReadingCompletion(
-        session.familyId,
-        book,
-        session.readerChildId,
-        session.readerName,
-        audience,
-      )
-    },
-    [familyId, book, readerSession],
-  )
-  // A ref mirror lets the unmount fallback call the latest writer. Written from
-  // an effect rather than during render, so a render React discards cannot
-  // install a writer the commit never had.
-  const writeCompletionRef = useRef(writeCompletion)
+    const page = book.pages[contentPageIndex]
+    const wordsOnPage = page.sightWordsOnPage ?? []
+    const uniqueWords = [...new Set(wordsOnPage.map(w => w.toLowerCase()))]
+    setTotalWordsEncountered(prev => prev + uniqueWords.length)
+
+    // Batch record 'seen' for each unique word on this page
+    for (const word of uniqueWords) {
+      void recordInteraction(word, 'seen')
+    }
+  }, [currentPage, isSightWordBook, book, recordInteraction, contentPageOffset, session])
+
+  // Track which pages THIS session has viewed, same stamping rule.
   useEffect(() => {
-    writeCompletionRef.current = writeCompletion
-  }, [writeCompletion])
+    const sessionId = session?.id ?? 0
+    if (pagesViewedRef.current.sessionId !== sessionId) {
+      pagesViewedRef.current = { sessionId, pages: new Set() }
+    }
+    pagesViewedRef.current.pages.add(currentPage)
+  }, [currentPage, session])
+
+  /**
+   * Write the Share artifact for one session, exactly once.
+   *
+   * Stable (it reads only refs and its argument), so the lifecycle effect below
+   * can depend on the session alone. The artifact's `childId` and the child
+   * named in its words come from the SAME session — on a sibling-owned
+   * contributor book they used to name different children.
+   */
+  const writeCompletionFor = useCallback((target: ReaderSession, audience?: string) => {
+    if (completionWrittenRef.current) return
+    const snapshot = snapshotRef.current
+    // No committed snapshot for this session: nothing honest to describe yet.
+    // Not lost — the caller asks again on the next committed render — and never
+    // answered with another session's document or the book owner's id.
+    if (snapshot.sessionId !== target.id || !snapshot.book) return
+    completionWrittenRef.current = true
+    void logReadingCompletion(
+      target.familyId,
+      snapshot.book,
+      target.readerChildId,
+      readerSessionLabel(target, snapshot.legacyChildName),
+      audience,
+    )
+  }, [])
+
+  /**
+   * FINALISE one session: its Share artifact, its reading hours and its awards,
+   * against its own snapshot — and hand the clock to whatever comes next.
+   *
+   * Called from the lifecycle effect's cleanup, which React runs both when a
+   * replacement scope commits and on unmount, so a legitimate original session
+   * is completed rather than dropped. Stable, and everything it reads is either
+   * its argument or a ref stamped with that session's id, so a later session's
+   * facts can never be written under an earlier one's name.
+   *
+   * The elapsed formula is untouched: `Math.round(ms / 60000)` and then the
+   * rounded-minute floor, exactly the two lines that were here before.
+   */
+  const finalizeSession = useCallback((ending: ReaderSession | null) => {
+    if (!ending) return
+    if (finalizedSessionRef.current >= ending.id) return
+    const snapshot = snapshotRef.current
+    const endedAt = Date.now()
+    const startedAt = sessionStartRef.current
+    // Whatever happens, the NEXT session starts here: no minute is counted
+    // twice, and none is lost to the gap while a replacement document loads.
+    sessionStartRef.current = endedAt
+    // A session that never had a committed snapshot of its own (an unresolved or
+    // failed child read, a book that never landed) has nothing to say.
+    if (snapshot.sessionId !== ending.id || !snapshot.book) return
+    const endedBook = snapshot.book
+
+    // Story Call: in call mode the completion write is deferred to here so it carries
+    // the FINAL audience selection (un-stamped if no chip was tapped). Non-call already
+    // wrote on back-cover reach, so this is a no-op there (completionWrittenRef guard).
+    if (completedRef.current) writeCompletionFor(ending, audienceRef.current)
+
+    const elapsed = Math.round((endedAt - startedAt) / 60000)
+    if (elapsed < 1) return
+
+    // Marked only once there is something to be once-only ABOUT. The app runs
+    // under `StrictMode`, which tears an effect down and sets it up again on the
+    // initial mount: a flag set before this line would be spent by that
+    // rehearsal — at zero elapsed minutes, so nothing was written — and the real
+    // end of the session would then find itself already finalised and write
+    // nothing at all. The Share artifact has its own once-only flag, so the one
+    // write above this line cannot double either.
+    finalizedSessionRef.current = ending.id
+
+    const pagesViewed = pagesViewedRef.current
+    void logReadingHours(
+      ending.familyId,
+      ending.readerChildId,
+      elapsed,
+      endedBook.title,
+      completedRef.current,
+      pagesViewed.sessionId === ending.id ? pagesViewed.pages.size : 0,
+      snapshot.totalPages,
+      endedBook.sightWords?.length ?? 0,
+      audienceRef.current,
+    )
+
+    // Award XP for reading session (once per book per day). The dedup key is
+    // unchanged; the ledger's own doc id is `{childId}_{dedupKey}`, so pointing
+    // the award at the reader keeps the per-child-per-book-per-day guard exactly
+    // as it was — and lets each brother earn once for the same book.
+    const date = new Date().toISOString().slice(0, 10)
+    void addXpEvent(
+      ending.familyId,
+      ending.readerChildId,
+      'BOOK_READ',
+      15,
+      `book_${endedBook.id ?? 'unknown'}_${date}`,
+    ).catch((err) => console.error('[XP] Award failed:', err))
+
+    // Award 3 diamonds for reading a book
+    void addDiamondEvent({
+      familyId: ending.familyId,
+      childId: ending.readerChildId,
+      amount: 3,
+      type: DIAMOND_EVENTS.BOOK_READ,
+      reason: `Read: ${endedBook.title ?? 'book'}`,
+      dedupKey: `book_${endedBook.id ?? 'unknown'}_${date}-diamond`,
+    }).catch((err) => console.error('[Diamond] Award failed:', err))
+  }, [writeCompletionFor])
+
+  // ── The lifecycle itself ──────────────────────────────────────────────────
+  //
+  // One effect per session. Its cleanup closes over the session it was set up
+  // for — not a ref, so there is no window in which it could finalise the wrong
+  // one — and React runs that cleanup exactly when the session ends: a
+  // replacement scope committing, or unmount. Its setup then clears the state a
+  // replacement may not inherit (completion, the audience stamp, the deferred
+  // questions), after the outgoing session has been written from it.
+  useEffect(() => {
+    const running = session
+    if (running) {
+      completedRef.current = false
+      completionWrittenRef.current = false
+      audienceRef.current = undefined
+      callQuestionsRequestedRef.current = false
+    }
+    return () => {
+      finalizeSession(running)
+    }
+  }, [session, finalizeSession])
 
   // Detect book completion — reaching the last page (back cover).
   // Non-call mode writes the Share artifact immediately (unchanged behavior). Call mode
   // DEFERS the write until reader exit so it carries the FINAL audience selection — a
   // grandparent can correct a mis-tapped chip and both records (artifact + hours) agree.
+  //
+  // Declared AFTER the snapshot effect, so by the time this runs the running
+  // session's snapshot is the committed one; and asking again on a later render
+  // is how a read completed before its reader resolved still gets its artifact,
+  // rather than being written to a guess at the time or dropped.
   useEffect(() => {
-    if (currentPage === totalPages - 1 && book) completedRef.current = true
-    // Both halves are once-only (`completionWrittenRef`), so asking again after
-    // the session commits is how a read completed before the reader resolved
-    // still gets its artifact — rather than being written to a guess at the time
-    // or dropped for the rest of the session.
-    if (completedRef.current && !isCallMode) writeCompletion()
-  }, [currentPage, totalPages, book, isCallMode, writeCompletion])
+    if (!session) return
+    // A replacement session may not inherit the completion the previous one
+    // navigated to: if this session has only ever seen the back cover, it is
+    // standing where its predecessor finished, not finishing a read of its own.
+    const viewed = pagesViewedRef.current
+    const standingOnTheEnd =
+      viewed.sessionId === session.id &&
+      viewed.pages.size === 1 &&
+      viewed.pages.has(totalPages - 1)
+    if (currentPage === totalPages - 1 && book && !standingOnTheEnd) completedRef.current = true
+    if (completedRef.current && !isCallMode) writeCompletionFor(session)
+  }, [currentPage, totalPages, book, isCallMode, session, writeCompletionFor])
 
   // Story Call audience chip → record the selection (mutable — re-tapping corrects it).
   // The write is deferred to exit so the last tap wins in BOTH the artifact and hours.
@@ -398,85 +553,6 @@ export default function BookReaderPage() {
     callQuestionsRequestedRef.current = true
     void generateQuestions(book, childName, childAge)
   }, [isCallMode, currentPage, totalPages, book, childName, childAge, generateQuestions])
-
-  // ── Log reading hours and award XP when leaving the reader ────────────────
-  //
-  // Unmount ONLY, and now literally so: the deps are empty and everything the
-  // writer reads is a ref. It used to depend on `book?.childId`, `book?.title`,
-  // `book?.id` and `totalPages`, which meant a book property SETTLING mid-read
-  // ran this cleanup — `totalPages` grows the moment the sight-word page
-  // appears — and the run both consumed the once-only flag and wrote (or, below
-  // the floor, silently swallowed) the session's records in the middle of it.
-  // Nothing about the elapsed arithmetic moved: `sessionStart` is still the
-  // mount-time value of `sessionStartRef`, and the rounding and the one-minute
-  // floor are the same two lines.
-  //
-  // WHO the records belong to is the captured session (`readerSessionRef`), not
-  // the book's `childId` and not the live header. WHAT they say about the read is
-  // the live document (`liveReadRef`) — and the two must agree about which
-  // document this is, or the session has nothing it may honestly write.
-  useEffect(() => {
-    const sessionStart = sessionStartRef.current
-    const pagesViewed = pagesViewedRef.current
-    return () => {
-      if (hoursLoggedRef.current) return
-      const session = readerSessionRef.current
-      const live = liveReadRef.current
-      // No legitimate reader (an unresolved or failed child read, or a book that
-      // never landed), or this host has since moved to another book or family:
-      // write nothing. A session is never redirected onto a replacement child,
-      // family or document, and an unknown actor is never guessed from the
-      // book's owner — which, on a contributor book, is the sibling.
-      if (!session || !live.book || !readerSessionMatches(session, live.familyId, live.book)) return
-      const liveBook = live.book
-      hoursLoggedRef.current = true
-
-      // Story Call: in call mode the completion write is deferred to here so it carries
-      // the FINAL audience selection (un-stamped if no chip was tapped). Non-call already
-      // wrote on back-cover reach, so this is a no-op there (completionWrittenRef guard).
-      if (completedRef.current) writeCompletionRef.current(audienceRef.current)
-
-      const elapsed = Math.round((Date.now() - sessionStart) / 60000)
-      if (elapsed < 1) return
-
-      void logReadingHours(
-        session.familyId,
-        session.readerChildId,
-        elapsed,
-        liveBook.title,
-        completedRef.current,
-        pagesViewed.size,
-        live.totalPages,
-        liveBook.sightWords?.length ?? 0,
-        audienceRef.current,
-      )
-
-      // Award XP for reading session (once per book per day). The dedup key is
-      // unchanged; the ledger's own doc id is `{childId}_{dedupKey}`, so pointing
-      // the award at the reader keeps the per-child-per-book-per-day guard
-      // exactly as it was — and lets each brother earn once for the same book.
-      const date = new Date().toISOString().slice(0, 10)
-      void addXpEvent(
-        session.familyId,
-        session.readerChildId,
-        'BOOK_READ',
-        15,
-        `book_${liveBook.id ?? 'unknown'}_${date}`,
-      ).catch((err) => console.error('[XP] Award failed:', err))
-
-      // Award 3 diamonds for reading a book
-      void addDiamondEvent({
-        familyId: session.familyId,
-        childId: session.readerChildId,
-        amount: 3,
-        type: DIAMOND_EVENTS.BOOK_READ,
-        reason: `Read: ${liveBook.title ?? 'book'}`,
-        dedupKey: `book_${liveBook.id ?? 'unknown'}_${date}-diamond`,
-      }).catch((err) => console.error('[Diamond] Award failed:', err))
-    }
-    // Only run cleanup on unmount — every mutable input is read from a ref, so
-    // there is nothing here to depend on.
-  }, [])
 
   const handleWordTap = useCallback((word: string, action: 'help' | 'known') => {
     void recordInteraction(word, action)

@@ -177,13 +177,37 @@ describe('useBook — default (editor) hours behaviour is unchanged', () => {
     })
   })
 
-  it('writes neither the entry nor the total below the one-minute floor', async () => {
+  it('writes neither the entry nor the total below the rounded-minute floor', async () => {
     const { unmount } = await mountBook()
-    clock += 45_000
+    // The rule is `Math.round(ms / 60000)` and THEN `>= 1`, so the floor sits at
+    // 30s, not at 60s. 29s is the sub-boundary value.
+    clock += 29_000
     unmount()
 
     expect(hoursRows()).toHaveLength(0)
     expect(merges()).toHaveLength(0)
+  })
+
+  it('keeps the rounding rule exactly: 30s and 45s are one minute, 90s is two', async () => {
+    const half = await mountBook()
+    clock += 30_000
+    half.unmount()
+    expect(hoursRows()[0]).toMatchObject({ minutes: 1 })
+    expect(merges()[0]).toMatchObject({ totalMinutes: 8 })
+
+    m.ops.length = 0
+    const threeQuarters = await mountBook()
+    clock += 45_000
+    threeQuarters.unmount()
+    expect(hoursRows()[0]).toMatchObject({ minutes: 1 })
+    expect(merges()[0]).toMatchObject({ totalMinutes: 8 })
+
+    m.ops.length = 0
+    const long = await mountBook()
+    clock += 90_000
+    long.unmount()
+    expect(hoursRows()[0]).toMatchObject({ minutes: 2 })
+    expect(merges()[0]).toMatchObject({ totalMinutes: 9 })
   })
 })
 
@@ -227,13 +251,28 @@ describe('useBook — reader mode suppresses ONLY the editing-hours emission', (
     expect(merges()[0]).toMatchObject({ totalMinutes: 9 })
   })
 
-  it('leaves the floor where it is: below a minute writes nothing in either mode', async () => {
-    const { unmount } = await mountBook({ suppressEditingHours: true })
-    clock += 45_000
-    unmount()
-
+  it('leaves the floor and the rounding where they are, in reader mode too', async () => {
+    const below = await mountBook({ suppressEditingHours: true })
+    clock += 29_000
+    below.unmount()
     expect(hoursRows()).toHaveLength(0)
     expect(merges()).toHaveLength(0)
+
+    // Above the rounded floor the book total still moves by the SAME rounded
+    // minutes the editor would have used — only the hours entry is suppressed.
+    m.ops.length = 0
+    const half = await mountBook({ suppressEditingHours: true })
+    clock += 30_000
+    half.unmount()
+    expect(hoursRows()).toHaveLength(0)
+    expect(merges()[0]).toMatchObject({ totalMinutes: 8 })
+
+    m.ops.length = 0
+    const long = await mountBook({ suppressEditingHours: true })
+    clock += 90_000
+    long.unmount()
+    expect(hoursRows()).toHaveLength(0)
+    expect(merges()[0]).toMatchObject({ totalMinutes: 9 })
   })
 
   it('is bound to the session: a host that flips the flag mid-session does not re-arm it', async () => {
