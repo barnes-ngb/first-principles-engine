@@ -486,11 +486,9 @@ export default function BookshelfPage() {
               if (val) setBookFilter(val)
             }}
             size="small"
-            // Four counted tabs are wider than a phone, and a group that cannot
-            // wrap is measured as one unbreakable box — which is a document
-            // wider than the viewport before a single card is drawn. The tabs,
-            // their order, their counts and their meaning are unchanged; only
-            // the row they sit on is allowed to become two.
+            // The group is otherwise one unbreakable box, so four counted tabs
+            // can exceed a narrow viewport. Tabs, order, counts and meaning are
+            // unchanged; only the row may become two.
             sx={{ flexWrap: 'wrap', maxWidth: '100%' }}
           >
             <ToggleButton value="all" sx={{ textTransform: 'none', minHeight: 36 }}>
@@ -726,20 +724,11 @@ export default function BookshelfPage() {
         <Box
           sx={{
             display: 'grid',
-            /**
-             * Phone: tracks that cannot be pushed wider than the shelf.
-             *
-             * `1fr` is `minmax(auto, 1fr)`, so each track was at least as wide
-             * as its widest card wanted to be — a long chip label ("Continue
-             * making this story →") or a long title made the grid, and with it
-             * the document, wider than the viewport, and the second card's
-             * options button sat off the right edge. `auto-fill` with a 140px
-             * floor is the same two columns at 390px, drops to one column on a
-             * genuinely narrow phone instead of overflowing, and never asks for
-             * more width than there is. Tablet and desktop keep their fixed 2
-             * and 3 columns, now with a 0 minimum so a card's content can never
-             * widen the track there either.
-             */
+            // `1fr` is `minmax(auto, 1fr)`, so a card's content could widen its
+            // own track and push the second card past the viewport edge. The
+            // phone track has an explicit floor instead: two columns at 390px,
+            // one on a narrower phone, never wider than the shelf. Tablet and
+            // desktop keep 2 and 3 columns with a 0 track minimum.
             gridTemplateColumns: {
               xs: 'repeat(auto-fill, minmax(140px, 1fr))',
               sm: 'repeat(2, minmax(0, 1fr))',
@@ -765,8 +754,7 @@ export default function BookshelfPage() {
               alignItems: 'center',
               justifyContent: 'center',
               minHeight: 140,
-              // A grid item's own `min-width: auto` is content-based, so without
-              // this the tile could still widen its track.
+              // A grid item's `min-width: auto` is content-based.
               minWidth: 0,
               '&:hover': { borderColor: 'primary.light', bgcolor: 'action.hover' },
             }}
@@ -846,20 +834,14 @@ export default function BookshelfPage() {
                   minHeight: 140,
                   maxWidth: 200,
                   width: '100%',
-                  // Same reason as the make-a-book tile: the card takes the
-                  // width of its track rather than setting it.
+                  // The card takes its track's width rather than setting it.
                   minWidth: 0,
                 }}
               >
-                {/* The card's one action door.
-                    It was a 30 × 30px icon with no accessible name, so a
-                    screen reader heard "button" once per card with nothing to
-                    tell them apart and a finger had nothing to land on. Now it
-                    says which book it belongs to, it is the 44px this app holds
-                    every control to, and its focus ring is visible on the cover
-                    it sits over. `stopPropagation` is unchanged: the tap opens
-                    the menu and never the card underneath, changes no
-                    selection and writes nothing. */}
+                {/* The card's one action door. It was a 30 × 30px icon with no
+                    accessible name; it now names its book and is the 44px this
+                    app holds every control to. `stopPropagation` is unchanged:
+                    the tap opens the menu, never the card underneath. */}
                 <IconButton
                   size="small"
                   aria-label={`Options for ${book.title}`}
@@ -934,16 +916,11 @@ export default function BookshelfPage() {
                   sx={{
                     fontWeight: 600,
                     minWidth: 0,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    // On a phone the title is given two lines and allowed to
-                    // break anywhere, so a long title — including one long
-                    // unbroken word — stays readable instead of being cut to a
-                    // few letters or pushing the card wide. Tablet and desktop
+                    // Phone: the whole title wraps, breaking anywhere so a long
+                    // unbroken word stays inside the card. Tablet and desktop
                     // keep the existing single ellipsised line.
-                    display: { xs: '-webkit-box', sm: 'block' },
-                    WebkitBoxOrient: 'vertical',
-                    WebkitLineClamp: 2,
+                    overflow: { xs: 'visible', sm: 'hidden' },
+                    textOverflow: 'ellipsis',
                     whiteSpace: { xs: 'normal', sm: 'nowrap' },
                     overflowWrap: 'anywhere',
                     ...(isLincoln
@@ -962,11 +939,9 @@ export default function BookshelfPage() {
                     mt: 'auto',
                     pt: 1,
                     minWidth: 0,
-                    // One rule for every label on this row — author, draft
-                    // owner, word count, AI, Finished, the long "Continue
-                    // making this story →". A Chip's label already ellipsises;
-                    // what it lacked was a ceiling, so each one asked for its
-                    // full text and the widest of them set the card's width.
+                    // A Chip label already ellipsises; it lacked a ceiling, so
+                    // the widest label could set the card's width. One rule for
+                    // every label on this row.
                     '& .MuiChip-root': { maxWidth: '100%' },
                   }}
                   flexWrap="wrap"

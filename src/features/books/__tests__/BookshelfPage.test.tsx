@@ -260,11 +260,9 @@ describe('BookshelfPage — Per-Page Review wiring (PR-B)', () => {
 
 // ── Phone gallery: the card's options action ──────────────────────
 //
-// The three-dot control had no accessible name, so every card's door was
-// announced as "button" with nothing to tell it from the next card's, and the
-// target measured 30 × 30 CSS px. These pin the name, the identity it carries,
-// and the guards that were already true and must stay true. The widths
-// themselves are a browser measurement and are Sol's to make.
+// The three-dot control had no accessible name and measured 30 × 30 CSS px.
+// These pin the name, the book identity it carries, and the existing guards.
+// The widths themselves are a browser measurement, made separately.
 
 describe('BookshelfPage — card options action', () => {
   it('gives every card a named options button tied to its own book', () => {
