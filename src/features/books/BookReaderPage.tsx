@@ -393,6 +393,19 @@ export default function BookReaderPage() {
     setTotalWordsEncountered(0)
     setSelectedAudience(null)
     if (documentMoved) setCurrentPage(0)
+    // An IN-FLIGHT gesture is display state too, and it was the one piece that
+    // outlived the boundary. A pending swipe is held as `touchStart` state, not
+    // in the handler's closure, so the CURRENT surface's handler — which passes
+    // `admits` because the replacement session really is live — still measured
+    // its `touchend` against the finger-down of the reader who has LEFT. On the
+    // phone that turned Lincoln's half-finished swipe on a content page into
+    // London's advance to the back cover, and wrote a London Share artifact from
+    // a gesture nobody made in his session. A gesture belongs to the question it
+    // started under: dropping the pending one here means a replacement can only
+    // complete a swipe its own reader began, while an ordinary swipe inside one
+    // question, and a fresh swipe after the move, are untouched.
+    setTouchStart(null)
+    setSwipeOffset(0)
   }
 
   /**

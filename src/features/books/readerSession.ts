@@ -32,11 +32,21 @@ import type { Book } from '../../core/types'
  * state. `id` is monotonic, so `A → B → A` is a third session and an obsolete
  * callback from the first can be told apart from the one now on screen.
  *
- * A scope that merely becomes UNRESOLVABLE — the replacement book has not
- * landed yet, a children read is in flight again — is not a new scope and ends
- * nothing: there is nothing to attribute a change to yet, and the honest answer
- * is to keep the session that is running. That is also why nothing here resets a
- * clock because data settled.
+ * A committed move of the RAW question — the family, the route's book id or the
+ * locked profile / selected child (`ReaderQuestion`) — ends the old session's
+ * authority AT ONCE, even while the replacement is still unresolved. That is
+ * knowable before anything resolves, and it has to be: letting the first
+ * reader's clock run on through an unresolved replacement bills him for time he
+ * was not reading, and leaves his handlers able to act. An unresolved question
+ * grants no reader authority of its own — it writes nothing, for either reader,
+ * because there is nobody to name yet. What the raw question may never do is say
+ * who the new reader IS; that stays `resolveReaderSession`'s answer.
+ *
+ * So the clocks follow the BOUNDARY, not the data. An initial delay does not
+ * restart the route's clock — a session whose reader or book resolves late is
+ * still credited from the mount, because that is when the reading started — and
+ * a replacement session's clock begins at its own known boundary, not at the
+ * later moment its identity settles.
  *
  * Parent profiles keep the legacy book-owner semantics unchanged: FEAT-95's
  * question — whether a parent reading ALOUD is a participant whose own record

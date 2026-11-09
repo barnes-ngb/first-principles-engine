@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { StrictMode, type ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -287,7 +287,12 @@ function stubSpeech() {
   Object.defineProperty(globalThis, 'SpeechSynthesisUtterance', {
     value: class {
       rate = 1
-      constructor(public text: string) {}
+      // An explicit field + assignment, not a parameter property: the latter
+      // emits runtime code and `erasableSyntaxOnly` rejects it (TS1294).
+      text: string
+      constructor(text: string) {
+        this.text = text
+      }
     },
     configurable: true,
     writable: true,
@@ -303,6 +308,74 @@ function stubSpeech() {
 function tapWordForHelp(word: string) {
   fireEvent.click(screen.getByText(word))
   fireEvent.click(screen.getByRole('button', { name: /Hear it/ }))
+}
+
+type TouchPhase = 'touchstart' | 'touchmove' | 'touchend'
+type SwipeHandlers = Record<TouchPhase, (event: unknown) => void>
+
+const TOUCH_PROP: Record<TouchPhase, string> = {
+  touchstart: 'onTouchStart',
+  touchmove: 'onTouchMove',
+  touchend: 'onTouchEnd',
+}
+
+/**
+ * The CURRENT rendered swipe surface's handlers, re-found on every call.
+ *
+ * The companion of `retainedOnClick` and its opposite: a gesture delivered here
+ * goes through the handler the screen the person is looking at really has, not
+ * one retained from a session that has ended. That is the whole point of the
+ * pending-gesture case — the live handler IS admitted, and what it measured the
+ * finger-up against is the question at issue.
+ */
+function swipeHandlers(): SwipeHandlers {
+  const found: SwipeHandlers[] = []
+  for (const node of Array.from(document.querySelectorAll('*'))) {
+    const bag = node as unknown as Record<string, unknown>
+    const key = Object.keys(bag).find((k) => k.startsWith('__reactProps$'))
+    const props = key ? (bag[key] as Record<string, unknown>) : undefined
+    if (!props) continue
+    if (!Object.values(TOUCH_PROP).every((prop) => typeof props[prop] === 'function')) continue
+    // MUI's `ButtonBase` carries all three touch props for its ripple, and the
+    // back-arrow button renders BEFORE the page area — so "the first node with
+    // touch handlers" is a button, which is how a probe silently stops driving
+    // the gesture it claims to drive. The reader's swipe surface is the one that
+    // is not a control: no pointer or click handling of its own.
+    if (typeof props.onMouseDown === 'function' || typeof props.onClick === 'function') continue
+    found.push({
+      touchstart: props.onTouchStart as (event: unknown) => void,
+      touchmove: props.onTouchMove as (event: unknown) => void,
+      touchend: props.onTouchEnd as (event: unknown) => void,
+    })
+  }
+  if (found.length !== 1) {
+    throw new Error(
+      `expected exactly one rendered swipe surface, found ${found.length} — this probe must drive the real gesture`,
+    )
+  }
+  return found[0]
+}
+
+/**
+ * One phase of a real gesture, through the handler the CURRENT screen has.
+ *
+ * jsdom has no constructible `TouchEvent` and a hand-rolled DOM event does not
+ * survive React's touch delegation, so the probe invokes the rendered props the
+ * way `retainedOnClick` invokes a rendered `onClick` — re-read from the live DOM
+ * each phase, inside `act`, so every state update it causes is committed before
+ * the next assertion. `touchend` carries an empty `touches` like the real event:
+ * the finger is up, and `changedTouches` is where it left.
+ */
+function touch(phase: TouchPhase, clientX: number) {
+  const handlers = swipeHandlers()
+  const point = { clientX, clientY: 0 }
+  const event =
+    phase === 'touchend'
+      ? { touches: [], targetTouches: [], changedTouches: [point] }
+      : { touches: [point], targetTouches: [point], changedTouches: [point] }
+  act(() => {
+    handlers[phase](event)
+  })
 }
 
 /** Jump to a page via the accessible dot indicators. */
@@ -746,6 +819,54 @@ describe('BookReaderPage — one session per committed scope', () => {
     expect(londonRow).toBeDefined()
     expect(String(londonRow?.notes)).not.toContain('completed')
     expect(String(londonRow?.notes)).not.toContain('Mimi')
+  })
+
+  it('does not let a replacement session complete a swipe the previous reader began', async () => {
+    // The phone sequence, exactly: Lincoln puts a finger down on a content page
+    // and drags; the profile is committed to London on the same book; the finger
+    // comes up on the CURRENT screen. The handler that receives it is London's
+    // own and really is live, so no incarnation fence can refuse it — the
+    // gesture itself is the thing that does not belong to his session.
+    putBook('family-1', 'book-1', siblingOwnedBook())
+    const { unmount, rerender } = await openReader()
+    goToPage(2)
+    touch('touchstart', 300)
+    touch('touchmove', 200)
+    minutes(2)
+
+    m.identity = { isChildProfile: true, activeChild: LONDON, isLoading: false, loadFailed: false }
+    rerender(<BookReaderPage />)
+
+    // Past the 50px threshold, and far enough to be a page turn if it counted.
+    touch('touchend', 100)
+
+    // It did not: London is still on the content page he arrived on, and no
+    // completion artifact exists for a read he has not finished.
+    expect(screen.queryByText('Great reading!')).toBeNull()
+    expect(artifactRows()).toHaveLength(0)
+
+    // And the replacement's OWN gesture works, start to finish — the pending
+    // one was dropped, not the swipe lane.
+    touch('touchstart', 300)
+    touch('touchmove', 150)
+    touch('touchend', 100)
+    expect(screen.getByText('Great reading!')).toBeTruthy()
+    await waitFor(() => expect(artifactRows()).toHaveLength(1))
+    expect(artifactRows()[0]).toMatchObject({ childId: LONDON.id })
+    expect(String(artifactRows()[0].content)).toContain('The Brave Dog')
+
+    minutes(2)
+    unmount()
+
+    // Two sessions, each with its own minutes; only London's completed, and the
+    // completion came from his own swipe.
+    expect(hoursRows().map((row) => [row.childId, row.minutes])).toEqual([
+      [LINCOLN.id, 2],
+      [LONDON.id, 2],
+    ])
+    expect(String(hoursRows()[0].notes)).not.toContain('completed')
+    expect(String(hoursRows()[1].notes)).toContain('completed')
+    expect(artifactRows()).toHaveLength(1)
   })
 })
 
