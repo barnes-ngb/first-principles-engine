@@ -465,6 +465,27 @@ of the figure: **one row added, none removed, so `candidates`, `census rows` and
 move by one when the command is next run**, and `census problems` should stay 0 because the row
 exists.
 
+### Re-derived 2026-11-09 UTC (UX-487 — reader session integrity)
+
+BookReaderPage moves from SAFE to BIND because a contributor book can belong to a
+sibling. Its reader session owns record-producing actions, and an unfinished swipe
+is discarded when the committed reader question changes. useBook remains SAFE:
+its reader-only editing-hours opt-out does not change book ownership or editor saves.
+
+Output from the committed census script on the frozen reader source:
+
+```text
+source files scanned (non-test, under src/, excluding src/test/): 889
+files reading useActiveChild: 82
+candidates: 99 (hook arm 48, prop arm 51)
+files rendering an in-page <ChildSelector>: 0
+feature files referencing setActiveChildId (any in-page child control): 3
+census rows: 99
+by verdict: {"BIND":11,"HIDE":3,"RESET":19,"GATE":10,"SAFE":56}
+by severity: {"P1":0,"P2":0,"P3":0,"—":99}
+census problems: 0
+```
+
 ## 5. The registry
 
 | Surface (file) | Child-scoped state it holds | What it writes, and to which collection | Reachable by a switch today? | Verdict | Severity |
