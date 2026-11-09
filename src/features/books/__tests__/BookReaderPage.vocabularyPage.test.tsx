@@ -36,6 +36,7 @@ vi.mock('../../../core/hooks/useActiveChild', () => ({
     activeChild: { id: 'child-1', name: 'London', birthdate: '2020-01-01' },
     children: [],
     isChildProfile: true,
+    childrenFamilyId: 'family-1',
   }),
 }))
 

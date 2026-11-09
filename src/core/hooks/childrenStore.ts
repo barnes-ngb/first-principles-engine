@@ -29,10 +29,19 @@
 
 import type { Child } from '../types'
 
-let current: Child[] = []
+interface ChildrenSnapshot {
+  children: Child[]
+  familyId: string | null
+}
+
+let current: ChildrenSnapshot = { children: [], familyId: null }
 const listeners = new Set<() => void>()
 
 export function getSharedChildren(): Child[] {
+  return current.children
+}
+
+export function getSharedChildrenSnapshot(): ChildrenSnapshot {
   return current
 }
 
@@ -48,9 +57,9 @@ function notify(): void {
  * re-renders on every mount's load. Several instances load the same family
  * within a frame of each other, so this is the common case, not the edge one.
  */
-export function setSharedChildren(next: Child[]): void {
-  if (sameList(current, next)) return
-  current = next
+export function setSharedChildren(next: Child[], familyId: string | null = null): void {
+  if (current.familyId === familyId && sameList(current.children, next)) return
+  current = { children: next, familyId }
   notify()
 }
 
@@ -61,15 +70,19 @@ export function setSharedChildren(next: Child[]): void {
  * Idempotent by id, so two consumers reporting the same new child cannot
  * duplicate it.
  */
-export function addSharedChild(child: Child): void {
-  if (current.some((c) => c.id === child.id)) return
-  current = [...current, child]
+export function addSharedChild(child: Child, familyId = current.familyId): void {
+  if (current.children.some((c) => c.id === child.id)) return
+  // Only a load can certify a list after it has mixed family scopes.
+  current = {
+    children: [...current.children, child],
+    familyId: current.familyId === familyId ? familyId : null,
+  }
   notify()
 }
 
 /** Visible for tests: forget the cache so each case starts from nothing. */
 export function __resetSharedChildren(): void {
-  current = []
+  current = { children: [], familyId: null }
   notify()
 }
 
