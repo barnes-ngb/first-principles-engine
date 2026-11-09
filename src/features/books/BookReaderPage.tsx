@@ -309,6 +309,10 @@ export default function BookReaderPage() {
   // reader; that stays `resolveReaderSession`'s answer, from the resolved child.
   const documentKey = readerDocumentKey(familyId, bookId)
   const identityKey = readerIdentityKey(isChildProfile === true, rawProfile, childId)
+  // A raw profile or document move starts a new clock even before either reader
+  // resolves. A child ID arriving for the same profile is identity resolution.
+  const clockScopeKey = documentKey + '|' + readerIdentityKey(isChildProfile === true, rawProfile, '')
+  const clockScopeRef = useRef(clockScopeKey)
   const [askedQuestion, setAskedQuestion] = useState<ReaderQuestion>(() => ({
     id: 1,
     documentKey,
@@ -669,6 +673,12 @@ export default function BookReaderPage() {
   // replacement may not inherit (completion, the audience stamp, the deferred
   // questions), after the outgoing session has been written from it.
   useEffect(() => {
+    // The outgoing cleanup has already finalized its own time. Start the new
+    // scope here even if both this session and the previous one were pending.
+    if (clockScopeRef.current !== clockScopeKey) {
+      clockScopeRef.current = clockScopeKey
+      sessionStartRef.current = Date.now()
+    }
     const running = session
     if (running) {
       completedRef.current = false
@@ -679,7 +689,7 @@ export default function BookReaderPage() {
     return () => {
       finalizeSession(running)
     }
-  }, [session, finalizeSession])
+  }, [session, finalizeSession, clockScopeKey])
 
   // Detect book completion — reaching the last page (back cover).
   // Non-call mode writes the Share artifact immediately (unchanged behavior). Call mode

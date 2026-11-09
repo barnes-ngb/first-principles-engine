@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { StrictMode, type ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { ProfileContext } from '../../core/profile/context'
 import { computeHoursSummary } from '../records/records.logic'
 import type { HoursEntry } from '../../core/types'
 
@@ -647,6 +648,34 @@ describe('BookReaderPage — an actor that is not resolved is not guessed', () =
     // minutes long, not the one minute since the actor landed.
     expect(hoursRows()[0]).toMatchObject({ childId: LINCOLN.id, minutes: 2 })
     expect(artifactRows()[0]).toMatchObject({ childId: LINCOLN.id })
+  })
+
+  it('drops the abandoned clock when the profile changes before either reader resolves', async () => {
+    const renderReader = (profile: 'lincoln' | 'london') => (
+      <ProfileContext.Provider value={{
+        profile, themeMode: 'family', canEdit: false,
+        selectProfile: vi.fn(), setThemeMode: vi.fn(), logout: vi.fn(),
+      }}>
+        <BookReaderPage />
+      </ProfileContext.Provider>
+    )
+    m.identity = { isChildProfile: true, activeChild: undefined, isLoading: true, loadFailed: false }
+    const { rerender, unmount } = render(renderReader('lincoln'))
+    await waitForBook(/Brave Dog/)
+    minutes(2)
+
+    rerender(renderReader('london'))
+    minutes(1)
+    m.identity = { isChildProfile: true, activeChild: LONDON, isLoading: false, loadFailed: false }
+    rerender(renderReader('london'))
+    goToBackCover()
+    minutes(1)
+    unmount()
+
+    expect(hoursRows()).toHaveLength(1)
+    expect(hoursRows()[0]).toMatchObject({ childId: LONDON.id, minutes: 2 })
+    expect(countedMinutes(LINCOLN.id)).toBe(0)
+    expect(countedMinutes(LONDON.id)).toBe(2)
   })
 
   it('credits the whole session once a DELAYED book resolves mid-read', async () => {
