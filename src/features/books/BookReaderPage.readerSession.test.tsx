@@ -3,6 +3,7 @@ import { StrictMode, type ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ProfileContext } from '../../core/profile/context'
+import { formatDateYmd } from '../../core/utils/format'
 import { computeHoursSummary } from '../records/records.logic'
 import type { HoursEntry } from '../../core/types'
 
@@ -442,7 +443,9 @@ describe('BookReaderPage — the reader of record (child profile)', () => {
       childId: LINCOLN.id,
       minutes: 2,
       subjectBucket: 'LanguageArts',
-      date: today(),
+      // The reader's own local day at the moment the session ended, through the
+      // app's own local-day helper on this frozen clock.
+      date: formatDateYmd(new Date(clock)),
     })
     expect(String(hoursRows()[0].notes)).toContain('completed')
     expect(String(hoursRows()[0].notes)).not.toContain('page editing')
@@ -1214,5 +1217,72 @@ describe('BookReaderPage — a parent reader keeps the legacy book-owner record'
     // part of a book-owner session's scope.
     expect(hoursRows()).toHaveLength(1)
     expect(hoursRows()[0]).toMatchObject({ childId: LINCOLN.id, minutes: 2 })
+  })
+})
+
+/**
+ * WHICH DAY a finished read belongs to: the reader's LOCAL day at the instant the
+ * session ended, not the UTC day, which filed an evening read on tomorrow and so
+ * into the next Sunday–Saturday week.
+ *
+ * The controlled boundary: these cases alone pin the three local calendar fields
+ * `formatDateYmd` reads — `getFullYear` / `getMonth` / `getDate` — to a fixed
+ * Chicago standard offset (US DST ended 2026-11-01), so the expected days hold
+ * whatever zone the host runs in. Nothing else about `Date` is touched: the UTC
+ * readers stay native, which is why the UTC reward dedup keys still read as UTC
+ * here. Real calendar and weekly-fold behaviour is verified in a browser.
+ *
+ * Restoring the UTC date fails the evening case. The afternoon and local-midnight controls still pass.
+ */
+describe('BookReaderPage — the reading-hours row is dated by the reader’s local day', () => {
+  const CHICAGO_CST_OFFSET_MINUTES = -360
+
+  beforeEach(() => {
+    const shifted = (instant: Date) =>
+      new Date(instant.getTime() + CHICAGO_CST_OFFSET_MINUTES * 60_000)
+    vi.spyOn(Date.prototype, 'getFullYear').mockImplementation(function (this: Date) {
+      return shifted(this).getUTCFullYear()
+    })
+    vi.spyOn(Date.prototype, 'getMonth').mockImplementation(function (this: Date) {
+      return shifted(this).getUTCMonth()
+    })
+    vi.spyOn(Date.prototype, 'getDate').mockImplementation(function (this: Date) {
+      return shifted(this).getUTCDate()
+    })
+  })
+
+  it.each([
+    // starts (UTC)                  | ends, Chicago local        | stored day
+    ['2026-11-07T20:00:00.000Z', 'Saturday 2:02 p.m.', '2026-11-07'],
+    ['2026-11-08T01:00:00.000Z', 'Saturday 7:02 p.m.', '2026-11-07'],
+    ['2026-11-08T05:59:00.000Z', 'Sunday 12:01 a.m.', '2026-11-08'],
+  ])('a two-minute read starting %s and ending %s local is dated %s', async (startsAt, _ends, expectedDay) => {
+    clock = Date.parse(startsAt)
+    const { unmount } = await openReader()
+    goToBackCover()
+    minutes(2)
+    unmount()
+
+    expect(hoursRows()).toHaveLength(1)
+    expect(hoursRows()[0]).toMatchObject({
+      childId: LINCOLN.id,
+      minutes: 2,
+      subjectBucket: 'LanguageArts',
+      date: expectedDay,
+    })
+    expect(countedMinutes(LINCOLN.id)).toBe(2)
+
+    // Untouched: the reward amounts and their UTC daily dedup keys.
+    expect(m.xp.mock.calls[0].slice(0, 5)).toEqual([
+      'family-1',
+      LINCOLN.id,
+      'BOOK_READ',
+      15,
+      `book_book-1_${today()}`,
+    ])
+    expect(m.diamond.mock.calls[0][0]).toMatchObject({
+      amount: 3,
+      dedupKey: `book_book-1_${today()}-diamond`,
+    })
   })
 })
