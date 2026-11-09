@@ -486,6 +486,10 @@ export default function BookshelfPage() {
               if (val) setBookFilter(val)
             }}
             size="small"
+            // The group is otherwise one unbreakable box, so four counted tabs
+            // can exceed a narrow viewport. Tabs, order, counts and meaning are
+            // unchanged; only the row may become two.
+            sx={{ flexWrap: 'wrap', maxWidth: '100%' }}
           >
             <ToggleButton value="all" sx={{ textTransform: 'none', minHeight: 36 }}>
               All ({books.length})
@@ -548,7 +552,14 @@ export default function BookshelfPage() {
       {/* Creator filter (parent view: all / mom's books / kids' books).
           Count-bearing, so it waits for an answer like the tabs above. */}
       {isParent && shelfSettled && (
-        <Stack direction="row" spacing={1} sx={{ mb: 1 }} alignItems="center">
+        <Stack
+          direction="row"
+          spacing={1}
+          sx={{ mb: 1 }}
+          alignItems="center"
+          flexWrap="wrap"
+          useFlexGap
+        >
           <Typography variant="caption" color="text.secondary" sx={{ alignSelf: 'center', mr: 0.5 }}>
             Made by:
           </Typography>
@@ -580,7 +591,7 @@ export default function BookshelfPage() {
           parent's family-wide answer and is not what that query asks for, so a
           change here neither re-reads nor reloads anything. */}
       {isParent && shelfSettled && allChildren.length > 1 && (
-        <Stack direction="row" spacing={1} sx={{ mb: 1 }}>
+        <Stack direction="row" spacing={1} sx={{ mb: 1 }} flexWrap="wrap" useFlexGap>
           <Chip
             label="All"
             onClick={() => setChildFilter('all')}
@@ -713,9 +724,15 @@ export default function BookshelfPage() {
         <Box
           sx={{
             display: 'grid',
+            // `1fr` is `minmax(auto, 1fr)`, so a card's content could widen its
+            // own track and push the second card past the viewport edge. The
+            // phone track has an explicit floor instead: two columns at 390px,
+            // one on a narrower phone, never wider than the shelf. Tablet and
+            // desktop keep 2 and 3 columns with a 0 track minimum.
             gridTemplateColumns: {
-              xs: 'repeat(2, 1fr)',
-              md: 'repeat(3, 1fr)',
+              xs: 'repeat(auto-fill, minmax(140px, 1fr))',
+              sm: 'repeat(2, minmax(0, 1fr))',
+              md: 'repeat(3, minmax(0, 1fr))',
             },
             gap: 2,
           }}
@@ -737,6 +754,8 @@ export default function BookshelfPage() {
               alignItems: 'center',
               justifyContent: 'center',
               minHeight: 140,
+              // A grid item's `min-width: auto` is content-based.
+              minWidth: 0,
               '&:hover': { borderColor: 'primary.light', bgcolor: 'action.hover' },
             }}
           >
@@ -815,11 +834,19 @@ export default function BookshelfPage() {
                   minHeight: 140,
                   maxWidth: 200,
                   width: '100%',
+                  // The card takes its track's width rather than setting it.
+                  minWidth: 0,
                 }}
               >
-                {/* 3-dot menu */}
+                {/* The card's one action door. It was a 30 × 30px icon with no
+                    accessible name; it now names its book and is the 44px this
+                    app holds every control to. `stopPropagation` is unchanged:
+                    the tap opens the menu, never the card underneath. */}
                 <IconButton
                   size="small"
+                  aria-label={`Options for ${book.title}`}
+                  aria-haspopup="true"
+                  aria-expanded={!!menuAnchor && menuBookId === (book.id ?? null)}
                   onClick={(e) => {
                     e.stopPropagation()
                     setMenuAnchor(e.currentTarget)
@@ -830,8 +857,16 @@ export default function BookshelfPage() {
                     top: 4,
                     right: 4,
                     zIndex: 1,
+                    width: 44,
+                    height: 44,
                     bgcolor: 'rgba(255,255,255,0.7)',
                     '&:hover': { bgcolor: 'rgba(255,255,255,0.9)' },
+                    '&:focus-visible': {
+                      outline: '3px solid',
+                      outlineColor: 'primary.main',
+                      outlineOffset: 1,
+                      bgcolor: 'rgba(255,255,255,0.95)',
+                    },
                   }}
                 >
                   <MoreVertIcon fontSize="small" />
@@ -880,9 +915,14 @@ export default function BookshelfPage() {
                   variant="subtitle2"
                   sx={{
                     fontWeight: 600,
-                    overflow: 'hidden',
+                    minWidth: 0,
+                    // Phone: the whole title wraps, breaking anywhere so a long
+                    // unbroken word stays inside the card. Tablet and desktop
+                    // keep the existing single ellipsised line.
+                    overflow: { xs: 'visible', sm: 'hidden' },
                     textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
+                    whiteSpace: { xs: 'normal', sm: 'nowrap' },
+                    overflowWrap: 'anywhere',
                     ...(isLincoln
                       ? { fontFamily: '"Press Start 2P", monospace', fontSize: '0.55rem' }
                       : {}),
@@ -895,7 +935,15 @@ export default function BookshelfPage() {
                   direction="row"
                   spacing={0.5}
                   alignItems="center"
-                  sx={{ mt: 'auto', pt: 1 }}
+                  sx={{
+                    mt: 'auto',
+                    pt: 1,
+                    minWidth: 0,
+                    // A Chip label already ellipsises; it lacked a ceiling, so
+                    // the widest label could set the card's width. One rule for
+                    // every label on this row.
+                    '& .MuiChip-root': { maxWidth: '100%' },
+                  }}
                   flexWrap="wrap"
                   useFlexGap
                 >
@@ -995,7 +1043,12 @@ export default function BookshelfPage() {
                       data-testid={`draft-blocked-${book.id}`}
                       variant="caption"
                       color="text.secondary"
-                      sx={{ ml: 'auto', textAlign: 'right' }}
+                      sx={{
+                        ml: 'auto',
+                        textAlign: 'right',
+                        minWidth: 0,
+                        overflowWrap: 'anywhere',
+                      }}
                     >
                       {draftBlockedLine}
                     </Typography>
