@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
@@ -36,6 +36,12 @@ let booksFixture: Book[] = []
 // The read's own answer, stated as the hook states it: a settled, successful
 // one. `phase` is the explicit half — a stub without it is read as *waiting*
 // rather than as a ready shelf, which is the fail-closed direction.
+// Stable write spies, so a test can assert that merely opening a card's
+// options menu writes nothing. Lazily read inside the hook stub, which is why
+// the hoisted factory may close over them.
+const createBookMock = vi.fn()
+const deleteBookMock = vi.fn()
+
 vi.mock('../useBook', () => ({
   useBookshelf: () => ({
     books: booksFixture,
@@ -43,8 +49,8 @@ vi.mock('../useBook', () => ({
     phase: 'ready',
     error: false,
     retry: vi.fn(),
-    createBook: vi.fn(),
-    deleteBook: vi.fn(),
+    createBook: createBookMock,
+    deleteBook: deleteBookMock,
   }),
 }))
 
@@ -78,6 +84,8 @@ vi.mock('../../../components/Page', () => ({
 
 beforeEach(() => {
   navigateMock.mockReset()
+  createBookMock.mockReset()
+  deleteBookMock.mockReset()
   booksFixture = []
   currentProfile = 'parents'
 })
@@ -247,5 +255,91 @@ describe('BookshelfPage — Per-Page Review wiring (PR-B)', () => {
     await user.click(screen.getByTestId('make-book-choice-with-shelly'))
     await user.click(screen.getByRole('button', { name: /commit-trigger/i }))
     expect(navigateMock).toHaveBeenCalledWith('/books/committed-book')
+  })
+})
+
+// ── Phone gallery: the card's options action ──────────────────────
+//
+// The three-dot control had no accessible name and measured 30 × 30 CSS px.
+// These pin the name, the book identity it carries, and the existing guards.
+// The widths themselves are a browser measurement, made separately.
+
+describe('BookshelfPage — card options action', () => {
+  it('gives every card a named options button tied to its own book', () => {
+    booksFixture = [
+      makeBook({ id: 'b1', title: 'First Book' }),
+      makeBook({ id: 'b2', title: 'Second Book' }),
+    ]
+    render(<BookshelfPage />)
+    expect(screen.getByRole('button', { name: 'Options for First Book' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Options for Second Book' })).toBeTruthy()
+    // One per card, and none left unnamed.
+    expect(screen.getAllByRole('button', { name: /^Options for / })).toHaveLength(2)
+  })
+
+  it('opens the menu without opening the card underneath or writing anything', async () => {
+    const user = userEvent.setup()
+    booksFixture = [makeBook({ id: 'b1', title: 'First Book' })]
+    render(<BookshelfPage />)
+    await user.click(screen.getByRole('button', { name: 'Options for First Book' }))
+    // The menu is open...
+    expect(screen.getByRole('menuitem', { name: 'Read' })).toBeTruthy()
+    // ...and the card's own tap did not also fire, nor did any write.
+    expect(navigateMock).not.toHaveBeenCalled()
+    expect(createBookMock).not.toHaveBeenCalled()
+    expect(deleteBookMock).not.toHaveBeenCalled()
+  })
+
+  it('reports its open state and returns focus to the button on Escape', async () => {
+    const user = userEvent.setup()
+    booksFixture = [makeBook({ id: 'b1', title: 'First Book' })]
+    render(<BookshelfPage />)
+    const trigger = screen.getByRole('button', { name: 'Options for First Book' })
+    expect(trigger.getAttribute('aria-haspopup')).toBe('true')
+    expect(trigger.getAttribute('aria-expanded')).toBe('false')
+    await user.click(trigger)
+    expect(trigger.getAttribute('aria-expanded')).toBe('true')
+    await user.keyboard('{Escape}')
+    await waitFor(() => {
+      expect(screen.queryByRole('menuitem', { name: 'Read' })).toBeNull()
+    })
+    expect(trigger.getAttribute('aria-expanded')).toBe('false')
+    expect(document.activeElement).toBe(trigger)
+  })
+
+  it('keeps the menu pointed at the book whose own button was pressed', async () => {
+    const user = userEvent.setup()
+    booksFixture = [
+      makeBook({ id: 'b1', title: 'First Book' }),
+      makeBook({ id: 'b2', title: 'Second Book' }),
+    ]
+    render(<BookshelfPage />)
+    await user.click(screen.getByRole('button', { name: 'Options for Second Book' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Read' }))
+    expect(navigateMock).toHaveBeenCalledWith('/books/b2/read')
+  })
+
+  it('keeps the existing actions and their order, Delete last', async () => {
+    const user = userEvent.setup()
+    booksFixture = [makeBook({ id: 'b1', title: 'First Book', status: 'complete' })]
+    render(<BookshelfPage />)
+    await user.click(screen.getByRole('button', { name: 'Options for First Book' }))
+    const items = screen.getAllByRole('menuitem').map((el) => el.textContent)
+    expect(items[0]).toBe('Read')
+    expect(items[1]).toBe('Story Call')
+    expect(items[2]).toBe('Edit')
+    expect(items[3]).toBe('Make a PDF')
+    expect(items[items.length - 1]).toBe('Delete')
+  })
+
+  it('names the button from the title even when the title is long and unbroken', () => {
+    currentProfile = 'london'
+    booksFixture = [makeBook({ id: 'b1', title: 'Titlewordwithabsolutelynospacesinitatall' })]
+    render(<BookshelfPage />)
+    expect(
+      screen.getByRole('button', {
+        name: 'Options for Titlewordwithabsolutelynospacesinitatall',
+      }),
+    ).toBeTruthy()
   })
 })
