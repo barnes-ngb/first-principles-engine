@@ -160,6 +160,7 @@ export default function BookReaderPage() {
     activeChild,
     isChildProfile,
     isLoading: identityLoading,
+    childrenFamilyId,
     loadFailed: identityLoadFailed,
   } = useActiveChild()
   const childName = activeChild?.name ?? ''
@@ -174,7 +175,8 @@ export default function BookReaderPage() {
   // A failed children read keeps `isLoading` true on purpose (`useChildren`), so
   // "settled" means ANSWERED WITH CHILDREN and the failure is its own word.
   const identityFailed = identityLoadFailed === true
-  const identitySettled = identityLoading !== true && !identityFailed
+  // The shared list can still hold the previous family while a new book loads.
+  const identitySettled = identityLoading !== true && !identityFailed && childrenFamilyId === familyId
 
   // Story Call mode (?call=1): a screen-shared read-aloud to a far-away grandparent.
   // Presentation only — larger art/text, parent/utility chrome hidden, Ask-Me back

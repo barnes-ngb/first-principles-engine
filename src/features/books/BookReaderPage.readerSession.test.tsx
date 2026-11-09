@@ -60,6 +60,7 @@ const m = vi.hoisted(() => {
     words: [] as string[],
     search: '',
     familyId: 'family-1',
+    childrenFamilyId: null as string | null,
     bookId: 'book-1' as string | undefined,
     /** `${familyId}|${bookId}` → the document, or absent for "no such book". */
     books: new Map<string, Record<string, unknown>>(),
@@ -93,6 +94,7 @@ vi.mock('../../core/hooks/useActiveChild', () => ({
     setActiveChildId: () => {},
     isChildProfile: m.identity.isChildProfile,
     isLoading: m.identity.isLoading,
+    childrenFamilyId: m.childrenFamilyId ?? m.familyId,
     loadFailed: m.identity.loadFailed,
     addChild: () => {},
   }),
@@ -407,6 +409,7 @@ beforeEach(() => {
   m.words.length = 0
   m.search = ''
   m.familyId = 'family-1'
+  m.childrenFamilyId = null
   m.bookId = 'book-1'
   m.books = new Map()
   putBook('family-1', 'book-1', bookDoc())
@@ -1053,6 +1056,37 @@ describe('BookReaderPage — a replacement document must prove it loaded', () =>
     // first session's elapsed: 2 waiting + 2 reading, not 2 + 2 + 2.
     expect(hoursRows()[1]).toMatchObject({ childId: LINCOLN.id, minutes: 4 })
     expect(String(hoursRows()[1].notes)).toContain('Replacement family book')
+  })
+})
+
+describe('BookReaderPage — child-family provenance', () => {
+  it('waits for the new family child list even after its book is visible', async () => {
+    putBook('family-1', 'book-1', siblingOwnedBook())
+    putBook('family-2', 'book-1', siblingOwnedBook({ title: 'New family book' }))
+    const { rerender, unmount } = await openReader()
+    minutes(2)
+
+    // The book read settles first. The shared children cache still holds the
+    // previous family, even though the existing loading flag remains false.
+    m.childrenFamilyId = 'family-1'
+    m.familyId = 'family-2'
+    rerender(<BookReaderPage />)
+    await waitForBook(/New family book/)
+    goToBackCover()
+    expect(artifactRows()).toHaveLength(0)
+    expect(hoursRows()).toEqual([expect.objectContaining({ childId: LINCOLN.id, minutes: 2 })])
+
+    const replacement = { ...LINCOLN, id: 'family-2-lincoln' }
+    m.childrenFamilyId = 'family-2'
+    m.identity = { isChildProfile: true, activeChild: replacement, isLoading: false, loadFailed: false }
+    rerender(<BookReaderPage />)
+    goToBackCover()
+    minutes(2)
+    unmount()
+
+    expect(artifactRows()).toEqual([expect.objectContaining({ childId: replacement.id })])
+    expect(hoursRows()[1]).toMatchObject({ childId: replacement.id, minutes: 2 })
+    expect(m.ops.filter((op) => op.collection === 'hours').map((op) => op.family)).toEqual(['family-1', 'family-2'])
   })
 })
 
