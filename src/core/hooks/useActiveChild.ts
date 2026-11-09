@@ -12,6 +12,8 @@ export interface UseActiveChildResult {
   activeChild: Child | undefined
   /** All children in the family. */
   children: Child[]
+  /** Family whose read produced the current shared children list. */
+  childrenFamilyId?: string | null
   /** Change active child. No-op for child profiles (Lincoln/London). */
   setActiveChildId: (id: string) => void
   /** True when the current profile is a child (Lincoln/London). */
@@ -50,6 +52,7 @@ export function useActiveChild(): UseActiveChildResult {
     addChild,
     loadFailed,
     retryLoad,
+    childrenFamilyId,
   } = useChildren()
 
   const isChildProfile =
@@ -83,6 +86,7 @@ export function useActiveChild(): UseActiveChildResult {
     activeChildId,
     activeChild,
     children,
+    childrenFamilyId,
     setActiveChildId,
     isChildProfile,
     isLoading,

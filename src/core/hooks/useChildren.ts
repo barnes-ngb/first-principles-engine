@@ -14,7 +14,7 @@ import {
 } from './activeChildStore'
 import {
   addSharedChild,
-  getSharedChildren,
+  getSharedChildrenSnapshot,
   setSharedChildren,
   subscribeSharedChildren,
 } from './childrenStore'
@@ -97,6 +97,8 @@ export function dedupeChildrenByName<T extends { name: string; createdAt?: strin
 
 export interface UseChildrenResult {
   children: Child[]
+  /** Family whose read produced the current shared children list. */
+  childrenFamilyId?: string | null
   selectedChildId: string
   setSelectedChildId: (id: string) => void
   isLoading: boolean
@@ -145,7 +147,10 @@ export function useChildren(): UseChildrenResult {
   // the instance whose selector was tapped and every other mounted consumer
   // held a list without the new child — resolving `activeChild` to `undefined`
   // and rendering its empty branch until a reload. See `childrenStore.ts`.
-  const children = useSyncExternalStore(subscribeSharedChildren, getSharedChildren)
+  const { children, familyId: childrenFamilyId } = useSyncExternalStore(
+    subscribeSharedChildren,
+    getSharedChildrenSnapshot,
+  )
   // Selected child lives in a shared external store so every consumer
   // (AppShell header, Plan My Week selector, …) sees the same value and
   // re-renders together — see activeChildStore.ts.
@@ -215,7 +220,7 @@ export function useChildren(): UseChildrenResult {
         loaded = dedupeChildrenByName([...loaded, ...created])
       }
 
-      setSharedChildren(loaded)
+      setSharedChildren(loaded, familyId)
 
       // Restore persisted child or auto-select based on profile. The shared
       // store is seeded from localStorage at import, so getActiveChildId()
@@ -252,12 +257,13 @@ export function useChildren(): UseChildrenResult {
 
   const addChild = useCallback((child: Child) => {
     // Reaches every mounted consumer, not just this one.
-    addSharedChild(child)
+    addSharedChild(child, familyId)
     setSelectedChildId(child.id)
-  }, [setSelectedChildId])
+  }, [familyId, setSelectedChildId])
 
   return {
     children,
+    childrenFamilyId,
     selectedChildId,
     setSelectedChildId,
     isLoading,

@@ -23,7 +23,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 // `vi.hoisted` is the only place these can live. The fixture children are
 // Lincoln and London; Shelly is the parent whose composer gate this read gates.
 const { reads, getDocsMock, seedMock } = vi.hoisted(() => {
-  const reads: { reject: boolean } = { reject: false }
+  const reads = { reject: false, familyId: 'fam-1' }
   const docsFor = (rows: { id: string; name: string }[]) => ({
     docs: rows.map((r) => ({ id: r.id, data: () => ({ name: r.name }) })),
   })
@@ -46,7 +46,7 @@ const { reads, getDocsMock, seedMock } = vi.hoisted(() => {
 vi.mock('firebase/firestore', () => ({ getDocs: () => getDocsMock() }))
 vi.mock('../firebase/firestore', () => ({ childrenCollection: () => ({}) }))
 vi.mock('../firebase/seedProfileChildren', () => ({ seedProfileChildren: seedMock }))
-vi.mock('../auth/useAuth', () => ({ useFamilyId: () => 'fam-1' }))
+vi.mock('../auth/useAuth', () => ({ useFamilyId: () => reads.familyId }))
 vi.mock('../profile/useProfile', () => ({ useProfile: () => ({ profile: 'parents' }) }))
 
 import { setActiveChildIdShared } from './activeChildStore'
@@ -54,12 +54,13 @@ import { setSharedChildren } from './childrenStore'
 import { useChildren } from './useChildren'
 
 function Probe() {
-  const { children, isLoading, loadFailed, retryLoad, selectedChildId } = useChildren()
+  const { children, childrenFamilyId, isLoading, loadFailed, retryLoad, selectedChildId } = useChildren()
   return (
     <div>
       <span data-testid="loading">{String(isLoading)}</span>
       <span data-testid="failed">{String(Boolean(loadFailed))}</span>
       <span data-testid="count">{children.length}</span>
+      <span data-testid="family">{childrenFamilyId}</span>
       <span data-testid="selected">{selectedChildId}</span>
       <button onClick={() => retryLoad?.()}>retry</button>
     </div>
@@ -70,6 +71,7 @@ const text = (id: string) => screen.getByTestId(id).textContent
 
 beforeEach(() => {
   reads.reject = false
+  reads.familyId = 'fam-1'
   getDocsMock.mockClear()
   seedMock.mockClear()
   setSharedChildren([])
@@ -121,6 +123,30 @@ describe('a children read that rejects', () => {
     expect(text('count')).toBe('2')
     expect(text('selected')).toBe('child-lincoln')
     expect(getDocsMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('changes the child-list provenance only when the replacement family answers', async () => {
+    const { rerender } = render(<Probe />)
+    await waitFor(() => expect(text('family')).toBe('fam-1'))
+
+    let release: (() => void) | undefined
+    getDocsMock.mockImplementationOnce(async () => {
+      await new Promise<void>((resolve) => { release = resolve })
+      // Identical IDs and names are not proof that two families are the same.
+      return {
+        docs: [
+          { id: 'child-lincoln', data: () => ({ name: 'Lincoln' }) },
+          { id: 'child-london', data: () => ({ name: 'London' }) },
+        ],
+      }
+    })
+    reads.familyId = 'fam-2'
+    rerender(<Probe />)
+    expect(text('family')).toBe('fam-1')
+    expect(release).toBeTypeOf('function')
+    release?.()
+    await waitFor(() => expect(text('family')).toBe('fam-2'))
+    expect(text('count')).toBe('2')
   })
 
   it('does not report a failure from a load the unmount made obsolete', async () => {
