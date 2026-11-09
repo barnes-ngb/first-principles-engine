@@ -33,6 +33,7 @@ import { useFamilyId } from '../../core/auth/useAuth'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { ProfileContext } from '../../core/profile/context'
 import { computeAge } from '../../core/profile/childIdentity'
+import { formatDateYmd } from '../../core/utils/format'
 import { artifactsCollection, hoursCollection } from '../../core/firebase/firestore'
 import type { Book, BookPage } from '../../core/types'
 import { EngineStage, EvidenceType, SubjectBucket } from '../../core/types/enums'
@@ -71,11 +72,17 @@ import { STORY_CALL_AUDIENCES } from './storyCallLabels'
 
 // ── Reading session helpers ──────────────────────────────────────
 
-/** Log reading time as compliance hours */
+/**
+ * Log reading time as compliance hours.
+ *
+ * `date` is the session's own LOCAL calendar day at the instant it ended, passed
+ * in by the caller — a UTC day filed an evening read on tomorrow.
+ */
 async function logReadingHours(
   familyId: string,
   childId: string,
   minutes: number,
+  date: string,
   bookTitle: string,
   completed: boolean,
   pagesRead: number,
@@ -84,7 +91,6 @@ async function logReadingHours(
   audience?: string,
 ): Promise<void> {
   if (minutes < 1) return
-  const date = new Date().toISOString().slice(0, 10)
 
   const notes = buildReadingHoursNotes(
     bookTitle,
@@ -630,10 +636,13 @@ export default function BookReaderPage() {
     finalizedSessionRef.current = ending.id
 
     const pagesViewed = pagesViewedRef.current
+    // Dated by the local day of `endedAt` — the same boundary the elapsed
+    // minutes were measured to, not a second clock read inside the writer.
     void logReadingHours(
       ending.familyId,
       ending.readerChildId,
       elapsed,
+      formatDateYmd(new Date(endedAt)),
       endedBook.title,
       completedRef.current,
       pagesViewed.sessionId === ending.id ? pagesViewed.pages.size : 0,
@@ -645,7 +654,9 @@ export default function BookReaderPage() {
     // Award XP for reading session (once per book per day). The dedup key is
     // unchanged; the ledger's own doc id is `{childId}_{dedupKey}`, so pointing
     // the award at the reader keeps the per-child-per-book-per-day guard exactly
-    // as it was — and lets each brother earn once for the same book.
+    // as it was — and lets each brother earn once for the same book. This key
+    // stays on the UTC day: which awards count as one award is reward policy,
+    // outside the hours-row local-day repair above.
     const date = new Date().toISOString().slice(0, 10)
     void addXpEvent(
       ending.familyId,
