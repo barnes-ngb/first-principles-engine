@@ -1,4 +1,4 @@
-import { useEffect, useState, useSyncExternalStore } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { doc, getDocs, query, updateDoc, where, orderBy, limit as firestoreLimit } from 'firebase/firestore'
 import Alert from '@mui/material/Alert'
@@ -718,8 +718,11 @@ function MineTripExit({ generation }: { generation: number }) {
         navigate(libraryReturnPath(returning))
       }}
       sx={{
-        fontFamily: MC.font,
-        fontSize: '0.4rem',
+        // NEW child-facing text, so this feature's readability rule applies and
+        // the legacy Mine's 0.4rem pixel font around it does not: plain, at
+        // least 14px, on the 44px target it already had.
+        fontSize: '14px',
+        lineHeight: 1.45,
         color: MC.stone,
         textTransform: 'none',
         minHeight: 44,
@@ -787,6 +790,30 @@ function MineTripSuggestion({
         (m) => m.domain === agreed.domain && m.questMode === agreed.questMode,
       )
     : undefined
+
+  /**
+   * The agreement this card most recently COMMITTED.
+   *
+   * Keying this component protects it from a change of IDENTITY; the host's own
+   * guard protects the start from a change of identity or journey. Neither sees
+   * the third case, which is the one that reached a real AI call: the identity
+   * and the journey are untouched and the OFFER goes away — the model is
+   * removed, the read fails, or the recommendation moves to another mode — while
+   * this component stays mounted. The card stops rendering, but a callback a
+   * test (or a browser) already captured still held the old agreement.
+   *
+   * Written in a layout effect, not during render: a render React abandons must
+   * not be able to authorise a start, and a commit that renders no card records
+   * `null`, which refuses.
+   */
+  const committed = useRef<{ settled: boolean; agreed: MineInvitation | null }>({
+    settled: false,
+    agreed: null,
+  })
+  useLayoutEffect(() => {
+    committed.current = { settled, agreed }
+  }, [settled, agreed])
+
   if (!agreed || !config) return null
 
   return (
@@ -796,9 +823,20 @@ function MineTripSuggestion({
         // no level, count or score in the offer.
         config={{ ...config, label: agreed.label, description: config.label }}
         suggested
-        // The host re-checks the identity and the journey before starting; this
-        // render's own agreement is what says the mode is still the right one.
-        onSelect={() => onStart(config, generation)}
+        // Three things have to hold, and this is the one only this component
+        // can check: the offer committed on screen is still the offer this
+        // handler was drawn for. The host then re-checks the identity and the
+        // journey before anything starts.
+        onSelect={() => {
+          const live = committed.current
+          if (!live.settled || !live.agreed) return
+          if (
+            live.agreed.questMode !== agreed.questMode ||
+            live.agreed.domain !== agreed.domain
+          )
+            return
+          onStart(config, generation)
+        }}
       />
     </Box>
   )
@@ -867,14 +905,35 @@ function QuestCard({
       }}
     >
       <Typography sx={{ fontSize: '1.5rem' }}>{icon}</Typography>
-      <Box sx={{ textAlign: 'left', flex: 1 }}>
-        <Stack direction="row" alignItems="center" spacing={1}>
+      <Box sx={{ textAlign: 'left', flex: 1, minWidth: 0 }}>
+        <Stack
+          direction="row"
+          alignItems="center"
+          spacing={1}
+          // The suggested card carries an extra chip beside a sentence-length
+          // label, which has nowhere to go on a 390px phone unless the row is
+          // allowed to wrap. Ordinary cards keep their single line.
+          sx={suggested ? { flexWrap: 'wrap', rowGap: 0.5 } : undefined}
+        >
           <Typography
-            sx={{
-              fontFamily: MC.font,
-              fontSize: '0.5rem',
-              color: enabled ? MC.white : MC.stone,
-            }}
+            sx={
+              suggested
+                ? // NEW child-facing text: plain and readable, not the legacy
+                  // pixel font at 0.5rem. Local to this variant on purpose.
+                  {
+                    fontSize: '16px',
+                    fontWeight: 700,
+                    lineHeight: 1.4,
+                    color: enabled ? MC.white : MC.stone,
+                    minWidth: 0,
+                    overflowWrap: 'anywhere',
+                  }
+                : {
+                    fontFamily: MC.font,
+                    fontSize: '0.5rem',
+                    color: enabled ? MC.white : MC.stone,
+                  }
+            }
           >
             {label}
           </Typography>
@@ -883,12 +942,14 @@ function QuestCard({
               label="From your village"
               size="small"
               sx={{
-                fontFamily: MC.font,
-                fontSize: '0.3rem',
-                height: 18,
+                fontSize: '14px',
+                lineHeight: 1.3,
+                height: 'auto',
+                maxWidth: '100%',
                 bgcolor: MC.diamond,
                 color: MC.bg,
                 fontWeight: 700,
+                '& .MuiChip-label': { px: 1, py: 0.25, whiteSpace: 'normal' },
               }}
             />
           )}
@@ -909,17 +970,31 @@ function QuestCard({
         </Stack>
         {description && (
           <Typography
-            sx={{
-              fontFamily: MC.font,
-              fontSize: '0.35rem',
-              color: MC.stone,
-              mt: 0.5,
-            }}
+            sx={
+              suggested
+                ? {
+                    fontSize: '14px',
+                    lineHeight: 1.45,
+                    color: MC.stone,
+                    mt: 0.5,
+                    overflowWrap: 'anywhere',
+                  }
+                : {
+                    fontFamily: MC.font,
+                    fontSize: '0.35rem',
+                    color: MC.stone,
+                    mt: 0.5,
+                  }
+            }
           >
             {description}
           </Typography>
         )}
-        {enabled && (
+        {/* The reward teaser belongs to the ordinary cards, which all still
+            carry it. The village's single offer stays about the MODE it opens:
+            the same line repeated here would be the loudest thing on a card
+            whose whole job is one invitation. No reward rule changes. */}
+        {enabled && !suggested && (
           <Typography
             sx={{
               fontFamily: MC.font,

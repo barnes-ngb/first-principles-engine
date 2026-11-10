@@ -382,13 +382,16 @@ function renderTown(initial = STONEBRIDGE_TOWN_PATH) {
     ],
     { initialEntries: [initial] },
   )
-  render(
+  // The real render result, plus the router — so a test that needs to tear one
+  // town down before rendering the next can use testing-library's own
+  // `unmount`. Every existing `{ router }` caller is unaffected.
+  const result = render(
     <>
       <IdentityObserver signedIn />
       <RouterProvider router={router} />
     </>,
   )
-  return { router }
+  return Object.assign(result, { router })
 }
 
 /** Begin a journey directly, against the epoch the module has observed. */

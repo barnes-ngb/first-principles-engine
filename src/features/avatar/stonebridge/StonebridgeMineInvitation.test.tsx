@@ -90,17 +90,37 @@ function modelWith(conceptId: string): LearnerModel {
   } as unknown as LearnerModel
 }
 
+/** Both domains calibrated by real evidence — so the OFFER can change mode. */
+const BOTH_SNAPSHOT = {
+  childId: 'lincoln',
+  prioritySkills: [
+    { tag: 'math.operations.add', level: SkillLevel.Developing, masteryGate: MasteryGate.NotYet },
+  ],
+  supports: [],
+  stopRules: [],
+  workingLevels: { phonics: 3 },
+} as unknown as SkillSnapshot
+
+/** A real, answered model that recommends nothing a Mine mode can carry. */
+function modelWithNoMove(): LearnerModel {
+  return {
+    ...modelWith('reading.phonics.cvc'),
+    openQuestions: [],
+    synthesis: null,
+  } as unknown as LearnerModel
+}
+
 const noop = () => {}
 
-function renderInvitation(
-  props: Partial<{
-    identityEpoch: number
-    focusGeneration: number
-    onFocusServed: (generation: number, landed: boolean) => void
-    onOffer: (invitation: unknown, observedEpoch: number) => void
-  }> = {},
-) {
-  return render(
+type InvitationProps = Partial<{
+  identityEpoch: number
+  focusGeneration: number
+  onFocusServed: (generation: number, landed: boolean) => void
+  onOffer: (invitation: unknown, observedEpoch: number) => void
+}>
+
+function invitationElement(props: InvitationProps = {}) {
+  return (
     <StonebridgeMineInvitation
       familyId="fam-1"
       childId="lincoln"
@@ -109,8 +129,29 @@ function renderInvitation(
       focusGeneration={props.focusGeneration ?? 0}
       onFocusServed={props.onFocusServed ?? noop}
       onOffer={props.onOffer ?? noop}
-    />,
+    />
   )
+}
+
+function renderInvitation(props: InvitationProps = {}) {
+  return render(invitationElement(props))
+}
+
+/**
+ * The `onClick` a RENDERED action is holding — captured, then invoked later.
+ *
+ * This is the shape the browser actually produced: a handler is captured while
+ * the offer is on screen, the offer then goes away inside the same identity and
+ * the same mount, and the captured handler is invoked. Clicking the node after
+ * the fact proves nothing (React has detached it), so the retained callback is
+ * read off the element and called directly, exactly as the hostile case did.
+ */
+function retainedOnClick(node: HTMLElement): () => void {
+  const key = Object.keys(node).find((k) => k.startsWith('__reactProps$'))
+  const props = (node as unknown as Record<string, { onClick?: () => void }>)[key!]
+  const onClick = props?.onClick
+  expect(typeof onClick).toBe('function')
+  return onClick!
 }
 
 beforeEach(() => {
@@ -197,6 +238,88 @@ describe('the tap', () => {
     renderInvitation({ identityEpoch: committed, onOffer })
     fireEvent.click(screen.getByRole('button', { name: MINE_READING_DIG_LABEL }))
     expect(onOffer.mock.calls[0][1]).toBe(committed)
+  })
+})
+
+describe('a RETAINED tap, inside the same identity and the same mount', () => {
+  /**
+   * The hole an epoch and a mount check cannot see.
+   *
+   * Nothing moves here: the same family, the same child, the same epoch, the
+   * same mounted component. Only the OFFER changes — removed, failed, or moved
+   * to another mode by fresh evidence — and a handler captured before that must
+   * not hand on an offer this surface no longer makes, because the host would
+   * navigate and create a trip for it.
+   */
+  function captureThenCommit(next: () => void) {
+    const onOffer = vi.fn()
+    const { rerender } = renderInvitation({ onOffer })
+    const retained = retainedOnClick(
+      screen.getByRole('button', { name: MINE_READING_DIG_LABEL }),
+    )
+    next()
+    rerender(invitationElement({ onOffer }))
+    return { retained, onOffer }
+  }
+
+  it('is refused after the model is REMOVED under the live scope', () => {
+    const { retained, onOffer } = captureThenCommit(() => {
+      fx.model = null
+    })
+    expect(screen.queryByText(`⛏️ ${MINE_INVITATION_LINE}`)).not.toBeInTheDocument()
+    retained()
+    expect(onOffer).not.toHaveBeenCalled()
+  })
+
+  it('is refused after a FAILED model read — which arrives as nothing', () => {
+    // A failure is not an affirmative empty result; the hooks report both as
+    // "nothing", and neither may authorise a trip a handler captured earlier.
+    const { retained, onOffer } = captureThenCommit(() => {
+      fx.model = null
+      fx.loading = false
+      fx.loaded = true
+    })
+    retained()
+    expect(onOffer).not.toHaveBeenCalled()
+  })
+
+  it('is refused after the model answers with NO recommendation', () => {
+    const { retained, onOffer } = captureThenCommit(() => {
+      fx.model = modelWithNoMove()
+    })
+    expect(screen.queryByText(`⛏️ ${MINE_INVITATION_LINE}`)).not.toBeInTheDocument()
+    retained()
+    expect(onOffer).not.toHaveBeenCalled()
+  })
+
+  it('is refused after the SUPPORTED offer changed to the other mode', () => {
+    // The screen still shows an invitation — a different one. The old tap is
+    // refused on its own terms rather than being quietly re-pointed.
+    fx.snapshot = BOTH_SNAPSHOT
+    const { retained, onOffer } = captureThenCommit(() => {
+      fx.model = modelWith('math.operations.addWithin20')
+    })
+    expect(screen.getByRole('button', { name: MINE_MATH_DIG_LABEL })).toBeInTheDocument()
+    retained()
+    expect(onOffer).not.toHaveBeenCalled()
+  })
+
+  it('is refused while the read goes UNSETTLED again, mid-reload', () => {
+    const { retained, onOffer } = captureThenCommit(() => {
+      fx.loading = true
+    })
+    retained()
+    expect(onOffer).not.toHaveBeenCalled()
+  })
+
+  it('but a still-valid tap is accepted — the ordinary child tap is untouched', () => {
+    const { retained, onOffer } = captureThenCommit(() => {})
+    retained()
+    expect(onOffer).toHaveBeenCalledTimes(1)
+    expect(onOffer.mock.calls[0][0]).toMatchObject({
+      conceptId: 'reading.phonics.cvc',
+      questMode: 'phonics',
+    })
   })
 })
 

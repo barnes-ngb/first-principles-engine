@@ -115,6 +115,53 @@ export default function StonebridgeMineInvitation({
       mounted.current = false
     }
   }, [])
+
+  /**
+   * The offer this surface has most recently COMMITTED — the one thing a mount
+   * and epoch check cannot see.
+   *
+   * Both of those answer "is this still the same scope?", and inside one live
+   * scope the offer itself can still go away: the model is removed, the read
+   * fails, or fresh evidence moves the recommendation to another mode. The
+   * component stays mounted and the epoch never moves, so a handler captured by
+   * an earlier render would happily hand on an offer the screen no longer makes
+   * — and the host would navigate and create a trip for it.
+   *
+   * This is written in a LAYOUT EFFECT rather than during render on purpose. A
+   * render-time write would record an offer from a render that React may
+   * abandon (a concurrent render that never commits), which is the opposite
+   * mistake: the handler would then be measured against something no child ever
+   * saw. Only a commit counts, and a commit that renders nothing records
+   * `null`, which is exactly the refusal we want.
+   */
+  const committedOffer = useRef<{ invitation: MineInvitation | null; settled: boolean }>({
+    invitation: null,
+    settled: false,
+  })
+  useLayoutEffect(() => {
+    committedOffer.current = { invitation, settled }
+  }, [invitation, settled])
+
+  /**
+   * Is the offer this handler captured still the offer on the screen?
+   *
+   * Compared by what the host will ACT on — the concept, the mode and where the
+   * offer came from — not by object identity, which a re-read rebuilds every
+   * time. Unsettled, cleared, failed and changed all land on `false`.
+   */
+  const stillOffered = (captured: MineInvitation) => {
+    const latest = committedOffer.current
+    if (!latest.settled) return false
+    const live = latest.invitation
+    if (!live) return false
+    return (
+      live.conceptId === captured.conceptId &&
+      live.questMode === captured.questMode &&
+      live.domain === captured.domain &&
+      live.source === captured.source
+    )
+  }
+
   const stillLive = () => mounted.current && identityEpoch === getLibraryIdentityEpoch()
 
   const actionRef = useRef<HTMLButtonElement | null>(null)
@@ -171,6 +218,10 @@ export default function StonebridgeMineInvitation({
           // retained handler whose identity has moved is refused here and
           // again by the store, so no trip is created and no route changes.
           if (!stillLive()) return
+          // And the offer has to still BE this offer. Same scope, same mount,
+          // same epoch — and the recommendation gone, failed or moved since
+          // this handler was drawn is refused just as firmly.
+          if (!stillOffered(invitation)) return
           onOffer(invitation, identityEpoch)
         }}
         sx={{

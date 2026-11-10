@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -163,12 +163,54 @@ function beginTrip(suggestion: unknown = READING_SUGGESTION) {
   })
 }
 
-function renderMine() {
-  return render(
+/** Both domains calibrated by real evidence — so the OFFER can change mode. */
+const BOTH_CALIBRATED = {
+  childId: 'lincoln',
+  prioritySkills: [],
+  workingLevels: { phonics: 3, math: 1 },
+}
+
+/** The same model shape, waiting on the supported MATH concept instead. */
+const MATH_QUEUED = {
+  childId: 'lincoln',
+  openQuestions: [
+    {
+      conceptId: 'math.operations.addWithin20',
+      question: 'see this?',
+      routedTo: 'quest',
+      reason: 'queued',
+    },
+  ],
+  synthesisStaleAt: null,
+}
+
+function mineElement() {
+  return (
     <MemoryRouter initialEntries={['/quest']}>
       <KnowledgeMinePage />
-    </MemoryRouter>,
+    </MemoryRouter>
   )
+}
+
+function renderMine() {
+  return render(mineElement())
+}
+
+/**
+ * The `onClick` a RENDERED card is holding — captured, then invoked later.
+ *
+ * The defect was a handler captured while the offer was on screen and invoked
+ * after the offer went away inside the SAME identity and the SAME live journey.
+ * Clicking the node afterwards proves nothing (React has detached it), so the
+ * retained callback is read off the element and called directly, which is what
+ * the hostile case did when it reached a real `startQuest` and a real AI call.
+ */
+function retainedOnClick(node: HTMLElement): () => void {
+  const key = Object.keys(node).find((k) => k.startsWith('__reactProps$'))
+  const props = (node as unknown as Record<string, { onClick?: () => void }>)[key!]
+  const onClick = props?.onClick
+  expect(typeof onClick).toBe('function')
+  return onClick!
 }
 
 function suggestedCard() {
@@ -324,6 +366,121 @@ describe('a retained Start is rejected, not honoured', () => {
     })
     fireEvent.click(card)
     expect(fx.startQuest).not.toHaveBeenCalled()
+  })
+})
+
+describe('a retained Start inside the SAME identity and the SAME journey', () => {
+  /**
+   * The hole the epoch and generation checks cannot see.
+   *
+   * Nothing moves: same family, child, profile, epoch, and the same live Mine
+   * journey of the same generation. Only the page's own READ changes, which is
+   * what retires the offer — and a handler captured before that must not start
+   * a real quest or call the AI.
+   */
+  function captureThenCommit(next: () => void) {
+    beginTrip()
+    const { rerender } = renderMine()
+    const retained = retainedOnClick(suggestedCard())
+    const generation = getLibraryReturnFlow()?.generation
+    next()
+    act(() => {
+      rerender(mineElement())
+    })
+    // The journey really is untouched: this is not the generation case again.
+    expect(getLibraryReturnFlow()?.generation).toBe(generation)
+    return retained
+  }
+
+  it('is refused after the model is REMOVED — no quest, no AI call', () => {
+    const retained = captureThenCommit(() => {
+      fx.model = null
+    })
+    expect(
+      screen.queryByRole('button', { name: new RegExp(MINE_READING_DIG_LABEL) }),
+    ).not.toBeInTheDocument()
+    retained()
+    expect(fx.startQuest).not.toHaveBeenCalled()
+  })
+
+  it('is refused after a FAILED model read, which arrives as nothing', () => {
+    const retained = captureThenCommit(() => {
+      fx.model = null
+      fx.modelLoading = false
+    })
+    retained()
+    expect(fx.startQuest).not.toHaveBeenCalled()
+  })
+
+  it('is refused while the read goes UNSETTLED again, mid-reload', () => {
+    const retained = captureThenCommit(() => {
+      fx.modelLoading = true
+    })
+    retained()
+    expect(fx.startQuest).not.toHaveBeenCalled()
+  })
+
+  it('is refused after the SUPPORTED offer changed to the other mode', () => {
+    fx.snapshot = BOTH_CALIBRATED
+    const retained = captureThenCommit(() => {
+      fx.model = MATH_QUEUED
+    })
+    retained()
+    expect(fx.startQuest).not.toHaveBeenCalled()
+  })
+
+  it('but a still-valid tap starts the mode exactly once', () => {
+    const retained = captureThenCommit(() => {})
+    retained()
+    expect(fx.startQuest).toHaveBeenCalledTimes(1)
+    expect(fx.startQuest).toHaveBeenCalledWith('reading', 'phonics')
+  })
+
+  it('and the ordinary section cards are untouched by any of it', () => {
+    renderMine()
+    fireEvent.click(screen.getByText('Comprehension Quest'))
+    expect(fx.startQuest).toHaveBeenCalledWith('reading', 'comprehension')
+  })
+})
+
+describe('the new child-facing text is readable, not the legacy pixel font', () => {
+  it('the way back is plain and at least 14px on its 44px target', () => {
+    beginTrip()
+    renderMine()
+    const back = screen.getByRole('button', { name: `🏰 ${MINE_RETURN_LABEL}` })
+    const style = getComputedStyle(back)
+    expect(parseFloat(style.fontSize)).toBeGreaterThanOrEqual(14)
+    expect(style.fontFamily).not.toMatch(/Press Start 2P/)
+  })
+
+  it('the suggested card’s own words are plain and at least 14px', () => {
+    beginTrip()
+    renderMine()
+    const label = screen.getByText(MINE_READING_DIG_LABEL)
+    const description = within(suggestedCard()).getByText('Phonics Quest')
+    // The chip's size is set on its root; the label span inherits it.
+    const chip = screen.getByText('From your village').closest('.MuiChip-root')
+    expect(chip).not.toBeNull()
+    for (const node of [label, description, chip as HTMLElement]) {
+      const style = getComputedStyle(node)
+      expect(parseFloat(style.fontSize)).toBeGreaterThanOrEqual(14)
+      expect(style.fontFamily).not.toMatch(/Press Start 2P/)
+    }
+  })
+
+  it('and it does not repeat the reward teaser the ordinary cards carry', () => {
+    beginTrip()
+    renderMine()
+    const teasers = screen.getAllByText('Earn diamonds 💎')
+    // One per ordinary enabled card, and none on the invitation.
+    expect(within(suggestedCard()).queryByText('Earn diamonds 💎')).not.toBeInTheDocument()
+    expect(teasers.length).toBeGreaterThan(0)
+  })
+
+  it('while an ordinary card keeps its existing font', () => {
+    renderMine()
+    const style = getComputedStyle(screen.getByText('Comprehension Quest'))
+    expect(style.fontFamily).toMatch(/Press Start 2P/)
   })
 })
 
