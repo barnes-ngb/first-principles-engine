@@ -57,6 +57,7 @@ import {
   finalizeGuidedEvaluation,
   GuidedEvaluationSourceMismatch,
   newGuidedEvaluationSourceId,
+  type FinalizeGuidedEvaluationArgs,
   type GuidedEvaluationReceipt,
 } from './guidedEvaluationSource'
 import { ChatMessageRole, EvaluationDomain, MasteryGate, SkillLevel } from '../../core/types/enums'
@@ -210,34 +211,28 @@ function findingStatusIcon(status: EvaluationFinding['status']) {
 
 // ── The finalized source, and the Apply gate (UX-492) ───────────
 //
-// UX-491 bound a turn to its visit. What it left filed — in its own census row
-// — was the *day* the completion lands on: the daily record id is
-// `{childId}_{domain}_{date}`, so both of a day's completed attempts write the
-// same document and the later replaces the earlier. Two attempts can project
-// the SAME evidence summary with opposite help notes, so after the replacement
-// nothing stored could say which attempt a learner-model ref was evidence of.
-// And a final save that FAILED, or was still in flight, left Apply enabled, so
-// the write-back could stamp a source that was absent or uncommitted.
+// UX-491 bound a turn to its visit; what it left filed was the *day* the
+// completion lands on. The daily id is `{childId}_{domain}_{date}`, so both of a
+// day's completed attempts write the same document and the later replaces the
+// earlier — and two attempts can project the same evidence summary with opposite
+// help notes, after which nothing stored says which one a learner-model ref came
+// from. A final save that failed or was still in flight also left Apply enabled.
 //
-// Three things close that here, and the daily record is untouched by all of them
-// (same id, same shape plus one optional field, same history, resume, rewards):
+// The daily record is unchanged (same id, same shape plus one optional pointer,
+// same history, resume and rewards). Three invariants carry the repair:
 //
-//   * **one final-save boundary**, shared by the initial-response completion and
-//     an ordinary Send. The family, child, domain, day id, ordered findings and
-//     a FRESH finalization id are admitted and pinned SYNCHRONOUSLY before the
-//     save starts, into a slot that is create-once per draft — so a completed
-//     reply cannot open a replacement finalization, and an in-progress save can
-//     neither mark the final source saved nor replace it.
-//   * **the receipt is the authority.** Apply is disabled and refused until the
-//     exact pinned save is acknowledged, and what it then writes back — source
-//     id, finalization id and findings — comes from the receipt, never from a
-//     current-session read or a reconstructed fallback. A pending or failed
-//     finalization admits nothing downstream.
-//   * **an explicit retry** of the same captured payload and id, single-flight,
-//     with no new AI request and no second hour log. Success clears the failure
-//     and lets the same original findings be applied once by the usual path; a
-//     retry whose first attempt had in fact landed is acknowledged without
-//     rewriting the day record, which by then a newer attempt may own.
+//   1. ONE final-save boundary, shared by a direct completion and an ordinary
+//      Send. Scope, day id, ordered findings and a fresh finalization id are
+//      pinned synchronously, create-once per draft, before any await — and the
+//      pinned save queues behind this draft's own in-progress save of the same
+//      document, which nothing else ordered.
+//   2. The RECEIPT is the authority. Apply is shut and refused until the exact
+//      pinned save is acknowledged, and stamps the receipt's ids and findings —
+//      never a current-session read or a reconstructed fallback.
+//   3. A failure keeps the work: the summary and download stay, and an explicit
+//      single-flight retry re-sends the same payload and id with no new AI call
+//      and no second hour log. A retry whose first attempt had in fact landed is
+//      acknowledged without rewriting the day record a newer attempt may own.
 
 /** How this draft's one final save stands. */
 type FinalSaveStatus =
@@ -257,18 +252,10 @@ type FinalSaveStatus =
 /**
  * The pinned final save of one draft — captured before the save's first await,
  * so a save already admitted finishes for its ORIGINAL scope whatever happens on
- * screen afterwards.
+ * screen afterwards. The writer's own argument type, so the pin and the save can
+ * never describe different things.
  */
-interface PinnedFinalSave {
-  familyId: string
-  childId: string
-  domain: EvaluationDomain
-  sessionDocId: string
-  sourceId: string
-  finalizedAt: string
-  findings: EvaluationFinding[]
-  session: Omit<EvaluationSession, 'id'>
-}
+type PinnedFinalSave = FinalizeGuidedEvaluationArgs
 
 /** The settled scope one evaluation visit is bound to. */
 interface EvaluateVisitScope {
@@ -636,6 +623,13 @@ function EvaluateDraft({
   const finalSaveBusyRef = useRef(false)
   /** The one pattern analysis this finalization is allowed to ask for. */
   const patternAnalysisAskedRef = useRef(false)
+  /**
+   * This draft's in-progress save of the daily document, while one is in flight.
+   * The completing save queues behind it, because both write that same document
+   * and a late in-progress `setDoc` landing after the finalization transaction
+   * put the record back to `in-progress` — pointer gone, source orphaned.
+   */
+  const inFlightInProgressRef = useRef<Promise<void> | null>(null)
 
   /** Unchanged day-based shape: `{childId}_{domain}_{date}`. */
   const defaultSessionDocId = useCallback(
@@ -752,28 +746,45 @@ function EvaluateDraft({
   )
 
   /**
-   * The in-progress save, unchanged. It never touches the finalization: it
-   * cannot mark the final source saved, replace it, or re-open a replacement
-   * draft, and a `complete` turn does not come through here at all.
+   * The in-progress save, unchanged in what it writes and where. It never
+   * touches the finalization: it cannot mark the final source saved, replace it,
+   * or re-open a replacement draft, and a `complete` turn never comes here.
+   *
+   * What it now also does is PUBLISH itself in `inFlightInProgressRef`, so the
+   * completing save can sequence behind it. Both write the SAME daily document,
+   * and nothing else ordered them: hold the opening Start save, Send the next
+   * turn, and the completion's transaction committed first — then the opening
+   * save landed on top of it and the record was an in-progress one again, with
+   * the finalization pointer gone and a finalized source left pointing at it.
    */
   const persistInProgress = useCallback(
-    async (msgs: ChatMessage[], fndgs: EvaluationFinding[]): Promise<string> => {
+    async (msgs: ChatMessage[], fndgs: EvaluationFinding[]): Promise<void> => {
       // Destination captured before the await: this draft's child and domain,
       // and the session id this call is writing.
       const existingDocId = sessionDocId
       const targetDocId = existingDocId ?? defaultSessionDocId()
       const session = buildSession(msgs, fndgs, null, new Date().toISOString())
 
-      try {
-        const ref = doc(evaluationSessionsCollection(familyId), targetDocId)
-        await setDoc(ref, session)
-        // Only a live draft learns the id its save was given.
-        if (!existingDocId && isLive()) setSessionDocId(targetDocId)
-      } catch (err) {
-        console.error('Failed to persist evaluation session', err)
-      }
+      const save = (async () => {
+        try {
+          const ref = doc(evaluationSessionsCollection(familyId), targetDocId)
+          await setDoc(ref, session)
+          // Only a live draft learns the id its save was given.
+          if (!existingDocId && isLive()) setSessionDocId(targetDocId)
+        } catch (err) {
+          console.error('Failed to persist evaluation session', err)
+        }
+      })()
 
-      return targetDocId
+      // Per-draft by construction, so no independent draft is ever waited on.
+      inFlightInProgressRef.current = save
+      try {
+        await save
+      } finally {
+        // Released on success AND on rejection — a save that threw must not
+        // leave a completion waiting on it forever.
+        if (inFlightInProgressRef.current === save) inFlightInProgressRef.current = null
+      }
     },
     [familyId, sessionDocId, defaultSessionDocId, buildSession, isLive],
   )
@@ -790,7 +801,7 @@ function EvaluateDraft({
    * captured.
    */
   const runPinnedFinalSave = useCallback(
-    async (pinned: PinnedFinalSave): Promise<GuidedEvaluationReceipt | null> => {
+    async (pinned: PinnedFinalSave): Promise<void> => {
       try {
         const receipt = await finalizeGuidedEvaluation(pinned)
         // The receipt is recorded unconditionally — an Apply admitted before a
@@ -810,7 +821,6 @@ function EvaluateDraft({
             void triggerPatternAnalysis(pinned.sessionDocId, receipt.findings)
           }
         }
-        return receipt
       } catch (err) {
         console.error('Failed to finalize guided evaluation', err)
         if (isLive() && pinnedFinalSaveRef.current === pinned) {
@@ -818,7 +828,6 @@ function EvaluateDraft({
             err instanceof GuidedEvaluationSourceMismatch ? 'conflict' : 'failed',
           )
         }
-        return null
       } finally {
         finalSaveBusyRef.current = false
       }
@@ -839,10 +848,9 @@ function EvaluateDraft({
       msgs: ChatMessage[],
       fndgs: EvaluationFinding[],
       complete: CompleteBlock,
-    ): Promise<string> => {
-      if (pinnedFinalSaveRef.current || finalSaveBusyRef.current) {
-        return pinnedFinalSaveRef.current?.sessionDocId ?? (sessionDocId ?? defaultSessionDocId())
-      }
+    ): Promise<void> => {
+      // Create-once: a second completed reply finds the slot taken.
+      if (pinnedFinalSaveRef.current || finalSaveBusyRef.current) return
 
       const finalizedAt = new Date().toISOString()
       const pinned: PinnedFinalSave = {
@@ -860,8 +868,13 @@ function EvaluateDraft({
       pinnedFinalSaveRef.current = pinned
       setFinalSaveStatus('saving')
 
+      // Ownership, payload, date and both ids are pinned ABOVE, and the parent
+      // is already told this is saving — so the wait below cannot change what
+      // gets written or where, and a switch mid-wait cannot stop it.
+      const earlier = inFlightInProgressRef.current
+      if (earlier) await earlier.catch(() => undefined)
+
       await runPinnedFinalSave(pinned)
-      return pinned.sessionDocId
     },
     [
       familyId,

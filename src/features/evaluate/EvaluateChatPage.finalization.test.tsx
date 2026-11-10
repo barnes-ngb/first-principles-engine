@@ -104,7 +104,16 @@ let transactionFailures: Array<Error | null> = []
 /** Set to hold the next transaction open until released. */
 let holdTransaction: (() => void) | null = null
 
-const setDoc = vi.fn<(...args: unknown[]) => Promise<void>>(() => Promise.resolve())
+/**
+ * Records into the SAME `writes` log the transaction uses, so the order of an
+ * in-progress `setDoc` and a finalization commit against one daily document is
+ * observable — which is the whole question in the ordering case below.
+ */
+const setDoc = vi.fn<(...args: unknown[]) => Promise<void>>((ref, data) => {
+  const r = ref as Ref
+  writes.push({ collection: r.collection, id: r.id, data: data as Record<string, unknown> })
+  return Promise.resolve()
+})
 const addDoc = vi.fn<(...args: unknown[]) => Promise<{ id: string }>>(() =>
   Promise.resolve({ id: 'new' }),
 )
@@ -204,6 +213,9 @@ const UNAIDED_TURN = {
     '<complete>{"summary":"Short-o is the frontier.","frontier":"Short-o CVC words","recommendations":[]}</complete>',
 }
 
+/** A continuing turn: no `<complete>`, so the composer stays and a save runs. */
+const OPENING_TURN = { message: 'Show Lincoln these words: hop, mop, dog.' }
+
 const dayWrites = () => writes.filter((w) => w.collection === 'evaluationSessions')
 const sourceWrites = () => writes.filter((w) => w.collection === 'guidedEvaluationSources')
 const hoursWrites = () =>
@@ -267,6 +279,64 @@ describe('UX-492 — Apply waits for the finalization it will point at', () => {
     expect(
       (addDiamondEvent.mock.calls[0][0] as { dedupKey: string }).dedupKey,
     ).toBe(`eval_${sourceId}-diamond`)
+  })
+
+  it('ORDERING — a completion queues behind this draft’s held in-progress save', async () => {
+    const user = userEvent.setup()
+    render(<EvaluateChatPage />)
+
+    // The opening Start save of the daily document is held open.
+    let releaseOpening: () => void = () => {}
+    setDoc.mockImplementationOnce(
+      (ref, data) =>
+        new Promise<void>((resolve) => {
+          releaseOpening = () => {
+            const r = ref as Ref
+            writes.push({
+              collection: r.collection,
+              id: r.id,
+              data: data as Record<string, unknown>,
+            })
+            resolve()
+          }
+        }),
+    )
+
+    await user.click(await screen.findByRole('button', { name: /start reading assessment/i }))
+    await act(async () => {
+      releaseChat(OPENING_TURN)
+    })
+
+    // The reply is on screen, so the parent can Send the next turn while the
+    // opening save is still in flight — the window Sol reproduced.
+    const composer = await screen.findByPlaceholderText(/type your response/i)
+    await user.type(composer, 'He read hop and mop')
+    await user.click(screen.getByRole('button', { name: /send/i }))
+    await act(async () => {
+      releaseChat(UNAIDED_TURN)
+    })
+
+    // Admitted and pinned, the parent told — and nothing written yet.
+    expect(await screen.findByText(/saving the completed evaluation/i)).toBeInTheDocument()
+    expect(dayWrites()).toEqual([])
+    expect(sourceWrites()).toEqual([])
+
+    await act(async () => {
+      releaseOpening()
+    })
+    await waitFor(() => expect(sourceWrites()).toHaveLength(1))
+
+    // POSITIVE CONTROL: remove the sequencing and these two swap — the
+    // in-progress write lands LAST on the same daily document, so the stored
+    // record is `in-progress` again, its finalization pointer is gone, and the
+    // committed source points at a record that no longer names it.
+    const days = dayWrites()
+    expect(days).toHaveLength(2)
+    expect(days[0].id).toBe(days[1].id)
+    expect(days[0].data.status).toBe('in-progress')
+    expect(days[1].data.status).toBe('complete')
+    expect(days[1].data.finalizedSourceId).toBe(sourceWrites()[0].id)
+    await waitFor(() => expect(applyButton()).toBeEnabled())
   })
 
   it('PENDING — a finalization still in flight says so and admits no Apply', async () => {

@@ -265,15 +265,40 @@ describe('finalizeGuidedEvaluation — create-once and the retry path', () => {
     ).rejects.toBeInstanceOf(GuidedEvaluationSourceMismatch)
   })
 
-  it('reads the finalization stamp off the STORED record on a retry', async () => {
+  it('proves the stamp too — a differing finalizedAt is a MISMATCH', async () => {
+    // The retry carries the same PINNED stamp, so a different one is not this
+    // finalization. Previously the stored stamp was simply adopted (or the
+    // incoming one substituted when the stored record had none), which let a
+    // document the caller had not written be acknowledged as its own.
     await finalizeGuidedEvaluation(args({ finalizedAt: AT }))
-    const receipt = await finalizeGuidedEvaluation(
-      args({ finalizedAt: '2026-11-10T23:59:00.000Z' }),
-    )
-    // The first commit's clock is the record's; a differing stamp is not a
-    // content mismatch, because what it dates is the save, not the evidence.
+    writes = []
+
+    await expect(
+      finalizeGuidedEvaluation(args({ finalizedAt: '2026-11-10T23:59:00.000Z' })),
+    ).rejects.toBeInstanceOf(GuidedEvaluationSourceMismatch)
+    expect(writes).toEqual([])
+
+    // The same pinned stamp still replays, and reports the STORED one.
+    const receipt = await finalizeGuidedEvaluation(args({ finalizedAt: AT }))
     expect(receipt.finalizedAt).toBe(AT)
     expect(receipt.alreadyFinalized).toBe(true)
+    expect(writes).toEqual([])
+  })
+
+  it('refuses a stored record with no stamp rather than lending it the incoming one', async () => {
+    // A document under this id that carries no `finalizedAt` is not a finalized
+    // record of this attempt, and must never be reported as one.
+    store.set('src-1', {
+      childId: 'lincoln',
+      domain: 'reading',
+      sessionDocId: DAY_ID,
+      findings: [UNAIDED],
+    })
+
+    await expect(finalizeGuidedEvaluation(args())).rejects.toBeInstanceOf(
+      GuidedEvaluationSourceMismatch,
+    )
+    expect(writes).toEqual([])
   })
 })
 
@@ -293,23 +318,33 @@ describe('the equality the retry path rests on', () => {
       childId: 'lincoln',
       domain: 'reading' as EvaluationSession['domain'],
       sessionDocId: DAY_ID,
+      finalizedAt: AT,
       findings: [UNAIDED, HELPED],
     }
     expect(guidedSourceContentMatches({ ...expected }, expected)).toBe(true)
     expect(
       guidedSourceContentMatches({ ...expected, findings: [HELPED, UNAIDED] }, expected),
     ).toBe(false)
+    // Every identifying field is compared, the stamp included.
+    expect(
+      guidedSourceContentMatches({ ...expected, finalizedAt: '2026-01-01T00:00:00.000Z' }, expected),
+    ).toBe(false)
+    expect(guidedSourceContentMatches({ ...expected, childId: 'london' }, expected)).toBe(false)
   })
 
-  it('reads a missing or findings-less document as no match', () => {
+  it('reads a missing, findings-less or stamp-less document as no match', () => {
     const expected = {
       childId: 'lincoln',
       domain: 'reading' as EvaluationSession['domain'],
       sessionDocId: DAY_ID,
+      finalizedAt: AT,
       findings: [UNAIDED],
     }
     expect(guidedSourceContentMatches(undefined, expected)).toBe(false)
     expect(guidedSourceContentMatches({ childId: 'lincoln' }, expected)).toBe(false)
+    expect(
+      guidedSourceContentMatches({ ...expected, finalizedAt: undefined }, expected),
+    ).toBe(false)
   })
 })
 

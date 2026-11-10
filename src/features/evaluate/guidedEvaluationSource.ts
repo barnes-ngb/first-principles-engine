@@ -1,52 +1,36 @@
 // ── The finalized guided-evaluation source: one atomic save (UX-492) ──────
 //
-// ## What was wrong
-//
 // A completed guided evaluation is written to `evaluationSessions` under a
 // day-based id — `{childId}_{domain}_{date}` — so BOTH of a day's completed
-// attempts write the same document and the later one replaces the earlier. That
-// is survivable for a history chip and fatal for evidence: two attempts can
-// project the SAME evidence summary (the finding `evidence` string the eval
-// writes) while their actual help notes are opposite ("read it unaided" vs
-// "read it after I sounded out the first two"). Once the second attempt lands,
-// the learner-model ref stamped with that day id points at a record whose notes
-// are no longer the ones the applied findings came from, and nothing stored can
-// tell the two apart. The second half of the same defect: a failed or still
-// pending final save left Apply enabled, so the write-back could stamp a source
-// that was absent or not yet committed.
+// attempts write the same document and the later replaces the earlier. Two
+// attempts can project the SAME evidence summary (the finding `evidence` string)
+// while their recorded help is opposite ("read it unaided" vs "read it after I
+// sounded out the first two"), after which a learner-model ref stamped with that
+// day id names a record whose notes are not the ones the applied findings came
+// from, and nothing stored tells the two apart.
 //
-// ## The shape of the repair
+// The daily record is kept exactly as it is — query shape, history, resume and
+// the reward dedup key all depend on it. What is added is ONE family-scoped
+// `guidedEvaluationSources` document per finalization, under a fresh id captured
+// once at the completed reply, holding only scoped metadata, the finalization
+// stamp and the exact ordered findings; the completed day record then carries
+// that id, which is what distinguishes it from a later version of itself.
 //
-// The daily record is kept, exactly as it is — the query shape, the history
-// list, resume, the reward dedup key and every existing reader depend on it.
-// What is added is ONE family-scoped `guidedEvaluationSources` document per
-// finalization, under a fresh Firestore id captured once at the completed
-// reply, holding only scoped metadata, the finalization stamp and the exact
-// ordered findings. The daily record's completed version then carries that id
-// in `finalizedSourceId`, which is what distinguishes it from a later version
-// of the same document.
+// Three invariants:
 //
-// Both writes go in ONE transaction (the `nativeProgressWrites` pattern: read
-// first, write after), so a partial write can never look finalized — either the
-// source exists AND the day record names it, or neither happened.
-//
-// ## Create-once, and what a retry is allowed to do
-//
-// The record is **application-create-once**: the first commit of an id is the
-// record. An attempt whose answer was lost (a dropped connection on commit) can
-// be retried with the SAME captured payload and id, and the retry must not
-// rewrite the day record — by then a newer attempt may legitimately own it, and
-// re-running the old `set` would silently restore the older day. So a retry
-// that finds its own id already committed VERIFIES scope and content and
-// acknowledges the saved source, writing nothing.
-//
-// The verification is a normalized equality (`guidedSourceContentMatches`) that
-// tolerates the two differences Firestore introduces by itself — key ordering,
-// and `undefined` fields omitted on write (`stripUndefined` in the converter) —
-// and nothing else. A same-id mismatch is not reconciled and not overwritten:
-// it **fails closed** with {@link GuidedEvaluationSourceMismatch}, because an id
-// that already holds different evidence means the thing this caller believes it
-// finalized is not what is stored.
+//   1. ATOMIC. Both writes go in one transaction (the `nativeProgressWrites`
+//      pattern: read first, write after), so a partial write can never look
+//      finalized — either the source exists AND the day record names it, or
+//      neither happened.
+//   2. CREATE-ONCE. The first commit of an id is the record. A retry (an attempt
+//      whose answer was lost) must not rewrite the day record — a newer attempt
+//      may legitimately own it by now — so a retry that finds its own id
+//      committed verifies and acknowledges it, writing nothing.
+//   3. FAIL CLOSED. Verification is a normalized equality over scope, stamp and
+//      ordered findings, tolerating only what Firestore itself introduces (key
+//      ordering, and `undefined` omitted by the converter's `stripUndefined`).
+//      Anything else throws {@link GuidedEvaluationSourceMismatch}: an id
+//      holding other evidence is not this caller's finalization.
 
 import { doc, runTransaction } from 'firebase/firestore'
 
@@ -102,50 +86,53 @@ export function normalizeForCompare(value: unknown): unknown {
   return value
 }
 
-/** The scope + content of a finalized source, as equality reads it. */
-function comparableSource(source: {
+/** Everything a finalized source is identified by, as equality reads it. */
+export interface GuidedEvaluationSourceIdentity {
   childId: string
   domain: EvaluationDomain
   sessionDocId: string
+  /** The pinned finalization stamp — the retry carries the same one. */
+  finalizedAt: string
   findings: readonly EvaluationFinding[]
-}): unknown {
-  return normalizeForCompare({
-    childId: source.childId,
-    domain: source.domain,
-    sessionDocId: source.sessionDocId,
-    findings: source.findings,
-  })
+}
+
+function comparable(source: GuidedEvaluationSourceIdentity): string {
+  return JSON.stringify(
+    normalizeForCompare({
+      childId: source.childId,
+      domain: source.domain,
+      sessionDocId: source.sessionDocId,
+      finalizedAt: source.finalizedAt,
+      findings: source.findings,
+    }),
+  )
 }
 
 /**
- * Does a stored finalized source describe exactly this scope and these ordered
- * findings?
+ * Does a stored finalized source describe exactly this scope, this stamp and
+ * these ordered findings?
  *
- * `finalizedAt` is deliberately NOT compared: the stored stamp is the moment the
- * finalization was committed, and on the retry path that is the first attempt's
- * clock, which is the one the record should keep. Everything that identifies
- * WHOSE evidence this is and WHAT it says is compared, in full.
+ * The stamp is part of the identity, not an incidental detail: a retry carries
+ * the same PINNED `finalizedAt`, so comparing it is free — and a stored record
+ * that does not carry one cannot be read as this finalization at all. The
+ * alternative (adopting the incoming stamp when the stored one is absent) would
+ * let a half-written or foreign document be reported as this attempt's own
+ * finalized record, which is the thing the replay path exists to verify.
  */
 export function guidedSourceContentMatches(
   stored: Partial<GuidedEvaluationSource> | undefined,
-  expected: {
-    childId: string
-    domain: EvaluationDomain
-    sessionDocId: string
-    findings: readonly EvaluationFinding[]
-  },
+  expected: GuidedEvaluationSourceIdentity,
 ): boolean {
-  if (!stored) return false
-  if (!Array.isArray(stored.findings)) return false
+  if (!stored || !Array.isArray(stored.findings)) return false
+  if (typeof stored.finalizedAt !== 'string') return false
   return (
-    JSON.stringify(
-      comparableSource({
-        childId: stored.childId as string,
-        domain: stored.domain as EvaluationDomain,
-        sessionDocId: stored.sessionDocId as string,
-        findings: stored.findings,
-      }),
-    ) === JSON.stringify(comparableSource(expected))
+    comparable({
+      childId: stored.childId as string,
+      domain: stored.domain as EvaluationDomain,
+      sessionDocId: stored.sessionDocId as string,
+      finalizedAt: stored.finalizedAt,
+      findings: stored.findings,
+    }) === comparable(expected)
   )
 }
 
@@ -227,7 +214,18 @@ export async function finalizeGuidedEvaluation(
 
     if (existing.exists()) {
       const stored = existing.data() as Partial<GuidedEvaluationSource> | undefined
-      if (!guidedSourceContentMatches(stored, { childId, domain, sessionDocId, findings })) {
+      // The identity is PROVED off the stored document — scope, stamp and
+      // ordered findings — or this fails closed. Nothing is defaulted from the
+      // incoming payload, because then the payload would be verifying itself.
+      if (
+        !guidedSourceContentMatches(stored, {
+          childId,
+          domain,
+          sessionDocId,
+          finalizedAt,
+          findings,
+        })
+      ) {
         throw new GuidedEvaluationSourceMismatch(sourceId)
       }
       // Acknowledged, and NOTHING is written. In particular the day record is
@@ -238,8 +236,8 @@ export async function finalizeGuidedEvaluation(
         sessionDocId,
         childId,
         domain,
-        finalizedAt: (stored?.finalizedAt as string) ?? finalizedAt,
-        findings: (stored?.findings as EvaluationFinding[]) ?? findings,
+        finalizedAt: stored!.finalizedAt as string,
+        findings: stored!.findings as EvaluationFinding[],
         alreadyFinalized: true,
       }
     }
