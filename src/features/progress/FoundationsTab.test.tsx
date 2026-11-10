@@ -96,6 +96,7 @@ import {
 import {
   FOCUS_EVIDENCE_LABEL,
   FOCUS_EVIDENCE_UNAVAILABLE,
+  RECONCILE_READ_ONLY_NOTICE,
   SYNTHESIS_STALE_NOTICE,
 } from './foundationsView'
 
@@ -1057,7 +1058,8 @@ describe('FoundationsTab — “See current evidence” on the focus (read-only)
   })
 
   it('exposes no correction controls, and closes with focus returned to the button', async () => {
-    // Flagged for a disagreement — the notice still reads, its two ways out do not.
+    // Flagged for a disagreement — both reads still state what was recorded,
+    // and neither way out of it is offered here.
     const flagged = focusModel()
     flagged.conceptStates[LONG] = {
       ...flaggedCvc(),
@@ -1070,7 +1072,15 @@ describe('FoundationsTab — “See current evidence” on the focus (read-only)
     await user.click(opener)
 
     const sheet = focusSheet()
-    expect(within(sheet).getByText(RECONCILE_NOTICE)).toBeInTheDocument()
+    // The structured lines — whose word, which state, what date — stay.
+    expect(within(sheet).getByText(/You recorded: Lincoln/)).toBeInTheDocument()
+    expect(within(sheet).getByText(/The evaluation saw: Lincoln/)).toBeInTheDocument()
+    // Read-only wording, not the terrain's "view & reconcile" instruction.
+    expect(within(sheet).getByText(RECONCILE_READ_ONLY_NOTICE)).toBeInTheDocument()
+    expect(within(sheet).queryByText(RECONCILE_NOTICE)).not.toBeInTheDocument()
+    // The free-text notes behind the two reads are left to the terrain review.
+    expect(sheet.textContent ?? '').not.toContain('He read cat, run, sit for me')
+    expect(sheet.textContent ?? '').not.toContain('needed a hand on a few')
     expect(within(sheet).getByText('Evidence')).toBeInTheDocument()
     expect(screen.queryByLabelText(/What did you see/)).not.toBeInTheDocument()
     expect(screen.queryByText(/Record what you’ve seen/)).not.toBeInTheDocument()
@@ -1099,6 +1109,44 @@ describe('FoundationsTab — “See current evidence” on the focus (read-only)
     expect(screen.queryByText(FOCUS_EVIDENCE_UNAVAILABLE)).not.toBeInTheDocument()
     // Reading the terrain is untouched.
     expect(screen.getByText(CVC_NAME)).toBeInTheDocument()
+  })
+
+  it('offers no door at all when the loaded model is not the active child’s', () => {
+    // The opener refuses this scope, so the control must not be there to tap.
+    mockUseLearnerModel.mockReturnValue({
+      loading: false,
+      model: { ...focusModel(), childId: 'c2' },
+    })
+    render(<FoundationsTab />)
+
+    expect(
+      screen.queryByRole('button', { name: FOCUS_EVIDENCE_LABEL }),
+    ).not.toBeInTheDocument()
+    // And not the unknown-concept line either — nothing is claimed about the
+    // concept when the scope itself has not settled.
+    expect(screen.queryByText(FOCUS_EVIDENCE_UNAVAILABLE)).not.toBeInTheDocument()
+  })
+
+  it('withholds the other saved prose while stale, and keeps the live queued asks', () => {
+    mockUseLearnerModel.mockReturnValue({
+      loading: false,
+      model: { ...focusModel(), synthesisStaleAt: '2026-07-20T00:00:00.000Z' },
+    })
+    render(<FoundationsTab />)
+
+    // Both copies of the move keep their qualification.
+    expect(screen.getAllByText(SYNTHESIS_STALE_NOTICE)).toHaveLength(2)
+    // The saved prose that carries no qualification of its own is not left
+    // standing somewhere else on the page.
+    expect(
+      screen.queryByText(/Reading is coming together nicely/),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByText(/Checking whether long-vowel words are clicking/),
+    ).not.toBeInTheDocument()
+    // The routed ask is live data, not synthesis — it still reads.
+    expect(screen.getByText("Questions we're exploring")).toBeInTheDocument()
+    expect(screen.getByText('waiting')).toBeInTheDocument()
   })
 
   it('keeps the opened concept when the saved focus moves, and keeps its evidence live', async () => {

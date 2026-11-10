@@ -134,50 +134,44 @@ function evidenceSourceBody(ref: EvidenceRef, suffix: string): string {
 }
 
 // ── The focus → current-evidence entrance (read-only) ─────────────────────
-//
-// The top focus section names ONE saved suggestion. These are the words and the
-// two pure decisions behind the door it opens; the component only renders them.
 
 /**
  * Which entrance one drawer opening came through. The terrain chip keeps the
- * parent's correction controls; the focus entrance is read-only — it exists to
- * answer *what is actually recorded for the thing you are being told to work
- * on*, and a parent who wants to change it still goes through the terrain.
+ * parent's correction controls; the focus entrance only reads the record.
  */
 export type EvidenceEntryMode = 'terrain' | 'focus'
 
 /** The one named action on the focus section. */
 export const FOCUS_EVIDENCE_LABEL = 'See current evidence'
 
-/**
- * The drawer's accessible name. The focus entrance says what it is showing —
- * the evidence as it stands now — and which concept, so the sheet is never an
- * unnamed frame over the page.
- */
+/** The drawer's accessible name — what it shows, and which concept. */
 export function evidenceDrawerTitle(kidName: string, mode: EvidenceEntryMode): string {
   return mode === 'focus' ? `Current evidence — ${kidName}` : `${kidName} — evidence`
 }
 
 /**
  * A saved suggestion whose concept the model no longer carries (or the graph
- * cannot name). Quiet and honest: the suggestion still reads, it just has no
- * evidence page to open, which is said instead of offering a dead button.
+ * cannot name) — said instead of offering a button that cannot open.
  */
 export const FOCUS_EVIDENCE_UNAVAILABLE =
   'This suggestion isn’t on the map right now, so there’s no evidence page to open for it.'
+
+/**
+ * The same standing eval-vs-parent disagreement as {@link RECONCILE_NOTICE},
+ * said where there is nothing to reconcile *with*: the read-only sheet carries
+ * no choice, so it records that both reads exist instead of asking for one.
+ */
+export const RECONCILE_READ_ONLY_NOTICE =
+  'The model has a new take on this. Both reads are recorded.'
 
 /**
  * The suggestion is behind the recorded evidence (D4 `synthesisStaleAt`).
  *
  * **Truthiness is the whole signal** — the marker is set by the writer paths and
  * cleared to `null` by the synthesis beat, so a stamp that happens to read older
- * than `synthesis.generatedAt` still means *a regeneration is due*. Comparing the
- * two dates would silently drop the warning on a clock-skewed or same-second
- * write. Absent or null ⇒ nothing is claimed and no warning shows.
- *
- * It says "may be" because that is what is known: the stored prose was written
- * against earlier concept states, and nothing here can establish which of them
- * actually moved. The drawer beside it shows what is recorded now.
+ * than `synthesis.generatedAt` still means *a regeneration is due*. Comparing
+ * the two dates would drop the warning on a clock-skewed or same-second write.
+ * Absent or null ⇒ nothing is claimed and no warning shows.
  */
 export const SYNTHESIS_STALE_NOTICE = 'This saved suggestion may be out of date.'
 
