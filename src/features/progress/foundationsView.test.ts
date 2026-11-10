@@ -10,9 +10,11 @@ import {
   computeFocusConfirmations,
   computeMovedFeed,
   countByState,
+  evidenceDrawerTitle,
   evidenceSourceLine,
   groupTerrainByDomain,
   prettySource,
+  savedSuggestionStale,
   scrubDisplayJargon,
 } from './foundationsView'
 
@@ -149,5 +151,27 @@ describe('computeMovedFeed — accumulating, never a downgrade phrasing', () => 
     expect(moved[0].at).toBe('2026-07-05')
     expect(moved.some((m) => m.line.includes('became solid'))).toBe(true)
     expect(moved.every((m) => !/\bnot\b.*\bsolid\b|down|regress|lost/i.test(m.line))).toBe(true)
+  })
+})
+
+describe('the focus → current-evidence entrance', () => {
+  it('names the sheet for the evidence and the concept it is showing', () => {
+    expect(evidenceDrawerTitle('Read long-vowel words', 'focus')).toBe(
+      'Current evidence — Read long-vowel words',
+    )
+    // The terrain entrance keeps its own name — one sheet, two honest titles.
+    expect(evidenceDrawerTitle('Read long-vowel words', 'terrain')).toContain(
+      'Read long-vowel words',
+    )
+  })
+
+  it('reads the stale marker as truthiness, never as a date comparison', () => {
+    // Set by a writer path ⇒ a regeneration is due, whatever the stamp reads
+    // relative to `synthesis.generatedAt`.
+    expect(savedSuggestionStale({ synthesisStaleAt: '2026-07-20' })).toBe(true)
+    expect(savedSuggestionStale({ synthesisStaleAt: '1999-01-01' })).toBe(true)
+    // Cleared by the beat, or never written: nothing is claimed.
+    expect(savedSuggestionStale({ synthesisStaleAt: null })).toBe(false)
+    expect(savedSuggestionStale({})).toBe(false)
   })
 })

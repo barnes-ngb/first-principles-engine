@@ -133,6 +133,55 @@ function evidenceSourceBody(ref: EvidenceRef, suffix: string): string {
   }
 }
 
+// ── The focus → current-evidence entrance (read-only) ─────────────────────
+
+/**
+ * Which entrance one drawer opening came through. The terrain chip keeps the
+ * parent's correction controls; the focus entrance only reads the record.
+ */
+export type EvidenceEntryMode = 'terrain' | 'focus'
+
+/** The one named action on the focus section. */
+export const FOCUS_EVIDENCE_LABEL = 'See current evidence'
+
+/** The drawer's accessible name — what it shows, and which concept. */
+export function evidenceDrawerTitle(kidName: string, mode: EvidenceEntryMode): string {
+  return mode === 'focus' ? `Current evidence — ${kidName}` : `${kidName} — evidence`
+}
+
+/**
+ * A saved suggestion whose concept the model no longer carries (or the graph
+ * cannot name) — said instead of offering a button that cannot open.
+ */
+export const FOCUS_EVIDENCE_UNAVAILABLE =
+  'This suggestion isn’t on the map right now, so there’s no evidence page to open for it.'
+
+/**
+ * The same standing eval-vs-parent disagreement as {@link RECONCILE_NOTICE},
+ * said where there is nothing to reconcile *with*: the read-only sheet carries
+ * no choice, so it records that both reads exist instead of asking for one.
+ */
+export const RECONCILE_READ_ONLY_NOTICE =
+  'The model has a new take on this. Both reads are recorded.'
+
+/**
+ * The suggestion is behind the recorded evidence (D4 `synthesisStaleAt`).
+ *
+ * **Truthiness is the whole signal** — the marker is set by the writer paths and
+ * cleared to `null` by the synthesis beat, so a stamp that happens to read older
+ * than `synthesis.generatedAt` still means *a regeneration is due*. Comparing
+ * the two dates would drop the warning on a clock-skewed or same-second write.
+ * Absent or null ⇒ nothing is claimed and no warning shows.
+ */
+export const SYNTHESIS_STALE_NOTICE = 'This saved suggestion may be out of date.'
+
+/** True when the stale marker is set at all. See the note above — no dates. */
+export function savedSuggestionStale(model: {
+  synthesisStaleAt?: string | null
+}): boolean {
+  return Boolean(model.synthesisStaleAt)
+}
+
 /** A concept entry paired with its node id and plain-language name. */
 export interface TerrainConcept {
   conceptId: string
@@ -154,6 +203,31 @@ const DOMAIN_LABEL: Record<string, string> = {
 }
 
 /**
+ * Resolve ONE concept out of a model by its **exact** node id — the same pairing
+ * of graph node and stored entry the terrain map is built from, for a surface
+ * that holds an id rather than a chip.
+ *
+ * The Foundations drawer uses this to re-read its concept from the live model on
+ * every render instead of keeping the snapshot it was opened with, so there is
+ * one definition of "this id, named §14-safely, with its current evidence".
+ * Null when the model has no entry under that id, or the graph cannot name it.
+ */
+export function selectTerrainConcept(
+  model: LearnerModel,
+  conceptId: string,
+): TerrainConcept | null {
+  const entry = model.conceptStates[conceptId]
+  const node = entry ? FOUNDATION_NODE_MAP[conceptId] : undefined
+  if (!entry || !node) return null
+  return {
+    conceptId,
+    kidName: node.kidName,
+    parentDescription: node.parentDescription,
+    entry,
+  }
+}
+
+/**
  * Group a model's concept states by domain for the terrain map. Domains come out
  * reading→math; within a domain, solid→forming→frontier→not-yet then by name, so
  * the strongest ground reads first. Concepts whose node id is unknown to the graph
@@ -162,16 +236,12 @@ const DOMAIN_LABEL: Record<string, string> = {
 export function groupTerrainByDomain(model: LearnerModel): TerrainDomain[] {
   const rank = new Map(STATE_META.map((m, i) => [m.state, i]))
   const byDomain = new Map<string, TerrainConcept[]>()
-  for (const [conceptId, entry] of Object.entries(model.conceptStates)) {
-    const node = FOUNDATION_NODE_MAP[conceptId]
-    if (!node) continue
+  for (const conceptId of Object.keys(model.conceptStates)) {
+    const concept = selectTerrainConcept(model, conceptId)
+    const node = concept ? FOUNDATION_NODE_MAP[conceptId] : undefined
+    if (!concept || !node) continue
     const list = byDomain.get(node.domain) ?? []
-    list.push({
-      conceptId,
-      kidName: node.kidName,
-      parentDescription: node.parentDescription,
-      entry,
-    })
+    list.push(concept)
     byDomain.set(node.domain, list)
   }
   const order = ['reading', 'math']
