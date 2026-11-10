@@ -238,6 +238,60 @@ export interface EvaluationSession {
   frontier?: string
   evaluatedAt: string
   nextEvalDate?: string
+  /**
+   * UX-492 — the {@link GuidedEvaluationSource} document that finalized **this
+   * version** of the daily record.
+   *
+   * The daily document id is `{childId}_{domain}_{date}`, so two completed
+   * guided attempts on the same day share it and the later one replaces the
+   * earlier. That is kept (history, resume, the reward dedup key and every
+   * existing reader depend on it); what is added is a way to tell the versions
+   * apart. Written only by the completing save, in the same transaction as the
+   * source document it names, so a record carrying this field is a record whose
+   * finalized source exists. Absent on every pre-UX-492 record and on an
+   * in-progress save — in which case the record cannot be read as proof of any
+   * particular attempt.
+   */
+  finalizedSourceId?: string
+}
+
+/**
+ * A finalized guided evaluation's **own** record — UX-492.
+ *
+ * The problem it solves: both same-day completed attempts write the same daily
+ * `evaluationSessions` document, so a second attempt can replace the first even
+ * when their projected evidence summaries are identical and their actual help
+ * notes are opposite. The daily record stays exactly as it was for every
+ * existing consumer; this is one additional, family-scoped document per
+ * finalization, with a fresh Firestore id captured once at the completed reply.
+ *
+ * **Application-create-once.** The first commit of an id is the record; a retry
+ * of the same payload is acknowledged rather than rewritten, and a same-id
+ * mismatch fails closed (see `features/evaluate/guidedEvaluationSource.ts`).
+ *
+ * It carries only scoped metadata, the finalization stamp and the **exact
+ * ordered findings** — evidence, notes and `testedAt` as recorded. No
+ * transcript, no recommendations, no summary: this is the evidence a later
+ * Apply must be able to point at, not a second copy of the session.
+ */
+export interface GuidedEvaluationSource {
+  id?: string
+  childId: string
+  domain: EvaluationDomain
+  /** The daily `evaluationSessions` document this finalization saved alongside. */
+  sessionDocId: string
+  /** ISO — when the completing save was admitted. */
+  finalizedAt: string
+  /**
+   * The findings exactly as the completed reply recorded them, in order. The
+   * order is load-bearing: a learner-model evidence ref stores the **index** of
+   * the finding it came from, so the winner of a rank/first-on-tie selection
+   * stays identifiable after the fact.
+   *
+   * Explicitly recorded help is preserved verbatim in `notes` / `evidence`;
+   * absent help stays absent (unknown), never rewritten as "no help".
+   */
+  findings: EvaluationFinding[]
 }
 
 export interface EvaluationFinding {

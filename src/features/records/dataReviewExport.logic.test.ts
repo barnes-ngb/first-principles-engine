@@ -6,6 +6,9 @@ import {
   DataReviewExportMode,
   dataReviewExportFilename,
   evalLooksAppliedToSnapshot,
+  evalReachedModel,
+  evalWritebackMatch,
+  EvalWritebackMatch,
   OPEN_QUESTION_STALE_DAYS,
   projectedThroughLine,
   storedDate,
@@ -591,6 +594,83 @@ describe('integrity — open questions, evaluations, Dad Lab tags', () => {
     const check = checkById(computeIntegrityChecks(input), 'eval-never-applied')
     expect(check.status).toBe('FLAG')
     expect(check.detail).toContain('eval-lost')
+  })
+
+  /**
+   * UX-492 — a same-day replacement must not be reported as applied on the
+   * strength of the older attempt's ref, because both share the daily id.
+   *
+   * A = the attempt that was applied; B = the later finalization of the same
+   * day. POSITIVE CONTROL: compare only `sourceId` (the pre-UX-492 rule) and the
+   * replacement case below reports B as reaching the model.
+   */
+  describe('the learner-model writeback indicator (UX-492)', () => {
+    const DAY = `${CHILD_ID}_reading_2026-07-12`
+    const evalRef = (finalizedSourceId?: string) => ({
+      kind: 'eval' as const,
+      sourceId: DAY,
+      note: 'Guided eval read this as emerging',
+      observedAt: '2026-07-12T10:00:00.000Z',
+      ...(finalizedSourceId ? { finalizedSourceId, sourceFindingIndex: 0 } : {}),
+    })
+    const modelWithRefs = (...refs: ReturnType<typeof evalRef>[]) =>
+      learnerModel({
+        conceptStates: { [CONCEPT]: { state: 'frontier', evidence: refs } },
+      })
+    const sessionA = guidedSession({ id: DAY, finalizedSourceId: 'src-A' })
+    const sessionB = guidedSession({ id: DAY, finalizedSourceId: 'src-B' })
+
+    it('OLDER APPLIED A — the attempt whose finalization the ref names is exact', () => {
+      const model = modelWithRefs(evalRef('src-A'))
+      expect(evalWritebackMatch(model, sessionA)).toBe(EvalWritebackMatch.Exact)
+      expect(evalReachedModel(model, sessionA)).toBe(true)
+    })
+
+    it('REPLACEMENT B — a newer same-day version is NOT proved by A’s ref', () => {
+      const model = modelWithRefs(evalRef('src-A'))
+      expect(evalWritebackMatch(model, sessionB)).toBe(EvalWritebackMatch.None)
+      expect(evalReachedModel(model, sessionB)).toBe(false)
+    })
+
+    it('EXACT B — applying B names B, and A is then no longer proved either', () => {
+      const model = modelWithRefs(evalRef('src-A'), evalRef('src-B'))
+      expect(evalWritebackMatch(model, sessionB)).toBe(EvalWritebackMatch.Exact)
+      expect(evalWritebackMatch(model, sessionA)).toBe(EvalWritebackMatch.Exact)
+      expect(evalReachedModel(model, sessionB)).toBe(true)
+    })
+
+    it('LEGACY DAY — a pointer-less ref proves a legacy record, never a finalized one', () => {
+      const model = modelWithRefs(evalRef())
+      // The pre-UX-492 record: a day id is all that ever existed for it.
+      const legacy = guidedSession({ id: DAY })
+      expect(evalWritebackMatch(model, legacy)).toBe(EvalWritebackMatch.LegacyDay)
+      expect(evalReachedModel(model, legacy)).toBe(true)
+      // The finalized record: the same ref may belong to the version it
+      // replaced, so it is ambiguous and counts as nothing.
+      expect(evalWritebackMatch(model, sessionB)).toBe(EvalWritebackMatch.LegacyDay)
+      expect(evalReachedModel(model, sessionB)).toBe(false)
+    })
+
+    it('reports the ambiguity in the integrity check without counting it', () => {
+      const input = completeInput({
+        learnerModel: modelWithRefs(evalRef()),
+        skillSnapshot: null,
+        evaluationSessions: [sessionB],
+      })
+      const check = checkById(computeIntegrityChecks(input), 'eval-never-applied')
+      expect(check.status).toBe('FLAG')
+      expect(check.detail).toContain('ambiguous')
+      expect(check.detail).toContain(DAY)
+    })
+
+    it('keeps the separately labelled snapshot heuristic independent of all this', () => {
+      // The snapshot column is inferred from priority skills and the snapshot's
+      // own `updatedAt`; the finalization pointer has no bearing on it.
+      expect(evalLooksAppliedToSnapshot(sessionB, skillSnapshot())).toBe(true)
+      expect(
+        evalReachedModel(modelWithRefs(evalRef('src-A')), sessionB),
+      ).toBe(false)
+    })
   })
 
   it('infers "applied to snapshot" from a matching priority skill, not a stored marker', () => {

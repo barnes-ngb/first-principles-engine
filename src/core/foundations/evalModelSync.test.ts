@@ -84,6 +84,33 @@ describe('computeEvalRead', () => {
     expect(read).toHaveLength(1)
     expect(read[0].conceptId).toBe(CVC)
     expect(read[0].state).toBe('solid')
+    // UX-492 — and it records WHICH finding won, by its original ordinal.
+    expect(read[0].findingIndex).toBe(1)
+  })
+
+  it('carries the ORIGINAL ordinal of the rank / first-on-tie winner (UX-492)', () => {
+    // Equal rank: the FIRST finding keeps the concept, as it always has, and its
+    // index is the one recorded. POSITIVE CONTROL: make the comparison `>=` and
+    // this reads 2 instead of 0.
+    const tied = computeEvalRead([
+      finding('phonics.cvc.short-a', 'emerging'),
+      finding('phonics.blends', 'mastered'),
+      finding('phonics.cvc.short-o', 'emerging'),
+    ])
+    const cvc = tied.find((r) => r.conceptId === CVC)!
+    expect(cvc.findingIndex).toBe(0)
+    expect(tied.find((r) => r.conceptId === BLENDS)!.findingIndex).toBe(1)
+  })
+
+  it('gives every concept a multi-concept finding maps to the SAME ordinal', () => {
+    // One recorded observation, named once: a tag that resolves to several
+    // concepts is still finding number N of the source's ordered list.
+    const read = computeEvalRead([
+      finding('phonics.cvc', 'not-tested'),
+      finding('writing.spelling.cvc', 'mastered'),
+    ])
+    expect(read.length).toBeGreaterThan(0)
+    for (const r of read) expect(r.findingIndex).toBe(1)
   })
 
   it('produces a kid-word evidence note per concept', () => {
@@ -120,6 +147,41 @@ describe('applyEvalFindingsToModel', () => {
     expect(next.conceptStates[CVC].state).toBe('forming')
     expect(changedConceptIds).toEqual([CVC])
     expect(next.conceptStates[CVC].evidence.some((e) => e.kind === 'eval')).toBe(true)
+  })
+
+  it('stamps the finalized source and the finding ordinal when given one (UX-492)', () => {
+    const m = model({ conceptStates: { [CVC]: entry('frontier') } })
+    const { model: next } = applyEvalFindingsToModel(
+      m,
+      computeEvalRead([
+        finding('phonics.blends', 'emerging'),
+        finding('phonics.cvc', 'mastered'),
+      ]),
+      SID,
+      NOW,
+      'finalized-1',
+    )
+    const ref = next.conceptStates[CVC].evidence.find((e) => e.kind === 'eval')!
+    // The daily id stays where every existing reader looks for it…
+    expect(ref.sourceId).toBe(SID)
+    // …and the exact original is named alongside it, with the ordinal of the
+    // finding inside that source's ordered list.
+    expect(ref.finalizedSourceId).toBe('finalized-1')
+    expect(ref.sourceFindingIndex).toBe(1)
+  })
+
+  it('writes the pre-UX-492 ref shape when no finalization is supplied', () => {
+    const m = model({ conceptStates: { [CVC]: entry('frontier') } })
+    const { model: next } = applyEvalFindingsToModel(
+      m,
+      computeEvalRead([finding('phonics.cvc', 'mastered')]),
+      SID,
+      NOW,
+    )
+    const ref = next.conceptStates[CVC].evidence.find((e) => e.kind === 'eval')!
+    expect(ref.sourceId).toBe(SID)
+    expect('finalizedSourceId' in ref).toBe(false)
+    expect('sourceFindingIndex' in ref).toBe(false)
   })
 
   it('phrases a downward move with no-shame wording — never regress/drop/lost', () => {

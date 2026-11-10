@@ -158,6 +158,12 @@ export const PROBED_COLLECTIONS: readonly string[] = [
   'evaluationSessions',
   'evaluations',
   'featureRequests',
+  // UX-492 — a finalized guided evaluation holds a child's own recorded
+  // evidence (its findings, their notes, their `testedAt`) under a top-level
+  // family collection, so the duplicate-child survey must see it before
+  // offering any deletion. It is the shape round 1 cared about: the id is a
+  // fresh auto-id, so only the `childId` field names its child.
+  'guidedEvaluationSources',
   'helpCards',
   'hours',
   'hoursAdjustments',

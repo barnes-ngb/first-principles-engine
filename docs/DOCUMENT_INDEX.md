@@ -25,7 +25,7 @@
 | ~~`PARENT_EXPERIENCE_AUDIT.md`~~ | REMOVED | Superseded by `FIRST_PRINCIPLES_ALIGNMENT.md` |
 | ~~`PARENT_EXPERIENCE_ALIGNMENT_PLAN.md`~~ | REMOVED | All items done Mar 25, 2026. Superseded by `FIRST_PRINCIPLES_ALIGNMENT.md` |
 | `DESIGN_FAST_PHONICS_COMPLETION.md` | **CURRENT** (Oct 17) | FEAT-242 — confirming a whole program is finished: the immutable act log vs the mutable projection, the reviewed coverage mapping and its qualifiers, the shared coverage precedence, the correction/withdrawal contract, and the transaction work the safety rests on. Local candidate; not merged or deployed. |
-| `FIRESTORE_AUDIT.md` | **STALE** (Mar 21) | Data model, indexes, collections audit — stale since Mar 21. CLAUDE.md table is now authoritative; `firestore.ts` defines <!-- gen:collection-count -->51<!-- /gen --> exported collection helpers (count generated + verified by `npm run docs:check`; see `DOCS_ALIGNMENT.md`). |
+| `FIRESTORE_AUDIT.md` | **STALE** (Mar 21) | Data model, indexes, collections audit — stale since Mar 21. CLAUDE.md table is now authoritative; `firestore.ts` defines <!-- gen:collection-count -->52<!-- /gen --> exported collection helpers (count generated + verified by `npm run docs:check`; see `DOCS_ALIGNMENT.md`). |
 | `WEEKLY_CONUNDRUM_ARC.md` | **CURRENT** | Weekly conundrum story arc design — Stonebridge narrative, recurring characters, ethical reasoning scenarios |
 | `KNOWLEDGE_MINE_BRIEF.md` | **CURRENT** | Interactive evaluation design doc (Knowledge Mine) — Phase 1 shipped |
 | `barnes-story-game-workshop-design.md` | **CURRENT** | Story Game Workshop design doc — wizard, 3 game types, art gen, voice recording, playtester, play experience |

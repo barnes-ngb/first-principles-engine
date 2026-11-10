@@ -32,6 +32,7 @@ import type {
   Evaluation,
   EvaluationSession,
   FeatureRequest,
+  GuidedEvaluationSource,
   HelpCard,
   HoursAdjustment,
   HoursEntry,
@@ -492,6 +493,31 @@ export const evaluationSessionsCollection = (
   collection(db, `families/${familyId}/evaluationSessions`).withConverter(
     evaluationSessionConverter,
   ) as CollectionReference<EvaluationSession>
+
+// ── Finalized guided-evaluation sources (UX-492) ───────────────
+//
+// One document per completed guided evaluation, keyed by a FRESH Firestore id
+// rather than by the day — which is the whole point: the daily
+// `evaluationSessions` document above is shared by both of a day's completed
+// attempts, so it cannot distinguish them. Family-scoped and child-stamped like
+// every other per-child record here, so the existing family rules cover it and
+// nothing implies parent-only storage.
+
+const guidedEvaluationSourceConverter: FirestoreDataConverter<GuidedEvaluationSource> = {
+  toFirestore: (data) => stripUndefined(data as unknown as Record<string, unknown>),
+  fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions) => {
+    const data = snapshot.data(options) as GuidedEvaluationSource
+    return { ...data, id: snapshot.id }
+  },
+}
+
+/** Finalized guided evaluations. Doc ID: a fresh auto-id, one per finalization. */
+export const guidedEvaluationSourcesCollection = (
+  familyId: string,
+): CollectionReference<GuidedEvaluationSource> =>
+  collection(db, `families/${familyId}/guidedEvaluationSources`).withConverter(
+    guidedEvaluationSourceConverter,
+  ) as CollectionReference<GuidedEvaluationSource>
 
 // ── Story Games (Game Workshop) ─────────────────────────────────
 

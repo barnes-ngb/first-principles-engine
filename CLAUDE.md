@@ -540,6 +540,7 @@ All under `families/{familyId}/`:
 | `avatarProfiles` | Per-child avatar customization |
 | `dailyArmorSessions` | Daily armor XP session tracking |
 | `evaluationSessions` | Interactive evaluation sessions (Knowledge Mine) |
+| `guidedEvaluationSources` | Per-family finalized guided-evaluation findings. A Firestore transaction creates each exact ordered source once and updates the daily session in the same commit. The original notes stay here with the finding. Source identity is separate from the daily reward key. |
 | `storyGames` | Story Game Workshop games |
 | `scans` | Curriculum photo scan records |
 | `shellyChatThreads` | Shelly AI chat thread roots |
