@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import AssessmentIcon from '@mui/icons-material/Assessment'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
@@ -40,6 +40,7 @@ import { updateSkillMapFromFindings } from '../../core/curriculum/updateSkillMap
 import { addXpEvent } from '../../core/xp/addXpEvent'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import type {
+  Child,
   ChatMessage,
   ConceptualBlock,
   EvaluationFinding,
@@ -136,7 +137,7 @@ function formatSkillLabel(tag: string): string {
   return tag
     .split('.')
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' \u2192 ')
+    .join(' → ')
     .replace(/-/g, ' ')
     .replace(/cvc/i, 'CVC')
     .replace(/cvce/i, 'CVCe')
@@ -147,6 +148,12 @@ const DOMAIN_TABS: { value: EvaluationDomain; label: string }[] = [
   { value: EvaluationDomain.Math, label: 'Math' },
   { value: EvaluationDomain.Speech, label: 'Speech' },
   { value: EvaluationDomain.Writing, label: 'Writing' },
+]
+
+const READY_DOMAINS: EvaluationDomain[] = [
+  EvaluationDomain.Reading,
+  EvaluationDomain.Speech,
+  EvaluationDomain.Math,
 ]
 
 function findingStatusIcon(status: EvaluationFinding['status']) {
@@ -162,18 +169,171 @@ function findingStatusIcon(status: EvaluationFinding['status']) {
   }
 }
 
-// ── Component ───────────────────────────────────────────────────
+// ── Visit ownership (FIX-248) ───────────────────────────────────
+//
+// A guided evaluation is a long conversation that writes to five collections,
+// and the shell's child chip can change the scoped identity under it at any
+// moment — the `CLAUDE.md` rail every `FIX-220` / `UX-329` round found one more
+// surface for. Here it was reachable from the ordinary controls: hold Lincoln's
+// Start (or Send) reply, switch to London, let London's sessions land, then let
+// the old completion arrive, and Lincoln's finding is published under London's
+// name, persisted to a London-shaped session id, and projected onto London's
+// skill snapshot and learner model.
+//
+// The repair is a **committed visit boundary**, not another guard per callback.
+// `EvaluateChatEditor` holds every piece of editable state, is handed a SETTLED
+// family, child and domain as props, and is **keyed** by them — so a committed
+// change unmounts the visit and mounts a new one, and the old visit's input,
+// messages, findings, recommendations, analysis, dialogs, feedback, admission
+// guards and session timer go with it in the same commit. Because each visit is
+// its own component instance, `A → B → A` is a third visit, the same child id in
+// a different family is a different visit, and no closure can retarget: the
+// family, child and domain a closure sees are its own instance's props and can
+// never change value.
+//
+// Two things the key cannot own live inside the instance:
+//
+//   * **the draft lifetime** (`lifetimeRef`) — Clear & Restart ends the draft
+//     without ending the visit, so in-flight work from before the Clear must be
+//     discarded too. It is also what stops the initial read from re-resuming the
+//     draft the parent just cleared.
+//   * **the committed-mounted flag** (`visitLiveRef`) — set in a LAYOUT effect,
+//     so between a commit's teardown and its setup there is no live visit and a
+//     retained callback cannot borrow the authority of the one that just left
+//     (`useBookshelf` / `BookReaderPage`'s rule).
+//
+// `isCurrent(lifetime)` is the single question every awaited step asks before it
+// publishes state or starts a side effect. A write or Apply that was already
+// admitted finishes with its own captured destination and contents — but its
+// late UI feedback is dropped.
+
+/** The settled scope one evaluation visit is bound to. */
+interface EvaluateVisitScope {
+  familyId: string
+  childId: string
+  childName: string
+  domain: EvaluationDomain
+}
+
+/**
+ * One synchronous admission slot per operation per lifetime.
+ *
+ * Holds the lifetime that owns the operation, so release cannot unlock a later
+ * visit or a later draft: it clears the slot only if the slot is still its own.
+ */
+type AdmissionSlot = { current: number | null }
+
+function admit(slot: AdmissionSlot, lifetime: number): boolean {
+  if (slot.current !== null) return false
+  slot.current = lifetime
+  return true
+}
+
+function release(slot: AdmissionSlot, lifetime: number): void {
+  if (slot.current === lifetime) slot.current = null
+}
+
+// ── Page (scope resolution only) ────────────────────────────────
 
 export default function EvaluateChatPage() {
   const familyId = useFamilyId()
-  const navigate = useNavigate()
-  const [searchParams] = useSearchParams()
   // UX-425: this page no longer chooses or adds a child — it reads the active
   // one. The shell's chip is the one control that changes it.
-  const { activeChildId, activeChild } = useActiveChild()
-  const { chat, analyzePatterns, loading: aiLoading, error: aiError } = useAI()
+  const {
+    activeChildId,
+    activeChild,
+    isLoading: childrenLoading,
+    loadFailed: childrenLoadFailed,
+    retryLoad: retryChildren,
+    isChildProfile,
+  } = useActiveChild()
 
   const [domain, setDomain] = useState<EvaluationDomain>(EvaluationDomain.Reading)
+
+  const isDomainReady = READY_DOMAINS.includes(domain)
+
+  // The visit's scope, or `null` while the identity is not settled. A FAILED
+  // children read is handled separately below: it is not an affirmative empty
+  // family, and it must not look like one.
+  const resolved: { familyId: string; child: Child } | null =
+    !childrenLoading && !childrenLoadFailed && familyId && activeChildId && activeChild
+      ? { familyId, child: activeChild }
+      : null
+
+  // `/evaluate` sits outside `RequireParent` and the profile menu switches in
+  // place, so the parent role is part of the visit identity — a kid profile
+  // resolving to the same child is still a different visit (the planner's
+  // `usePlannerAskSource` reading).
+  const role = isChildProfile ? 'child' : 'parent'
+
+  return (
+    <Page>
+      <Stack direction="row" alignItems="center" spacing={1}>
+        <AssessmentIcon color="primary" />
+        <Typography variant="h5">
+          Evaluate {activeChild?.name || 'Child'}
+        </Typography>
+      </Stack>
+
+      {/* UX-425: the in-page selector is gone — the shell's chip is the one
+          place a parent chooses the child. The heading above already names him,
+          so no `ActiveChildLine` is needed here (UX-426). */}
+
+      {/* Domain Tabs */}
+      <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
+        <Tabs
+          value={domain}
+          onChange={(_, v: EvaluationDomain) => setDomain(v)}
+          variant="scrollable"
+          scrollButtons="auto"
+        >
+          {DOMAIN_TABS.map((tab) => (
+            <Tab
+              key={tab.value}
+              value={tab.value}
+              label={READY_DOMAINS.includes(tab.value) ? tab.label : `${tab.label} (coming soon)`}
+              disabled={!READY_DOMAINS.includes(tab.value)}
+            />
+          ))}
+        </Tabs>
+      </Box>
+
+      {!isDomainReady ? (
+        <Alert severity="info">
+          {domain.charAt(0).toUpperCase() + domain.slice(1)} evaluation coming soon. Start with Reading.
+        </Alert>
+      ) : childrenLoadFailed ? (
+        // GATE on a FAILED read — recoverable and visibly distinct from an
+        // empty family, which is `useBusinessGoal`'s round-5 lesson.
+        <ErrorState
+          message="We couldn't load your children, so an evaluation can't be started yet."
+          onRetry={retryChildren}
+        />
+      ) : !resolved ? (
+        <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+          <LoadingState size={40} />
+        </Box>
+      ) : (
+        <EvaluateChatEditor
+          // The visit boundary. Everything editable lives below this key.
+          key={`${resolved.familyId}|${resolved.child.id}|${role}|${domain}`}
+          familyId={resolved.familyId}
+          childId={resolved.child.id}
+          childName={resolved.child.name}
+          domain={domain}
+        />
+      )}
+    </Page>
+  )
+}
+
+// ── Editor (one visit) ──────────────────────────────────────────
+
+function EvaluateChatEditor({ familyId, childId, childName, domain }: EvaluateVisitScope) {
+  const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const { chat, analyzePatterns, loading: aiLoading, error: aiError } = useAI()
+
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [findings, setFindings] = useState<EvaluationFinding[]>([])
   const [recommendations, setRecommendations] = useState<EvaluationRecommendation[]>([])
@@ -186,6 +346,8 @@ export default function EvaluateChatPage() {
   const [previousSessions, setPreviousSessions] = useState<EvaluationSession[]>([])
   const [inputText, setInputText] = useState('')
   const [initializing, setInitializing] = useState(true)
+  const [loadFailed, setLoadFailed] = useState(false)
+  const [reloadNonce, setReloadNonce] = useState(0)
   const [clearDialogOpen, setClearDialogOpen] = useState(false)
   const [reapplyDialogOpen, setReapplyDialogOpen] = useState(false)
   const [hasAppliedThisSession, setHasAppliedThisSession] = useState(false)
@@ -196,6 +358,39 @@ export default function EvaluateChatPage() {
   const sessionTimer = useSessionTimer()
   const hoursLoggedRef = useRef(false)
 
+  // ── Visit + draft lifetime ──────────────────────────────────
+
+  /** Committed-mounted: false until this visit's layout effect has run. */
+  const visitLiveRef = useRef(false)
+  /** The current draft's lifetime. Clear & Restart ends one and opens the next. */
+  const lifetimeRef = useRef(0)
+
+  useLayoutEffect(() => {
+    visitLiveRef.current = true
+    return () => {
+      visitLiveRef.current = false
+    }
+  }, [])
+
+  /** May work started under `lifetime` still touch this visit? */
+  const isCurrent = useCallback(
+    (lifetime: number) => visitLiveRef.current && lifetimeRef.current === lifetime,
+    [],
+  )
+
+  const startSlot = useRef<number | null>(null)
+  const sendSlot = useRef<number | null>(null)
+  const applySlot = useRef<number | null>(null)
+
+  /**
+   * The deterministic session id `persistSession` assigns, rebuilt from THIS
+   * visit's child and domain. Unchanged day-based shape (`{childId}_{domain}_{date}`).
+   */
+  const defaultSessionDocId = useCallback(
+    () => `${childId}_${domain}_${new Date().toISOString().slice(0, 10)}`,
+    [childId, domain],
+  )
+
   // Auto-scroll on new messages
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -203,49 +398,61 @@ export default function EvaluateChatPage() {
 
   // ── Log session hours when evaluation completes ────────────
 
-  const logSessionHours = useCallback(async () => {
-    if (hoursLoggedRef.current || !activeChildId) return
-    hoursLoggedRef.current = true
+  const logSessionHours = useCallback(
+    async (lifetime: number) => {
+      if (hoursLoggedRef.current) return
+      // An old completion must not stop THIS visit's (or this draft's) timer,
+      // and must not log minutes for it. `UX-327`'s rule, one surface over.
+      if (!isCurrent(lifetime)) return
+      hoursLoggedRef.current = true
 
-    const activeSeconds = sessionTimer.stop()
-    const minutes = Math.ceil(activeSeconds / 60 / 5) * 5 // round up to nearest 5
-    if (minutes < 5) return // too short to log
+      const activeSeconds = sessionTimer.stop()
+      const minutes = Math.ceil(activeSeconds / 60 / 5) * 5 // round up to nearest 5
+      if (minutes < 5) return // too short to log
 
-    try {
-      await addDoc(hoursCollection(familyId), {
-        childId: activeChildId,
-        date: todayKey(),
-        minutes,
-        subjectBucket: domainToSubjectBucket(domain),
-        quickCapture: true,
-        notes: `${domain.charAt(0).toUpperCase() + domain.slice(1)} evaluation session`,
-        source: 'evaluation-session',
-      })
-    } catch (err) {
-      console.error('[SessionTimer] Failed to log evaluation hours:', err)
-    }
-  }, [activeChildId, familyId, domain, sessionTimer])
+      try {
+        await addDoc(hoursCollection(familyId), {
+          childId,
+          date: todayKey(),
+          minutes,
+          subjectBucket: domainToSubjectBucket(domain),
+          quickCapture: true,
+          notes: `${domain.charAt(0).toUpperCase() + domain.slice(1)} evaluation session`,
+          source: 'evaluation-session',
+        })
+      } catch (err) {
+        console.error('[SessionTimer] Failed to log evaluation hours:', err)
+      }
+    },
+    [childId, familyId, domain, sessionTimer, isCurrent],
+  )
 
   // ── Load or create session ──────────────────────────────────
+  //
+  // Runs once per visit (family / child / domain are props, fixed for this
+  // instance) plus once per explicit retry. It deliberately does NOT depend on
+  // anything Clear & Restart changes, so Clear cannot re-resume the draft the
+  // parent just cleared — and the lifetime check below means an in-flight read
+  // can't either.
 
   useEffect(() => {
-    if (!activeChildId || !familyId) return
-
     let cancelled = false
+    const lifetime = lifetimeRef.current
 
     async function loadSession() {
       setInitializing(true)
+      setLoadFailed(false)
       try {
         // Load all sessions for this child + domain
         const allQ = query(
           evaluationSessionsCollection(familyId),
-          where('childId', '==', activeChildId),
+          where('childId', '==', childId),
           where('domain', '==', domain),
           orderBy('evaluatedAt', 'desc'),
         )
         const allSnap = await getDocs(allQ)
 
-        if (cancelled) return
+        if (cancelled || !isCurrent(lifetime)) return
 
         const allSessions = allSnap.docs.map((d) => ({ ...d.data(), id: d.id }))
         setPreviousSessions(allSessions.filter((s) => s.status === 'complete'))
@@ -284,8 +491,11 @@ export default function EvaluateChatPage() {
         }
       } catch (err) {
         console.error('Failed to load evaluation session', err)
+        // A failed read is not an empty history: refuse to be editable and say
+        // so, with a way back (`useBusinessGoal`'s GATE).
+        if (!cancelled && visitLiveRef.current) setLoadFailed(true)
       } finally {
-        if (!cancelled) setInitializing(false)
+        if (!cancelled && visitLiveRef.current) setInitializing(false)
       }
     }
 
@@ -293,20 +503,25 @@ export default function EvaluateChatPage() {
     return () => {
       cancelled = true
     }
-  }, [activeChildId, familyId, domain])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [familyId, childId, domain, reloadNonce])
 
   // ── Persist session to Firestore ────────────────────────────
 
   const persistSession = useCallback(
     async (
+      lifetime: number,
       msgs: ChatMessage[],
       fndgs: EvaluationFinding[],
       complete?: CompleteBlock | null,
-    ) => {
-      if (!activeChildId) return
+    ): Promise<string> => {
+      // Destination captured before the await: this visit's child and domain,
+      // and the session id this call is writing.
+      const existingDocId = sessionDocId
+      const targetDocId = existingDocId ?? defaultSessionDocId()
 
       const session: Omit<EvaluationSession, 'id'> = {
-        childId: activeChildId,
+        childId,
         domain,
         status: complete ? 'complete' : 'in-progress',
         messages: msgs,
@@ -321,33 +536,40 @@ export default function EvaluateChatPage() {
       }
 
       try {
-        if (sessionDocId) {
-          const ref = doc(evaluationSessionsCollection(familyId), sessionDocId)
-          await setDoc(ref, session)
-        } else {
-          // Create with a deterministic ID: {childId}_{domain}_{date}
-          const newDocId = `${activeChildId}_${domain}_${new Date().toISOString().slice(0, 10)}`
-          const ref = doc(evaluationSessionsCollection(familyId), newDocId)
-          await setDoc(ref, session)
-          setSessionDocId(newDocId)
-        }
+        const ref = doc(evaluationSessionsCollection(familyId), targetDocId)
+        await setDoc(ref, session)
+        // Only this visit's current draft learns the id it was given.
+        if (!existingDocId && isCurrent(lifetime)) setSessionDocId(targetDocId)
       } catch (err) {
         console.error('Failed to persist evaluation session', err)
       }
+
+      return targetDocId
     },
-    [activeChildId, domain, familyId, sessionDocId, recommendations, completeSummary, completeData, nextEvalDate],
+    [
+      childId,
+      domain,
+      familyId,
+      sessionDocId,
+      recommendations,
+      completeSummary,
+      completeData,
+      nextEvalDate,
+      defaultSessionDocId,
+      isCurrent,
+    ],
   )
 
   // ── Trigger pattern analysis after <complete> ────────────────
 
   const triggerPatternAnalysis = useCallback(
-    async (sessionId: string, allFindings: EvaluationFinding[]) => {
-      if (!activeChildId) return
+    async (lifetime: number, sessionId: string, allFindings: EvaluationFinding[]) => {
+      if (!isCurrent(lifetime)) return
       setPatternAnalysisState('loading')
       try {
         const result = await analyzePatterns({
           familyId,
-          childId: activeChildId,
+          childId,
           evaluationSessionId: sessionId,
           currentFindings: allFindings.map((f) => ({
             skill: f.skill,
@@ -356,6 +578,8 @@ export default function EvaluateChatPage() {
             notes: f.notes,
           })),
         })
+        // A late analysis belongs to the visit that asked for it, nobody else.
+        if (!isCurrent(lifetime)) return
         if (result) {
           setConceptualBlocks(result.blocks as ConceptualBlock[])
           setBlocksSummary(result.summary)
@@ -363,172 +587,224 @@ export default function EvaluateChatPage() {
         setPatternAnalysisState('done')
       } catch (err) {
         console.warn('Pattern analysis failed:', err)
+        if (!isCurrent(lifetime)) return
         setPatternAnalysisState('done')
         setBlocksSummary(undefined)
       }
     },
-    [activeChildId, familyId, analyzePatterns],
+    [childId, familyId, analyzePatterns, isCurrent],
   )
 
   // ── Start evaluation (first AI message) ─────────────────────
 
   const startEvaluation = useCallback(async () => {
-    if (!activeChildId || !activeChild) return
+    const lifetime = lifetimeRef.current
+    // One synchronous admission per lifetime — a double-tap cannot open two.
+    if (!admit(startSlot, lifetime)) return
 
-    hoursLoggedRef.current = false
-    sessionTimer.startTimer()
+    try {
+      hoursLoggedRef.current = false
+      sessionTimer.startTimer()
 
-    const aiMessages: AIChatMessage[] = [
-      {
-        role: 'user',
-        content: `I'd like to evaluate ${activeChild.name}'s ${domain} skills. Let's start the diagnostic assessment.`,
-      },
-    ]
+      const openingText = `I'd like to evaluate ${childName}'s ${domain} skills. Let's start the diagnostic assessment.`
 
-    const response = await chat({
-      familyId,
-      childId: activeChildId,
-      taskType: TaskType.Evaluate,
-      messages: aiMessages,
-      domain,
-    })
+      const aiMessages: AIChatMessage[] = [{ role: 'user', content: openingText }]
 
-    if (!response) return
+      const response = await chat({
+        familyId,
+        childId,
+        taskType: TaskType.Evaluate,
+        messages: aiMessages,
+        domain,
+      })
 
-    const newFindings = extractFindings(response.message)
-    const complete = extractComplete(response.message)
-    const displayText = stripTags(response.message)
+      // The defect: an answer that arrived after the parent moved on. Nothing
+      // was admitted for it, so it is discarded whole — no message, no finding,
+      // no evaluation record, no hours, no analysis.
+      if (!isCurrent(lifetime)) return
+      if (!response) return
 
-    const userMsg: ChatMessage = {
-      id: generateMessageId(),
-      role: ChatMessageRole.User,
-      text: `I'd like to evaluate ${activeChild.name}'s ${domain} skills. Let's start the diagnostic assessment.`,
-      createdAt: new Date().toISOString(),
+      const newFindings = extractFindings(response.message)
+      const complete = extractComplete(response.message)
+      const displayText = stripTags(response.message)
+
+      const userMsg: ChatMessage = {
+        id: generateMessageId(),
+        role: ChatMessageRole.User,
+        text: openingText,
+        createdAt: new Date().toISOString(),
+      }
+
+      const aiMsg: ChatMessage = {
+        id: generateMessageId(),
+        role: ChatMessageRole.Assistant,
+        text: displayText,
+        createdAt: new Date().toISOString(),
+      }
+
+      const newMessages = [userMsg, aiMsg]
+      const allFindings = [...newFindings]
+
+      setMessages(newMessages)
+      setFindings(allFindings)
+
+      if (complete) {
+        setCompleteData(complete)
+        setRecommendations(complete.recommendations)
+        setCompleteSummary(complete.summary)
+        setNextEvalDate(complete.nextEvalDate)
+        setSessionStatus('complete')
+        void logSessionHours(lifetime)
+      }
+
+      const sid = await persistSession(lifetime, newMessages, allFindings, complete)
+
+      if (complete && isCurrent(lifetime)) {
+        void triggerPatternAnalysis(lifetime, sid, allFindings)
+      }
+    } finally {
+      release(startSlot, lifetime)
     }
-
-    const aiMsg: ChatMessage = {
-      id: generateMessageId(),
-      role: ChatMessageRole.Assistant,
-      text: displayText,
-      createdAt: new Date().toISOString(),
-    }
-
-    const newMessages = [userMsg, aiMsg]
-    const allFindings = [...newFindings]
-
-    setMessages(newMessages)
-    setFindings(allFindings)
-
-    if (complete) {
-      setCompleteData(complete)
-      setRecommendations(complete.recommendations)
-      setCompleteSummary(complete.summary)
-      setNextEvalDate(complete.nextEvalDate)
-      setSessionStatus('complete')
-      void logSessionHours()
-    }
-
-    await persistSession(newMessages, allFindings, complete)
-
-    if (complete) {
-      // Determine the session doc ID (may have been set by persistSession)
-      const sid = sessionDocId ?? `${activeChildId}_${domain}_${new Date().toISOString().slice(0, 10)}`
-      void triggerPatternAnalysis(sid, allFindings)
-    }
-  }, [activeChildId, activeChild, familyId, domain, chat, persistSession, sessionDocId, triggerPatternAnalysis, sessionTimer, logSessionHours])
+  }, [
+    childId,
+    childName,
+    familyId,
+    domain,
+    chat,
+    persistSession,
+    triggerPatternAnalysis,
+    sessionTimer,
+    logSessionHours,
+    isCurrent,
+  ])
 
   // ── Send message ────────────────────────────────────────────
 
   const handleSend = useCallback(async () => {
     const text = inputText.trim()
-    if (!text || !activeChildId || aiLoading) return
+    if (!text || aiLoading) return
 
-    const userMsg: ChatMessage = {
-      id: generateMessageId(),
-      role: ChatMessageRole.User,
-      text,
-      createdAt: new Date().toISOString(),
+    const lifetime = lifetimeRef.current
+    if (!admit(sendSlot, lifetime)) return
+
+    try {
+      const userMsg: ChatMessage = {
+        id: generateMessageId(),
+        role: ChatMessageRole.User,
+        text,
+        createdAt: new Date().toISOString(),
+      }
+
+      const updatedMessages = [...messages, userMsg]
+      setMessages(updatedMessages)
+      setInputText('')
+
+      // Build AI message history
+      const aiMessages: AIChatMessage[] = updatedMessages.map((m) => ({
+        role: m.role as 'user' | 'assistant',
+        content: m.text || '',
+      }))
+
+      const response = await chat({
+        familyId,
+        childId,
+        taskType: TaskType.Evaluate,
+        messages: aiMessages,
+        domain,
+      })
+
+      // Same discard as Start: the ordinary Send control reproduced the same
+      // cross-child write.
+      if (!isCurrent(lifetime)) return
+      if (!response) return
+
+      const newFindings = extractFindings(response.message)
+      const complete = extractComplete(response.message)
+      const displayText = stripTags(response.message)
+
+      const aiMsg: ChatMessage = {
+        id: generateMessageId(),
+        role: ChatMessageRole.Assistant,
+        text: displayText,
+        createdAt: new Date().toISOString(),
+      }
+
+      const finalMessages = [...updatedMessages, aiMsg]
+      const allFindings = [...findings, ...newFindings]
+
+      setMessages(finalMessages)
+      setFindings(allFindings)
+
+      if (complete) {
+        setCompleteData(complete)
+        setRecommendations(complete.recommendations)
+        setCompleteSummary(complete.summary)
+        setNextEvalDate(complete.nextEvalDate)
+        setSessionStatus('complete')
+        void logSessionHours(lifetime)
+      }
+
+      const sid = await persistSession(lifetime, finalMessages, allFindings, complete)
+
+      if (complete && isCurrent(lifetime)) {
+        void triggerPatternAnalysis(lifetime, sid, allFindings)
+      }
+    } finally {
+      release(sendSlot, lifetime)
     }
-
-    const updatedMessages = [...messages, userMsg]
-    setMessages(updatedMessages)
-    setInputText('')
-
-    // Build AI message history
-    const aiMessages: AIChatMessage[] = updatedMessages.map((m) => ({
-      role: m.role as 'user' | 'assistant',
-      content: m.text || '',
-    }))
-
-    const response = await chat({
-      familyId,
-      childId: activeChildId,
-      taskType: TaskType.Evaluate,
-      messages: aiMessages,
-      domain,
-    })
-
-    if (!response) return
-
-    const newFindings = extractFindings(response.message)
-    const complete = extractComplete(response.message)
-    const displayText = stripTags(response.message)
-
-    const aiMsg: ChatMessage = {
-      id: generateMessageId(),
-      role: ChatMessageRole.Assistant,
-      text: displayText,
-      createdAt: new Date().toISOString(),
-    }
-
-    const finalMessages = [...updatedMessages, aiMsg]
-    const allFindings = [...findings, ...newFindings]
-
-    setMessages(finalMessages)
-    setFindings(allFindings)
-
-    if (complete) {
-      setCompleteData(complete)
-      setRecommendations(complete.recommendations)
-      setCompleteSummary(complete.summary)
-      setNextEvalDate(complete.nextEvalDate)
-      setSessionStatus('complete')
-      void logSessionHours()
-    }
-
-    await persistSession(finalMessages, allFindings, complete)
-
-    if (complete) {
-      const sid = sessionDocId ?? `${activeChildId}_${domain}_${new Date().toISOString().slice(0, 10)}`
-      void triggerPatternAnalysis(sid, allFindings)
-    }
-  }, [inputText, activeChildId, aiLoading, messages, findings, familyId, domain, chat, persistSession, sessionDocId, triggerPatternAnalysis, logSessionHours])
+  }, [
+    inputText,
+    aiLoading,
+    messages,
+    findings,
+    childId,
+    familyId,
+    domain,
+    chat,
+    persistSession,
+    triggerPatternAnalysis,
+    logSessionHours,
+    isCurrent,
+  ])
 
   // ── Save & Apply (update skill snapshot) ────────────────────
 
   const handleSaveAndApply = useCallback(async () => {
-    if (!activeChildId || findings.length === 0) return
+    const lifetime = lifetimeRef.current
+    if (findings.length === 0) return
+    if (!admit(applySlot, lifetime)) return
+
+    // Everything this Apply writes is captured BEFORE the first await: the
+    // destination (`familyId` / `childId` / `domain` are this visit's props and
+    // cannot change value) and the contents. An Apply already admitted finishes
+    // against these and nothing else; only its UI feedback is dropped if the
+    // parent has moved on.
+    const applyFindings = findings
+    const applyRecommendations = recommendations
+    const applyComplete = completeData
+    const applyBlocks = conceptualBlocks
+    const applySessionDocId = sessionDocId
 
     try {
-      const snapshotRef = doc(skillSnapshotsCollection(familyId), activeChildId)
+      const snapshotRef = doc(skillSnapshotsCollection(familyId), childId)
       const snapshotSnap = await getDoc(snapshotRef)
       const existing: Partial<SkillSnapshot> = snapshotSnap.exists()
         ? snapshotSnap.data()
         : {}
 
       // Build priority skills from findings (frontier skills — emerging/not-yet)
-      const newPrioritySkills: SkillSnapshot['prioritySkills'] = findings
+      const newPrioritySkills: SkillSnapshot['prioritySkills'] = applyFindings
         .filter((f) => f.status === 'emerging' || f.status === 'not-yet')
         .map((f) => ({
           tag: f.skill,
           label: formatSkillLabel(f.skill),
           level: f.status === 'emerging' ? SkillLevel.Emerging : SkillLevel.Emerging,
           masteryGate: MasteryGate.NotYet,
-          notes: `${f.evidence}${f.notes ? ' \u2014 ' + f.notes : ''} (Evaluated ${new Date().toLocaleDateString()})`,
+          notes: `${f.evidence}${f.notes ? ' — ' + f.notes : ''} (Evaluated ${new Date().toLocaleDateString()})`,
         }))
 
       // Add recommendations as priority skills if not already covered
-      for (const rec of recommendations) {
+      for (const rec of applyRecommendations) {
         if (!newPrioritySkills.some((s) => s.tag === rec.skill)) {
           newPrioritySkills.push({
             tag: rec.skill,
@@ -541,7 +817,7 @@ export default function EvaluateChatPage() {
       }
 
       // Also update mastered findings in existing skills
-      for (const finding of findings) {
+      for (const finding of applyFindings) {
         if (finding.status === 'mastered') {
           const existingIdx = newPrioritySkills.findIndex((s) => s.tag === finding.skill)
           if (existingIdx < 0) {
@@ -550,25 +826,25 @@ export default function EvaluateChatPage() {
               label: formatSkillLabel(finding.skill),
               level: SkillLevel.Secure,
               masteryGate: MasteryGate.IndependentConsistent,
-              notes: `${finding.evidence}${finding.notes ? ' \u2014 ' + finding.notes : ''} (Evaluated ${new Date().toLocaleDateString()})`,
+              notes: `${finding.evidence}${finding.notes ? ' — ' + finding.notes : ''} (Evaluated ${new Date().toLocaleDateString()})`,
             })
           }
         }
       }
 
       // Build supports, stop rules, evidence definitions from <complete> data
-      const newSupports = completeData?.supports?.map((s) => ({
+      const newSupports = applyComplete?.supports?.map((s) => ({
         label: s.label,
         description: s.description,
       })) || []
 
-      const newStopRules = completeData?.stopRules?.map((r) => ({
+      const newStopRules = applyComplete?.stopRules?.map((r) => ({
         label: r.label,
         trigger: r.trigger,
         action: r.action,
       })) || []
 
-      const newEvidenceDefs = completeData?.evidenceDefinitions?.map((e) => ({
+      const newEvidenceDefs = applyComplete?.evidenceDefinitions?.map((e) => ({
         label: e.label,
         description: e.description,
       })) || []
@@ -582,19 +858,19 @@ export default function EvaluateChatPage() {
       let mergedWorkingLevels = existing.workingLevels ?? {}
       if (domain === 'reading') {
         // Phonics working level
-        const phonicsLevel = deriveWorkingLevelFromEvaluation(findings, 'phonics')
+        const phonicsLevel = deriveWorkingLevelFromEvaluation(applyFindings, 'phonics')
         if (phonicsLevel && canOverwriteWorkingLevel(mergedWorkingLevels.phonics, phonicsLevel)) {
           mergedWorkingLevels = { ...mergedWorkingLevels, phonics: phonicsLevel }
         }
         // Comprehension working level
-        const compLevel = deriveWorkingLevelFromEvaluation(findings, 'comprehension')
+        const compLevel = deriveWorkingLevelFromEvaluation(applyFindings, 'comprehension')
         if (compLevel && canOverwriteWorkingLevel(mergedWorkingLevels.comprehension, compLevel)) {
           mergedWorkingLevels = { ...mergedWorkingLevels, comprehension: compLevel }
         }
       }
       // Math evaluations: derive math working level if domain is math
       if (domain === 'math') {
-        const mathLevel = deriveWorkingLevelFromEvaluation(findings, 'math')
+        const mathLevel = deriveWorkingLevelFromEvaluation(applyFindings, 'math')
         if (mathLevel && canOverwriteWorkingLevel(mergedWorkingLevels.math, mathLevel)) {
           mergedWorkingLevels = { ...mergedWorkingLevels, math: mathLevel }
         }
@@ -605,15 +881,15 @@ export default function EvaluateChatPage() {
       // Merge evaluation-derived blocks with existing blocks rather than overwriting.
       // This preserves blocks from quest/scan/parent writers that this evaluation didn't touch.
       let mergedBlocks: ConceptualBlock[] = existing.conceptualBlocks ?? []
-      for (const block of conceptualBlocks) {
+      for (const block of applyBlocks) {
         const b = block as Partial<ConceptualBlock>
         if (!b.id) continue
         mergedBlocks = mergeBlock(mergedBlocks, b as Parameters<typeof mergeBlock>[1])
       }
-      const blocksChanged = conceptualBlocks.length > 0
+      const blocksChanged = applyBlocks.length > 0
 
       const updated: Omit<SkillSnapshot, 'id'> = {
-        childId: activeChildId,
+        childId,
         prioritySkills: [...existingSkills, ...newPrioritySkills],
         supports: newSupports.length > 0 ? newSupports : existing.supports || [],
         stopRules: newStopRules.length > 0 ? newStopRules : existing.stopRules || [],
@@ -630,11 +906,15 @@ export default function EvaluateChatPage() {
           blocksUpdatedAt: now,
         })
       }
-      setSnackText('Skill snapshot updated! Priority skills, supports, stop rules, and evidence all set.')
-      setHasAppliedThisSession(true)
+      // Late feedback from a finished Apply is dropped rather than shown over
+      // whoever is on screen now.
+      if (isCurrent(lifetime)) {
+        setSnackText('Skill snapshot updated! Priority skills, supports, stop rules, and evidence all set.')
+        setHasAppliedThisSession(true)
+      }
 
       // Update Learning Map from findings (fire-and-forget)
-      updateSkillMapFromFindings(familyId, activeChildId, findings)
+      updateSkillMapFromFindings(familyId, childId, applyFindings)
         .catch((err) => console.warn('[LearningMap] Failed to update from evaluation findings', err))
 
       // FEAT-76: project the guided eval onto the learner-model frontier — the
@@ -642,34 +922,46 @@ export default function EvaluateChatPage() {
       // Fire-and-forget, guarded model-exists inside the writer; never blocks apply.
       // Fall back to the same deterministic session id persistSession assigns, so a
       // first-turn/slow-network Apply (sessionDocId still pending) isn't skipped.
-      const evalSessionId =
-        sessionDocId ?? `${activeChildId}_${domain}_${new Date().toISOString().slice(0, 10)}`
-      void syncEvalFindingsToModel(familyId, activeChildId, evalSessionId, findings, now)
+      const evalSessionId = applySessionDocId ?? defaultSessionDocId()
+      void syncEvalFindingsToModel(familyId, childId, evalSessionId, applyFindings, now)
         .catch((err) => console.warn('[eval] learner-model write-back failed', err))
 
       // Award XP for completing an evaluation (once per evaluation session)
-      if (sessionDocId) {
+      if (applySessionDocId) {
         void addXpEvent(
           familyId,
-          activeChildId,
+          childId,
           'EVALUATION_COMPLETE',
           25,
-          `eval_${sessionDocId}`,
+          `eval_${applySessionDocId}`,
         ).catch((err) => console.error('[XP] Award failed:', err))
 
         void addDiamondEvent({
           familyId,
-          childId: activeChildId,
+          childId,
           amount: 5,
           type: DIAMOND_EVENTS.EVALUATION_COMPLETE,
           reason: `Evaluation completed (${domain})`,
-          dedupKey: `eval_${sessionDocId}-diamond`,
+          dedupKey: `eval_${applySessionDocId}-diamond`,
         }).catch((err) => console.error('[Diamond] Evaluation award failed:', err))
       }
     } catch (err) {
       console.error('Failed to apply findings to skill snapshot', err)
+    } finally {
+      release(applySlot, lifetime)
     }
-  }, [activeChildId, familyId, findings, recommendations, completeData, sessionDocId, conceptualBlocks, domain])
+  }, [
+    childId,
+    familyId,
+    findings,
+    recommendations,
+    completeData,
+    sessionDocId,
+    conceptualBlocks,
+    domain,
+    defaultSessionDocId,
+    isCurrent,
+  ])
 
   // Apply is repeatable (FEAT-75). The first apply runs straight through; a
   // re-apply in the same session confirms first so a double-tap can't silently
@@ -690,6 +982,14 @@ export default function EvaluateChatPage() {
   // ── Clear & Restart ───────────────────────────────────────
 
   const handleClear = useCallback(() => {
+    // End this draft's lifetime: work already in flight (a pending reply, a
+    // pending persist, a pending analysis) belongs to the draft being cleared
+    // and must not land on the fresh one.
+    lifetimeRef.current += 1
+    startSlot.current = null
+    sendSlot.current = null
+    applySlot.current = null
+
     sessionTimer.stop() // discard timer without logging
     hoursLoggedRef.current = false
     setMessages([])
@@ -701,6 +1001,8 @@ export default function EvaluateChatPage() {
     setSessionDocId(null)
     setSessionStatus('in-progress')
     setClearDialogOpen(false)
+    setReapplyDialogOpen(false)
+    setInputText('')
     setSnackText(null)
     setHasAppliedThisSession(false)
     setPatternAnalysisState('idle')
@@ -711,10 +1013,10 @@ export default function EvaluateChatPage() {
   // ── Download Report ─────────────────────────────────────────
 
   const handleDownloadReport = useCallback(() => {
-    if (!activeChild || !completeSummary) return
+    if (!completeSummary) return
 
     const date = new Date().toLocaleDateString()
-    let md = `# ${activeChild.name} — Reading Evaluation\n`
+    let md = `# ${childName} — Reading Evaluation\n`
     md += `**Date:** ${date}\n\n`
     md += `## Summary\n${completeSummary}\n\n`
 
@@ -725,9 +1027,9 @@ export default function EvaluateChatPage() {
     // Findings
     md += `## Skill Map\n`
     for (const f of findings) {
-      const icon = f.status === 'mastered' ? '\u2705' : f.status === 'emerging' ? '\u26A0\uFE0F' : '\u274C'
+      const icon = f.status === 'mastered' ? '✅' : f.status === 'emerging' ? '⚠️' : '❌'
       md += `${icon} **${formatSkillLabel(f.skill)}:** ${f.evidence}`
-      if (f.notes) md += ` \u2014 ${f.notes}`
+      if (f.notes) md += ` — ${f.notes}`
       md += `\n`
     }
     md += `\n`
@@ -765,10 +1067,10 @@ export default function EvaluateChatPage() {
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = `${activeChild.name}-reading-eval-${new Date().toISOString().split('T')[0]}.md`
+    link.download = `${childName}-reading-eval-${new Date().toISOString().split('T')[0]}.md`
     link.click()
     URL.revokeObjectURL(url)
-  }, [activeChild, completeSummary, findings, recommendations, completeData])
+  }, [childName, completeSummary, findings, recommendations, completeData])
 
   // ── Handle Enter key ────────────────────────────────────────
 
@@ -784,46 +1086,10 @@ export default function EvaluateChatPage() {
 
   // ── Render ──────────────────────────────────────────────────
 
-  const READY_DOMAINS: EvaluationDomain[] = [
-    EvaluationDomain.Reading,
-    EvaluationDomain.Speech,
-    EvaluationDomain.Math,
-  ]
-  const isDomainReady = READY_DOMAINS.includes(domain)
   const hasMessages = messages.length > 0
 
   return (
-    <Page>
-      <Stack direction="row" alignItems="center" spacing={1}>
-        <AssessmentIcon color="primary" />
-        <Typography variant="h5">
-          Evaluate {activeChild?.name || 'Child'}
-        </Typography>
-      </Stack>
-
-      {/* UX-425: the in-page selector is gone — the shell's chip is the one
-          place a parent chooses the child. The heading above already names him,
-          so no `ActiveChildLine` is needed here (UX-426). */}
-
-      {/* Domain Tabs */}
-      <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
-        <Tabs
-          value={domain}
-          onChange={(_, v: EvaluationDomain) => setDomain(v)}
-          variant="scrollable"
-          scrollButtons="auto"
-        >
-          {DOMAIN_TABS.map((tab) => (
-            <Tab
-              key={tab.value}
-              value={tab.value}
-              label={READY_DOMAINS.includes(tab.value) ? tab.label : `${tab.label} (coming soon)`}
-              disabled={!READY_DOMAINS.includes(tab.value)}
-            />
-          ))}
-        </Tabs>
-      </Box>
-
+    <>
       {/* Previous evaluations */}
       {previousSessions.length > 0 && (
         <Box sx={{ mb: 1 }}>
@@ -854,14 +1120,17 @@ export default function EvaluateChatPage() {
         </Box>
       )}
 
-      {!isDomainReady ? (
-        <Alert severity="info">
-          {domain.charAt(0).toUpperCase() + domain.slice(1)} evaluation coming soon. Start with Reading.
-        </Alert>
-      ) : initializing ? (
+      {initializing ? (
         <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
           <LoadingState size={40} />
         </Box>
+      ) : loadFailed ? (
+        // GATE: the read FAILED. Not an empty history, and not editable — the
+        // parent gets the honest state and a way to try again.
+        <ErrorState
+          message={`We couldn't load ${childName}'s evaluation history, so this evaluation isn't editable yet.`}
+          onRetry={() => setReloadNonce((n) => n + 1)}
+        />
       ) : (
         <Stack spacing={2}>
           {/* Start button (no messages yet) */}
@@ -869,10 +1138,10 @@ export default function EvaluateChatPage() {
             <Box sx={{ textAlign: 'center', py: 4 }}>
               <Typography variant="body1" gutterBottom>
                 {domain === EvaluationDomain.Math
-                  ? <>Ready to assess {activeChild?.name}'s math skills? Have {activeChild?.name} nearby — you'll pose problems and report what you see.</>
+                  ? <>Ready to assess {childName}'s math skills? Have {childName} nearby — you'll pose problems and report what you see.</>
                   : domain === EvaluationDomain.Speech
-                  ? <>Ready to assess {activeChild?.name}'s speech? Have {activeChild?.name} nearby — you'll ask them to say specific words and report what you hear.</>
-                  : <>Ready to assess {activeChild?.name}'s reading skills? Have {activeChild?.name} nearby — you'll show letters and words, then report what you see.</>
+                  ? <>Ready to assess {childName}'s speech? Have {childName} nearby — you'll ask them to say specific words and report what you hear.</>
+                  : <>Ready to assess {childName}'s reading skills? Have {childName} nearby — you'll show letters and words, then report what you see.</>
                 }
               </Typography>
               <Button
@@ -1065,10 +1334,10 @@ export default function EvaluateChatPage() {
                           {/* Content */}
                           <Box sx={{ pb: isLast ? 0 : 2 }}>
                             <Typography variant="body2" sx={{ fontWeight: isFirst ? 700 : 400 }}>
-                              {isFirst ? '\u2192 NOW: ' : ''}{formatSkillLabel(rec.skill)}
+                              {isFirst ? '→ NOW: ' : ''}{formatSkillLabel(rec.skill)}
                             </Typography>
                             <Typography variant="caption" color="text.secondary">
-                              {rec.duration} \u00B7 {rec.frequency}
+                              {rec.duration} · {rec.frequency}
                             </Typography>
                           </Box>
                         </Stack>
@@ -1236,6 +1505,6 @@ export default function EvaluateChatPage() {
           </Button>
         </DialogActions>
       </Dialog>
-    </Page>
+    </>
   )
 }
