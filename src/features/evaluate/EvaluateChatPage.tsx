@@ -541,12 +541,10 @@ function EvaluateDraft({
   const applyBusyRef = useRef(false)
 
   /**
-   * The session id a source save of THIS draft is using or has used.
-   *
-   * Recorded synchronously by `persistSession`, before its await, so Apply can
-   * reuse the exact pending target instead of re-deriving a day-based id after
-   * its own I/O — which is how an Apply admitted at 23:59:55 recorded the next
-   * day's source id for a source that belongs to this one.
+   * The MOST RECENTLY ADMITTED source-save target of this draft — seeded from a
+   * resumed session and then rewritten by `persistSession` synchronously, before
+   * its await, so Apply can name the source its findings came from without
+   * waiting on, or being misled by, whichever save happens to resolve first.
    */
   const sourceTargetRef = useRef<string | null>(resume?.sessionDocId ?? null)
 
@@ -882,13 +880,20 @@ function EvaluateDraft({
     /** The SAVED id. Award eligibility and dedup keys read this, as before. */
     const applySessionDocId = sessionDocId
     /**
-     * The source id the learner-model write-back stamps, resolved here rather
-     * than after the snapshot I/O: the pending source save's exact target when
-     * there is one, and otherwise today's id as of ADMISSION. Computing it
-     * afterwards is how an Apply admitted at 23:59:55, waiting on a held source
-     * save, stamped the next day's id onto a source that belongs to this one.
+     * The source id the learner-model write-back stamps as its evidence ref,
+     * resolved HERE rather than after the snapshot I/O — computing it afterwards
+     * is how an Apply admitted at 23:59:55, waiting on a held source save,
+     * stamped the next day's id onto a source that belongs to this one.
+     *
+     * Precedence is the most recently ADMITTED source target of this draft
+     * first, then the saved id, then today's id as of admission. The saved id
+     * cannot lead: when a later turn's save is still in flight and an earlier
+     * one resolves, `sessionDocId` holds the earlier, in-progress document —
+     * whose findings are empty — while the findings being applied belong to the
+     * completed source the pending save is writing. The saved id stays the
+     * separate award-eligibility and dedup input above.
      */
-    const applySourceId = applySessionDocId ?? sourceTargetRef.current ?? defaultSessionDocId()
+    const applySourceId = sourceTargetRef.current ?? applySessionDocId ?? defaultSessionDocId()
 
     try {
       const snapshotRef = doc(skillSnapshotsCollection(familyId), childId)
