@@ -20,11 +20,16 @@ import {
 } from './useTownHeroProfile'
 import { useStonebridgeProgress } from './useStonebridgeProgress'
 import { requestForgeFocus, FORGE_HOST_PATH } from './forgeFocusHandoff'
+import StonebridgeMineInvitation from './StonebridgeMineInvitation'
+import type { MineInvitation } from './mineInvitation'
 import {
   STONEBRIDGE_BOOKS_PATH,
+  STONEBRIDGE_MINE_PATH,
   STONEBRIDGE_TODAY_PATH,
 } from './stonebridgeDestinations'
 import {
+  LibraryReturnDestination,
+  LibraryReturnFocus,
   LibraryReturnOrigin,
   beginLibraryReturnFlow,
   getLibraryIdentityEpoch,
@@ -127,6 +132,7 @@ export default function StonebridgePage() {
    */
   const {
     activeChild,
+    isChildProfile,
     isLoading: childrenLoading,
     loadFailed: childrenLoadFailed,
     retryLoad,
@@ -148,11 +154,22 @@ export default function StonebridgePage() {
    * and the children read must not be unsettled or failed. While it is false
    * the read is idle — no subscription, and nothing on screen.
    */
+  /**
+   * The identity this page may act on: a resolved child from a settled read,
+   * with a profile chosen.
+   *
+   * One expression, because two surfaces now depend on exactly it — the hero
+   * read below, and the Mine invitation further down. An unsettled or FAILED
+   * children read is not an identity, so neither is offered against one.
+   */
+  const identityReady =
+    Boolean(childId) && profile !== null && !childrenLoading && !childrenLoadFailed
+
   const heroRead = useTownHeroProfile({
     familyId,
     childId,
     identityKey: profile ?? '',
-    ready: Boolean(childId) && profile !== null && !childrenLoading && !childrenLoadFailed,
+    ready: identityReady,
   })
   /** Only ever a document proven to be this child's, from a settled read. */
   const heroDocument = heroRead.phase === TownHeroPhase.Ready ? heroRead.document : null
@@ -210,11 +227,23 @@ export default function StonebridgePage() {
    * not this page's to serve, even for the right child in the right phase.
    */
   const flow = useSyncExternalStore(subscribeLibraryReturnFlow, getLibraryReturnFlow)
-  const pendingReturn = libraryReturnForOrigin(
+  const ownReturn = libraryReturnForOrigin(
     flow,
     { familyId, childId },
     LibraryReturnOrigin.Town,
   )
+  /**
+   * WHICH of this entry's two returns it is — by what the journey says it
+   * focuses, never by where it went.
+   *
+   * A Books trip comes back to a location tile, which the board focuses; a Mine
+   * trip comes back to the Square's invitation, which has no tile at all (its
+   * `missionId` is empty by construction). Keeping them apart here is what stops
+   * the board being handed an empty mission id to focus.
+   */
+  const squareReturn =
+    ownReturn?.focus === LibraryReturnFocus.SquareInvitation ? ownReturn : null
+  const pendingReturn = squareReturn ? null : ownReturn
 
   /**
    * Where the town's focus belongs, and which return it answered.
@@ -330,6 +359,33 @@ export default function StonebridgePage() {
       },
     },
   ] as const
+
+  /**
+   * The Square's invitation, taken — one temporary note and one navigation.
+   *
+   * The same module memory the Books door uses, with a typed destination and a
+   * Square focus target instead of a location tile: there is no second store, no
+   * URL state, nothing persisted and nothing written. The journey carries the
+   * offer so the hub can revalidate it on arrival, and the epoch is the one the
+   * invitation read AT the tap — a journey refused here still leaves the action
+   * working, which is an ordinary trip to the Mine with no way back offered and
+   * no suggestion to serve.
+   */
+  const openMineTrip = (invitation: MineInvitation, observedEpoch: number) => {
+    beginLibraryReturnFlow({
+      familyId,
+      childId,
+      // The Square is a landmark, not a mission: there is no tile to come back
+      // to and the focus target says so.
+      missionId: '',
+      origin: LibraryReturnOrigin.Town,
+      destination: LibraryReturnDestination.Mine,
+      focus: LibraryReturnFocus.SquareInvitation,
+      suggestion: invitation,
+      observedEpoch,
+    })
+    navigate(STONEBRIDGE_MINE_PATH)
+  }
 
   /**
    * The doors as a plain strip — the shape every state WITHOUT a village uses.
@@ -542,6 +598,31 @@ export default function StonebridgePage() {
           }}
         />
       </Box>
+
+      {/* ── The Square's one invitation into a Mine mode (UX-493) ───────
+          Beside the town it belongs to, and a CHILD's offer only: a parent
+          looking at this village needs no new launcher, and the Mine's own
+          doors are unchanged for everybody. Mounted under the scope key, so
+          the reads behind it are destroyed by a child change rather than
+          carried into it, and absent entirely while the identity is
+          unresolved or failed. */}
+      {isChildProfile && identityReady && (
+        <StonebridgeMineInvitation
+          key={scopeKey}
+          familyId={familyId}
+          childId={childId}
+          focusGeneration={squareReturn?.generation ?? 0}
+          onFocusServed={(generation, landed) => {
+            // A safe fallback, not a pretend one: if fresh evidence retired the
+            // invitation while the child was away there is nothing to focus, so
+            // the focus goes to the top of the town — the same place the board
+            // hands it back to — and the journey is consumed either way.
+            if (!landed) returnFocusToTown()
+            serveLibraryReturn(generation)
+          }}
+          onOffer={openMineTrip}
+        />
+      )}
 
       {/* ── The hero read, said honestly ────────────────────────────────
           The village does not wait for this read and is not held by it, so the

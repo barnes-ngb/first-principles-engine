@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { doc, getDocs, query, updateDoc, where, orderBy, limit as firestoreLimit } from 'firebase/firestore'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
@@ -15,7 +16,21 @@ import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useChildSkillSnapshot } from '../../core/hooks/useChildSkillSnapshot'
 import type { EvaluationSession, SkillSnapshot } from '../../core/types'
 import { EvaluationDomain, SkillLevel } from '../../core/types/enums'
+import { useLearnerModel } from '../../core/hooks/useLearnerModel'
 import MinecraftAvatar from '../avatar/MinecraftAvatar'
+import { MINE_RETURN_LABEL } from '../avatar/stonebridge/libraryReturnCopy'
+import {
+  LibraryReturnDestination,
+  getLibraryReturnFlow,
+  libraryReturnForDestination,
+  libraryReturnPath,
+  requestLibraryReturn,
+  subscribeLibraryReturnFlow,
+} from '../avatar/stonebridge/libraryReturnFlow'
+import {
+  selectMineInvitation,
+  type MineInvitation,
+} from '../avatar/stonebridge/mineInvitation'
 import { useXpLedger } from '../../core/xp/useXpLedger'
 import QuestQuestionScreen, { QuestFeedback, QuestLoading } from './ReadingQuest'
 import BuildWordQuestionScreen from './BuildWordQuestion'
@@ -114,7 +129,12 @@ function isPhonicsSecure(snapshot: SkillSnapshot | null): boolean {
 }
 
 export default function KnowledgeMinePage() {
-  const { activeChild, activeChildId } = useActiveChild()
+  const {
+    activeChild,
+    activeChildId,
+    isLoading: childrenLoading,
+    loadFailed: childrenLoadFailed,
+  } = useActiveChild()
   const familyId = useFamilyId()
   const quest = useQuestSession()
   const xpLedger = useXpLedger(familyId, activeChildId ?? '')
@@ -193,6 +213,37 @@ export default function KnowledgeMinePage() {
     void loadResume()
     return () => { cancelled = true }
   }, [activeChildId, familyId, quest.screen]) // re-query when returning to intro
+
+  /**
+   * A trip here from the village's Square invitation, if there is one (UX-493).
+   *
+   * The SAME module-memory journey the Books trip uses — no second store, no URL
+   * state, nothing persisted — read for this scope and this destination only. A
+   * direct arrival at `/quest`, a reload, a journey that belongs to another
+   * child and a journey to the shelf all leave this null, and then this page is
+   * exactly the page it has always been.
+   *
+   * The identity has to be SETTLED, not merely present: `useChildren` keeps the
+   * previous answer's `activeChild` beside an unsettled or FAILED read, so the
+   * id alone would vouch for a child nobody can confirm. The shell's own
+   * readiness watch is what ENDS such a journey; this gate is what stops it
+   * being served in the frames before that lands.
+   */
+  const returnFlow = useSyncExternalStore(subscribeLibraryReturnFlow, getLibraryReturnFlow)
+  const mineTrip =
+    !childrenLoading && !childrenLoadFailed
+      ? libraryReturnForDestination(
+          returnFlow,
+          { familyId, childId: activeChildId ?? '' },
+          LibraryReturnDestination.Mine,
+        )
+      : null
+
+  /** The ordinary Start, taken by the suggested mode's own card. */
+  const startMode = (config: QuestDomainConfig) => {
+    setActiveDomain(config)
+    void quest.startQuest(config.domain, config.questMode)
+  }
 
   const phonicsSecure = isPhonicsSecure(snapshot)
 
@@ -277,6 +328,9 @@ export default function KnowledgeMinePage() {
   if (quest.screen === QuestScreen.Intro) {
     return (
       <Page>
+        {/* The way back to the village, for THIS trip only. Nothing starts,
+            finishes or saves here: it is the journey's own one-use request. */}
+        {mineTrip && <MineTripExit generation={mineTrip.generation} />}
         <Box
           sx={{
             bgcolor: MC.bg,
@@ -365,6 +419,23 @@ export default function KnowledgeMinePage() {
                 }
                 setResumeSession(null)
               }}
+            />
+          )}
+
+          {/* ── The village's suggestion, revalidated here (UX-493) ──
+              Mounted under the scope key so its two reads are destroyed by a
+              child change rather than carried into it, and rendered only when
+              THIS page's own fresh read still recommends the mode the village
+              offered. It is an offer with the mode's ordinary Start; the
+              sections below keep every calibrated choice, and the Resume card
+              above keeps its place. */}
+          {mineTrip && (
+            <MineTripSuggestion
+              key={`${familyId}_${activeChildId ?? ''}`}
+              familyId={familyId}
+              childId={activeChildId ?? ''}
+              suggestion={mineTrip.suggestion}
+              onStart={startMode}
             />
           )}
 
@@ -535,6 +606,13 @@ export default function KnowledgeMinePage() {
         />
       )}
 
+      {/* The same one way back, on the summary — the other screen this trip is
+          offered from. Done, Try again and every writer behind them are
+          untouched; an active quest still exits through its own reset. */}
+      {mineTrip && quest.screen === QuestScreen.Summary && (
+        <MineTripExit generation={mineTrip.generation} />
+      )}
+
       {/* Summary */}
       {quest.screen === QuestScreen.Summary && quest.questState && (
         <QuestSummary
@@ -572,6 +650,105 @@ export default function KnowledgeMinePage() {
 
 // ── Sub-components ──────────────────────────────────────────────
 
+/**
+ * The village's way back, for a live Mine trip only (UX-493).
+ *
+ * Holds nothing and reads nothing: the journey decides whether the tap is
+ * accepted and WHERE it goes (the entry the child actually left from), so a tap
+ * that lands after the scope moved navigates nowhere at all. One use per
+ * journey, by the generation this render was given.
+ */
+function MineTripExit({ generation }: { generation: number }) {
+  const navigate = useNavigate()
+  return (
+    <Button
+      onClick={() => {
+        const returning = requestLibraryReturn(generation)
+        if (!returning) return
+        navigate(libraryReturnPath(returning))
+      }}
+      sx={{
+        fontFamily: MC.font,
+        fontSize: '0.4rem',
+        color: MC.stone,
+        textTransform: 'none',
+        minHeight: 44,
+        mb: 1,
+        '&:hover': { color: MC.white },
+      }}
+    >
+      🏰 {MINE_RETURN_LABEL}
+    </Button>
+  )
+}
+
+/**
+ * The village's suggested mode, revalidated against this page's own read.
+ *
+ * The journey carries what the village offered; it is a suggestion, not an
+ * authorisation, so nothing here trusts it. This re-reads the child's own model
+ * and snapshot inside its own mount scope, runs the SAME pure selector the
+ * village ran, and offers the mode only while the two agree. A recommendation
+ * that moved while the child was walking over (an evaluation, a quest, a review
+ * apply) simply leaves the Mine as it is — every calibrated mode is still listed
+ * below, so nothing is taken away by the suggestion going quiet.
+ *
+ * Nothing autostarts: the card's tap is the mode's ordinary Start, the same call
+ * its own section card makes.
+ */
+function MineTripSuggestion({
+  familyId,
+  childId,
+  suggestion,
+  onStart,
+}: {
+  familyId: string
+  childId: string
+  suggestion: MineInvitation | null
+  onStart: (config: QuestDomainConfig) => void
+}) {
+  const { snapshot, loaded } = useChildSkillSnapshot(familyId, childId)
+  const { model, loading } = useLearnerModel(familyId, childId)
+  const settled = loaded && !loading
+
+  const current = settled
+    ? selectMineInvitation({
+        model,
+        readingCalibrated: hasReadingCalibration(snapshot),
+        mathCalibrated: hasMathCalibration(snapshot),
+      })
+    : null
+
+  // The mode is what was offered and what is still recommended — the concept may
+  // legitimately differ (the queue moved on inside the same mode), and the offer
+  // was only ever a mode.
+  const agreed =
+    current &&
+    suggestion &&
+    current.domain === suggestion.domain &&
+    current.questMode === suggestion.questMode
+      ? current
+      : null
+  const config = agreed
+    ? [...READING_MODES, ...MATH_MODES].find(
+        (m) => m.domain === agreed.domain && m.questMode === agreed.questMode,
+      )
+    : undefined
+  if (!agreed || !config) return null
+
+  return (
+    <Box sx={{ mb: 2, textAlign: 'left' }}>
+      <QuestCard
+        // The invitation's own words, and the mode it opens named underneath —
+        // no level, count or score in the offer.
+        config={{ ...config, label: agreed.label, description: config.label }}
+        suggested
+        onSelect={() => onStart(config)}
+      />
+    </Box>
+  )
+}
+
 function DomainSection({ label, icon, children }: { label: string; icon: string; children: React.ReactNode }) {
   return (
     <Box sx={{ mb: 2, textAlign: 'left' }}>
@@ -593,7 +770,16 @@ function DomainSection({ label, icon, children }: { label: string; icon: string;
   )
 }
 
-function QuestCard({ config, onSelect }: { config: QuestDomainConfig; onSelect: () => void }) {
+function QuestCard({
+  config,
+  onSelect,
+  suggested,
+}: {
+  config: QuestDomainConfig
+  onSelect: () => void
+  /** The village's revalidated offer (UX-493) — a label, never a gate. */
+  suggested?: boolean
+}) {
   const { enabled, icon, label, description, recommended } = config
 
   return (
@@ -637,6 +823,20 @@ function QuestCard({ config, onSelect }: { config: QuestDomainConfig; onSelect: 
           >
             {label}
           </Typography>
+          {suggested && (
+            <Chip
+              label="From your village"
+              size="small"
+              sx={{
+                fontFamily: MC.font,
+                fontSize: '0.3rem',
+                height: 18,
+                bgcolor: MC.diamond,
+                color: MC.bg,
+                fontWeight: 700,
+              }}
+            />
+          )}
           {recommended && (
             <Chip
               label="Recommended"

@@ -78,6 +78,19 @@ const fx = vi.hoisted(() => ({
   childrenLoading: false,
   childrenLoadFailed: false,
   /**
+   * Whether a KID is looking at the town (UX-493).
+   *
+   * Default `false` — a parent — which is the state every claim written before
+   * the Square's Mine invitation existed was written under, and the state in
+   * which that invitation is not on the page at all.
+   */
+  isChildProfile: false,
+  /** What the invitation's two scoped reads report. Nothing by default. */
+  snapshot: null as unknown,
+  snapshotLoaded: true,
+  model: null as unknown,
+  modelLoading: false,
+  /**
    * The hook's own retry and the hook's own setter, as spies.
    *
    * Spies and nothing more: neither one re-reads, recovers or selects here.
