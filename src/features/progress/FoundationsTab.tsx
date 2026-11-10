@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { doc } from 'firebase/firestore'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
@@ -170,9 +170,12 @@ export default function FoundationsTab() {
   /** The next lifetime id. A ref, so two taps in one tick cannot share one. */
   const lifetimeRef = useRef(0)
   /**
-   * The lifetime of the open, still-valid drawer (0 when none). Written beside
-   * every change to `scope`, so an `await` that resolves later can ask whether
-   * its own opening is still the live one without waiting for an effect.
+   * The lifetime of the **committed** open, still-valid drawer (0 when none),
+   * so an `await` that resolves later can ask whether its own opening is still
+   * the live one. Written only after a commit (the layout effect below) or by
+   * the close handler, which invalidates immediately. Never during render: an
+   * interrupted render could otherwise zero it without the scope change ever
+   * committing, and silence a live save's feedback.
    */
   const openLifetimeRef = useRef(0)
   /** The lifetimes with a save in flight — per-lifetime, so one tap writes once. */
@@ -221,12 +224,24 @@ export default function FoundationsTab() {
    * and an identity that came back before it ran would reopen the old staging.
    */
   if (scope && !scopedConcept) {
-    openLifetimeRef.current = 0
     setScope(null)
     setSaveError(null)
     setSavedNotice(null)
     setLostNotice(SCOPE_LOST_NOTICE)
   }
+
+  /**
+   * The committed truth of which opening is live, derived from the effective
+   * scope and the concept it resolved to — the same two values every render
+   * decides the drawer from. It runs after the commit that changed them, so no
+   * abandoned render can move it, and the cleanup clears it on unmount.
+   */
+  useLayoutEffect(() => {
+    openLifetimeRef.current = scope && scopedConcept ? scope.lifetimeId : 0
+    return () => {
+      openLifetimeRef.current = 0
+    }
+  }, [scope, scopedConcept])
 
   /**
    * A receipt belongs to the scope it was written in, so a committed change of
@@ -255,6 +270,10 @@ export default function FoundationsTab() {
       // Per-lifetime, so a pending save in a closed drawer cannot disable a new
       // one's Confirm, and two taps in one tick still write once.
       if (inFlightRef.current.has(lifetimeId)) return
+      // Refuse before any work unless this tap belongs to the drawer that is
+      // committed and valid right now — the same ref its own outcome is judged
+      // against, so a save can never start under a lifetime that cannot report.
+      if (openLifetimeRef.current !== lifetimeId) return
       if (!scope || scope.lifetimeId !== lifetimeId || !scopedConcept) return
       if (!canEdit || !scope.canEdit || scope.profile !== profile) {
         // Belt-and-braces: the controls are hidden for non-parent profiles, and
@@ -345,7 +364,8 @@ export default function FoundationsTab() {
       if (!familyId || !activeChildId || loading || !model) return
       if (model.childId !== activeChildId) return
       lifetimeRef.current += 1
-      openLifetimeRef.current = lifetimeRef.current
+      // No write here: the layout effect commits this opening's lifetime once
+      // the scope it captured has actually rendered and still resolves.
       setScope({
         lifetimeId: lifetimeRef.current,
         familyId,
