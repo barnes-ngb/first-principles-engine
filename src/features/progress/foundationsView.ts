@@ -154,6 +154,31 @@ const DOMAIN_LABEL: Record<string, string> = {
 }
 
 /**
+ * Resolve ONE concept out of a model by its **exact** node id — the same pairing
+ * of graph node and stored entry the terrain map is built from, for a surface
+ * that holds an id rather than a chip.
+ *
+ * The Foundations drawer uses this to re-read its concept from the live model on
+ * every render instead of keeping the snapshot it was opened with, so there is
+ * one definition of "this id, named §14-safely, with its current evidence".
+ * Null when the model has no entry under that id, or the graph cannot name it.
+ */
+export function selectTerrainConcept(
+  model: LearnerModel,
+  conceptId: string,
+): TerrainConcept | null {
+  const entry = model.conceptStates[conceptId]
+  const node = entry ? FOUNDATION_NODE_MAP[conceptId] : undefined
+  if (!entry || !node) return null
+  return {
+    conceptId,
+    kidName: node.kidName,
+    parentDescription: node.parentDescription,
+    entry,
+  }
+}
+
+/**
  * Group a model's concept states by domain for the terrain map. Domains come out
  * reading→math; within a domain, solid→forming→frontier→not-yet then by name, so
  * the strongest ground reads first. Concepts whose node id is unknown to the graph
@@ -162,16 +187,12 @@ const DOMAIN_LABEL: Record<string, string> = {
 export function groupTerrainByDomain(model: LearnerModel): TerrainDomain[] {
   const rank = new Map(STATE_META.map((m, i) => [m.state, i]))
   const byDomain = new Map<string, TerrainConcept[]>()
-  for (const [conceptId, entry] of Object.entries(model.conceptStates)) {
-    const node = FOUNDATION_NODE_MAP[conceptId]
-    if (!node) continue
+  for (const conceptId of Object.keys(model.conceptStates)) {
+    const concept = selectTerrainConcept(model, conceptId)
+    const node = concept ? FOUNDATION_NODE_MAP[conceptId] : undefined
+    if (!concept || !node) continue
     const list = byDomain.get(node.domain) ?? []
-    list.push({
-      conceptId,
-      kidName: node.kidName,
-      parentDescription: node.parentDescription,
-      entry,
-    })
+    list.push(concept)
     byDomain.set(node.domain, list)
   }
   const order = ['reading', 'math']

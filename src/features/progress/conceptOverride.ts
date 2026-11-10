@@ -177,6 +177,133 @@ export function buildReconcileView(
   return { yours, yourState, theirs, ...(evalState ? { evalState } : {}) }
 }
 
+// ── The scoped decision contract (the drawer's one basis definition) ──────
+//
+// A staged intent is only meaningful against the evidence the parent was LOOKING
+// AT when they chose. Three things therefore travel together from the tap to the
+// commit: the child, the exact concept, and a fingerprint of that evidence.
+//
+// This lives here, beside the reconcile view it is derived from, so the decision
+// shown and the decision validated read the SAME refs — `latestEvidenceOfKind`
+// above, once. `writeReviewAction` imports it to make the same check against the
+// STORED document inside its transaction; that is the only cross-feature use,
+// and it is deliberately one-way (nothing here imports the writer).
+
+/**
+ * The evidence one drawer decision rests on, as it stood when it was made.
+ *
+ * Deliberately narrow: the standing-disagreement flag plus the parent's own
+ * latest word and the evaluation's latest read — the three things every route in
+ * this drawer describes. An unrelated concept moving, a synthesis re-run, or a
+ * quest landing on some other node leaves it untouched, so an otherwise current
+ * draft is not thrown away by noise.
+ */
+export interface ConceptDecisionBasis {
+  /** Whether an eval-vs-parent disagreement was standing on the entry. */
+  needsReconcile: boolean
+  /** The parent's latest attested word (provenance + status + content), or null. */
+  attestation: string | null
+  /** The evaluation's latest read (provenance + status + content), or null. */
+  eval: string | null
+}
+
+/**
+ * One ref flattened to the fields a decision actually rests on: where it came
+ * from, whether it still stands, what it said, and what it says. A replacement
+ * eval that happens to assert the SAME state is a different ref and must read as
+ * one; a withdrawn ref changes `status` and must too.
+ */
+function basisPrint(ref: EvidenceRef | undefined): string | null {
+  if (!ref) return null
+  return JSON.stringify([
+    ref.kind,
+    ref.sourceId ?? '',
+    ref.observedAt ?? '',
+    ref.status ?? 'active',
+    ref.readState ?? '',
+    ref.note ?? '',
+  ])
+}
+
+/** The basis for one concept entry. The only way this fingerprint is computed. */
+export function conceptDecisionBasis(
+  entry: ConceptStateEntry | undefined,
+): ConceptDecisionBasis {
+  return {
+    needsReconcile: Boolean(entry?.needsReconcile),
+    attestation: basisPrint(latestEvidenceOfKind(entry, 'attestation')),
+    eval: basisPrint(latestEvidenceOfKind(entry, 'eval')),
+  }
+}
+
+/** True when a staged decision still describes the evidence in front of it. */
+export function sameConceptDecisionBasis(
+  a: ConceptDecisionBasis,
+  b: ConceptDecisionBasis,
+): boolean {
+  return (
+    a.needsReconcile === b.needsReconcile &&
+    a.attestation === b.attestation &&
+    a.eval === b.eval
+  )
+}
+
+/** Which way out of the drawer the parent chose. */
+export type DecisionRoute = 'override' | 'reconcileKeep' | 'reconcileTake'
+
+/**
+ * One staged intent, bound to its scope. Built when the parent picks, carried to
+ * Confirm unchanged, and checked against the live model (in the drawer) and the
+ * stored model (in the transaction) before anything is written.
+ */
+export interface StagedDecision {
+  /** The drawer opening this belongs to — feedback never crosses lifetimes. */
+  lifetimeId: number
+  /** The child captured at open, never the live active one. */
+  childId: string
+  /** The exact concept id captured at open. */
+  conceptId: string
+  route: DecisionRoute
+  state: ReviewProposedState
+  /** The evidence this decision describes. */
+  basis: ConceptDecisionBasis
+}
+
+/** Why a write was refused against the stored model. Diagnostic, never shown. */
+export type ReviewActionRefusal =
+  | 'model-missing'
+  | 'child-mismatch'
+  | 'concept-missing'
+  | 'concept-mismatch'
+  | 'basis-stale'
+
+/**
+ * A refusal raised INSIDE the transaction, before any merge is computed, when
+ * the stored model is not the one the parent decided against. Distinguished from
+ * an ordinary write error because retrying the same tap cannot help: the parent
+ * is asked to look again instead.
+ */
+export class ReviewActionBasisError extends Error {
+  reason: ReviewActionRefusal
+
+  constructor(reason: ReviewActionRefusal) {
+    super(`review action refused: ${reason}`)
+    this.name = 'ReviewActionBasisError'
+    this.reason = reason
+  }
+}
+
+/** Shown when the drawer's scope went away under it. No evidence, no note. */
+export const SCOPE_LOST_NOTICE =
+  'That closed because the child or the map changed. Open it again to see where things stand.'
+
+/** Shown when the thing a staged choice described moved before it was written. */
+export const DECISION_STALE_NOTICE =
+  'This has moved on since you chose — have another look and choose again.'
+
+/** Shown when a save that had already started could not be recorded. */
+export const SAVE_RETRY_LINE = 'Could not save that — try again.'
+
 /** The note recorded when a parent reads the new take and stands by what they saw. */
 export const KEEP_MY_WORD_NOTE =
   'You looked at the new take from the evaluation and stood by what you have seen.'
@@ -206,4 +333,29 @@ export function buildOverrideAction(args: {
     origin: args.origin,
     ...(note ? { note } : {}),
   }
+}
+
+/**
+ * The action for a staged decision — one write semantic for all three routes,
+ * through the same {@link buildOverrideAction} above. The child and the concept
+ * come from the decision's captured scope, never from whatever is active now,
+ * and the note is read at build time so editing it after choosing still reaches
+ * the durable evidence.
+ */
+export function stagedDecisionAction(
+  decision: StagedDecision,
+  note: string,
+): FoundationsReviewAction {
+  return buildOverrideAction({
+    childId: decision.childId,
+    conceptId: decision.conceptId,
+    state: decision.state,
+    note:
+      decision.route === 'override'
+        ? note
+        : decision.route === 'reconcileKeep'
+          ? KEEP_MY_WORD_NOTE
+          : TAKE_MODEL_READ_NOTE,
+    origin: decision.route === 'override' ? 'foundationsTab' : decision.route,
+  })
 }

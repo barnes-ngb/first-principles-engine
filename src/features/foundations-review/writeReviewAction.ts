@@ -26,6 +26,15 @@ import type { DocumentReference } from 'firebase/firestore'
 
 import { updateLearnerModelInTransaction } from '../../core/firebase/modelTransaction'
 import { promotedModelStatus } from '../../core/foundations/modelStatus'
+// The scoped decision contract (FEAT-66). One-way: the drawer's basis definition
+// is also what the transaction checks the STORED document against, so there is a
+// single answer to "is this decision still the one that was made?".
+import {
+  conceptDecisionBasis,
+  ReviewActionBasisError,
+  sameConceptDecisionBasis,
+  type ConceptDecisionBasis,
+} from '../progress/conceptOverride'
 import {
   applyReviewActionToModel,
   type AppliedReviewAction,
@@ -85,15 +94,68 @@ export async function writeReviewAction(
  * model, and `fallbackBase` is used only when the document genuinely does not
  * exist. The caller must update its own cache from the RESOLVED value, never
  * before the commit: the callback can run more than once.
+ *
+ * `expectStored` is **opt-in** (the Foundations tab's drawer passes it; the
+ * Review Chat does not, and nothing about its write changes). When it is given,
+ * the stored model must still be the one the parent decided against — see
+ * {@link checkStoredBasis} — and otherwise nothing is written at all.
  */
 export async function applyAndWriteReviewAction(
   modelRef: DocumentReference<LearnerModel>,
   fallbackBase: LearnerModel,
   action: FoundationsReviewAction,
   nowIso: string,
+  expectStored?: StoredDecisionExpectation,
 ): Promise<LearnerModel> {
   return updateLearnerModelInTransaction<LearnerModel>(modelRef, (stored) => {
+    // Before any merge is computed and before the fallback is considered — and
+    // on EVERY attempt, because a transaction retry re-runs this callback
+    // against a document that has since moved.
+    if (expectStored) checkStoredBasis(stored, action, expectStored)
     const applied = applyReviewActionToModel(stored ?? fallbackBase, action, nowIso)
     return { merge: buildReviewActionMerge(applied), result: applied.model }
   })
+}
+
+/**
+ * What a surface that staged a decision against a SPECIFIC stored state claims
+ * is still true. Carried from the tap, not re-read at commit time — that is the
+ * whole point of it.
+ */
+export interface StoredDecisionExpectation {
+  /** The child the drawer captured at open. */
+  childId: string
+  /** The exact concept the staged intent names. */
+  conceptId: string
+  /** The evidence the displayed decision described. */
+  basis: ConceptDecisionBasis
+}
+
+/**
+ * Refuse a write whose basis is no longer the stored one. Throws
+ * {@link ReviewActionBasisError} — no merge, no fallback, no partial state.
+ *
+ * There is no "write it anyway" branch, and in particular no falling back to the
+ * caller's cached model: a missing document is a missing basis, and a decision
+ * made about evidence cannot be applied to a document that does not have it.
+ */
+function checkStoredBasis(
+  stored: LearnerModel | null,
+  action: FoundationsReviewAction,
+  expectStored: StoredDecisionExpectation,
+): void {
+  if (!stored) throw new ReviewActionBasisError('model-missing')
+  if (stored.childId !== expectStored.childId || action.childId !== expectStored.childId) {
+    throw new ReviewActionBasisError('child-mismatch')
+  }
+  if (action.conceptId !== expectStored.conceptId) {
+    throw new ReviewActionBasisError('concept-mismatch')
+  }
+  const entry = stored.conceptStates?.[expectStored.conceptId]
+  // An entry that has gone is not an empty basis that happens to match — the
+  // concept the parent was looking at is not in the document any more.
+  if (!entry) throw new ReviewActionBasisError('concept-missing')
+  if (!sameConceptDecisionBasis(conceptDecisionBasis(entry), expectStored.basis)) {
+    throw new ReviewActionBasisError('basis-stale')
+  }
 }

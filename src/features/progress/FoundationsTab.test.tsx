@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
@@ -54,10 +54,16 @@ const mockApplyAndWrite = vi.fn(async (...args: unknown[]) => {
 })
 /** The confirmed action is the 3rd arg: (modelRef, base, action, nowIso). */
 const confirmedAction = (call = 0) => mockApplyAndWrite.mock.calls[call][2]
+/** The stored-basis expectation is the 5th arg — opt-in, this surface only. */
+const confirmedExpectation = (call = 0) => mockApplyAndWrite.mock.calls[call][4]
 vi.mock('../foundations-review/writeReviewAction', () => ({
   applyAndWriteReviewAction: (...args: unknown[]) => mockApplyAndWrite(...(args as [])),
 }))
-vi.mock('firebase/firestore', () => ({ doc: vi.fn(() => ({})) }))
+/** `doc(collection, childId)` — the destination, asserted by its child id. */
+const mockDoc = vi.fn((..._args: unknown[]) => ({}))
+vi.mock('firebase/firestore', () => ({
+  doc: (...args: unknown[]) => mockDoc(...(args as [])),
+}))
 
 // UX-286 — the create-only bootstrap seam. The decision and the write are pinned
 // in `foundationsBootstrap.test.ts` / `useFoundationsBootstrap.test.tsx`; here we
@@ -75,6 +81,12 @@ vi.mock('../../core/firebase/firestore', () => ({
 }))
 
 import FoundationsTab from './FoundationsTab'
+import {
+  conceptDecisionBasis,
+  DECISION_STALE_NOTICE,
+  ReviewActionBasisError,
+  SCOPE_LOST_NOTICE,
+} from './conceptOverride'
 
 const CVC = 'reading.phonics.cvc'
 const BLENDS = 'reading.phonics.blends'
@@ -509,5 +521,326 @@ describe('FoundationsTab — reconcile the eval’s new take (FEAT-66 B / FEAT-7
     expect(text).not.toContain('%')
     expect(text).not.toMatch(/regress|dropped|failed/i)
     expect(text).not.toMatch(/\bscore\b/i)
+  })
+})
+
+// ── FEAT-66 scope repair: the drawer's lifetime, and its decision basis ────
+//
+// The drawer used to hold a whole concept snapshot and read the child from the
+// page at Confirm time, so a committed child switch left one child's concept and
+// evidence on screen while the staged action was rebuilt for the newly active
+// child — and the write went to the new child. These pin the repair: the scope is
+// captured at open, the concept is re-resolved from the live model, and a staged
+// decision is bound to the evidence it describes.
+
+/** Make the shell's active child a different boy, with his own model. */
+function makeActive(childId: string, name: string, model: LearnerModel | null) {
+  mockUseActiveChild.mockReturnValue({
+    activeChild: { id: childId, name },
+    activeChildId: childId,
+    children: [{ id: childId, name }],
+    setActiveChildId: vi.fn(),
+    isChildProfile: false,
+    isLoading: false,
+    addChild: vi.fn(),
+  })
+  mockUseLearnerModel.mockReturnValue({ loading: false, model })
+}
+
+/** The same model, with a DIFFERENT evaluation standing on the CVC concept. */
+function modelWithReplacedEval(sourceId: string, observedAt: string): LearnerModel {
+  const m = modelWithReconcile()
+  const entry = m.conceptStates[CVC]
+  entry.evidence = [
+    { ...entry.evidence[0] },
+    { ...entry.evidence[1], sourceId, observedAt },
+  ]
+  return m
+}
+
+describe('FoundationsTab — the drawer is scoped to the opening it was tapped in', () => {
+  beforeEach(() => {
+    mockApplyAndWrite.mockReset()
+    mockApplyAndWrite.mockResolvedValue({} as LearnerModel)
+    mockUseLearnerModel.mockReturnValue({ loading: false, model: fullModel() })
+  })
+
+  it('closes on a committed child switch, loses the staged work visibly, and writes nothing', async () => {
+    const user = userEvent.setup()
+    const { rerender } = render(<FoundationsTab />)
+    await openConcept(user, CVC_NAME)
+    await user.type(screen.getByLabelText(/What did you see/), 'He read the whole page')
+    await user.click(screen.getByRole('button', { name: 'Lincoln has this solid' }))
+    expect(screen.getByRole('button', { name: 'Confirm' })).toBeInTheDocument()
+
+    // The shell's chip changes the child. The drawer belongs to the old one.
+    makeActive('c2', 'London', fullModel())
+    rerender(<FoundationsTab />)
+
+    // No stale frame: the drawer is gone in the same pass, with it the note, the
+    // staged proposal and the evidence it was about.
+    expect(screen.queryByLabelText(/What did you see/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Confirm' })).not.toBeInTheDocument()
+    expect(document.body.textContent ?? '').not.toContain('He read the whole page')
+    // The loss is visible, and the line carries no evidence and no note.
+    expect(screen.getByText(SCOPE_LOST_NOTICE)).toBeInTheDocument()
+    expect(mockApplyAndWrite).not.toHaveBeenCalled()
+  })
+
+  it('does not resurrect the staged work when the first child comes back (A → B → A)', async () => {
+    const user = userEvent.setup()
+    const { rerender } = render(<FoundationsTab />)
+    await openConcept(user, CVC_NAME)
+    await user.type(screen.getByLabelText(/What did you see/), 'He read the whole page')
+    await user.click(screen.getByRole('button', { name: 'Lincoln has this solid' }))
+
+    makeActive('c2', 'London', fullModel())
+    rerender(<FoundationsTab />)
+    makeActive('c1', 'Lincoln', fullModel())
+    rerender(<FoundationsTab />)
+
+    expect(screen.queryByLabelText(/What did you see/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Confirm' })).not.toBeInTheDocument()
+    expect(mockApplyAndWrite).not.toHaveBeenCalled()
+
+    // Opening it again is a NEW lifetime: empty note, nothing staged.
+    await openConcept(user, CVC_NAME)
+    expect(screen.getByLabelText(/What did you see/)).toHaveValue('')
+    expect(screen.queryByRole('button', { name: 'Confirm' })).not.toBeInTheDocument()
+  })
+
+  it('closes and refuses when the model goes away, whatever the cause', async () => {
+    const user = userEvent.setup()
+    const { rerender } = render(<FoundationsTab />)
+    await openConcept(user, CVC_NAME)
+    expect(screen.getByText('Evidence')).toBeInTheDocument()
+
+    mockUseLearnerModel.mockReturnValue({ loading: false, model: null })
+    rerender(<FoundationsTab />)
+
+    expect(screen.queryByText('Evidence')).not.toBeInTheDocument()
+    expect(screen.getByText(SCOPE_LOST_NOTICE)).toBeInTheDocument()
+  })
+
+  it('closes when the concept itself is no longer on the model', async () => {
+    const user = userEvent.setup()
+    const { rerender } = render(<FoundationsTab />)
+    await openConcept(user, CVC_NAME)
+
+    const without = fullModel()
+    delete without.conceptStates[CVC]
+    mockUseLearnerModel.mockReturnValue({ loading: false, model: without })
+    rerender(<FoundationsTab />)
+
+    expect(screen.queryByText('Evidence')).not.toBeInTheDocument()
+    expect(screen.getByText(SCOPE_LOST_NOTICE)).toBeInTheDocument()
+  })
+
+  it('closes when the profile’s capability changes under it', async () => {
+    const user = userEvent.setup()
+    const { rerender } = render(<FoundationsTab />)
+    await openConcept(user, CVC_NAME)
+
+    mockCanEdit.mockReturnValue(false)
+    rerender(<FoundationsTab />)
+
+    expect(screen.queryByText('Evidence')).not.toBeInTheDocument()
+    expect(screen.getByText(SCOPE_LOST_NOTICE)).toBeInTheDocument()
+  })
+
+  it('keeps a save that has already started on the child it was confirmed for', async () => {
+    // The write is in flight when the switch lands. It is addressed to the child
+    // captured at open, and its receipt names that child — never the new one.
+    let settle = (): void => {}
+    mockApplyAndWrite.mockImplementation(
+      () => new Promise<LearnerModel>((resolve) => {
+        settle = () => resolve({} as LearnerModel)
+      }),
+    )
+    const user = userEvent.setup()
+    const { rerender } = render(<FoundationsTab />)
+    await openConcept(user, CVC_NAME)
+    await user.click(screen.getByRole('button', { name: 'Lincoln has this solid' }))
+    await user.click(screen.getByRole('button', { name: 'Confirm' }))
+
+    expect(mockApplyAndWrite).toHaveBeenCalledTimes(1)
+    expect(confirmedAction()).toMatchObject({ childId: 'c1', conceptId: CVC })
+    // The destination was built from the captured child, not the live one.
+    expect(mockDoc).toHaveBeenCalledWith(expect.anything(), 'c1')
+
+    makeActive('c2', 'London', fullModel())
+    rerender(<FoundationsTab />)
+    await act(async () => {
+      settle()
+    })
+
+    expect(mockDoc).not.toHaveBeenCalledWith(expect.anything(), 'c2')
+    expect(screen.getByText(/Recorded — Lincoln has this solid/)).toBeInTheDocument()
+    expect(document.body.textContent ?? '').not.toMatch(/Recorded — London/)
+  })
+
+  it('does not let a failed save from a closed drawer touch a later one', async () => {
+    // The save is still in flight when the parent closes the drawer and opens it
+    // again. Its outcome belongs to the lifetime that started it.
+    let fail = (): void => {}
+    mockApplyAndWrite.mockImplementationOnce(
+      () => new Promise<LearnerModel>((_resolve, reject) => {
+        fail = () => reject(new Error('firestore down'))
+      }),
+    )
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const user = userEvent.setup()
+    render(<FoundationsTab />)
+    await openConcept(user, CVC_NAME)
+    await user.click(screen.getByRole('button', { name: 'Lincoln has this solid' }))
+    await user.click(screen.getByRole('button', { name: 'Confirm' }))
+
+    await user.keyboard('{Escape}')
+    await openConcept(user, CVC_NAME)
+    await act(async () => {
+      fail()
+    })
+
+    // Nothing inside the new drawer changed: no error line on it, and the
+    // proposal it has not staged yet was not invented for it.
+    const drawer = screen.getByRole('presentation')
+    expect(drawer.textContent ?? '').not.toContain('Could not save that')
+    expect(screen.queryByRole('button', { name: 'Confirm' })).not.toBeInTheDocument()
+    // The outcome is still reported, in the tab's own voice.
+    expect(screen.getByText('Could not save that — try again.')).toBeInTheDocument()
+    errSpy.mockRestore()
+  })
+
+  it('writes once for two Confirm taps in the same tick', async () => {
+    const user = userEvent.setup()
+    render(<FoundationsTab />)
+    await openConcept(user, CVC_NAME)
+    await user.click(screen.getByRole('button', { name: 'Lincoln has this solid' }))
+
+    const confirm = screen.getByRole('button', { name: 'Confirm' })
+    await act(async () => {
+      fireEvent.click(confirm)
+      fireEvent.click(confirm)
+    })
+    expect(mockApplyAndWrite).toHaveBeenCalledTimes(1)
+  })
+
+  it('still retries an ordinary failure without re-choosing', async () => {
+    mockApplyAndWrite.mockRejectedValueOnce(new Error('firestore down'))
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const user = userEvent.setup()
+    render(<FoundationsTab />)
+    await openConcept(user, CVC_NAME)
+    await user.click(screen.getByRole('button', { name: 'Lincoln has this solid' }))
+    await user.click(screen.getByRole('button', { name: 'Confirm' }))
+    await waitFor(() =>
+      expect(screen.getByText('Could not save that — try again.')).toBeInTheDocument(),
+    )
+
+    // The basis has not moved, so the proposal is still there and one tap retries.
+    await user.click(screen.getByRole('button', { name: 'Confirm' }))
+    await waitFor(() => expect(mockApplyAndWrite).toHaveBeenCalledTimes(2))
+    errSpy.mockRestore()
+  })
+})
+
+describe('FoundationsTab — a staged decision is bound to the evidence it describes', () => {
+  beforeEach(() => {
+    mockApplyAndWrite.mockReset()
+    mockApplyAndWrite.mockResolvedValue({} as LearnerModel)
+    mockUseLearnerModel.mockReturnValue({ loading: false, model: modelWithReconcile() })
+  })
+
+  it('carries the captured child, the exact concept and the basis to the writer', async () => {
+    const model = modelWithReconcile()
+    mockUseLearnerModel.mockReturnValue({ loading: false, model })
+    const user = userEvent.setup()
+    render(<FoundationsTab />)
+    await openConcept(user, CVC_NAME)
+    await user.click(screen.getByRole('button', { name: 'Take the model’s read' }))
+    await user.click(screen.getByRole('button', { name: 'Confirm' }))
+
+    await waitFor(() => expect(mockApplyAndWrite).toHaveBeenCalledTimes(1))
+    expect(confirmedExpectation()).toEqual({
+      childId: 'c1',
+      conceptId: CVC,
+      basis: conceptDecisionBasis(model.conceptStates[CVC]),
+    })
+  })
+
+  it('clears the confirmation and asks for another look when a replacement eval lands', async () => {
+    const user = userEvent.setup()
+    const { rerender } = render(<FoundationsTab />)
+    await openConcept(user, CVC_NAME)
+    await user.click(screen.getByRole('button', { name: 'Take the model’s read' }))
+    expect(screen.getByRole('button', { name: 'Confirm' })).toBeInTheDocument()
+
+    // A second evaluation, on a different day, asserting the SAME state — the
+    // case a state comparison cannot see.
+    mockUseLearnerModel.mockReturnValue({
+      loading: false,
+      model: modelWithReplacedEval('sess-12', '2026-07-24T00:00:00.000Z'),
+    })
+    rerender(<FoundationsTab />)
+
+    expect(screen.queryByRole('button', { name: 'Confirm' })).not.toBeInTheDocument()
+    expect(screen.getByText(DECISION_STALE_NOTICE)).toBeInTheDocument()
+    expect(mockApplyAndWrite).not.toHaveBeenCalled()
+    // The drawer is still open on the live evidence, which has redrawn.
+    expect(screen.getByText(/The evaluation saw: Lincoln is coming along with this/))
+      .toBeInTheDocument()
+    expect(document.body.textContent ?? '').toContain('2026-07-24')
+
+    // Choosing again stages against what is there now.
+    await user.click(screen.getByRole('button', { name: 'Take the model’s read' }))
+    await user.click(screen.getByRole('button', { name: 'Confirm' }))
+    await waitFor(() => expect(mockApplyAndWrite).toHaveBeenCalledTimes(1))
+    expect(confirmedExpectation()).toMatchObject({
+      basis: expect.objectContaining({ eval: expect.stringContaining('sess-12') }),
+    })
+  })
+
+  it('keeps an otherwise current draft when an unrelated concept moves', async () => {
+    const user = userEvent.setup()
+    const { rerender } = render(<FoundationsTab />)
+    await openConcept(user, CVC_NAME)
+    await user.type(screen.getByLabelText(/What did you see/), 'He blended every word')
+    await user.click(screen.getByRole('button', { name: 'Lincoln has this solid' }))
+
+    const moved = modelWithReconcile()
+    moved.conceptStates[LONG] = { state: 'solid', evidence: [] }
+    moved.synthesis = { ...moved.synthesis!, narrative: 'A fresh synthesis landed.' }
+    mockUseLearnerModel.mockReturnValue({ loading: false, model: moved })
+    rerender(<FoundationsTab />)
+
+    expect(screen.queryByText(DECISION_STALE_NOTICE)).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Confirm' }))
+    await waitFor(() => expect(mockApplyAndWrite).toHaveBeenCalledTimes(1))
+    expect(confirmedAction()).toMatchObject({
+      conceptId: CVC,
+      state: 'solid',
+      note: 'He blended every word',
+    })
+  })
+
+  it('does not offer a retry when the writer refuses the stored basis', async () => {
+    mockApplyAndWrite.mockRejectedValueOnce(new ReviewActionBasisError('basis-stale'))
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const user = userEvent.setup()
+    render(<FoundationsTab />)
+    await openConcept(user, CVC_NAME)
+    await user.click(screen.getByRole('button', { name: 'Keep my word' }))
+    await user.click(screen.getByRole('button', { name: 'Confirm' }))
+
+    await waitFor(() =>
+      expect(screen.getAllByText(DECISION_STALE_NOTICE).length).toBeGreaterThan(0),
+    )
+    // The staged confirmation is gone — the same tap would be refused again —
+    // and the evidence is still there to look at.
+    expect(screen.queryByRole('button', { name: 'Confirm' })).not.toBeInTheDocument()
+    expect(screen.getByText('Evidence')).toBeInTheDocument()
+    expect(screen.queryByText(/Recorded —/)).not.toBeInTheDocument()
+    expect(mockApplyAndWrite).toHaveBeenCalledTimes(1)
+    errSpy.mockRestore()
   })
 })
