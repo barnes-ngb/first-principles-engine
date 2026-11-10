@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { doc } from 'firebase/firestore'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
@@ -27,6 +27,7 @@ import { learnerModelsCollection } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import { useLearnerModel } from '../../core/hooks/useLearnerModel'
 import { useProfile } from '../../core/profile/useProfile'
+import type { UserProfile } from '../../core/types/enums'
 import type {
   ConceptStateKind,
   LearnerModel,
@@ -98,23 +99,19 @@ function stateColor(state: ConceptStateKind): string {
  * change means*). The drawer held a whole concept snapshot before, so a child
  * switch left the old concept on screen while the write addressed the new child.
  *
- * Everything scoped travels together: the family, the child, the capability the
- * profile actually had, the exact concept id, and a lifetime. The concept itself
- * is **not** here — it is re-resolved from the live model every render, so the
- * evidence trail is current and a concept that goes away closes the drawer.
+ * The concept itself is **not** here: it is re-resolved from the live model on
+ * every render, so the evidence is current and a concept that goes away closes
+ * the drawer.
  */
 interface DrawerScope {
-  /**
-   * Monotonic per opening. Feedback — a success line, an error, a stale-decision
-   * signal — is keyed to it, so a reply from one opening can never land on the
-   * next one.
-   */
+  /** Monotonic per opening. Every outcome is keyed to it. */
   lifetimeId: number
   familyId: string
   childId: string
   /** The name as it read at open, so a receipt names the child it was for. */
   childName: string
-  /** The capability at open (`canEdit`), never a name. */
+  /** The profile that opened it, and the capability it actually had. */
+  profile: UserProfile | null
   canEdit: boolean
   conceptId: string
 }
@@ -153,7 +150,9 @@ export default function FoundationsTab() {
   // directly, and their own `activeChildId` is populated. So the override is gated
   // on the same **capability** the route guard uses (`canEdit`), never on a name
   // (ARCH-41/42/43): kids may read the terrain, they may not attest.
-  const { canEdit } = useProfile()
+  // Both halves, not the capability alone: a profile change is a scope change
+  // even when `canEdit` happens to read the same for the new one.
+  const { canEdit, profile } = useProfile()
   // UX-425: this page no longer chooses or adds a child — it reads the active
   // one. The shell's chip is the one control that changes it.
   const { activeChild, activeChildId } = useActiveChild()
@@ -171,76 +170,93 @@ export default function FoundationsTab() {
   /** The next lifetime id. A ref, so two taps in one tick cannot share one. */
   const lifetimeRef = useRef(0)
   /**
-   * The synchronous duplicate-Confirm guard. `saving` is React state and is
-   * still `false` for a second tap in the same tick, which is one write per tap
-   * — this is read and set before the first `await`.
+   * The lifetime of the open, still-valid drawer (0 when none). Written beside
+   * every change to `scope`, so an `await` that resolves later can ask whether
+   * its own opening is still the live one without waiting for an effect.
    */
-  const savingRef = useRef(false)
-  /** Which lifetime, if any, has a save in flight / an error / a receipt. */
+  const openLifetimeRef = useRef(0)
+  /** The lifetimes with a save in flight — per-lifetime, so one tap writes once. */
+  const inFlightRef = useRef<Set<number>>(new Set())
+  /** Which lifetime, if any, has a save in flight / an error. */
   const [savingLifetime, setSavingLifetime] = useState<number | null>(null)
   const [saveError, setSaveError] = useState<{ lifetimeId: number; text: string } | null>(
     null,
   )
   const [staleSignal, setStaleSignal] = useState<StaleSignal>({ lifetimeId: 0, token: 0 })
+  /** The receipt for the lifetime that wrote, cleared by any scope change. */
   const [savedNotice, setSavedNotice] = useState<string | null>(null)
-  /** A loss or an out-of-lifetime outcome, said plainly and with no content. */
-  const [notice, setNotice] = useState<{ severity: 'info' | 'warning'; text: string } | null>(
-    null,
-  )
+  /** The generic loss line — no evidence, no note, nothing of the concept. */
+  const [lostNotice, setLostNotice] = useState<string | null>(null)
 
   const childName = activeChild?.name ?? 'this child'
 
   /**
    * The open concept, resolved from the LIVE model in the scope it was opened
-   * under. Null the moment any part of that scope stops holding — a committed
-   * child or family change, a capability change, a model that went away, or a
-   * concept the model no longer carries — and the drawer renders closed in the
-   * same pass, so there is no frame of someone else's evidence.
+   * under. Null the moment any part of that scope stops holding: a committed
+   * family, child, profile or capability change, an unsettled or absent model,
+   * a model for another child, or a concept the model no longer carries.
+   *
+   * Null for any reason is the same answer — nothing to show, so nothing is
+   * editable. Telling a failed read apart from an absent model is a separate
+   * follow-up and would not change it.
    */
   const scopedConcept = useMemo<TerrainConcept | null>(() => {
     if (!scope) return null
     if (
       scope.familyId !== familyId ||
       scope.childId !== activeChildId ||
+      scope.profile !== profile ||
       scope.canEdit !== canEdit
     ) {
       return null
     }
-    // Null for any reason is the same answer here: nothing to show, so nothing
-    // is editable. Telling a failed read apart from an absent model is a
-    // separate follow-up and would not change this decision.
-    if (!model || model.status === 'no-data') return null
+    if (loading || !model || model.status === 'no-data') return null
+    if (model.childId !== scope.childId) return null
     return selectTerrainConcept(model, scope.conceptId)
-  }, [scope, familyId, activeChildId, canEdit, model])
+  }, [scope, familyId, activeChildId, profile, canEdit, loading, model])
 
-  /** Drop the dead scope (and say so) once the render above has closed it. */
-  useEffect(() => {
-    if (!scope || scopedConcept) return
+  /**
+   * Drop an invalid scope **during render** — the pattern `useLearnerModel`
+   * uses for a key change. An effect would leave the drawer one commit behind,
+   * and an identity that came back before it ran would reopen the old staging.
+   */
+  if (scope && !scopedConcept) {
+    openLifetimeRef.current = 0
     setScope(null)
     setSaveError(null)
-    setNotice({ severity: 'info', text: SCOPE_LOST_NOTICE })
-  }, [scope, scopedConcept])
+    setSavedNotice(null)
+    setLostNotice(SCOPE_LOST_NOTICE)
+  }
 
-  /** Read inside the save, where the closure's `scope` is the one from the tap. */
-  const scopeRef = useRef<DrawerScope | null>(null)
-  useEffect(() => {
-    scopeRef.current = scope
-  }, [scope])
+  /**
+   * A receipt belongs to the scope it was written in, so a committed change of
+   * family, child, profile or capability clears it even with nothing open.
+   */
+  const scopeKey = `${familyId ?? ''}|${activeChildId ?? ''}|${profile ?? ''}|${canEdit}`
+  const [lastScopeKey, setLastScopeKey] = useState(scopeKey)
+  if (lastScopeKey !== scopeKey) {
+    setLastScopeKey(scopeKey)
+    setSavedNotice(null)
+    setSaveError(null)
+  }
 
   /**
    * Write one confirmed override. The only write on this tab, and it reaches
    * Firestore exclusively through the shared `writeReviewAction` merge — no second
    * write path, no `skillSnapshots` touch, `learnerModels` only.
    *
-   * Everything it checks comes from the drawer's captured scope and the staged
-   * decision, never from what the page happens to show now: the destination, the
-   * child on the action, the concept, and the evidence the decision described.
+   * Everything it checks comes from the captured scope and the staged decision,
+   * never from what the page happens to show now: the destination, the child on
+   * the action, the concept, and the evidence the decision described.
    */
   const handleConfirmDecision = useCallback(
     async (decision: StagedDecision, action: FoundationsReviewAction) => {
-      if (savingRef.current) return
-      if (!scope || scope.lifetimeId !== decision.lifetimeId) return
-      if (!canEdit || !scope.canEdit) {
+      const lifetimeId = decision.lifetimeId
+      // Per-lifetime, so a pending save in a closed drawer cannot disable a new
+      // one's Confirm, and two taps in one tick still write once.
+      if (inFlightRef.current.has(lifetimeId)) return
+      if (!scope || scope.lifetimeId !== lifetimeId || !scopedConcept) return
+      if (!canEdit || !scope.canEdit || scope.profile !== profile) {
         // Belt-and-braces: the controls are hidden for non-parent profiles, and
         // the writer refuses one anyway.
         console.warn('[foundations] rejected override — not a parent profile')
@@ -251,11 +267,9 @@ export default function FoundationsTab() {
         !activeChildId ||
         !model ||
         scope.familyId !== familyId ||
-        scope.childId !== activeChildId
+        scope.childId !== activeChildId ||
+        model.childId !== scope.childId
       ) {
-        // The scope this was staged under is gone; refuse and close.
-        setScope(null)
-        setNotice({ severity: 'info', text: SCOPE_LOST_NOTICE })
         return
       }
       if (
@@ -269,84 +283,90 @@ export default function FoundationsTab() {
         console.warn('[foundations] rejected override — scope mismatch', action)
         return
       }
-      const live = selectTerrainConcept(model, scope.conceptId)
-      if (!live) {
-        setScope(null)
-        setNotice({ severity: 'info', text: SCOPE_LOST_NOTICE })
-        return
-      }
       // Validated at Confirm as well as at render: the staged intent must still
       // describe the evidence in front of the parent.
-      if (!sameConceptDecisionBasis(conceptDecisionBasis(live.entry), decision.basis)) {
-        setStaleSignal((s) => ({ lifetimeId: decision.lifetimeId, token: s.token + 1 }))
-        setSaveError({ lifetimeId: decision.lifetimeId, text: DECISION_STALE_NOTICE })
+      if (
+        !sameConceptDecisionBasis(conceptDecisionBasis(scopedConcept.entry), decision.basis)
+      ) {
+        setStaleSignal((s) => ({ lifetimeId, token: s.token + 1 }))
         return
       }
-      savingRef.current = true
-      setSavingLifetime(decision.lifetimeId)
+      inFlightRef.current.add(lifetimeId)
+      setSavingLifetime(lifetimeId)
       setSaveError(null)
-      // The destination is the one captured at open, so a switch that lands
-      // while this is in flight cannot re-address a save that has started.
+      // The destination is the one captured at open, so a switch landing while
+      // this is in flight cannot re-address a save that has started.
       const destination = doc(learnerModelsCollection(scope.familyId), scope.childId)
-      const lifetimeId = decision.lifetimeId
       const forChildName = scope.childName
+      const kidName =
+        FOUNDATION_NODE_MAP[action.conceptId]?.kidName ?? scopedConcept.kidName
       try {
         await applyAndWriteReviewAction(destination, model, action, new Date().toISOString(), {
           childId: scope.childId,
           conceptId: scope.conceptId,
           basis: decision.basis,
         })
+        // Outcomes are for the opening that asked. If that opening is no longer
+        // the live one — closed, switched away from, or an A → B → A return —
+        // this says nothing at all rather than stamping a later drawer.
+        if (openLifetimeRef.current !== lifetimeId) return
         if (action.kind === 'attest') {
-          const kidName = FOUNDATION_NODE_MAP[action.conceptId]?.kidName ?? live.kidName
           setSavedNotice(
             `Recorded — ${stateChoiceLabel(action.state, forChildName)}: “${kidName}”`,
           )
         }
-        setScope((s) => (s && s.lifetimeId === lifetimeId ? null : s))
+        openLifetimeRef.current = 0
+        setScope(null)
       } catch (err) {
-        console.error('[foundations] failed to write learner model:', err)
+        console.error('[foundations] could not write learner model:', err)
+        if (openLifetimeRef.current !== lifetimeId) return
         // A basis refusal is not retryable — the same tap would be refused the
-        // same way — so the staged confirmation is cleared and the parent is
-        // asked to look again. An ordinary error keeps the proposal, and an
-        // ordinary retry costs one tap.
-        const refused = err instanceof ReviewActionBasisError
-        const text = refused ? DECISION_STALE_NOTICE : SAVE_RETRY_LINE
-        if (scopeRef.current?.lifetimeId === lifetimeId) {
-          setSaveError({ lifetimeId, text })
-          if (refused) {
-            setStaleSignal((s) => ({ lifetimeId, token: s.token + 1 }))
-          }
+        // same way — so the confirmation is cleared and the parent is asked to
+        // look again. An ordinary error keeps the proposal: retry is one tap.
+        if (err instanceof ReviewActionBasisError) {
+          setStaleSignal((s) => ({ lifetimeId, token: s.token + 1 }))
         } else {
-          // The drawer it belongs to is gone. The outcome is still reported, but
-          // in the tab's own voice and with nothing from that concept in it.
-          setNotice({ severity: 'warning', text: SAVE_RETRY_LINE })
+          setSaveError({ lifetimeId, text: SAVE_RETRY_LINE })
         }
       } finally {
-        savingRef.current = false
+        inFlightRef.current.delete(lifetimeId)
+        // Only this lifetime's guard — an old completion must not clear a newer
+        // drawer's in-flight state.
         setSavingLifetime((l) => (l === lifetimeId ? null : l))
       }
     },
-    [scope, canEdit, familyId, activeChildId, model],
+    [scope, scopedConcept, canEdit, profile, familyId, activeChildId, model],
   )
 
   /** Open the drawer for one concept, capturing the scope it was tapped in. */
   const handleOpenConcept = useCallback(
     (concept: TerrainConcept) => {
-      if (!familyId || !activeChildId) return
+      // A settled model for this very child, or there is nothing to open on.
+      if (!familyId || !activeChildId || loading || !model) return
+      if (model.childId !== activeChildId) return
       lifetimeRef.current += 1
+      openLifetimeRef.current = lifetimeRef.current
       setScope({
         lifetimeId: lifetimeRef.current,
         familyId,
         childId: activeChildId,
         childName,
+        profile,
         canEdit,
         conceptId: concept.conceptId,
       })
       setSaveError(null)
-      setNotice(null)
+      setSavedNotice(null)
+      setLostNotice(null)
     },
-    [familyId, activeChildId, childName, canEdit],
+    [familyId, activeChildId, childName, profile, canEdit, loading, model],
   )
+
+  /** The parent closed it. Nothing is lost that was not theirs to close. */
+  const handleCloseDrawer = useCallback(() => {
+    openLifetimeRef.current = 0
+    setScope(null)
+  }, [])
 
   return (
     <Container maxWidth="md" sx={{ py: 2 }}>
@@ -374,12 +394,11 @@ export default function FoundationsTab() {
         </Alert>
       )}
 
-      {/* The drawer's scope went away under it, or an already-started save came
-          back after its drawer had closed. Generic by construction: no evidence
-          line, no note, nothing about the concept it was for. */}
-      {notice && (
-        <Alert severity={notice.severity} sx={{ mt: 2 }} onClose={() => setNotice(null)}>
-          {notice.text}
+      {/* The drawer's scope went away under it. Generic by construction: no
+          evidence line, no note, nothing about the concept it was for. */}
+      {lostNotice && (
+        <Alert severity="info" sx={{ mt: 2 }} onClose={() => setLostNotice(null)}>
+          {lostNotice}
         </Alert>
       )}
 
@@ -452,7 +471,7 @@ export default function FoundationsTab() {
         scope={scope}
         concept={scopedConcept}
         staleSignal={staleSignal}
-        onClose={() => setScope(null)}
+        onClose={handleCloseDrawer}
         onConfirm={handleConfirmDecision}
         saving={scope !== null && savingLifetime === scope.lifetimeId}
         error={
@@ -794,33 +813,43 @@ function ConceptDrawerBody({
   /**
    * What the parent has *selected*, not what will be written: the route, the
    * state, the scope it was chosen in, and the evidence it describes. The action
-   * itself is derived below, so editing the note after picking a state can never
-   * leave a stale note baked into the staged proposal.
+   * is derived below, so editing the note after picking a state can never leave
+   * a stale note baked into the staged proposal.
    */
   const [decision, setDecision] = useState<StagedDecision | null>(null)
+  /** Shown once a staged choice has been dropped under the parent's feet. */
+  const [reviewAgain, setReviewAgain] = useState(false)
+  /** The refusal token this body has already acted on. */
+  const [handledRefusal, setHandledRefusal] = useState(0)
 
-  /**
-   * The evidence this drawer is showing, fingerprinted. Recomputed as the model
-   * streams in, which is what makes a staged choice measurable against what the
-   * parent is looking at now.
-   */
+  /** The evidence this drawer is showing, fingerprinted from the active refs. */
   const basis = useMemo(() => conceptDecisionBasis(concept.entry), [concept.entry])
-  /**
-   * A choice describes evidence. When that evidence moves — a replacement
-   * evaluation, a withdrawn ref, a new attestation, a disagreement raised or
-   * settled — the confirmation staged for it is no longer the one the parent
-   * read, so it is cleared and they are asked to look again.
-   */
-  const stale = Boolean(decision && !sameConceptDecisionBasis(decision.basis, basis))
 
-  /** The writer refused this lifetime's decision against the stored model. */
-  useEffect(() => {
-    if (staleSignal.lifetimeId !== scope.lifetimeId) return
+  /**
+   * Both of these drop the staged choice **during render** (the pattern
+   * `useLearnerModel` uses) and drop it for good — a derived "is it stale?"
+   * would let the evidence coming back revive a confirmation the parent has
+   * already been told to re-make:
+   *
+   * 1. the evidence it described moved — a replacement eval, a withdrawn ref, a
+   *    new attestation, a state change, a disagreement raised or settled;
+   * 2. the writer refused it against the stored model.
+   */
+  if (decision && !sameConceptDecisionBasis(decision.basis, basis)) {
     setDecision(null)
-  }, [staleSignal, scope.lifetimeId])
+    setReviewAgain(true)
+  } else if (
+    staleSignal.lifetimeId === scope.lifetimeId &&
+    staleSignal.token !== handledRefusal
+  ) {
+    setHandledRefusal(staleSignal.token)
+    setDecision(null)
+    setReviewAgain(true)
+  }
 
   const chooseDecision = useCallback(
     (route: DecisionRoute, state: ReviewProposedState) => {
+      setReviewAgain(false)
       setDecision({
         lifetimeId: scope.lifetimeId,
         childId: scope.childId,
@@ -849,11 +878,11 @@ function ConceptDrawerBody({
 
   /** The single staged proposal, derived from the live decision + note. */
   const staged = useMemo<FoundationsReviewAction | null>(() => {
-    if (!decision || stale || !canOverride) return null
+    if (!decision || !canOverride) return null
     return stagedDecisionAction(decision, note)
-  }, [decision, stale, canOverride, note])
+  }, [decision, canOverride, note])
 
-  const choice = !stale && decision?.route === 'override' ? decision.state : null
+  const choice = decision?.route === 'override' ? decision.state : null
 
   return (
     <Box sx={{ p: 2, maxWidth: 640, mx: 'auto', width: '100%' }}>
@@ -999,10 +1028,10 @@ function ConceptDrawerBody({
         </>
       )}
 
-      {/* The evidence this choice described has moved. Short, plain, and with
-          nothing from the older read in it — the two sections above are already
-          showing what stands now. */}
-      {stale && (
+      {/* The evidence the choice described has moved. Short, plain, and with
+          nothing of the older read in it — the sections above already show what
+          stands now. */}
+      {reviewAgain && !decision && (
         <Alert severity="info" sx={{ mt: 1.5 }}>
           {DECISION_STALE_NOTICE}
         </Alert>

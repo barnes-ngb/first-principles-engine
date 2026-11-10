@@ -19,6 +19,7 @@
  * no scores; no "regressed" / "dropped" / "failed" anywhere. A disagreement is
  * described as "a new take", never as the parent having been wrong.
  */
+import { isActiveEvidence } from '../../core/foundations'
 import { STATE_PHRASE } from '../foundations-review/statePhrase'
 import type {
   FoundationsReviewAction,
@@ -90,16 +91,35 @@ export function stateChoiceLabel(state: ReviewProposedState, childName: string):
   return `${childName || 'This child'} ${STATE_PHRASE[state]}`
 }
 
-/** The last ref of a kind on an entry (evidence is appended, so last = most recent). */
-export function latestEvidenceOfKind(
+/**
+ * The last **active** ref of a kind (evidence is appended, so last = most
+ * recent). A withdrawn ref is history — it still renders in the evidence trail,
+ * and it is never a read a parent is asked to decide about.
+ */
+export function latestActiveEvidenceOfKind(
   entry: ConceptStateEntry | undefined,
   kind: EvidenceRef['kind'],
 ): EvidenceRef | undefined {
   const refs = entry?.evidence ?? []
   for (let i = refs.length - 1; i >= 0; i -= 1) {
-    if (refs[i].kind === kind) return refs[i]
+    if (refs[i].kind === kind && isActiveEvidence(refs[i])) return refs[i]
   }
   return undefined
+}
+
+/**
+ * The two reads every route in this drawer is about. ONE definition, used by
+ * the view the parent sees and by the basis that validates what they chose, so
+ * the display and the check can never read different refs.
+ */
+export function decisionRefs(entry: ConceptStateEntry | undefined): {
+  attestation: EvidenceRef | undefined
+  eval: EvidenceRef | undefined
+} {
+  return {
+    attestation: latestActiveEvidenceOfKind(entry, 'attestation'),
+    eval: latestActiveEvidenceOfKind(entry, 'eval'),
+  }
 }
 
 /**
@@ -156,8 +176,7 @@ export function buildReconcileView(
 ): ReconcileView | null {
   if (!entry?.needsReconcile) return null
   const name = childName || 'This child'
-  const attestation = latestEvidenceOfKind(entry, 'attestation')
-  const evalRef = latestEvidenceOfKind(entry, 'eval')
+  const { attestation, eval: evalRef } = decisionRefs(entry)
 
   // The parent's own word, not wherever the entry has since drifted to.
   const yourState: ConceptStateKind = attestation?.readState ?? entry.state
@@ -180,38 +199,38 @@ export function buildReconcileView(
 // ── The scoped decision contract (the drawer's one basis definition) ──────
 //
 // A staged intent is only meaningful against the evidence the parent was LOOKING
-// AT when they chose. Three things therefore travel together from the tap to the
-// commit: the child, the exact concept, and a fingerprint of that evidence.
+// AT when they chose, so the child, the exact concept and a fingerprint of that
+// evidence travel together from the tap to the commit.
 //
-// This lives here, beside the reconcile view it is derived from, so the decision
-// shown and the decision validated read the SAME refs — `latestEvidenceOfKind`
-// above, once. `writeReviewAction` imports it to make the same check against the
+// It reads `decisionRefs` — the same active refs the reconcile view above
+// displays. `writeReviewAction` imports it to make the same check against the
 // STORED document inside its transaction; that is the only cross-feature use,
-// and it is deliberately one-way (nothing here imports the writer).
+// and it is one-way (nothing here imports the writer).
 
 /**
  * The evidence one drawer decision rests on, as it stood when it was made.
  *
- * Deliberately narrow: the standing-disagreement flag plus the parent's own
- * latest word and the evaluation's latest read — the three things every route in
- * this drawer describes. An unrelated concept moving, a synthesis re-run, or a
- * quest landing on some other node leaves it untouched, so an otherwise current
- * draft is not thrown away by noise.
+ * Deliberately narrow: the standing-disagreement flag, the parent's own latest
+ * word, the evaluation's latest read, and the entry's state — which the legacy
+ * "keep my word" choice falls back to when an attestation predates `readState`.
+ * An unrelated concept moving, or a synthesis re-run, leaves it untouched.
  */
 export interface ConceptDecisionBasis {
   /** Whether an eval-vs-parent disagreement was standing on the entry. */
   needsReconcile: boolean
-  /** The parent's latest attested word (provenance + status + content), or null. */
+  /** The state the entry held — what a legacy keep-my-word re-attests. */
+  state: ConceptStateKind | null
+  /** The parent's latest active word (provenance + status + content), or null. */
   attestation: string | null
-  /** The evaluation's latest read (provenance + status + content), or null. */
+  /** The evaluation's latest active read (provenance + status + content), or null. */
   eval: string | null
 }
 
 /**
- * One ref flattened to the fields a decision actually rests on: where it came
- * from, whether it still stands, what it said, and what it says. A replacement
- * eval that happens to assert the SAME state is a different ref and must read as
- * one; a withdrawn ref changes `status` and must too.
+ * One ref flattened to the fields a decision rests on: where it came from,
+ * whether it still stands, what it asserted, and what it says. A replacement
+ * eval that happens to assert the SAME state is a different ref and reads as
+ * one; a withdrawn ref drops out of {@link decisionRefs} entirely.
  */
 function basisPrint(ref: EvidenceRef | undefined): string | null {
   if (!ref) return null
@@ -229,10 +248,12 @@ function basisPrint(ref: EvidenceRef | undefined): string | null {
 export function conceptDecisionBasis(
   entry: ConceptStateEntry | undefined,
 ): ConceptDecisionBasis {
+  const refs = decisionRefs(entry)
   return {
     needsReconcile: Boolean(entry?.needsReconcile),
-    attestation: basisPrint(latestEvidenceOfKind(entry, 'attestation')),
-    eval: basisPrint(latestEvidenceOfKind(entry, 'eval')),
+    state: entry?.state ?? null,
+    attestation: basisPrint(refs.attestation),
+    eval: basisPrint(refs.eval),
   }
 }
 
@@ -243,6 +264,7 @@ export function sameConceptDecisionBasis(
 ): boolean {
   return (
     a.needsReconcile === b.needsReconcile &&
+    a.state === b.state &&
     a.attestation === b.attestation &&
     a.eval === b.eval
   )
