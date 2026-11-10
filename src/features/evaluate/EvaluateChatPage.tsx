@@ -24,7 +24,7 @@ import Typography from '@mui/material/Typography'
 import { addDoc, doc, getDoc, getDocs, orderBy, query, setDoc, updateDoc, where } from 'firebase/firestore'
 
 import Page from '../../components/Page'
-import { LoadingState, ErrorState } from '../../components/states'
+import { LoadingState, EmptyState, ErrorState } from '../../components/states'
 import { useAI, TaskType } from '../../core/ai/useAI'
 import type { ChatMessage as AIChatMessage } from '../../core/ai/useAI'
 import { useFamilyId } from '../../core/auth/useAuth'
@@ -169,43 +169,38 @@ function findingStatusIcon(status: EvaluationFinding['status']) {
   }
 }
 
-// ── Visit ownership (FIX-248) ───────────────────────────────────
+// ── Visit + draft ownership (UX-491) ────────────────────────────
 //
-// A guided evaluation is a long conversation that writes to five collections,
-// and the shell's child chip can change the scoped identity under it at any
-// moment — the `CLAUDE.md` rail every `FIX-220` / `UX-329` round found one more
-// surface for. Here it was reachable from the ordinary controls: hold Lincoln's
-// Start (or Send) reply, switch to London, let London's sessions land, then let
-// the old completion arrive, and Lincoln's finding is published under London's
-// name, persisted to a London-shaped session id, and projected onto London's
-// skill snapshot and learner model.
+// The shell's child chip can change the scoped identity under a long guided
+// evaluation at any moment — the `CLAUDE.md` rail `FIX-220` / `UX-329` found one
+// more surface for on every round. Here it was reachable from the ordinary
+// controls: hold Lincoln's Start (or Send) reply, switch to London, let London's
+// sessions land, then release the old completion. Lincoln's finding was
+// published under London's name, and an Apply tapped afterwards wrote Lincoln's
+// retained content to LONDON's skill snapshot and learner model with a
+// London-shaped fallback source id (the session record itself stayed under
+// Lincoln, because that closure held its own id).
 //
-// The repair is a **committed visit boundary**, not another guard per callback.
-// `EvaluateChatEditor` holds every piece of editable state, is handed a SETTLED
-// family, child and domain as props, and is **keyed** by them — so a committed
-// change unmounts the visit and mounts a new one, and the old visit's input,
-// messages, findings, recommendations, analysis, dialogs, feedback, admission
-// guards and session timer go with it in the same commit. Because each visit is
-// its own component instance, `A → B → A` is a third visit, the same child id in
-// a different family is a different visit, and no closure can retarget: the
-// family, child and domain a closure sees are its own instance's props and can
-// never change value.
+// The repair is two committed boundaries rather than a guard per callback:
 //
-// Two things the key cannot own live inside the instance:
+//   * **the visit** — `EvaluateVisit` is handed a SETTLED family, child and
+//     domain and is keyed by them, so a committed change unmounts it and the old
+//     read, history list, draft and timer go in the same commit. `A → B → A` is
+//     a third visit and the same child id in another family is a different one.
+//     No closure can retarget: the family, child and domain a closure sees are
+//     its own instance's props and cannot change value.
+//   * **the draft** — `EvaluateDraft` is keyed inside the visit, so Clear &
+//     Restart mounts a new draft with its own `useAI` (loading + error), its own
+//     admission slots, its own timer and nothing resumed. The visit keeps the
+//     read, so Clear does not re-read or re-resume the draft just cleared, and
+//     the same-scope history list survives it.
 //
-//   * **the draft lifetime** (`lifetimeRef`) — Clear & Restart ends the draft
-//     without ending the visit, so in-flight work from before the Clear must be
-//     discarded too. It is also what stops the initial read from re-resuming the
-//     draft the parent just cleared.
-//   * **the committed-mounted flag** (`visitLiveRef`) — set in a LAYOUT effect,
-//     so between a commit's teardown and its setup there is no live visit and a
-//     retained callback cannot borrow the authority of the one that just left
-//     (`useBookshelf` / `BookReaderPage`'s rule).
-//
-// `isCurrent(lifetime)` is the single question every awaited step asks before it
-// publishes state or starts a side effect. A write or Apply that was already
-// admitted finishes with its own captured destination and contents — but its
-// late UI feedback is dropped.
+// `draftLiveRef` / `visitLiveRef` are set in LAYOUT effects, so between a
+// commit's teardown and its setup there is no live owner and a retained callback
+// cannot borrow the authority of the one that just left (`BookReaderPage`'s
+// rule). Every retained action asks at the tap and again after each await. A
+// write or Apply already admitted finishes with its own captured destination,
+// source id and contents; only its late UI feedback is dropped.
 
 /** The settled scope one evaluation visit is bound to. */
 interface EvaluateVisitScope {
@@ -215,22 +210,14 @@ interface EvaluateVisitScope {
   domain: EvaluationDomain
 }
 
-/**
- * One synchronous admission slot per operation per lifetime.
- *
- * Holds the lifetime that owns the operation, so release cannot unlock a later
- * visit or a later draft: it clears the slot only if the slot is still its own.
- */
-type AdmissionSlot = { current: number | null }
-
-function admit(slot: AdmissionSlot, lifetime: number): boolean {
-  if (slot.current !== null) return false
-  slot.current = lifetime
-  return true
-}
-
-function release(slot: AdmissionSlot, lifetime: number): void {
-  if (slot.current === lifetime) slot.current = null
+/** The in-progress session a visit resumes, read once by the visit. */
+interface EvaluateResume {
+  sessionDocId: string
+  messages: ChatMessage[]
+  findings: EvaluationFinding[]
+  recommendations: EvaluationRecommendation[]
+  summary: string | null
+  nextEvalDate?: string
 }
 
 // ── Page (scope resolution only) ────────────────────────────────
@@ -245,6 +232,7 @@ export default function EvaluateChatPage() {
     isLoading: childrenLoading,
     loadFailed: childrenLoadFailed,
     retryLoad: retryChildren,
+    childrenFamilyId,
     isChildProfile,
   } = useActiveChild()
 
@@ -252,12 +240,23 @@ export default function EvaluateChatPage() {
 
   const isDomainReady = READY_DOMAINS.includes(domain)
 
-  // The visit's scope, or `null` while the identity is not settled. A FAILED
-  // children read is handled separately below: it is not an affirmative empty
-  // family, and it must not look like one.
-  const resolved: { familyId: string; child: Child } | null =
-    !childrenLoading && !childrenLoadFailed && familyId && activeChildId && activeChild
-      ? { familyId, child: activeChild }
+  // A failed children read keeps `isLoading` true on purpose (`useChildren`), so
+  // the failure is its own word and "settled" means ANSWERED WITH CHILDREN.
+  const identityFailed = childrenLoadFailed === true
+  // Provenance, as `BookReaderPage` gates it: the children list is SHARED, so
+  // after an auth change it can still hold the previous family's children with
+  // `isLoading` already false. Until the list says it belongs to this family,
+  // nothing here may name a child, query an evaluation or become editable.
+  const identitySettled =
+    Boolean(familyId) &&
+    childrenLoading !== true &&
+    !identityFailed &&
+    childrenFamilyId === familyId
+
+  // The resolved child must be the active one, found in THIS family's list.
+  const resolvedChild: Child | null =
+    identitySettled && activeChildId && activeChild && activeChild.id === activeChildId
+      ? activeChild
       : null
 
   // `/evaluate` sits outside `RequireParent` and the profile menu switches in
@@ -271,7 +270,7 @@ export default function EvaluateChatPage() {
       <Stack direction="row" alignItems="center" spacing={1}>
         <AssessmentIcon color="primary" />
         <Typography variant="h5">
-          Evaluate {activeChild?.name || 'Child'}
+          Evaluate {resolvedChild?.name || 'Child'}
         </Typography>
       </Stack>
 
@@ -302,24 +301,31 @@ export default function EvaluateChatPage() {
         <Alert severity="info">
           {domain.charAt(0).toUpperCase() + domain.slice(1)} evaluation coming soon. Start with Reading.
         </Alert>
-      ) : childrenLoadFailed ? (
-        // GATE on a FAILED read — recoverable and visibly distinct from an
-        // empty family, which is `useBusinessGoal`'s round-5 lesson.
+      ) : identityFailed ? (
+        // GATE on a FAILED read — recoverable, and distinct from an empty
+        // family (`useBusinessGoal`'s round-5 lesson).
         <ErrorState
           message="We couldn't load your children, so an evaluation can't be started yet."
           onRetry={retryChildren}
         />
-      ) : !resolved ? (
+      ) : !identitySettled ? (
         <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
           <LoadingState size={40} />
         </Box>
+      ) : !resolvedChild ? (
+        // Settled, this family's own list, and nobody to evaluate: an answer,
+        // so it reads as one rather than as a spinner that never ends.
+        <EmptyState
+          title="No child to evaluate yet"
+          description="Add a child in Settings, then come back to run a guided evaluation."
+        />
       ) : (
-        <EvaluateChatEditor
+        <EvaluateVisit
           // The visit boundary. Everything editable lives below this key.
-          key={`${resolved.familyId}|${resolved.child.id}|${role}|${domain}`}
-          familyId={resolved.familyId}
-          childId={resolved.child.id}
-          childName={resolved.child.name}
+          key={`${familyId}|${resolvedChild.id}|${role}|${domain}`}
+          familyId={familyId}
+          childId={resolvedChild.id}
+          childName={resolvedChild.name}
           domain={domain}
         />
       )}
@@ -327,44 +333,19 @@ export default function EvaluateChatPage() {
   )
 }
 
-// ── Editor (one visit) ──────────────────────────────────────────
+// ── Visit (one settled scope: the read, the history, the draft) ─
 
-function EvaluateChatEditor({ familyId, childId, childName, domain }: EvaluateVisitScope) {
-  const navigate = useNavigate()
-  const [searchParams] = useSearchParams()
-  const { chat, analyzePatterns, loading: aiLoading, error: aiError } = useAI()
-
-  const [messages, setMessages] = useState<ChatMessage[]>([])
-  const [findings, setFindings] = useState<EvaluationFinding[]>([])
-  const [recommendations, setRecommendations] = useState<EvaluationRecommendation[]>([])
-  const [completeSummary, setCompleteSummary] = useState<string | null>(null)
-  const [completeData, setCompleteData] = useState<CompleteBlock | null>(null)
-  const [nextEvalDate, setNextEvalDate] = useState<string | undefined>()
-  const [snackText, setSnackText] = useState<string | null>(null)
-  const [sessionDocId, setSessionDocId] = useState<string | null>(null)
-  const [sessionStatus, setSessionStatus] = useState<'in-progress' | 'complete'>('in-progress')
+function EvaluateVisit({ familyId, childId, childName, domain }: EvaluateVisitScope) {
   const [previousSessions, setPreviousSessions] = useState<EvaluationSession[]>([])
-  const [inputText, setInputText] = useState('')
+  const [resume, setResume] = useState<EvaluateResume | null>(null)
   const [initializing, setInitializing] = useState(true)
   const [loadFailed, setLoadFailed] = useState(false)
   const [reloadNonce, setReloadNonce] = useState(0)
-  const [clearDialogOpen, setClearDialogOpen] = useState(false)
-  const [reapplyDialogOpen, setReapplyDialogOpen] = useState(false)
-  const [hasAppliedThisSession, setHasAppliedThisSession] = useState(false)
-  const [patternAnalysisState, setPatternAnalysisState] = useState<'idle' | 'loading' | 'done'>('idle')
-  const [conceptualBlocks, setConceptualBlocks] = useState<ConceptualBlock[]>([])
-  const [blocksSummary, setBlocksSummary] = useState<string | undefined>(undefined)
-  const chatEndRef = useRef<HTMLDivElement>(null)
-  const sessionTimer = useSessionTimer()
-  const hoursLoggedRef = useRef(false)
-
-  // ── Visit + draft lifetime ──────────────────────────────────
+  /** Bumped by Clear & Restart: the key of the draft below. */
+  const [draftKey, setDraftKey] = useState(0)
 
   /** Committed-mounted: false until this visit's layout effect has run. */
   const visitLiveRef = useRef(false)
-  /** The current draft's lifetime. Clear & Restart ends one and opens the next. */
-  const lifetimeRef = useRef(0)
-
   useLayoutEffect(() => {
     visitLiveRef.current = true
     return () => {
@@ -372,72 +353,14 @@ function EvaluateChatEditor({ familyId, childId, childName, domain }: EvaluateVi
     }
   }, [])
 
-  /** May work started under `lifetime` still touch this visit? */
-  const isCurrent = useCallback(
-    (lifetime: number) => visitLiveRef.current && lifetimeRef.current === lifetime,
-    [],
-  )
-
-  const startSlot = useRef<number | null>(null)
-  const sendSlot = useRef<number | null>(null)
-  const applySlot = useRef<number | null>(null)
-
-  /**
-   * The deterministic session id `persistSession` assigns, rebuilt from THIS
-   * visit's child and domain. Unchanged day-based shape (`{childId}_{domain}_{date}`).
-   */
-  const defaultSessionDocId = useCallback(
-    () => `${childId}_${domain}_${new Date().toISOString().slice(0, 10)}`,
-    [childId, domain],
-  )
-
-  // Auto-scroll on new messages
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
-
-  // ── Log session hours when evaluation completes ────────────
-
-  const logSessionHours = useCallback(
-    async (lifetime: number) => {
-      if (hoursLoggedRef.current) return
-      // An old completion must not stop THIS visit's (or this draft's) timer,
-      // and must not log minutes for it. `UX-327`'s rule, one surface over.
-      if (!isCurrent(lifetime)) return
-      hoursLoggedRef.current = true
-
-      const activeSeconds = sessionTimer.stop()
-      const minutes = Math.ceil(activeSeconds / 60 / 5) * 5 // round up to nearest 5
-      if (minutes < 5) return // too short to log
-
-      try {
-        await addDoc(hoursCollection(familyId), {
-          childId,
-          date: todayKey(),
-          minutes,
-          subjectBucket: domainToSubjectBucket(domain),
-          quickCapture: true,
-          notes: `${domain.charAt(0).toUpperCase() + domain.slice(1)} evaluation session`,
-          source: 'evaluation-session',
-        })
-      } catch (err) {
-        console.error('[SessionTimer] Failed to log evaluation hours:', err)
-      }
-    },
-    [childId, familyId, domain, sessionTimer, isCurrent],
-  )
-
-  // ── Load or create session ──────────────────────────────────
+  // ── Load the session history once per visit ────────────────
   //
-  // Runs once per visit (family / child / domain are props, fixed for this
-  // instance) plus once per explicit retry. It deliberately does NOT depend on
-  // anything Clear & Restart changes, so Clear cannot re-resume the draft the
-  // parent just cleared — and the lifetime check below means an in-flight read
-  // can't either.
+  // The read lives HERE rather than in the draft, so Clear & Restart cannot
+  // re-read it or re-resume the draft the parent just cleared, and the
+  // same-scope history list survives the restart.
 
   useEffect(() => {
     let cancelled = false
-    const lifetime = lifetimeRef.current
 
     async function loadSession() {
       setInitializing(true)
@@ -452,43 +375,25 @@ function EvaluateChatEditor({ familyId, childId, childName, domain }: EvaluateVi
         )
         const allSnap = await getDocs(allQ)
 
-        if (cancelled || !isCurrent(lifetime)) return
+        if (cancelled || !visitLiveRef.current) return
 
         const allSessions = allSnap.docs.map((d) => ({ ...d.data(), id: d.id }))
         setPreviousSessions(allSessions.filter((s) => s.status === 'complete'))
 
-        // Check for an in-progress session to resume
+        // Check for an in-progress session to resume — same selection as before.
         const inProgress = allSessions.find((s) => s.status === 'in-progress')
-
-        if (inProgress) {
-          setSessionDocId(inProgress.id!)
-          setMessages(inProgress.messages || [])
-          setFindings(inProgress.findings || [])
-          setRecommendations(inProgress.recommendations || [])
-          setSessionStatus('in-progress')
-          setCompleteSummary(inProgress.summary || null)
-          // A resumed in-progress session has no <complete> block yet — clear any
-          // completeData/apply state carried over from a prior child/domain so a
-          // later in-progress save can't stamp the previous eval's frontier (and
-          // so the re-apply confirm doesn't fire on a different session).
-          setCompleteData(null)
-          setHasAppliedThisSession(false)
-          setNextEvalDate(inProgress.nextEvalDate)
-          // Resume timer for continued in-progress session
-          hoursLoggedRef.current = false
-          sessionTimer.startTimer()
-        } else {
-          // Fresh session
-          setSessionDocId(null)
-          setMessages([])
-          setFindings([])
-          setRecommendations([])
-          setCompleteSummary(null)
-          setCompleteData(null)
-          setHasAppliedThisSession(false)
-          setNextEvalDate(undefined)
-          setSessionStatus('in-progress')
-        }
+        setResume(
+          inProgress
+            ? {
+                sessionDocId: inProgress.id!,
+                messages: inProgress.messages || [],
+                findings: inProgress.findings || [],
+                recommendations: inProgress.recommendations || [],
+                summary: inProgress.summary || null,
+                nextEvalDate: inProgress.nextEvalDate,
+              }
+            : null,
+        )
       } catch (err) {
         console.error('Failed to load evaluation session', err)
         // A failed read is not an empty history: refuse to be editable and say
@@ -503,22 +408,209 @@ function EvaluateChatEditor({ familyId, childId, childName, domain }: EvaluateVi
     return () => {
       cancelled = true
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [familyId, childId, domain, reloadNonce])
+
+  const handleClearRestart = useCallback(() => {
+    // The restart IS the new draft: a fresh `useAI`, fresh admission slots, a
+    // fresh timer and nothing resumed.
+    setDraftKey((k) => k + 1)
+  }, [])
+
+  return (
+    <>
+      {/* Previous evaluations */}
+      {previousSessions.length > 0 && (
+        <Box sx={{ mb: 1 }}>
+          <Typography variant="subtitle2" color="text.secondary">
+            Previous evaluations:
+          </Typography>
+          <Stack spacing={0.75} sx={{ mt: 0.5 }}>
+            {previousSessions.map((session) => (
+              <Box key={session.id}>
+                <Chip
+                  label={`${session.domain} — ${new Date(session.evaluatedAt).toLocaleDateString()}`}
+                  variant="outlined"
+                  size="small"
+                />
+                {/* FEAT-75: retained learning frontier, surfaced read-only. */}
+                {session.frontier && (
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ display: 'block', mt: 0.25, ml: 0.5 }}
+                  >
+                    Learning frontier (from {new Date(session.evaluatedAt).toLocaleDateString()}): {session.frontier}
+                  </Typography>
+                )}
+              </Box>
+            ))}
+          </Stack>
+        </Box>
+      )}
+
+      {initializing ? (
+        <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+          <LoadingState size={40} />
+        </Box>
+      ) : loadFailed ? (
+        <ErrorState
+          message={`We couldn't load ${childName}'s evaluation history, so this evaluation isn't editable yet.`}
+          onRetry={() => setReloadNonce((n) => n + 1)}
+        />
+      ) : (
+        <EvaluateDraft
+          // The draft boundary. Clear & Restart lands here, not on the read.
+          key={draftKey}
+          familyId={familyId}
+          childId={childId}
+          childName={childName}
+          domain={domain}
+          // Only the visit's FIRST draft resumes; a restarted one starts empty.
+          resume={draftKey === 0 ? resume : null}
+          onClearRestart={handleClearRestart}
+        />
+      )}
+    </>
+  )
+}
+
+// ── Draft (one lifetime of editable work) ───────────────────────
+
+interface EvaluateDraftProps extends EvaluateVisitScope {
+  resume: EvaluateResume | null
+  onClearRestart: () => void
+}
+
+function EvaluateDraft({
+  familyId,
+  childId,
+  childName,
+  domain,
+  resume,
+  onClearRestart,
+}: EvaluateDraftProps) {
+  const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  // One `useAI` per draft, so a restarted draft owns its own loading and error
+  // and a pending turn from the cleared one can neither disable its Start nor
+  // raise an error in it.
+  const { chat, analyzePatterns, loading: aiLoading, error: aiError } = useAI()
+
+  const [messages, setMessages] = useState<ChatMessage[]>(resume?.messages ?? [])
+  const [findings, setFindings] = useState<EvaluationFinding[]>(resume?.findings ?? [])
+  const [recommendations, setRecommendations] = useState<EvaluationRecommendation[]>(
+    resume?.recommendations ?? [],
+  )
+  const [completeSummary, setCompleteSummary] = useState<string | null>(resume?.summary ?? null)
+  // A resumed in-progress session has no <complete> block yet, so apply state
+  // opens empty — a later in-progress save can't stamp a prior eval's frontier.
+  const [completeData, setCompleteData] = useState<CompleteBlock | null>(null)
+  const [nextEvalDate, setNextEvalDate] = useState<string | undefined>(resume?.nextEvalDate)
+  const [snackText, setSnackText] = useState<string | null>(null)
+  const [sessionDocId, setSessionDocId] = useState<string | null>(resume?.sessionDocId ?? null)
+  const [sessionStatus, setSessionStatus] = useState<'in-progress' | 'complete'>('in-progress')
+  const [inputText, setInputText] = useState('')
+  const [clearDialogOpen, setClearDialogOpen] = useState(false)
+  const [reapplyDialogOpen, setReapplyDialogOpen] = useState(false)
+  const [hasAppliedThisSession, setHasAppliedThisSession] = useState(false)
+  const [patternAnalysisState, setPatternAnalysisState] = useState<'idle' | 'loading' | 'done'>('idle')
+  const [conceptualBlocks, setConceptualBlocks] = useState<ConceptualBlock[]>([])
+  const [blocksSummary, setBlocksSummary] = useState<string | undefined>(undefined)
+  const chatEndRef = useRef<HTMLDivElement>(null)
+  const sessionTimer = useSessionTimer()
+  const hoursLoggedRef = useRef(false)
+
+  // ── This draft's committed lifetime ─────────────────────────
+
+  /** Committed-mounted: false until this draft's layout effect has run. */
+  const draftLiveRef = useRef(false)
+  useLayoutEffect(() => {
+    draftLiveRef.current = true
+    return () => {
+      draftLiveRef.current = false
+    }
+  }, [])
+
+  /** May a retained callback still act on, or publish to, this draft? */
+  const isLive = useCallback(() => draftLiveRef.current, [])
+
+  // One synchronous admission slot per operation. They are per-draft by
+  // construction, so releasing one can never unlock a later draft or visit.
+  const startBusyRef = useRef(false)
+  const sendBusyRef = useRef(false)
+  const applyBusyRef = useRef(false)
+
+  /**
+   * The session id a source save of THIS draft is using or has used.
+   *
+   * Recorded synchronously by `persistSession`, before its await, so Apply can
+   * reuse the exact pending target instead of re-deriving a day-based id after
+   * its own I/O — which is how an Apply admitted at 23:59:55 recorded the next
+   * day's source id for a source that belongs to this one.
+   */
+  const sourceTargetRef = useRef<string | null>(resume?.sessionDocId ?? null)
+
+  /** Unchanged day-based shape: `{childId}_{domain}_{date}`. */
+  const defaultSessionDocId = useCallback(
+    () => `${childId}_${domain}_${new Date().toISOString().slice(0, 10)}`,
+    [childId, domain],
+  )
+
+  // A resumed draft continues its session's clock; a fresh one waits for Start.
+  useEffect(() => {
+    if (resume) {
+      hoursLoggedRef.current = false
+      sessionTimer.startTimer()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Auto-scroll on new messages
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
+
+  // ── Log session hours when evaluation completes ────────────
+
+  const logSessionHours = useCallback(async () => {
+    if (hoursLoggedRef.current) return
+    // An old completion must not stop a later draft's timer or log minutes for
+    // it — `UX-327`'s rule, one surface over.
+    if (!isLive()) return
+    hoursLoggedRef.current = true
+
+    const activeSeconds = sessionTimer.stop()
+    const minutes = Math.ceil(activeSeconds / 60 / 5) * 5 // round up to nearest 5
+    if (minutes < 5) return // too short to log
+
+    try {
+      await addDoc(hoursCollection(familyId), {
+        childId,
+        date: todayKey(),
+        minutes,
+        subjectBucket: domainToSubjectBucket(domain),
+        quickCapture: true,
+        notes: `${domain.charAt(0).toUpperCase() + domain.slice(1)} evaluation session`,
+        source: 'evaluation-session',
+      })
+    } catch (err) {
+      console.error('[SessionTimer] Failed to log evaluation hours:', err)
+    }
+  }, [childId, familyId, domain, sessionTimer, isLive])
 
   // ── Persist session to Firestore ────────────────────────────
 
   const persistSession = useCallback(
     async (
-      lifetime: number,
       msgs: ChatMessage[],
       fndgs: EvaluationFinding[],
       complete?: CompleteBlock | null,
     ): Promise<string> => {
-      // Destination captured before the await: this visit's child and domain,
+      // Destination captured before the await: this draft's child and domain,
       // and the session id this call is writing.
       const existingDocId = sessionDocId
       const targetDocId = existingDocId ?? defaultSessionDocId()
+      sourceTargetRef.current = targetDocId
 
       const session: Omit<EvaluationSession, 'id'> = {
         childId,
@@ -538,8 +630,8 @@ function EvaluateChatEditor({ familyId, childId, childName, domain }: EvaluateVi
       try {
         const ref = doc(evaluationSessionsCollection(familyId), targetDocId)
         await setDoc(ref, session)
-        // Only this visit's current draft learns the id it was given.
-        if (!existingDocId && isCurrent(lifetime)) setSessionDocId(targetDocId)
+        // Only a live draft learns the id its save was given.
+        if (!existingDocId && isLive()) setSessionDocId(targetDocId)
       } catch (err) {
         console.error('Failed to persist evaluation session', err)
       }
@@ -556,15 +648,15 @@ function EvaluateChatEditor({ familyId, childId, childName, domain }: EvaluateVi
       completeData,
       nextEvalDate,
       defaultSessionDocId,
-      isCurrent,
+      isLive,
     ],
   )
 
   // ── Trigger pattern analysis after <complete> ────────────────
 
   const triggerPatternAnalysis = useCallback(
-    async (lifetime: number, sessionId: string, allFindings: EvaluationFinding[]) => {
-      if (!isCurrent(lifetime)) return
+    async (sessionId: string, allFindings: EvaluationFinding[]) => {
+      if (!isLive()) return
       setPatternAnalysisState('loading')
       try {
         const result = await analyzePatterns({
@@ -578,8 +670,8 @@ function EvaluateChatEditor({ familyId, childId, childName, domain }: EvaluateVi
             notes: f.notes,
           })),
         })
-        // A late analysis belongs to the visit that asked for it, nobody else.
-        if (!isCurrent(lifetime)) return
+        // A late analysis belongs to the draft that asked for it, nobody else.
+        if (!isLive()) return
         if (result) {
           setConceptualBlocks(result.blocks as ConceptualBlock[])
           setBlocksSummary(result.summary)
@@ -587,20 +679,23 @@ function EvaluateChatEditor({ familyId, childId, childName, domain }: EvaluateVi
         setPatternAnalysisState('done')
       } catch (err) {
         console.warn('Pattern analysis failed:', err)
-        if (!isCurrent(lifetime)) return
+        if (!isLive()) return
         setPatternAnalysisState('done')
         setBlocksSummary(undefined)
       }
     },
-    [childId, familyId, analyzePatterns, isCurrent],
+    [childId, familyId, analyzePatterns, isLive],
   )
 
   // ── Start evaluation (first AI message) ─────────────────────
 
   const startEvaluation = useCallback(async () => {
-    const lifetime = lifetimeRef.current
-    // One synchronous admission per lifetime — a double-tap cannot open two.
-    if (!admit(startSlot, lifetime)) return
+    // Asked at the TAP as well as after each await: a control still on screen
+    // from a draft that has gone may not act for the one that replaced it.
+    if (!isLive()) return
+    // One synchronous admission per draft — a double-tap cannot open two.
+    if (startBusyRef.current) return
+    startBusyRef.current = true
 
     try {
       hoursLoggedRef.current = false
@@ -621,7 +716,7 @@ function EvaluateChatEditor({ familyId, childId, childName, domain }: EvaluateVi
       // The defect: an answer that arrived after the parent moved on. Nothing
       // was admitted for it, so it is discarded whole — no message, no finding,
       // no evaluation record, no hours, no analysis.
-      if (!isCurrent(lifetime)) return
+      if (!isLive()) return
       if (!response) return
 
       const newFindings = extractFindings(response.message)
@@ -654,16 +749,16 @@ function EvaluateChatEditor({ familyId, childId, childName, domain }: EvaluateVi
         setCompleteSummary(complete.summary)
         setNextEvalDate(complete.nextEvalDate)
         setSessionStatus('complete')
-        void logSessionHours(lifetime)
+        void logSessionHours()
       }
 
-      const sid = await persistSession(lifetime, newMessages, allFindings, complete)
+      const sid = await persistSession(newMessages, allFindings, complete)
 
-      if (complete && isCurrent(lifetime)) {
-        void triggerPatternAnalysis(lifetime, sid, allFindings)
+      if (complete && isLive()) {
+        void triggerPatternAnalysis(sid, allFindings)
       }
     } finally {
-      release(startSlot, lifetime)
+      startBusyRef.current = false
     }
   }, [
     childId,
@@ -675,7 +770,7 @@ function EvaluateChatEditor({ familyId, childId, childName, domain }: EvaluateVi
     triggerPatternAnalysis,
     sessionTimer,
     logSessionHours,
-    isCurrent,
+    isLive,
   ])
 
   // ── Send message ────────────────────────────────────────────
@@ -683,9 +778,9 @@ function EvaluateChatEditor({ familyId, childId, childName, domain }: EvaluateVi
   const handleSend = useCallback(async () => {
     const text = inputText.trim()
     if (!text || aiLoading) return
-
-    const lifetime = lifetimeRef.current
-    if (!admit(sendSlot, lifetime)) return
+    if (!isLive()) return
+    if (sendBusyRef.current) return
+    sendBusyRef.current = true
 
     try {
       const userMsg: ChatMessage = {
@@ -715,7 +810,7 @@ function EvaluateChatEditor({ familyId, childId, childName, domain }: EvaluateVi
 
       // Same discard as Start: the ordinary Send control reproduced the same
       // cross-child write.
-      if (!isCurrent(lifetime)) return
+      if (!isLive()) return
       if (!response) return
 
       const newFindings = extractFindings(response.message)
@@ -741,16 +836,16 @@ function EvaluateChatEditor({ familyId, childId, childName, domain }: EvaluateVi
         setCompleteSummary(complete.summary)
         setNextEvalDate(complete.nextEvalDate)
         setSessionStatus('complete')
-        void logSessionHours(lifetime)
+        void logSessionHours()
       }
 
-      const sid = await persistSession(lifetime, finalMessages, allFindings, complete)
+      const sid = await persistSession(finalMessages, allFindings, complete)
 
-      if (complete && isCurrent(lifetime)) {
-        void triggerPatternAnalysis(lifetime, sid, allFindings)
+      if (complete && isLive()) {
+        void triggerPatternAnalysis(sid, allFindings)
       }
     } finally {
-      release(sendSlot, lifetime)
+      sendBusyRef.current = false
     }
   }, [
     inputText,
@@ -764,18 +859,19 @@ function EvaluateChatEditor({ familyId, childId, childName, domain }: EvaluateVi
     persistSession,
     triggerPatternAnalysis,
     logSessionHours,
-    isCurrent,
+    isLive,
   ])
 
   // ── Save & Apply (update skill snapshot) ────────────────────
 
   const handleSaveAndApply = useCallback(async () => {
-    const lifetime = lifetimeRef.current
     if (findings.length === 0) return
-    if (!admit(applySlot, lifetime)) return
+    if (!isLive()) return
+    if (applyBusyRef.current) return
+    applyBusyRef.current = true
 
     // Everything this Apply writes is captured BEFORE the first await: the
-    // destination (`familyId` / `childId` / `domain` are this visit's props and
+    // destination (`familyId` / `childId` / `domain` are this draft's props and
     // cannot change value) and the contents. An Apply already admitted finishes
     // against these and nothing else; only its UI feedback is dropped if the
     // parent has moved on.
@@ -783,7 +879,16 @@ function EvaluateChatEditor({ familyId, childId, childName, domain }: EvaluateVi
     const applyRecommendations = recommendations
     const applyComplete = completeData
     const applyBlocks = conceptualBlocks
+    /** The SAVED id. Award eligibility and dedup keys read this, as before. */
     const applySessionDocId = sessionDocId
+    /**
+     * The source id the learner-model write-back stamps, resolved here rather
+     * than after the snapshot I/O: the pending source save's exact target when
+     * there is one, and otherwise today's id as of ADMISSION. Computing it
+     * afterwards is how an Apply admitted at 23:59:55, waiting on a held source
+     * save, stamped the next day's id onto a source that belongs to this one.
+     */
+    const applySourceId = applySessionDocId ?? sourceTargetRef.current ?? defaultSessionDocId()
 
     try {
       const snapshotRef = doc(skillSnapshotsCollection(familyId), childId)
@@ -908,7 +1013,7 @@ function EvaluateChatEditor({ familyId, childId, childName, domain }: EvaluateVi
       }
       // Late feedback from a finished Apply is dropped rather than shown over
       // whoever is on screen now.
-      if (isCurrent(lifetime)) {
+      if (isLive()) {
         setSnackText('Skill snapshot updated! Priority skills, supports, stop rules, and evidence all set.')
         setHasAppliedThisSession(true)
       }
@@ -920,10 +1025,9 @@ function EvaluateChatEditor({ familyId, childId, childName, domain }: EvaluateVi
       // FEAT-76: project the guided eval onto the learner-model frontier — the
       // calibrated (up OR down) write, alongside the snapshot write above.
       // Fire-and-forget, guarded model-exists inside the writer; never blocks apply.
-      // Fall back to the same deterministic session id persistSession assigns, so a
-      // first-turn/slow-network Apply (sessionDocId still pending) isn't skipped.
-      const evalSessionId = applySessionDocId ?? defaultSessionDocId()
-      void syncEvalFindingsToModel(familyId, childId, evalSessionId, applyFindings, now)
+      // `applySourceId` keeps the fallback a first-turn/slow-network Apply needs
+      // (so it isn't skipped) while fixing WHEN the fallback is computed.
+      void syncEvalFindingsToModel(familyId, childId, applySourceId, applyFindings, now)
         .catch((err) => console.warn('[eval] learner-model write-back failed', err))
 
       // Award XP for completing an evaluation (once per evaluation session)
@@ -948,7 +1052,7 @@ function EvaluateChatEditor({ familyId, childId, childName, domain }: EvaluateVi
     } catch (err) {
       console.error('Failed to apply findings to skill snapshot', err)
     } finally {
-      release(applySlot, lifetime)
+      applyBusyRef.current = false
     }
   }, [
     childId,
@@ -960,55 +1064,36 @@ function EvaluateChatEditor({ familyId, childId, childName, domain }: EvaluateVi
     conceptualBlocks,
     domain,
     defaultSessionDocId,
-    isCurrent,
+    isLive,
   ])
 
   // Apply is repeatable (FEAT-75). The first apply runs straight through; a
   // re-apply in the same session confirms first so a double-tap can't silently
   // re-write the snapshot + learner model.
   const handleApplyClick = useCallback(() => {
+    if (!isLive()) return
     if (hasAppliedThisSession) {
       setReapplyDialogOpen(true)
     } else {
       void handleSaveAndApply()
     }
-  }, [hasAppliedThisSession, handleSaveAndApply])
+  }, [hasAppliedThisSession, handleSaveAndApply, isLive])
 
   const handleConfirmReapply = useCallback(() => {
     setReapplyDialogOpen(false)
+    if (!isLive()) return
     void handleSaveAndApply()
-  }, [handleSaveAndApply])
+  }, [handleSaveAndApply, isLive])
 
   // ── Clear & Restart ───────────────────────────────────────
 
   const handleClear = useCallback(() => {
-    // End this draft's lifetime: work already in flight (a pending reply, a
-    // pending persist, a pending analysis) belongs to the draft being cleared
-    // and must not land on the fresh one.
-    lifetimeRef.current += 1
-    startSlot.current = null
-    sendSlot.current = null
-    applySlot.current = null
-
-    sessionTimer.stop() // discard timer without logging
-    hoursLoggedRef.current = false
-    setMessages([])
-    setFindings([])
-    setRecommendations([])
-    setCompleteSummary(null)
-    setCompleteData(null)
-    setNextEvalDate(undefined)
-    setSessionDocId(null)
-    setSessionStatus('in-progress')
     setClearDialogOpen(false)
-    setReapplyDialogOpen(false)
-    setInputText('')
-    setSnackText(null)
-    setHasAppliedThisSession(false)
-    setPatternAnalysisState('idle')
-    setConceptualBlocks([])
-    setBlocksSummary(undefined)
-  }, [sessionTimer])
+    // The restart is a new draft, so there is nothing to reset by hand: this
+    // one's state, AI hook, timer, slots and in-flight work all go with it, and
+    // work already admitted finishes at the target it captured.
+    onClearRestart()
+  }, [onClearRestart])
 
   // ── Download Report ─────────────────────────────────────────
 
@@ -1090,49 +1175,7 @@ function EvaluateChatEditor({ familyId, childId, childName, domain }: EvaluateVi
 
   return (
     <>
-      {/* Previous evaluations */}
-      {previousSessions.length > 0 && (
-        <Box sx={{ mb: 1 }}>
-          <Typography variant="subtitle2" color="text.secondary">
-            Previous evaluations:
-          </Typography>
-          <Stack spacing={0.75} sx={{ mt: 0.5 }}>
-            {previousSessions.map((session) => (
-              <Box key={session.id}>
-                <Chip
-                  label={`${session.domain} — ${new Date(session.evaluatedAt).toLocaleDateString()}`}
-                  variant="outlined"
-                  size="small"
-                />
-                {/* FEAT-75: retained learning frontier, surfaced read-only. */}
-                {session.frontier && (
-                  <Typography
-                    variant="caption"
-                    color="text.secondary"
-                    sx={{ display: 'block', mt: 0.25, ml: 0.5 }}
-                  >
-                    Learning frontier (from {new Date(session.evaluatedAt).toLocaleDateString()}): {session.frontier}
-                  </Typography>
-                )}
-              </Box>
-            ))}
-          </Stack>
-        </Box>
-      )}
-
-      {initializing ? (
-        <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-          <LoadingState size={40} />
-        </Box>
-      ) : loadFailed ? (
-        // GATE: the read FAILED. Not an empty history, and not editable — the
-        // parent gets the honest state and a way to try again.
-        <ErrorState
-          message={`We couldn't load ${childName}'s evaluation history, so this evaluation isn't editable yet.`}
-          onRetry={() => setReloadNonce((n) => n + 1)}
-        />
-      ) : (
-        <Stack spacing={2}>
+      <Stack spacing={2}>
           {/* Start button (no messages yet) */}
           {!hasMessages && (
             <Box sx={{ textAlign: 'center', py: 4 }}>
@@ -1469,8 +1512,7 @@ function EvaluateChatEditor({ familyId, childId, childName, domain }: EvaluateVi
               </Button>
             )}
           </Stack>
-        </Stack>
-      )}
+      </Stack>
 
       {/* Clear confirmation dialog */}
       <Dialog open={clearDialogOpen} onClose={() => setClearDialogOpen(false)}>

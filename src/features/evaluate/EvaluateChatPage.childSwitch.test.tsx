@@ -3,24 +3,24 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 /**
- * FIX-248 — a guided evaluation's answer belongs to the visit that asked for it.
+ * UX-491 — a guided evaluation's answer belongs to the visit that asked for it.
  *
  * The reproducer is the ordinary one, with no developer tooling in it: hold
  * Lincoln's **Start** reply (or an ordinary **Send**), switch the shell chip to
  * London, let London's sessions land, then let the old completion arrive. Before
- * the repair, Lincoln's finding was published under London's name and written to
- * London's session document, skill snapshot and learner model with a
- * London-shaped fallback session id — `initializing` was set inside an async
- * effect body and nothing bound the turn to the visit that started it.
+ * the repair, Lincoln's finding was published under London's name, and an Apply
+ * tapped afterwards wrote that retained content to London's skill snapshot and
+ * learner model with a London-shaped fallback source id.
  *
- * The second case is the POSITIVE CONTROL: with the keyed visit boundary removed
- * (or the `isCurrent(lifetime)` check after the `chat` await deleted), Lincoln's
- * evidence is on screen under London and `syncEvalFindingsToModel` runs with
- * `london`, and the assertions below fail.
+ * The second case is the POSITIVE CONTROL: without the keyed visit boundary (or
+ * with the live check after the `chat` await deleted), Lincoln's evidence is on
+ * screen under London and the assertions below fail.
  *
  * The first case is the ordinary-path control: the same turn, with nobody
  * switching, must still show its finding and persist it under Lincoln.
  */
+
+const FAMILY_ID = 'fam-1'
 
 const CHILDREN = [
   { id: 'lincoln', name: 'Lincoln' },
@@ -28,12 +28,15 @@ const CHILDREN = [
 ]
 
 const activeChildId = vi.fn<() => string>()
+/** Which family the SHARED children list belongs to — the provenance gate. */
+const childrenFamilyId = vi.fn<() => string | null>()
 
 vi.mock('../../core/hooks/useActiveChild', () => ({
   useActiveChild: () => ({
     children: CHILDREN,
     activeChildId: activeChildId(),
     activeChild: CHILDREN.find((c) => c.id === activeChildId()),
+    childrenFamilyId: childrenFamilyId(),
     setActiveChildId: vi.fn(),
     isChildProfile: false,
     isLoading: false,
@@ -43,7 +46,7 @@ vi.mock('../../core/hooks/useActiveChild', () => ({
   }),
 }))
 
-vi.mock('../../core/auth/useAuth', () => ({ useFamilyId: () => 'fam-1' }))
+vi.mock('../../core/auth/useAuth', () => ({ useFamilyId: () => FAMILY_ID }))
 
 vi.mock('react-router-dom', () => ({
   useNavigate: () => vi.fn(),
@@ -68,17 +71,25 @@ vi.mock('../../core/ai/useAI', () => ({
 
 // ── Firestore, as references we can read back ───────────────────
 
-const setDoc = vi.fn(async (..._args: unknown[]) => {})
-const addDoc = vi.fn(async (..._args: unknown[]) => ({ id: 'new' }))
-const updateDoc = vi.fn(async (..._args: unknown[]) => {})
+// The call signature is declared on the spy and the implementation takes
+// nothing, so every argument is still recorded for the assertions below without
+// a parameter nobody reads.
+const setDoc = vi.fn<(...args: unknown[]) => Promise<void>>(() => Promise.resolve())
+const addDoc = vi.fn<(...args: unknown[]) => Promise<{ id: string }>>(() =>
+  Promise.resolve({ id: 'new' }),
+)
+const updateDoc = vi.fn<(...args: unknown[]) => Promise<void>>(() => Promise.resolve())
+const getDocs = vi.fn<(...args: unknown[]) => Promise<{ docs: never[] }>>(() =>
+  Promise.resolve({ docs: [] }),
+)
 
 vi.mock('firebase/firestore', () => ({
   addDoc: (...args: unknown[]) => addDoc(...args),
   setDoc: (...args: unknown[]) => setDoc(...args),
   updateDoc: (...args: unknown[]) => updateDoc(...args),
   doc: (collection: { name: string }, id: string) => ({ collection: collection.name, id }),
-  getDoc: vi.fn(async () => ({ exists: () => false, data: () => ({}) })),
-  getDocs: vi.fn(async () => ({ docs: [] })),
+  getDoc: vi.fn(() => Promise.resolve({ exists: () => false, data: () => ({}) })),
+  getDocs: (...args: unknown[]) => getDocs(...args),
   query: (...args: unknown[]) => args,
   where: (...args: unknown[]) => args,
   orderBy: (...args: unknown[]) => args,
@@ -91,7 +102,9 @@ vi.mock('../../core/firebase/firestore', () => ({
   skillSnapshotsCollection: () => ({ name: 'skillSnapshots' }),
 }))
 
-const syncEvalFindingsToModel = vi.fn(async (..._args: unknown[]) => {})
+const syncEvalFindingsToModel = vi.fn<(...args: unknown[]) => Promise<void>>(() =>
+  Promise.resolve(),
+)
 vi.mock('./evalModelWriteback', () => ({
   syncEvalFindingsToModel: (...args: unknown[]) => syncEvalFindingsToModel(...args),
 }))
@@ -123,12 +136,15 @@ function sessionWrites() {
 beforeEach(() => {
   vi.clearAllMocks()
   activeChildId.mockReturnValue('lincoln')
+  // The shared list belongs to the family the page is reading, which is what
+  // the outer gate requires before it names a child or queries anything.
+  childrenFamilyId.mockReturnValue(FAMILY_ID)
   // jsdom implements no layout, so the transcript's auto-scroll needs a stub or
   // the commit that adds a message throws.
   window.HTMLElement.prototype.scrollIntoView = vi.fn()
 })
 
-describe('EvaluateChatPage — an evaluation turn belongs to its own visit (FIX-248)', () => {
+describe('EvaluateChatPage — an evaluation turn belongs to its own visit (UX-491)', () => {
   it('ORDINARY PATH — the turn shows and persists under the child it was started for', async () => {
     const user = userEvent.setup()
     render(<EvaluateChatPage />)
@@ -179,5 +195,19 @@ describe('EvaluateChatPage — an evaluation turn belongs to its own visit (FIX-
     expect(addDoc).not.toHaveBeenCalled()
     expect(syncEvalFindingsToModel).not.toHaveBeenCalled()
     expect(analyzePatterns).not.toHaveBeenCalled()
+  })
+
+  it('GATE — a children list from another family names nobody and queries nothing', () => {
+    // The shared list can still hold the previous family after an auth change,
+    // with `isLoading` already false. Until the provenance matches, the heading
+    // must not name that child and no evaluation read may be issued.
+    childrenFamilyId.mockReturnValue('fam-0')
+    render(<EvaluateChatPage />)
+
+    expect(screen.queryByRole('heading', { name: /Evaluate Lincoln/ })).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: /start reading assessment/i }),
+    ).not.toBeInTheDocument()
+    expect(getDocs).not.toHaveBeenCalled()
   })
 })
