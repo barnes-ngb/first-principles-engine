@@ -126,6 +126,9 @@ const LINCOLN_TURN = {
     '<complete>{"summary":"Short-o is the frontier.","frontier":"Short-o CVC words","recommendations":[]}</complete>',
 }
 
+/** A continuing turn: no `<complete>`, so the composer stays on screen. */
+const OPENING_TURN = { message: 'Show Lincoln these words: hop, mop, dog.' }
+
 /** Every evaluation-session write this render performed. */
 function sessionWrites() {
   return setDoc.mock.calls.filter(
@@ -209,5 +212,47 @@ describe('EvaluateChatPage — an evaluation turn belongs to its own visit (UX-4
       screen.queryByRole('button', { name: /start reading assessment/i }),
     ).not.toBeInTheDocument()
     expect(getDocs).not.toHaveBeenCalled()
+  })
+
+  it('PENDING SAVE — a non-final Send says it is saving and holds the composer until it settles', async () => {
+    const user = userEvent.setup()
+    render(<EvaluateChatPage />)
+
+    // Open the session with a continuing turn, so the composer is on screen.
+    await user.click(await screen.findByRole('button', { name: /start reading assessment/i }))
+    await act(async () => {
+      releaseChat(OPENING_TURN)
+    })
+    const composer = await screen.findByPlaceholderText(/type your response/i)
+
+    // From here the evaluation save is held open: this is the window where the
+    // reply has landed, `aiLoading` is already false, and `sendBusyRef` is
+    // still closed.
+    let releaseSave: () => void = () => {}
+    setDoc.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseSave = () => resolve()
+        }),
+    )
+
+    await user.type(composer, 'He read hop and mop')
+    await user.click(screen.getByRole('button', { name: /send/i }))
+    await act(async () => {
+      releaseChat({ message: 'Now try dog.' })
+    })
+
+    // The parent is told why the input is closed, out loud, rather than
+    // meeting a Send that looks available and silently does nothing.
+    const saving = await screen.findByRole('status')
+    expect(saving).toHaveTextContent(/saving this turn/i)
+    expect(composer).toBeDisabled()
+
+    // The original save settling — not a timeout — reopens the composer.
+    await act(async () => {
+      releaseSave()
+    })
+    await waitFor(() => expect(composer).toBeEnabled())
+    expect(screen.queryByText(/saving this turn/i)).not.toBeInTheDocument()
   })
 })

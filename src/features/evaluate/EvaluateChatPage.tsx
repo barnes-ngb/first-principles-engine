@@ -541,6 +541,18 @@ function EvaluateDraft({
   const applyBusyRef = useRef(false)
 
   /**
+   * The render-side twin of `sendBusyRef`, for the WHOLE accepted Send — not
+   * just the model call. `useAI.chat` drops `aiLoading` as soon as a reply
+   * returns, but a non-final turn still has its evaluation save in flight and
+   * `sendBusyRef` is still closed, so on `aiLoading` alone the composer looked
+   * editable while the handler silently refused (round-one review, UX-491).
+   * `'saving'` is what the parent is told about that gap. Like every other
+   * slot here it is per-draft, so a late result cannot speak for the draft
+   * that replaced this one.
+   */
+  const [sendPhase, setSendPhase] = useState<'idle' | 'sending' | 'saving'>('idle')
+
+  /**
    * The MOST RECENTLY ADMITTED source-save target of this draft — seeded from a
    * resumed session and then rewritten by `persistSession` synchronously, before
    * its await, so Apply can name the source its findings came from without
@@ -779,6 +791,7 @@ function EvaluateDraft({
     if (!isLive()) return
     if (sendBusyRef.current) return
     sendBusyRef.current = true
+    setSendPhase('sending')
 
     try {
       const userMsg: ChatMessage = {
@@ -837,6 +850,11 @@ function EvaluateDraft({
         void logSessionHours()
       }
 
+      // The reply is on screen but the turn is not saved yet. On a completing
+      // turn the composer is replaced by the summary, so only a continuing
+      // one needs to say why it is still holding the input.
+      if (!complete) setSendPhase('saving')
+
       const sid = await persistSession(finalMessages, allFindings, complete)
 
       if (complete && isLive()) {
@@ -844,6 +862,10 @@ function EvaluateDraft({
       }
     } finally {
       sendBusyRef.current = false
+      // Resolved or rejected, THIS draft's composer comes back — and only if
+      // this draft is still the one on screen, so a late save cannot reopen
+      // the input of the draft that replaced it.
+      if (isLive()) setSendPhase('idle')
     }
   }, [
     inputText,
@@ -1269,17 +1291,25 @@ function EvaluateDraft({
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
                 onKeyDown={handleKeyDown}
-                disabled={aiLoading}
+                disabled={aiLoading || sendPhase !== 'idle'}
                 size="small"
               />
               <IconButton
                 color="primary"
+                aria-label="Send"
                 onClick={handleSend}
-                disabled={!inputText.trim() || aiLoading}
+                disabled={!inputText.trim() || aiLoading || sendPhase !== 'idle'}
               >
                 <SendIcon />
               </IconButton>
             </Stack>
+          )}
+
+          {/* Why the composer is still closed after the reply arrived. */}
+          {hasMessages && sessionStatus === 'in-progress' && sendPhase === 'saving' && (
+            <Typography variant="caption" color="text.secondary" role="status">
+              Saving this turn…
+            </Typography>
           )}
 
           {aiError && (
