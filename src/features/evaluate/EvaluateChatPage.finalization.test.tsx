@@ -339,6 +339,119 @@ describe('UX-492 — Apply waits for the finalization it will point at', () => {
     await waitFor(() => expect(applyButton()).toBeEnabled())
   })
 
+  it('ORDERING — it waits on EVERY pending save of its own daily document', async () => {
+    const user = userEvent.setup()
+    render(<EvaluateChatPage />)
+
+    // Save A — the opening Start write, held open for the whole turn.
+    let releaseA: () => void = () => {}
+    setDoc.mockImplementationOnce(
+      (ref, data) =>
+        new Promise<void>((resolve) => {
+          releaseA = () => {
+            const r = ref as Ref
+            writes.push({
+              collection: r.collection,
+              id: r.id,
+              data: data as Record<string, unknown>,
+            })
+            resolve()
+          }
+        }),
+    )
+
+    await user.click(await screen.findByRole('button', { name: /start reading assessment/i }))
+    await act(async () => {
+      releaseChat(OPENING_TURN)
+    })
+
+    // Save B — an ordinary non-final Send, which settles normally while A is
+    // still held. A single-promise slot has forgotten A at exactly this point.
+    const composer = await screen.findByPlaceholderText(/type your response/i)
+    await user.type(composer, 'He read hop')
+    await user.click(screen.getByRole('button', { name: /send/i }))
+    await act(async () => {
+      releaseChat({ message: 'Now try dog.' })
+    })
+    await waitFor(() => expect(dayWrites()).toHaveLength(1))
+    expect(dayWrites()[0].data.status).toBe('in-progress')
+
+    // The completing Send, with A still outstanding against the same document.
+    await user.type(composer, 'He read dog too')
+    await user.click(screen.getByRole('button', { name: /send/i }))
+    await act(async () => {
+      releaseChat(UNAIDED_TURN)
+    })
+
+    // POSITIVE CONTROL: track only the LATEST in-progress save and the
+    // finalization commits here, ahead of A — then A lands on top of it and
+    // reverts the daily mirror to `in-progress` with the pointer gone.
+    expect(await screen.findByText(/saving the completed evaluation/i)).toBeInTheDocument()
+    expect(sourceWrites()).toEqual([])
+
+    await act(async () => {
+      releaseA()
+    })
+    await waitFor(() => expect(sourceWrites()).toHaveLength(1))
+
+    const days = dayWrites()
+    expect(days).toHaveLength(3)
+    expect(new Set(days.map((d) => d.id)).size).toBe(1)
+    expect(days[2].data.status).toBe('complete')
+    expect(days[2].data.finalizedSourceId).toBe(sourceWrites()[0].id)
+    await waitFor(() => expect(applyButton()).toBeEnabled())
+  })
+
+  it('DIFFERENT DAY — a save held against another day does not stall a completion', async () => {
+    // Only `Date` is faked, so the component's day id moves while every timer
+    // the test library and React rely on stays real.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(new Date('2026-11-10T23:59:50.000Z'))
+      const user = userEvent.setup()
+      render(<EvaluateChatPage />)
+
+      // The opening save, held open against YESTERDAY's document.
+      let releaseOldDay: () => void = () => {}
+      setDoc.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            releaseOldDay = resolve
+          }),
+      )
+
+      await user.click(await screen.findByRole('button', { name: /start reading assessment/i }))
+      await act(async () => {
+        releaseChat(OPENING_TURN)
+      })
+      const composer = await screen.findByPlaceholderText(/type your response/i)
+
+      // UTC midnight passes while that save is still in flight.
+      vi.setSystemTime(new Date('2026-11-11T00:00:10.000Z'))
+
+      await user.type(composer, 'He read hop and mop')
+      await user.click(screen.getByRole('button', { name: /send/i }))
+      await act(async () => {
+        releaseChat(UNAIDED_TURN)
+      })
+
+      // The completion is pinned to the NEW day, so the held old-day save is
+      // not in its way: it commits without that save ever being released.
+      await waitFor(() => expect(sourceWrites()).toHaveLength(1))
+      const completed = dayWrites().find((w) => w.data.status === 'complete')!
+      expect(completed.id).toBe('lincoln_reading_2026-11-11')
+      expect(sourceWrites()[0].data.sessionDocId).toBe('lincoln_reading_2026-11-11')
+      // Unchanged UTC day-id derivation: the held save still owns the 10th.
+      expect(sourceWrites()[0].data.finalizedAt).toBe('2026-11-11T00:00:10.000Z')
+
+      await act(async () => {
+        releaseOldDay()
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('PENDING — a finalization still in flight says so and admits no Apply', async () => {
     const user = userEvent.setup()
     render(<EvaluateChatPage />)

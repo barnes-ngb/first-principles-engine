@@ -3,15 +3,21 @@ import { describe, expect, it } from 'vitest'
 import {
   buildOverrideAction,
   buildReconcileView,
+  conceptDecisionBasis,
   KEEP_MY_WORD_NOTE,
   PARENT_STATE_CHOICES,
   proposableState,
   RECONCILE_NOTICE,
+  sameConceptDecisionBasis,
   stateChoiceLabel,
   TAKE_MODEL_READ_NOTE,
 } from './conceptOverride'
 import { applyReviewActionToModel } from '../foundations-review/foundationsReviewActions'
-import type { ConceptStateEntry, LearnerModel } from '../../core/types/learnerModel'
+import type {
+  ConceptStateEntry,
+  EvidenceRef,
+  LearnerModel,
+} from '../../core/types/learnerModel'
 
 const NOW = '2026-07-25T12:00:00.000Z'
 const CVC = 'reading.phonics.cvc'
@@ -169,6 +175,81 @@ describe('buildOverrideAction — one write semantic for every route', () => {
     }
     const action = buildOverrideAction({ childId: 'c1', conceptId: CVC, state: 'solid', origin: 'foundationsTab' })
     expect(applyReviewActionToModel(base, action, NOW).model.conceptStates[CVC].state).toBe('solid')
+  })
+})
+
+/**
+ * UX-492 — the stale-basis guard has to see a same-day REPLACEMENT.
+ *
+ * `sourceId` on an `eval` ref is the daily id, which both of a day's completed
+ * guided attempts share. Sol's reproduction: a replacement whose clock, day,
+ * asserted state and summary note were all identical produced the same basis
+ * print, so the guard read the evidence as unmoved — and a parent who
+ * reconciled against the first attempt's finding had their word written over
+ * the second one's. The finalization id and the finding ordinal are what tell
+ * the two apart, so they are part of the print.
+ */
+describe('conceptDecisionBasis — the finalized original is part of the basis (UX-492)', () => {
+  const evalRef = (over: Partial<EvidenceRef> = {}): EvidenceRef => ({
+    kind: 'eval',
+    sourceId: 'c1_reading_2026-07-20',
+    note: 'Guided eval — "Sound out short words": needed help on 3 of 5',
+    observedAt: '2026-07-20T00:00:00.000Z',
+    readState: 'forming',
+    ...over,
+  })
+  const entryWith = (ref: EvidenceRef): ConceptStateEntry =>
+    flaggedEntry({ evidence: [flaggedEntry().evidence[0], ref] })
+
+  it('reads a different FINALIZATION of the same day as a different basis', () => {
+    const a = conceptDecisionBasis(
+      entryWith(evalRef({ finalizedSourceId: 'src-A', sourceFindingIndex: 0 })),
+    )
+    const b = conceptDecisionBasis(
+      entryWith(evalRef({ finalizedSourceId: 'src-B', sourceFindingIndex: 0 })),
+    )
+    // POSITIVE CONTROL: drop `finalizedSourceId` from the print and this passes
+    // as "unmoved", which is the defect.
+    expect(sameConceptDecisionBasis(a, b)).toBe(false)
+    expect(sameConceptDecisionBasis(a, a)).toBe(true)
+  })
+
+  it('reads a different FINDING INDEX as a different basis, and 0 is not absent', () => {
+    const base = evalRef({ finalizedSourceId: 'src-A' })
+    const zero = conceptDecisionBasis(entryWith({ ...base, sourceFindingIndex: 0 }))
+    const one = conceptDecisionBasis(entryWith({ ...base, sourceFindingIndex: 1 }))
+    const missing = conceptDecisionBasis(entryWith(base))
+
+    expect(sameConceptDecisionBasis(zero, one)).toBe(false)
+    // Index 0 is a real ordinal, not "no ordinal recorded".
+    expect(sameConceptDecisionBasis(zero, missing)).toBe(false)
+  })
+
+  it('leaves two identical LEGACY refs comparing equal — both fields absent', () => {
+    const legacy = conceptDecisionBasis(entryWith(evalRef()))
+    const same = conceptDecisionBasis(entryWith(evalRef()))
+    expect(sameConceptDecisionBasis(legacy, same)).toBe(true)
+    // And a legacy ref is still distinguishable from a finalized one.
+    expect(
+      sameConceptDecisionBasis(
+        legacy,
+        conceptDecisionBasis(entryWith(evalRef({ finalizedSourceId: 'src-A' }))),
+      ),
+    ).toBe(false)
+  })
+
+  it('still moves on everything it always moved on', () => {
+    const ref = evalRef({ finalizedSourceId: 'src-A', sourceFindingIndex: 0 })
+    const base = conceptDecisionBasis(entryWith(ref))
+    for (const changed of [
+      evalRef({ finalizedSourceId: 'src-A', sourceFindingIndex: 0, readState: 'frontier' }),
+      evalRef({ finalizedSourceId: 'src-A', sourceFindingIndex: 0, note: 'something else' }),
+      evalRef({ finalizedSourceId: 'src-A', sourceFindingIndex: 0, status: 'superseded' }),
+    ]) {
+      expect(
+        sameConceptDecisionBasis(base, conceptDecisionBasis(entryWith(changed))),
+      ).toBe(false)
+    }
   })
 })
 

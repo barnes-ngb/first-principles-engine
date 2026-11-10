@@ -54,11 +54,17 @@ import type {
  * does not describe this attempt.
  */
 export class GuidedEvaluationSourceMismatch extends Error {
-  constructor(public readonly sourceId: string) {
+  // Declared and assigned rather than a constructor parameter property, which
+  // `erasableSyntaxOnly` rejects (TS1294) — the same shape as
+  // `ReviewActionBasisError`.
+  readonly sourceId: string
+
+  constructor(sourceId: string) {
     super(
       `A finalized guided evaluation already exists under id ${sourceId} with different content`,
     )
     this.name = 'GuidedEvaluationSourceMismatch'
+    this.sourceId = sourceId
   }
 }
 

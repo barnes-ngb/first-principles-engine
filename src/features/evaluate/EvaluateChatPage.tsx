@@ -624,12 +624,21 @@ function EvaluateDraft({
   /** The one pattern analysis this finalization is allowed to ask for. */
   const patternAnalysisAskedRef = useRef(false)
   /**
-   * This draft's in-progress save of the daily document, while one is in flight.
-   * The completing save queues behind it, because both write that same document
-   * and a late in-progress `setDoc` landing after the finalization transaction
-   * put the record back to `in-progress` — pointer gone, source orphaned.
+   * EVERY in-progress save of this draft that is still in flight, grouped by the
+   * daily document id it captured.
+   *
+   * The completing save queues behind the ones that target ITS document, because
+   * nothing else orders them and a late in-progress `setDoc` landing after the
+   * finalization transaction puts the record back to `in-progress` — pointer
+   * gone, committed source orphaned. It has to be every pending save and not
+   * just the latest: hold the opening Start save, let the next Send's save
+   * settle, and a single-promise slot has already forgotten the held one.
+   *
+   * Grouped by target rather than drained wholesale, because a save held over
+   * from YESTERDAY's document is not in the way of a finalization pinned to
+   * today's — waiting on it would stall a completion behind an unrelated write.
    */
-  const inFlightInProgressRef = useRef<Promise<void> | null>(null)
+  const inFlightByTargetRef = useRef(new Map<string, Set<Promise<void>>>())
 
   /** Unchanged day-based shape: `{childId}_{domain}_{date}`. */
   const defaultSessionDocId = useCallback(
@@ -750,12 +759,12 @@ function EvaluateDraft({
    * touches the finalization: it cannot mark the final source saved, replace it,
    * or re-open a replacement draft, and a `complete` turn never comes here.
    *
-   * What it now also does is PUBLISH itself in `inFlightInProgressRef`, so the
-   * completing save can sequence behind it. Both write the SAME daily document,
-   * and nothing else ordered them: hold the opening Start save, Send the next
-   * turn, and the completion's transaction committed first — then the opening
-   * save landed on top of it and the record was an in-progress one again, with
-   * the finalization pointer gone and a finalized source left pointing at it.
+   * What it now also does is PUBLISH itself under the daily id it captured, so a
+   * completing save can sequence behind the saves that write the same document.
+   * Nothing else ordered them: hold the opening Start save, Send the next turn,
+   * and the completion's transaction committed first — then the opening save
+   * landed on top of it and the record was an in-progress one again, with the
+   * finalization pointer gone and a finalized source left pointing at it.
    */
   const persistInProgress = useCallback(
     async (msgs: ChatMessage[], fndgs: EvaluationFinding[]): Promise<void> => {
@@ -776,14 +785,22 @@ function EvaluateDraft({
         }
       })()
 
-      // Per-draft by construction, so no independent draft is ever waited on.
-      inFlightInProgressRef.current = save
+      // Per-draft by construction, so no independent draft is ever waited on,
+      // and keyed by the id this save already captured.
+      const byTarget = inFlightByTargetRef.current
+      const pending = byTarget.get(targetDocId) ?? new Set<Promise<void>>()
+      pending.add(save)
+      byTarget.set(targetDocId, pending)
+
       try {
         await save
       } finally {
         // Released on success AND on rejection — a save that threw must not
         // leave a completion waiting on it forever.
-        if (inFlightInProgressRef.current === save) inFlightInProgressRef.current = null
+        pending.delete(save)
+        if (pending.size === 0 && byTarget.get(targetDocId) === pending) {
+          byTarget.delete(targetDocId)
+        }
       }
     },
     [familyId, sessionDocId, defaultSessionDocId, buildSession, isLive],
@@ -871,8 +888,14 @@ function EvaluateDraft({
       // Ownership, payload, date and both ids are pinned ABOVE, and the parent
       // is already told this is saving — so the wait below cannot change what
       // gets written or where, and a switch mid-wait cannot stop it.
-      const earlier = inFlightInProgressRef.current
-      if (earlier) await earlier.catch(() => undefined)
+      //
+      // Every in-progress save already admitted against THIS daily document,
+      // and nothing else: a snapshot, so a save admitted later is not waited on
+      // either, and a save still held against another day is not in the way.
+      const earlier = inFlightByTargetRef.current.get(pinned.sessionDocId)
+      if (earlier?.size) {
+        await Promise.all([...earlier].map((p) => p.catch(() => undefined)))
+      }
 
       await runPinnedFinalSave(pinned)
     },
