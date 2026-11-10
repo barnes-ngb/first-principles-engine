@@ -550,17 +550,92 @@ const lastModelEvidenceAt = (model: LearnerModel | null): string | null => {
   return latest
 }
 
-/** True when the model carries `eval` evidence stamped with this session id. */
-const modelHasEvalWriteback = (
+/**
+ * How well the model's `eval` evidence can be tied to THIS session record.
+ *
+ * UX-492: the daily record id is shared by both of a day's completed guided
+ * attempts, so a day-id match alone cannot say which attempt a ref is evidence
+ * of — and before this, a replaced same-day attempt was reported as applied on
+ * the strength of the older ref's day id.
+ */
+export const EvalWritebackMatch = {
+  /** A ref names this record's own finalization id — the exact original. */
+  Exact: 'exact',
+  /** The day id matches, but nothing records WHICH attempt. Not proof. */
+  LegacyDay: 'legacy-day',
+  /** No `eval` ref speaks to this record at all. */
+  None: 'none',
+} as const
+export type EvalWritebackMatch =
+  (typeof EvalWritebackMatch)[keyof typeof EvalWritebackMatch]
+
+/**
+ * Classify the learner-model writeback for one guided evaluation.
+ *
+ * A ref that carries a finalization id is read against this record's own
+ * `finalizedSourceId`: equal ⇒ exact; different ⇒ it belongs to ANOTHER
+ * finalization of the same day and is not evidence about this record. A ref
+ * with no finalization id predates UX-492 (or was written with no receipt), so
+ * a day-id match is reported as exactly that and never as original evidence.
+ *
+ * Reads only the inputs this export already loads — no new source read, no new
+ * export surface.
+ */
+export const evalWritebackMatch = (
   model: LearnerModel | null,
-  sessionId: string | undefined,
+  session: Pick<DataReviewEvaluationSession, 'id' | 'finalizedSourceId'>,
+): EvalWritebackMatch => {
+  if (!model || !session.id) return EvalWritebackMatch.None
+  let legacy = false
+  for (const entry of Object.values(model.conceptStates ?? {})) {
+    for (const ref of entry.evidence ?? []) {
+      if (ref.kind !== 'eval' || ref.sourceId !== session.id) continue
+      if (ref.finalizedSourceId == null) {
+        legacy = true
+        continue
+      }
+      if (session.finalizedSourceId && ref.finalizedSourceId === session.finalizedSourceId) {
+        return EvalWritebackMatch.Exact
+      }
+    }
+  }
+  return legacy ? EvalWritebackMatch.LegacyDay : EvalWritebackMatch.None
+}
+
+/**
+ * Does the model carry evidence that THIS record reached it?
+ *
+ * One rule, used by the table and the integrity check alike, so the two can
+ * never disagree. An exact finalization match always counts. A day-only match
+ * counts **only for a record that names no finalization** — a legacy row, for
+ * which a day id is all that ever existed, and whose compatibility this keeps.
+ * For a finalized record it does not count: the ref could equally belong to the
+ * same-day version this one replaced, which is the claim UX-492 exists to stop.
+ */
+export const evalReachedModel = (
+  model: LearnerModel | null,
+  session: Pick<DataReviewEvaluationSession, 'id' | 'finalizedSourceId'>,
 ): boolean => {
-  if (!model || !sessionId) return false
-  return Object.values(model.conceptStates ?? {}).some((entry) =>
-    (entry.evidence ?? []).some(
-      (ref) => ref.kind === 'eval' && ref.sourceId === sessionId,
-    ),
-  )
+  const match = evalWritebackMatch(model, session)
+  if (match === EvalWritebackMatch.Exact) return true
+  return match === EvalWritebackMatch.LegacyDay && !session.finalizedSourceId
+}
+
+/** The table cell for one session's writeback, in the words it may claim. */
+const evalWritebackCell = (
+  model: LearnerModel | null,
+  session: DataReviewEvaluationSession,
+): string => {
+  switch (evalWritebackMatch(model, session)) {
+    case EvalWritebackMatch.Exact:
+      return 'yes (UX-492 — the finalized source id matches this record)'
+    case EvalWritebackMatch.LegacyDay:
+      return session.finalizedSourceId
+        ? 'ambiguous — a day-id `eval` ref with no finalization pointer, which may belong to the same-day version this record replaced'
+        : 'yes (day-id `eval` ref — the pre-UX-492 shape, so it names the day rather than one attempt)'
+    default:
+      return 'no — either never applied or predates the FEAT-76 writeback'
+  }
 }
 
 /**
@@ -734,19 +809,32 @@ export const computeIntegrityChecks = (
   )
   const neverApplied = guided.filter(
     (s) =>
-      !modelHasEvalWriteback(learnerModel, s.id) &&
-      !evalLooksAppliedToSnapshot(s, skillSnapshot),
+      !evalReachedModel(learnerModel, s) && !evalLooksAppliedToSnapshot(s, skillSnapshot),
   )
+  // Reported, never counted: a FINALIZED version whose only `eval` ref carries
+  // no finalization pointer. The ref may be this version's or the one it
+  // replaced, and the export may not decide which.
+  const ambiguous = guided.filter(
+    (s) =>
+      s.finalizedSourceId &&
+      evalWritebackMatch(learnerModel, s) === EvalWritebackMatch.LegacyDay,
+  )
+  const ambiguousNote =
+    ambiguous.length === 0
+      ? ''
+      : ` · ambiguous for ${ambiguous.length} finalized evaluation(s), whose only \`eval\` ref predates the finalization pointer and so cannot prove THIS version reached the model: ${idList(
+          ambiguous.map((s) => s.id ?? MISSING),
+        )}`
   checks.push({
     id: 'eval-never-applied',
     label: 'Guided evaluations reached the skill snapshot or the learner model',
     status: neverApplied.length === 0 ? 'PASS' : 'FLAG',
     detail:
-      neverApplied.length === 0
+      (neverApplied.length === 0
         ? `all ${guided.length} guided evaluation(s) with findings show downstream evidence`
         : `${neverApplied.length} of ${guided.length} guided evaluation(s) with findings show NO learner-model \`eval\` evidence and no matching snapshot priority skill: ${idList(
             neverApplied.map((s) => s.id ?? MISSING),
-          )}`,
+          )}`) + ambiguousNote,
   })
 
   // 9 — photo/audio artifacts with no media at all.
@@ -1740,9 +1828,7 @@ const buildEvaluationSection = (input: DataReviewExportInput): string[] => {
         String(s.recommendations.length),
         cell(truncate(s.frontier, 200)),
         evalLooksAppliedToSnapshot(s, input.skillSnapshot) ? 'yes' : 'no',
-        modelHasEvalWriteback(input.learnerModel, s.id)
-          ? 'yes (FEAT-76 `eval` evidence found)'
-          : 'no — either never applied or predates the FEAT-76 writeback',
+        evalWritebackCell(input.learnerModel, s),
       ]),
       'No guided evaluation sessions stored.',
     ),

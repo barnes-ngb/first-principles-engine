@@ -89,6 +89,39 @@ describe('syncEvalFindingsToModel', () => {
     expect(setDoc.mock.calls[0][2]).toEqual({ merge: true })
   })
 
+  // UX-492 — the finalization pointer is passed through to the refs, and the
+  // daily `sourceId` is untouched.
+  it('stamps a supplied finalized source id onto the eval evidence', async () => {
+    getDoc.mockResolvedValue({ exists: () => true, data: () => seededModel() })
+    setDoc.mockResolvedValue(undefined)
+
+    await syncEvalFindingsToModel(
+      'fam-1',
+      'c1',
+      'sess-1',
+      [finding('phonics.cvc', 'mastered')],
+      NOW,
+      'finalized-1',
+    )
+
+    const written = setDoc.mock.calls[0][1] as LearnerModel
+    const ref = written.conceptStates[CVC].evidence.find((e) => e.kind === 'eval')!
+    expect(ref.sourceId).toBe('sess-1')
+    expect(ref.finalizedSourceId).toBe('finalized-1')
+    expect(ref.sourceFindingIndex).toBe(0)
+  })
+
+  it('leaves the ref shape alone when no finalization id is given', async () => {
+    getDoc.mockResolvedValue({ exists: () => true, data: () => seededModel() })
+    setDoc.mockResolvedValue(undefined)
+
+    await syncEvalFindingsToModel('fam-1', 'c1', 'sess-1', [finding('phonics.cvc', 'mastered')], NOW)
+
+    const written = setDoc.mock.calls[0][1] as LearnerModel
+    const ref = written.conceptStates[CVC].evidence.find((e) => e.kind === 'eval')!
+    expect(ref.finalizedSourceId).toBeUndefined()
+  })
+
   it('no-ops (no write) when the child has no seeded model', async () => {
     getDoc.mockResolvedValue({ exists: () => false })
 

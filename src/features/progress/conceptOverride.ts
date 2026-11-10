@@ -231,6 +231,15 @@ export interface ConceptDecisionBasis {
  * whether it still stands, what it asserted, and what it says. A replacement
  * eval that happens to assert the SAME state is a different ref and reads as
  * one; a withdrawn ref drops out of {@link decisionRefs} entirely.
+ *
+ * UX-492 — the finalization pointer and the finding ordinal are part of "where
+ * it came from". `sourceId` is the DAILY id, which both of a day's completed
+ * guided attempts share, so a same-day replacement whose summary, state and
+ * clock all match read as the identical ref and slipped past the stale-basis
+ * guard: the parent reconciled against one attempt's evidence and the write
+ * landed over another's. `?? null` keeps index `0` distinct from an absent
+ * index, and leaves two identical legacy refs (both fields absent) comparing
+ * equal exactly as before.
  */
 function basisPrint(ref: EvidenceRef | undefined): string | null {
   if (!ref) return null
@@ -241,6 +250,8 @@ function basisPrint(ref: EvidenceRef | undefined): string | null {
     ref.status ?? 'active',
     ref.readState ?? '',
     ref.note ?? '',
+    ref.finalizedSourceId ?? null,
+    ref.sourceFindingIndex ?? null,
   ])
 }
 

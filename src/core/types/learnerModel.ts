@@ -121,6 +121,30 @@ export interface EvidenceRef {
    * Absent on refs written before FEAT-66; readers fall back to `entry.state`.
    */
   readState?: ConceptStateKind
+  // ── `eval` finalization pointer (UX-492) ─────────────────────────────
+  /**
+   * The finalized `guidedEvaluationSources` document this `eval` ref came from.
+   *
+   * `sourceId` above stays the **daily** `evaluationSessions` id, unchanged, for
+   * every existing reader. But that id is shared by both completed guided
+   * attempts on one day, so on its own it cannot say WHICH attempt this ref is
+   * evidence of — and the two can hold identical projected evidence summaries
+   * with opposite help notes. This names the exact winner.
+   *
+   * Absent on every ref written before UX-492, and on any ref whose write-back
+   * ran without an acknowledged finalization receipt. Such a ref stays a valid,
+   * compatible ref; what it can no longer be read as is proof of a particular
+   * original.
+   */
+  finalizedSourceId?: string
+  /**
+   * The index, in that source's **ordered** `findings`, of the finding this ref
+   * was projected from — the original ordinal of the rank / first-on-tie winner,
+   * carried through even where one finding maps onto several concepts. Lets a
+   * reader go from a concept back to the exact recorded evidence and notes
+   * rather than re-deriving them. Written only alongside `finalizedSourceId`.
+   */
+  sourceFindingIndex?: number
   // ── `programCompletionCoverage` structured fields (FEAT-242) ─────────
   /**
    * Lifecycle of the ref itself. Absent ⇒ active (every pre-FEAT-242 ref).
