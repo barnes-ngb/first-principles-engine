@@ -89,6 +89,24 @@ export interface EvalConceptRead {
   state: ConceptStateKind
   /** Human one-liner for the `eval` EvidenceRef shown on tap (no-shame). */
   note: string
+  /**
+   * The index, in the eval's ORIGINAL ordered findings, of the finding this read
+   * came from — the rank / first-on-tie winner's own ordinal (UX-492).
+   *
+   * Carried so an `eval` evidence ref can point back at the exact recorded
+   * finding (its evidence string, its notes, its `testedAt`) inside the
+   * finalized source, instead of a later reader re-deriving which of several
+   * findings on one concept had won. A finding that maps onto SEVERAL concepts
+   * carries the same ordinal onto each of them, which is correct: it is one
+   * recorded observation, named once.
+   *
+   * Optional, and {@link computeEvalRead} always supplies it: the reads this
+   * projector is given elsewhere in the repo (replay and coverage-precedence
+   * fixtures) are hand-built for a different question, and requiring an ordinal
+   * of them would change files this run has no business in. A read with no
+   * ordinal simply stamps no index.
+   */
+  findingIndex?: number
 }
 
 /** A short, factual evidence note for one finding on a concept. */
@@ -110,14 +128,19 @@ function evalEvidenceNote(conceptId: string, finding: EvaluationFinding): string
  * bands, and this writer may move a concept DOWN). When several findings land
  * on the same concept, the **highest-ranked** (most generous) read wins —
  * demonstrated partial mastery is never erased by a co-located struggle
- * (no-shame). The returned list is exactly the set of concepts the eval will
- * touch.
+ * (no-shame) — and on a TIE the **first** finding in the original order keeps
+ * the concept, as it always has. UX-492 only records which one that was: the
+ * winner's original ordinal travels with the read, unchanged by how many
+ * concepts the finding maps onto.
  */
 export function computeEvalRead(
   findings: readonly EvaluationFinding[],
 ): EvalConceptRead[] {
-  const byConcept = new Map<string, { state: ConceptStateKind; note: string }>()
-  for (const finding of findings) {
+  const byConcept = new Map<
+    string,
+    { state: ConceptStateKind; note: string; findingIndex: number }
+  >()
+  for (const [findingIndex, finding] of findings.entries()) {
     const state = FINDING_STATUS_TO_STATE[finding.status]
     if (!state) continue // 'not-tested' — the eval read nothing here
     // FIX-224 / UX-288: `mapFindingToNode` answers in curriculumMap ids, which
@@ -127,8 +150,15 @@ export function computeEvalRead(
     const { conceptIds } = resolveFoundationConcepts(mapFindingToNode(finding.skill), finding.skill)
     for (const conceptId of conceptIds) {
       const prev = byConcept.get(conceptId)
+      // Strictly greater, so an equal-ranked later finding does NOT displace the
+      // first — the existing first-on-tie rule, now also deciding which ordinal
+      // is recorded.
       if (!prev || STATE_RANK[state] > STATE_RANK[prev.state]) {
-        byConcept.set(conceptId, { state, note: evalEvidenceNote(conceptId, finding) })
+        byConcept.set(conceptId, {
+          state,
+          note: evalEvidenceNote(conceptId, finding),
+          findingIndex,
+        })
       }
     }
   }
@@ -136,6 +166,7 @@ export function computeEvalRead(
     conceptId,
     state: v.state,
     note: v.note,
+    findingIndex: v.findingIndex,
   }))
 }
 
@@ -180,12 +211,21 @@ export interface AppliedEvalFindings {
  *     wording for downward moves (guardrail 3).
  *
  * Concepts not present in `evalRead` are left exactly as-is (guardrail 1).
+ *
+ * `finalizedSourceId` (UX-492, optional) is the acknowledged
+ * `guidedEvaluationSources` id the applied findings came from. `sessionId` stays
+ * the daily `evaluationSessions` id in `sourceId` for every existing reader;
+ * when a finalization id is supplied, each ref ALSO names it and the original
+ * ordinal of the finding it was projected from, so the ref identifies which of a
+ * day's completed attempts it is evidence of. Omitted ⇒ refs keep exactly their
+ * pre-UX-492 shape.
  */
 export function applyEvalFindingsToModel(
   model: LearnerModel,
   evalRead: readonly EvalConceptRead[],
   sessionId: string,
   nowIso: string,
+  finalizedSourceId?: string,
 ): AppliedEvalFindings {
   if (evalRead.length === 0) return { model, changedConceptIds: [] }
 
@@ -206,6 +246,15 @@ export function applyEvalFindingsToModel(
       // of the eval's take — the Foundations tab reads it to offer "take the
       // model's read" when surfacing `needsReconcile`.
       readState: read.state,
+      // UX-492 — the exact finalized original, and the ordinal of the finding
+      // inside it. Spread conditionally so a write with no receipt stores the
+      // pre-UX-492 shape rather than two `undefined` keys.
+      ...(finalizedSourceId
+        ? {
+            finalizedSourceId,
+            ...(read.findingIndex == null ? {} : { sourceFindingIndex: read.findingIndex }),
+          }
+        : {}),
     }
     const nextEvidence = [...(prev?.evidence ?? []), evidence]
 

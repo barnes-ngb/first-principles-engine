@@ -34,6 +34,15 @@ import type { EvaluationFinding } from '../../core/types/evaluation'
  * @param sessionId the evaluation session doc id (stamped on the `eval` evidence)
  * @param findings  the session's findings (the eval's per-concept assessments)
  * @param nowIso    the apply timestamp (caller supplies the clock)
+ * @param finalizedSourceId
+ *   UX-492 — the ACKNOWLEDGED `guidedEvaluationSources` id the applied findings
+ *   came from, when the caller holds a finalization receipt. `sessionId` is
+ *   unchanged (the daily id every existing reader keys on), but two completed
+ *   guided attempts share that day id, so this is what makes a ref name the
+ *   exact original. Passed only from a receipt — never reconstructed, never read
+ *   back off the current session — so a ref that carries it is a ref whose
+ *   source is committed. Omitted ⇒ pre-UX-492 ref shape, which stays valid and
+ *   simply cannot be read as proof of a particular attempt.
  */
 export async function syncEvalFindingsToModel(
   familyId: string,
@@ -41,6 +50,7 @@ export async function syncEvalFindingsToModel(
   sessionId: string,
   findings: readonly EvaluationFinding[],
   nowIso: string,
+  finalizedSourceId?: string,
 ): Promise<void> {
   try {
     const evalRead = computeEvalRead(findings)
@@ -58,7 +68,13 @@ export async function syncEvalFindingsToModel(
     await updateLearnerModelInTransaction<void>(modelRef, (model) => {
       if (!model) return { result: undefined } // no seeded model — Review Chat feeds it first
 
-      const { model: next } = applyEvalFindingsToModel(model, evalRead, sessionId, nowIso)
+      const { model: next } = applyEvalFindingsToModel(
+        model,
+        evalRead,
+        sessionId,
+        nowIso,
+        finalizedSourceId,
+      )
 
       // A guided eval always writes evidence and may move state; mark the LLM
       // synthesis stale (FEAT-57, D4) so the next beat regenerates whatMattersNext.

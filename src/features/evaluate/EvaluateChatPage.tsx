@@ -53,6 +53,12 @@ import { mergeBlock } from '../../core/utils/blockerLifecycle'
 import { PROGRESS_TABS, progressPath } from '../progress/progressNav'
 import FoundationsSection from './FoundationsSection'
 import { syncEvalFindingsToModel } from './evalModelWriteback'
+import {
+  finalizeGuidedEvaluation,
+  GuidedEvaluationSourceMismatch,
+  newGuidedEvaluationSourceId,
+  type GuidedEvaluationReceipt,
+} from './guidedEvaluationSource'
 import { ChatMessageRole, EvaluationDomain, MasteryGate, SkillLevel } from '../../core/types/enums'
 import { addDiamondEvent } from '../../core/xp/addDiamondEvent'
 import { deriveWorkingLevelFromEvaluation, canOverwriteWorkingLevel } from '../quest/workingLevels'
@@ -201,6 +207,68 @@ function findingStatusIcon(status: EvaluationFinding['status']) {
 // rule). Every retained action asks at the tap and again after each await. A
 // write or Apply already admitted finishes with its own captured destination,
 // source id and contents; only its late UI feedback is dropped.
+
+// ── The finalized source, and the Apply gate (UX-492) ───────────
+//
+// UX-491 bound a turn to its visit. What it left filed — in its own census row
+// — was the *day* the completion lands on: the daily record id is
+// `{childId}_{domain}_{date}`, so both of a day's completed attempts write the
+// same document and the later replaces the earlier. Two attempts can project
+// the SAME evidence summary with opposite help notes, so after the replacement
+// nothing stored could say which attempt a learner-model ref was evidence of.
+// And a final save that FAILED, or was still in flight, left Apply enabled, so
+// the write-back could stamp a source that was absent or uncommitted.
+//
+// Three things close that here, and the daily record is untouched by all of them
+// (same id, same shape plus one optional field, same history, resume, rewards):
+//
+//   * **one final-save boundary**, shared by the initial-response completion and
+//     an ordinary Send. The family, child, domain, day id, ordered findings and
+//     a FRESH finalization id are admitted and pinned SYNCHRONOUSLY before the
+//     save starts, into a slot that is create-once per draft — so a completed
+//     reply cannot open a replacement finalization, and an in-progress save can
+//     neither mark the final source saved nor replace it.
+//   * **the receipt is the authority.** Apply is disabled and refused until the
+//     exact pinned save is acknowledged, and what it then writes back — source
+//     id, finalization id and findings — comes from the receipt, never from a
+//     current-session read or a reconstructed fallback. A pending or failed
+//     finalization admits nothing downstream.
+//   * **an explicit retry** of the same captured payload and id, single-flight,
+//     with no new AI request and no second hour log. Success clears the failure
+//     and lets the same original findings be applied once by the usual path; a
+//     retry whose first attempt had in fact landed is acknowledged without
+//     rewriting the day record, which by then a newer attempt may own.
+
+/** How this draft's one final save stands. */
+type FinalSaveStatus =
+  | 'none'
+  /** Admitted and in flight — the parent is told, and Apply is closed. */
+  | 'saving'
+  /** Acknowledged. The receipt exists, so Apply may run. */
+  | 'saved'
+  /** Rejected. Summary + download stay; an explicit retry is offered. */
+  | 'failed'
+  /**
+   * The captured id already holds different content. Fails closed: no retry is
+   * offered, because retrying would either refuse again or overwrite evidence.
+   */
+  | 'conflict'
+
+/**
+ * The pinned final save of one draft — captured before the save's first await,
+ * so a save already admitted finishes for its ORIGINAL scope whatever happens on
+ * screen afterwards.
+ */
+interface PinnedFinalSave {
+  familyId: string
+  childId: string
+  domain: EvaluationDomain
+  sessionDocId: string
+  sourceId: string
+  finalizedAt: string
+  findings: EvaluationFinding[]
+  session: Omit<EvaluationSession, 'id'>
+}
 
 /** The settled scope one evaluation visit is bound to. */
 interface EvaluateVisitScope {
@@ -552,13 +620,22 @@ function EvaluateDraft({
    */
   const [sendPhase, setSendPhase] = useState<'idle' | 'sending' | 'saving'>('idle')
 
-  /**
-   * The MOST RECENTLY ADMITTED source-save target of this draft — seeded from a
-   * resumed session and then rewritten by `persistSession` synchronously, before
-   * its await, so Apply can name the source its findings came from without
-   * waiting on, or being misled by, whichever save happens to resolve first.
-   */
-  const sourceTargetRef = useRef<string | null>(resume?.sessionDocId ?? null)
+  // ── This draft's one finalization (UX-492) ──────────────────
+  //
+  // The pin, the receipt and the single-flight slot are REFS: a retained
+  // callback and an Apply admitted mid-flight must read what this draft
+  // actually pinned, not what a render closed over. The status is state because
+  // it is what the parent is shown.
+
+  const [finalSaveStatus, setFinalSaveStatus] = useState<FinalSaveStatus>('none')
+  /** Create-once per draft: the final save this draft admitted, or none. */
+  const pinnedFinalSaveRef = useRef<PinnedFinalSave | null>(null)
+  /** The acknowledged receipt — the ONLY thing Apply reads its source from. */
+  const finalReceiptRef = useRef<GuidedEvaluationReceipt | null>(null)
+  /** One final save (or retry) in flight at a time. */
+  const finalSaveBusyRef = useRef(false)
+  /** The one pattern analysis this finalization is allowed to ask for. */
+  const patternAnalysisAskedRef = useRef(false)
 
   /** Unchanged day-based shape: `{childId}_{domain}_{date}`. */
   const defaultSessionDocId = useCallback(
@@ -608,60 +685,6 @@ function EvaluateDraft({
     }
   }, [childId, familyId, domain, sessionTimer, isLive])
 
-  // ── Persist session to Firestore ────────────────────────────
-
-  const persistSession = useCallback(
-    async (
-      msgs: ChatMessage[],
-      fndgs: EvaluationFinding[],
-      complete?: CompleteBlock | null,
-    ): Promise<string> => {
-      // Destination captured before the await: this draft's child and domain,
-      // and the session id this call is writing.
-      const existingDocId = sessionDocId
-      const targetDocId = existingDocId ?? defaultSessionDocId()
-      sourceTargetRef.current = targetDocId
-
-      const session: Omit<EvaluationSession, 'id'> = {
-        childId,
-        domain,
-        status: complete ? 'complete' : 'in-progress',
-        messages: msgs,
-        findings: fndgs,
-        recommendations: complete?.recommendations || recommendations,
-        summary: complete?.summary || completeSummary || undefined,
-        // FEAT-75: retain the completed eval's learning frontier on the record so
-        // the Evaluation History can surface it read-only after the fact.
-        frontier: complete?.frontier ?? completeData?.frontier,
-        evaluatedAt: new Date().toISOString(),
-        nextEvalDate: complete?.nextEvalDate || nextEvalDate,
-      }
-
-      try {
-        const ref = doc(evaluationSessionsCollection(familyId), targetDocId)
-        await setDoc(ref, session)
-        // Only a live draft learns the id its save was given.
-        if (!existingDocId && isLive()) setSessionDocId(targetDocId)
-      } catch (err) {
-        console.error('Failed to persist evaluation session', err)
-      }
-
-      return targetDocId
-    },
-    [
-      childId,
-      domain,
-      familyId,
-      sessionDocId,
-      recommendations,
-      completeSummary,
-      completeData,
-      nextEvalDate,
-      defaultSessionDocId,
-      isLive,
-    ],
-  )
-
   // ── Trigger pattern analysis after <complete> ────────────────
 
   const triggerPatternAnalysis = useCallback(
@@ -696,6 +719,180 @@ function EvaluateDraft({
     },
     [childId, familyId, analyzePatterns, isLive],
   )
+
+  // ── Persist session to Firestore ────────────────────────────
+
+  /**
+   * Build the daily record this draft would write. Synchronous and pure, so a
+   * caller can pin it before its save's first await. Shape, id and every stored
+   * field are exactly what they were; the completing save adds the one optional
+   * `finalizedSourceId` pointer, inside the finalization transaction.
+   */
+  const buildSession = useCallback(
+    (
+      msgs: ChatMessage[],
+      fndgs: EvaluationFinding[],
+      complete: CompleteBlock | null | undefined,
+      evaluatedAt: string,
+    ): Omit<EvaluationSession, 'id'> => ({
+      childId,
+      domain,
+      status: complete ? 'complete' : 'in-progress',
+      messages: msgs,
+      findings: fndgs,
+      recommendations: complete?.recommendations || recommendations,
+      summary: complete?.summary || completeSummary || undefined,
+      // FEAT-75: retain the completed eval's learning frontier on the record so
+      // the Evaluation History can surface it read-only after the fact.
+      frontier: complete?.frontier ?? completeData?.frontier,
+      evaluatedAt,
+      nextEvalDate: complete?.nextEvalDate || nextEvalDate,
+    }),
+    [childId, domain, recommendations, completeSummary, completeData, nextEvalDate],
+  )
+
+  /**
+   * The in-progress save, unchanged. It never touches the finalization: it
+   * cannot mark the final source saved, replace it, or re-open a replacement
+   * draft, and a `complete` turn does not come through here at all.
+   */
+  const persistInProgress = useCallback(
+    async (msgs: ChatMessage[], fndgs: EvaluationFinding[]): Promise<string> => {
+      // Destination captured before the await: this draft's child and domain,
+      // and the session id this call is writing.
+      const existingDocId = sessionDocId
+      const targetDocId = existingDocId ?? defaultSessionDocId()
+      const session = buildSession(msgs, fndgs, null, new Date().toISOString())
+
+      try {
+        const ref = doc(evaluationSessionsCollection(familyId), targetDocId)
+        await setDoc(ref, session)
+        // Only a live draft learns the id its save was given.
+        if (!existingDocId && isLive()) setSessionDocId(targetDocId)
+      } catch (err) {
+        console.error('Failed to persist evaluation session', err)
+      }
+
+      return targetDocId
+    },
+    [familyId, sessionDocId, defaultSessionDocId, buildSession, isLive],
+  )
+
+  // ── The one final save (UX-492) ─────────────────────────────
+
+  /**
+   * Run (or re-run) an ALREADY PINNED final save.
+   *
+   * Assumes `finalSaveBusyRef` is closed by the caller, which is what makes the
+   * admission and the retry single-flight with one another. The pin it is handed
+   * is the authority: late UI feedback is dropped when the draft has gone or has
+   * pinned something else, but the write itself finishes for the scope it
+   * captured.
+   */
+  const runPinnedFinalSave = useCallback(
+    async (pinned: PinnedFinalSave): Promise<GuidedEvaluationReceipt | null> => {
+      try {
+        const receipt = await finalizeGuidedEvaluation(pinned)
+        // The receipt is recorded unconditionally — an Apply admitted before a
+        // switch is entitled to the source its findings came from — while the
+        // visible state is only moved for the draft that is still on screen.
+        if (pinnedFinalSaveRef.current === pinned) {
+          finalReceiptRef.current = receipt
+        }
+        if (isLive() && pinnedFinalSaveRef.current === pinned) {
+          setSessionDocId(pinned.sessionDocId)
+          setFinalSaveStatus('saved')
+          // One analysis per finalization, asked only once the evidence it
+          // describes is actually on the record. A retry does not buy a second
+          // AI call.
+          if (!patternAnalysisAskedRef.current) {
+            patternAnalysisAskedRef.current = true
+            void triggerPatternAnalysis(pinned.sessionDocId, receipt.findings)
+          }
+        }
+        return receipt
+      } catch (err) {
+        console.error('Failed to finalize guided evaluation', err)
+        if (isLive() && pinnedFinalSaveRef.current === pinned) {
+          setFinalSaveStatus(
+            err instanceof GuidedEvaluationSourceMismatch ? 'conflict' : 'failed',
+          )
+        }
+        return null
+      } finally {
+        finalSaveBusyRef.current = false
+      }
+    },
+    [isLive, triggerPatternAnalysis],
+  )
+
+  /**
+   * Admit and pin the completing save, then run it. Everything up to the
+   * transaction is synchronous, so the family, child, domain, day id, ordered
+   * findings and the fresh finalization id are fixed before any await.
+   *
+   * Create-once per draft: a second completed reply in the same draft finds the
+   * slot taken and is refused rather than opening a replacement finalization.
+   */
+  const finalizeCompletion = useCallback(
+    async (
+      msgs: ChatMessage[],
+      fndgs: EvaluationFinding[],
+      complete: CompleteBlock,
+    ): Promise<string> => {
+      if (pinnedFinalSaveRef.current || finalSaveBusyRef.current) {
+        return pinnedFinalSaveRef.current?.sessionDocId ?? (sessionDocId ?? defaultSessionDocId())
+      }
+
+      const finalizedAt = new Date().toISOString()
+      const pinned: PinnedFinalSave = {
+        familyId,
+        childId,
+        domain,
+        sessionDocId: sessionDocId ?? defaultSessionDocId(),
+        sourceId: newGuidedEvaluationSourceId(familyId),
+        finalizedAt,
+        findings: fndgs.map((f) => ({ ...f })),
+        session: buildSession(msgs, fndgs, complete, finalizedAt),
+      }
+
+      finalSaveBusyRef.current = true
+      pinnedFinalSaveRef.current = pinned
+      setFinalSaveStatus('saving')
+
+      await runPinnedFinalSave(pinned)
+      return pinned.sessionDocId
+    },
+    [
+      familyId,
+      childId,
+      domain,
+      sessionDocId,
+      defaultSessionDocId,
+      buildSession,
+      runPinnedFinalSave,
+    ],
+  )
+
+  /**
+   * Retry the SAME captured payload and id after a rejection or an unknown
+   * result. No new AI request, no second hour log, no new finalization id — and
+   * single-flight, so a double-tap cannot open two. A callback from a cleared
+   * draft cannot reach this: `isLive()` is asked at the tap.
+   */
+  const handleRetryFinalSave = useCallback(() => {
+    if (!isLive()) return
+    const pinned = pinnedFinalSaveRef.current
+    if (!pinned) return
+    if (finalSaveBusyRef.current) return
+    // Already acknowledged: there is nothing to retry, and a second run would
+    // only re-read its own committed source.
+    if (finalReceiptRef.current) return
+
+    finalSaveBusyRef.current = true
+    setFinalSaveStatus('saving')
+    void runPinnedFinalSave(pinned)
+  }, [isLive, runPinnedFinalSave])
 
   // ── Start evaluation (first AI message) ─────────────────────
 
@@ -762,10 +959,12 @@ function EvaluateDraft({
         void logSessionHours()
       }
 
-      const sid = await persistSession(newMessages, allFindings, complete)
-
-      if (complete && isLive()) {
-        void triggerPatternAnalysis(sid, allFindings)
+      // Both completion paths share one boundary: a direct completion on the
+      // very first reply finalizes exactly as an ordinary Send does.
+      if (complete) {
+        await finalizeCompletion(newMessages, allFindings, complete)
+      } else {
+        await persistInProgress(newMessages, allFindings)
       }
     } finally {
       startBusyRef.current = false
@@ -776,8 +975,8 @@ function EvaluateDraft({
     familyId,
     domain,
     chat,
-    persistSession,
-    triggerPatternAnalysis,
+    persistInProgress,
+    finalizeCompletion,
     sessionTimer,
     logSessionHours,
     isLive,
@@ -855,10 +1054,11 @@ function EvaluateDraft({
       // one needs to say why it is still holding the input.
       if (!complete) setSendPhase('saving')
 
-      const sid = await persistSession(finalMessages, allFindings, complete)
-
-      if (complete && isLive()) {
-        void triggerPatternAnalysis(sid, allFindings)
+      // The shared final-save boundary — the same one a direct completion takes.
+      if (complete) {
+        await finalizeCompletion(finalMessages, allFindings, complete)
+      } else {
+        await persistInProgress(finalMessages, allFindings)
       }
     } finally {
       sendBusyRef.current = false
@@ -876,8 +1076,8 @@ function EvaluateDraft({
     familyId,
     domain,
     chat,
-    persistSession,
-    triggerPatternAnalysis,
+    persistInProgress,
+    finalizeCompletion,
     logSessionHours,
     isLive,
   ])
@@ -887,6 +1087,15 @@ function EvaluateDraft({
   const handleSaveAndApply = useCallback(async () => {
     if (findings.length === 0) return
     if (!isLive()) return
+    /**
+     * The gate (UX-492). Nothing downstream may run until this draft's own final
+     * save is ACKNOWLEDGED: while it is pending there is no committed source to
+     * point at, and if it was rejected there is none at all. Read off the ref
+     * rather than the status state, so a tap that races the acknowledgement
+     * cannot be admitted by a stale render.
+     */
+    const receipt = finalReceiptRef.current
+    if (!receipt) return
     if (applyBusyRef.current) return
     applyBusyRef.current = true
 
@@ -895,27 +1104,29 @@ function EvaluateDraft({
     // cannot change value) and the contents. An Apply already admitted finishes
     // against these and nothing else; only its UI feedback is dropped if the
     // parent has moved on.
-    const applyFindings = findings
+    /**
+     * The findings as the FINALIZED SOURCE recorded them, in its own order —
+     * not a current-session read. That is what makes a repeat Apply land on the
+     * intended revision: the day document may by then hold a later attempt with
+     * the same projected evidence and different help notes, and the receipt is
+     * the only thing that still names this one.
+     */
+    const applyFindings = receipt.findings
     const applyRecommendations = recommendations
     const applyComplete = completeData
     const applyBlocks = conceptualBlocks
     /** The SAVED id. Award eligibility and dedup keys read this, as before. */
-    const applySessionDocId = sessionDocId
+    const applySessionDocId = receipt.sessionDocId
     /**
-     * The source id the learner-model write-back stamps as its evidence ref,
-     * resolved HERE rather than after the snapshot I/O — computing it afterwards
-     * is how an Apply admitted at 23:59:55, waiting on a held source save,
-     * stamped the next day's id onto a source that belongs to this one.
-     *
-     * Precedence is the most recently ADMITTED source target of this draft
-     * first, then the saved id, then today's id as of admission. The saved id
-     * cannot lead: when a later turn's save is still in flight and an earlier
-     * one resolves, `sessionDocId` holds the earlier, in-progress document —
-     * whose findings are empty — while the findings being applied belong to the
-     * completed source the pending save is writing. The saved id stays the
-     * separate award-eligibility and dedup input above.
+     * The evidence ref's `sourceId` stays the DAILY id, unchanged, for every
+     * existing reader — taken from the receipt, so it is the id the save
+     * actually committed rather than a fallback computed after the snapshot I/O
+     * (which is how an Apply admitted at 23:59:55 once stamped the next day's
+     * id). The finalization id below is what disambiguates two attempts on it.
      */
-    const applySourceId = sourceTargetRef.current ?? applySessionDocId ?? defaultSessionDocId()
+    const applySourceId = receipt.sessionDocId
+    /** The exact winner this Apply is evidence of (UX-492). */
+    const applyFinalizedSourceId = receipt.sourceId
 
     try {
       const snapshotRef = doc(skillSnapshotsCollection(familyId), childId)
@@ -1052,10 +1263,19 @@ function EvaluateDraft({
       // FEAT-76: project the guided eval onto the learner-model frontier — the
       // calibrated (up OR down) write, alongside the snapshot write above.
       // Fire-and-forget, guarded model-exists inside the writer; never blocks apply.
-      // `applySourceId` keeps the fallback a first-turn/slow-network Apply needs
-      // (so it isn't skipped) while fixing WHEN the fallback is computed.
-      void syncEvalFindingsToModel(familyId, childId, applySourceId, applyFindings, now)
-        .catch((err) => console.warn('[eval] learner-model write-back failed', err))
+      // UX-492: both ids come from the acknowledged receipt — the daily
+      // `applySourceId` the existing readers key on, plus the finalization id
+      // that identifies WHICH of the day's completed attempts this evidence is.
+      // There is no fallback left to compute: an Apply with no receipt was never
+      // admitted.
+      void syncEvalFindingsToModel(
+        familyId,
+        childId,
+        applySourceId,
+        applyFindings,
+        now,
+        applyFinalizedSourceId,
+      ).catch((err) => console.warn('[eval] learner-model write-back failed', err))
 
       // Award XP for completing an evaluation (once per evaluation session)
       if (applySessionDocId) {
@@ -1087,10 +1307,8 @@ function EvaluateDraft({
     findings,
     recommendations,
     completeData,
-    sessionDocId,
     conceptualBlocks,
     domain,
-    defaultSessionDocId,
     isLive,
   ])
 
@@ -1099,6 +1317,9 @@ function EvaluateDraft({
   // re-write the snapshot + learner model.
   const handleApplyClick = useCallback(() => {
     if (!isLive()) return
+    // The same gate as the write itself, so a pending or rejected finalization
+    // cannot even open the re-apply confirmation (UX-492).
+    if (!finalReceiptRef.current) return
     if (hasAppliedThisSession) {
       setReapplyDialogOpen(true)
     } else {
@@ -1497,9 +1718,53 @@ function EvaluateDraft({
                 </Alert>
               )}
 
+              {/* UX-492 — how the finalization of THIS completed evaluation
+                  stands. The summary above and the download below stay on
+                  screen whatever it says; what waits on it is Apply. Local,
+                  announced feedback, with the retry an ordinary full-width
+                  phone-friendly button. */}
+              {finalSaveStatus === 'saving' && (
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  role="status"
+                  sx={{ display: 'block', mt: 2 }}
+                >
+                  Saving the completed evaluation…
+                </Typography>
+              )}
+              {finalSaveStatus === 'failed' && (
+                <Alert
+                  severity="warning"
+                  role="status"
+                  sx={{ mt: 2 }}
+                  action={
+                    <Button color="inherit" size="small" onClick={handleRetryFinalSave}>
+                      Retry save
+                    </Button>
+                  }
+                >
+                  This evaluation didn't save, so it can't be applied yet. Your summary and
+                  report are still here — retry the save to apply it.
+                </Alert>
+              )}
+              {finalSaveStatus === 'conflict' && (
+                <Alert severity="warning" role="status" sx={{ mt: 2 }}>
+                  We couldn't confirm this evaluation was saved, so it can't be applied. Your
+                  summary and report are still here — download the report and run the
+                  assessment again when you're ready.
+                </Alert>
+              )}
+
               {/* Action buttons */}
               <Stack direction="row" spacing={1} sx={{ mt: 2 }} flexWrap="wrap" useFlexGap>
-                <Button variant="contained" onClick={handleApplyClick}>
+                <Button
+                  variant="contained"
+                  onClick={handleApplyClick}
+                  // Nothing may be applied until the finalization this Apply
+                  // would point at is acknowledged (UX-492).
+                  disabled={finalSaveStatus !== 'saved'}
+                >
                   {hasAppliedThisSession ? 'Re-apply to Skill Snapshot' : 'Apply to Skill Snapshot'}
                 </Button>
                 <Button

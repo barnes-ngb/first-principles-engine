@@ -83,21 +83,52 @@ const getDocs = vi.fn<(...args: unknown[]) => Promise<{ docs: never[] }>>(() =>
   Promise.resolve({ docs: [] }),
 )
 
+/**
+ * UX-492 — a completing turn now writes the day record and its finalized source
+ * in ONE transaction, so the fake `doc` mints an auto-id when it is called
+ * without one (that is how the finalization id is captured) and `runTransaction`
+ * routes its `set` calls to the same `setDoc` spy these assertions already read.
+ * `sessionWrites()` below therefore still means "what this render wrote to
+ * `evaluationSessions`", through either path.
+ */
+let autoId = 0
+
 vi.mock('firebase/firestore', () => ({
   addDoc: (...args: unknown[]) => addDoc(...args),
   setDoc: (...args: unknown[]) => setDoc(...args),
   updateDoc: (...args: unknown[]) => updateDoc(...args),
-  doc: (collection: { name: string }, id: string) => ({ collection: collection.name, id }),
+  doc: (collection: { name: string }, id?: string) => ({
+    collection: collection.name,
+    id: id ?? `auto_${(autoId += 1)}`,
+  }),
   getDoc: vi.fn(() => Promise.resolve({ exists: () => false, data: () => ({}) })),
   getDocs: (...args: unknown[]) => getDocs(...args),
   query: (...args: unknown[]) => args,
   where: (...args: unknown[]) => args,
   orderBy: (...args: unknown[]) => args,
+  runTransaction: async (
+    _db: unknown,
+    fn: (tx: {
+      get: (ref: unknown) => Promise<{ exists: () => boolean; data: () => unknown }>
+      set: (ref: unknown, data: unknown) => void
+    }) => unknown,
+  ) => {
+    const writes: unknown[] = []
+    const out = await fn({
+      get: async () => ({ exists: () => false, data: () => undefined }),
+      set: (ref: unknown, data: unknown) => {
+        writes.push(setDoc(ref, data))
+      },
+    })
+    await Promise.all(writes)
+    return out
+  },
 }))
 
 vi.mock('../../core/firebase/firestore', () => ({
   db: {},
   evaluationSessionsCollection: () => ({ name: 'evaluationSessions' }),
+  guidedEvaluationSourcesCollection: () => ({ name: 'guidedEvaluationSources' }),
   hoursCollection: () => ({ name: 'hours' }),
   skillSnapshotsCollection: () => ({ name: 'skillSnapshots' }),
 }))
@@ -133,7 +164,14 @@ const OPENING_TURN = { message: 'Show Lincoln these words: hop, mop, dog.' }
 function sessionWrites() {
   return setDoc.mock.calls.filter(
     (call) => (call[0] as { collection?: string })?.collection === 'evaluationSessions',
-  ) as unknown as Array<[{ id: string }, { childId: string }]>
+  ) as unknown as Array<[{ id: string }, { childId: string; finalizedSourceId?: string }]>
+}
+
+/** Every finalized-source write this render performed (UX-492). */
+function sourceWrites() {
+  return setDoc.mock.calls.filter(
+    (call) => (call[0] as { collection?: string })?.collection === 'guidedEvaluationSources',
+  ) as unknown as Array<[{ id: string }, { childId: string; sessionDocId: string }]>
 }
 
 beforeEach(() => {
@@ -165,6 +203,15 @@ describe('EvaluateChatPage — an evaluation turn belongs to its own visit (UX-4
     expect(writes).toHaveLength(1)
     expect(writes[0][1].childId).toBe('lincoln')
     expect(writes[0][0].id).toMatch(/^lincoln_reading_/)
+
+    // UX-492 — the same commit wrote this finalization's OWN source document,
+    // under a fresh id, and the (unchanged, day-based) record names it. That
+    // pointer is what tells this completed version from a later same-day one.
+    const sources = sourceWrites()
+    expect(sources).toHaveLength(1)
+    expect(sources[0][1].childId).toBe('lincoln')
+    expect(sources[0][1].sessionDocId).toBe(writes[0][0].id)
+    expect(writes[0][1].finalizedSourceId).toBe(sources[0][0].id)
   })
 
   it('POSITIVE CONTROL — a completion released after a switch writes nothing and shows nothing', async () => {
