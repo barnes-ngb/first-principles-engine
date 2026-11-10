@@ -73,12 +73,18 @@ import {
   computeFocusConfirmations,
   computeMovedFeed,
   countByState,
+  evidenceDrawerTitle,
   evidenceSourceLine,
+  FOCUS_EVIDENCE_LABEL,
+  FOCUS_EVIDENCE_UNAVAILABLE,
   groupTerrainByDomain,
+  savedSuggestionStale,
   scrubDisplayJargon,
   selectTerrainConcept,
   STATE_LABEL,
   STATE_META,
+  SYNTHESIS_STALE_NOTICE,
+  type EvidenceEntryMode,
   type TerrainConcept,
 } from './foundationsView'
 
@@ -114,6 +120,12 @@ interface DrawerScope {
   profile: UserProfile | null
   canEdit: boolean
   conceptId: string
+  /**
+   * Which entrance this opening came through — captured with the rest of the
+   * scope, so a read-only open can never acquire correction controls from a
+   * later render, and the editor is simply not mounted behind it.
+   */
+  mode: EvidenceEntryMode
 }
 
 /** A refusal signal for one lifetime: clear its staged confirmation. */
@@ -357,12 +369,16 @@ export default function FoundationsTab() {
     [scope, scopedConcept, canEdit, profile, familyId, activeChildId, model],
   )
 
-  /** Open the drawer for one concept, capturing the scope it was tapped in. */
-  const handleOpenConcept = useCallback(
-    (concept: TerrainConcept) => {
+  /** Open the drawer for one concept id, capturing the scope it was tapped in. */
+  const openDrawer = useCallback(
+    (conceptId: string, mode: EvidenceEntryMode) => {
       // A settled model for this very child, or there is nothing to open on.
       if (!familyId || !activeChildId || loading || !model) return
       if (model.childId !== activeChildId) return
+      // The focus entrance is a parent surface (ARCH-41/42/43 — the capability,
+      // never a name). Checked here as well as at the control, and the captured
+      // `canEdit` keeps it checked for the whole lifetime.
+      if (mode === 'focus' && !canEdit) return
       lifetimeRef.current += 1
       // No write here: the layout effect commits this opening's lifetime once
       // the scope it captured has actually rendered and still resolves.
@@ -373,13 +389,31 @@ export default function FoundationsTab() {
         childName,
         profile,
         canEdit,
-        conceptId: concept.conceptId,
+        conceptId,
+        mode,
       })
       setSaveError(null)
       setSavedNotice(null)
       setLostNotice(null)
     },
     [familyId, activeChildId, childName, profile, canEdit, loading, model],
+  )
+
+  const handleOpenConcept = useCallback(
+    (concept: TerrainConcept) => openDrawer(concept.conceptId, 'terrain'),
+    [openDrawer],
+  )
+
+  /**
+   * The focus section's door. It carries the **exact stored `conceptId`** of the
+   * suggestion, never its denormalized `kidName` — the drawer then re-resolves
+   * that id against the live model every render, so the inspected concept stays
+   * put when a re-synthesis moves the focus underneath, and the evidence it
+   * shows keeps refreshing.
+   */
+  const handleOpenFocusEvidence = useCallback(
+    (conceptId: string) => openDrawer(conceptId, 'focus'),
+    [openDrawer],
   )
 
   /** The parent closed it. Nothing is lost that was not theirs to close. */
@@ -469,7 +503,9 @@ export default function FoundationsTab() {
         <FoundationsBody
           model={model}
           childName={childName}
+          canEdit={canEdit}
           onOpenConcept={handleOpenConcept}
+          onOpenFocusEvidence={handleOpenFocusEvidence}
         />
       )}
 
@@ -530,11 +566,15 @@ function EmptyFoundations({
 function FoundationsBody({
   model,
   childName,
+  canEdit,
   onOpenConcept,
+  onOpenFocusEvidence,
 }: {
   model: LearnerModel
   childName: string
+  canEdit: boolean
   onOpenConcept: (c: TerrainConcept) => void
+  onOpenFocusEvidence: (conceptId: string) => void
 }) {
   const moves = useMemo(
     () => model.synthesis?.whatMattersNext ?? [],
@@ -558,6 +598,19 @@ function FoundationsBody({
     [model.changeFeed],
   )
   const questAsks = model.openQuestions.filter((q) => q.routedTo === 'quest')
+  /**
+   * The suggestion the focus section names, resolved by its **exact stored id**
+   * against the live model — the same pairing the terrain chips are built from.
+   * Null when the model has no entry under that id (or the graph cannot name
+   * it), which is said out loud below instead of offering a door to nothing.
+   */
+  const focusConceptId = moves[0]?.conceptId
+  const focusConcept = useMemo(
+    () => (focusConceptId ? selectTerrainConcept(model, focusConceptId) : null),
+    [model, focusConceptId],
+  )
+  /** Truthy marker only — see `savedSuggestionStale`. No date comparison. */
+  const stale = savedSuggestionStale(model)
 
   return (
     <Stack spacing={2} sx={{ mt: 2 }}>
@@ -571,6 +624,42 @@ function FoundationsBody({
             <Typography variant="body2" color="text.secondary">
               {scrubDisplayJargon(moves[0].why)}
             </Typography>
+            {/* The stored prose is behind the recorded states. Said next to the
+                prose it qualifies — and again beside the full list below — so
+                neither copy of the suggestion reads as current on its own. */}
+            {stale && (
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                {SYNTHESIS_STALE_NOTICE}
+              </Typography>
+            )}
+            {/* The read-only door to what is actually recorded for this concept
+                right now — the honest answer to a suggestion that may be stale.
+                Parent-only: a kid profile reads the terrain and nothing more. */}
+            {canEdit &&
+              (focusConcept ? (
+                <Button
+                  variant="outlined"
+                  size="small"
+                  onClick={() => onOpenFocusEvidence(focusConcept.conceptId)}
+                  sx={{
+                    mt: 1,
+                    textTransform: 'none',
+                    // Touchable and fully inside a 320 CSS px column.
+                    minHeight: 44,
+                    maxWidth: '100%',
+                  }}
+                >
+                  {FOCUS_EVIDENCE_LABEL}
+                </Button>
+              ) : (
+                <Typography
+                  variant="body2"
+                  color="text.secondary"
+                  sx={{ mt: 1, fontStyle: 'italic' }}
+                >
+                  {FOCUS_EVIDENCE_UNAVAILABLE}
+                </Typography>
+              ))}
           </Box>
         ) : (
           <Typography variant="body2" color="text.secondary">
@@ -643,6 +732,13 @@ function FoundationsBody({
       {/* 3 — What matters next (full 1–3 moves). */}
       {moves.length > 0 && (
         <SectionCard title="What matters next">
+          {/* Same saved prose, same qualification — a parent who scrolls past
+              the focus card must not meet an unqualified copy of it. */}
+          {stale && (
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+              {SYNTHESIS_STALE_NOTICE}
+            </Typography>
+          )}
           <List dense disablePadding>
             {moves.map((m, i) => (
               <ListItem key={`${m.conceptId}_${i}`} disableGutters alignItems="flex-start">
@@ -781,8 +877,23 @@ function ConceptEvidenceDrawer({
   saving: boolean
   error: string | null
 }) {
+  const open = Boolean(scope && concept)
   return (
-    <Drawer anchor="bottom" open={Boolean(scope && concept)} onClose={onClose}>
+    <Drawer
+      anchor="bottom"
+      open={open}
+      onClose={onClose}
+      // The sheet is named for what it shows and which concept, so it is never
+      // an unnamed frame. Only ever named while it holds a resolved concept —
+      // the frame cannot outlive the thing it was named for.
+      slotProps={{
+        paper: {
+          role: 'dialog',
+          'aria-label':
+            scope && concept ? evidenceDrawerTitle(concept.kidName, scope.mode) : undefined,
+        },
+      }}
+    >
       {/* Keyed on the lifetime, so one opening's note and staged choice can
           never be inherited by the next — including an A → B → A return, which
           is a new opening and starts empty. */}
@@ -792,6 +903,7 @@ function ConceptEvidenceDrawer({
           scope={scope}
           concept={concept}
           staleSignal={staleSignal}
+          onClose={onClose}
           onConfirm={onConfirm}
           saving={saving}
           error={error}
@@ -814,6 +926,7 @@ function ConceptDrawerBody({
   scope,
   concept,
   staleSignal,
+  onClose,
   onConfirm,
   saving,
   error,
@@ -821,12 +934,18 @@ function ConceptDrawerBody({
   scope: DrawerScope
   concept: TerrainConcept
   staleSignal: StaleSignal
+  onClose: () => void
   onConfirm: (decision: StagedDecision, action: FoundationsReviewAction) => void
   saving: boolean
   error: string | null
 }) {
-  /** Parent capability (never a child's name) — kids see the evidence, not the write. */
-  const canOverride = scope.canEdit
+  /**
+   * Parent capability (never a child's name) — kids see the evidence, not the
+   * write — **and** the entrance it was opened through: the focus door is a
+   * read-only look at what is recorded, so no correction control renders and no
+   * editor or staged decision is mounted behind it at all.
+   */
+  const canOverride = scope.canEdit && scope.mode === 'terrain'
   /** The name captured at open, so every line in here is about one child. */
   const childName = scope.childName
   const [note, setNote] = useState('')
@@ -906,7 +1025,26 @@ function ConceptDrawerBody({
 
   return (
     <Box sx={{ p: 2, maxWidth: 640, mx: 'auto', width: '100%' }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+      {/* Which child this is about, kept in view — the focus door opens from a
+          card that does not repeat the name, and nothing below it would. */}
+      {scope.mode === 'focus' && (
+        <Typography
+          variant="overline"
+          color="text.secondary"
+          sx={{ fontWeight: 700, display: 'block' }}
+        >
+          Current evidence · {childName}
+        </Typography>
+      )}
+      <Box
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: 1,
+          mb: 0.5,
+        }}
+      >
         <Typography variant="h6" sx={{ fontWeight: 700 }}>
           {concept.kidName}
         </Typography>
@@ -916,6 +1054,15 @@ function ConceptDrawerBody({
           sx={{ color: stateColor(concept.entry.state), fontWeight: 700 }}
           variant="outlined"
         />
+        {/* A way out that does not depend on finding the backdrop or knowing
+            Escape. MUI's modal returns focus to whatever opened the sheet. */}
+        <Button
+          size="small"
+          onClick={onClose}
+          sx={{ ml: 'auto', textTransform: 'none', minHeight: 44 }}
+        >
+          Close
+        </Button>
       </Box>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
         {concept.parentDescription}

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
@@ -89,9 +89,15 @@ import FoundationsTab from './FoundationsTab'
 import {
   conceptDecisionBasis,
   DECISION_STALE_NOTICE,
+  RECONCILE_NOTICE,
   ReviewActionBasisError,
   SCOPE_LOST_NOTICE,
 } from './conceptOverride'
+import {
+  FOCUS_EVIDENCE_LABEL,
+  FOCUS_EVIDENCE_UNAVAILABLE,
+  SYNTHESIS_STALE_NOTICE,
+} from './foundationsView'
 
 const CVC = 'reading.phonics.cvc'
 const BLENDS = 'reading.phonics.blends'
@@ -980,5 +986,213 @@ describe('FoundationsTab — a staged decision is bound to the evidence it descr
     expect(screen.queryByRole('button', { name: 'Confirm' })).not.toBeInTheDocument()
     expect(screen.getByText(DECISION_STALE_NOTICE)).toBeInTheDocument()
     expect(mockApplyAndWrite).not.toHaveBeenCalled()
+  })
+})
+
+// ── The focus section's read-only door to the current evidence ────────────
+//
+// `fullModel()`'s saved focus is LONG, carrying the DENORMALIZED kid name
+// "Long vowel words" on the move. The graph names that node "Read long-vowel
+// words", so every assertion below also proves the door resolved the stored
+// `conceptId` rather than matching on a display name.
+
+/** The graph's own name for the saved focus concept, and for a sibling. */
+const LONG_NAME = 'Read long-vowel words'
+const BLENDS_NAME = 'Blend two sounds together'
+
+/** The saved focus, with something real recorded against it. */
+function focusModel(): LearnerModel {
+  const m = fullModel()
+  m.conceptStates[LONG] = {
+    state: 'frontier',
+    evidence: [
+      {
+        kind: 'eval',
+        sourceId: 'sess-4',
+        note: 'Guided eval — read cake and bike with a hand on the silent e',
+        observedAt: '2026-07-18T00:00:00.000Z',
+        readState: 'frontier',
+      },
+    ],
+  }
+  return m
+}
+
+const openFocusEvidence = async (user: ReturnType<typeof userEvent.setup>) =>
+  user.click(screen.getByRole('button', { name: FOCUS_EVIDENCE_LABEL }))
+
+/** The sheet, by the accessible name it is given for the focus entrance. */
+const focusSheet = (kidName = LONG_NAME) =>
+  screen.getByRole('dialog', { name: `Current evidence — ${kidName}` })
+
+describe('FoundationsTab — “See current evidence” on the focus (read-only)', () => {
+  beforeEach(() => {
+    mockApplyAndWrite.mockReset()
+    mockApplyAndWrite.mockResolvedValue({} as LearnerModel)
+    mockUseLearnerModel.mockReturnValue({ loading: false, model: focusModel() })
+  })
+
+  it('opens the exact saved concept id, names the child, and shows what is recorded', async () => {
+    const user = userEvent.setup()
+    render(<FoundationsTab />)
+    await openFocusEvidence(user)
+
+    const sheet = focusSheet()
+    // The child and the concept, by the graph's name — not the move's.
+    expect(within(sheet).getByText(/Lincoln/)).toBeInTheDocument()
+    expect(within(sheet).getByText(LONG_NAME)).toBeInTheDocument()
+    // The state as recorded now, with the evidence's source and date.
+    expect(within(sheet).getByText('Frontier')).toBeInTheDocument()
+    expect(
+      within(sheet).getByText('From an evaluation · 2026-07-18'),
+    ).toBeInTheDocument()
+    // The source label, never the raw seeded note behind it.
+    expect(sheet.textContent ?? '').not.toContain('Guided eval')
+    // No sibling, and no second frame.
+    expect(within(sheet).queryByText(CVC_NAME)).not.toBeInTheDocument()
+    expect(within(sheet).queryByText(BLENDS_NAME)).not.toBeInTheDocument()
+    expect(screen.getAllByRole('dialog')).toHaveLength(1)
+    // Opening evidence is a read: nothing was written.
+    expect(mockApplyAndWrite).not.toHaveBeenCalled()
+  })
+
+  it('exposes no correction controls, and closes with focus returned to the button', async () => {
+    // Flagged for a disagreement — the notice still reads, its two ways out do not.
+    const flagged = focusModel()
+    flagged.conceptStates[LONG] = {
+      ...flaggedCvc(),
+      state: 'frontier',
+    }
+    mockUseLearnerModel.mockReturnValue({ loading: false, model: flagged })
+    const user = userEvent.setup()
+    render(<FoundationsTab />)
+    const opener = screen.getByRole('button', { name: FOCUS_EVIDENCE_LABEL })
+    await user.click(opener)
+
+    const sheet = focusSheet()
+    expect(within(sheet).getByText(RECONCILE_NOTICE)).toBeInTheDocument()
+    expect(within(sheet).getByText('Evidence')).toBeInTheDocument()
+    expect(screen.queryByLabelText(/What did you see/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Record what you’ve seen/)).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Lincoln has this solid' }),
+    ).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Keep my word' })).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Take the model’s read' }),
+    ).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Confirm' })).not.toBeInTheDocument()
+
+    // A reachable way out, and the keyboard lands back where it started.
+    await user.click(within(sheet).getByRole('button', { name: 'Close' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    await waitFor(() => expect(opener).toHaveFocus())
+    expect(mockApplyAndWrite).not.toHaveBeenCalled()
+  })
+
+  it('offers the door to a parent only — a kid profile keeps the terrain alone', () => {
+    mockCanEdit.mockReturnValue(false)
+    render(<FoundationsTab />)
+    expect(
+      screen.queryByRole('button', { name: FOCUS_EVIDENCE_LABEL }),
+    ).not.toBeInTheDocument()
+    expect(screen.queryByText(FOCUS_EVIDENCE_UNAVAILABLE)).not.toBeInTheDocument()
+    // Reading the terrain is untouched.
+    expect(screen.getByText(CVC_NAME)).toBeInTheDocument()
+  })
+
+  it('keeps the opened concept when the saved focus moves, and keeps its evidence live', async () => {
+    const user = userEvent.setup()
+    const { rerender } = render(<FoundationsTab />)
+    await openFocusEvidence(user)
+    expect(focusSheet()).toBeInTheDocument()
+
+    // A re-synthesis points the focus somewhere else, and LONG gains a ref.
+    const moved = focusModel()
+    if (moved.synthesis) {
+      moved.synthesis.whatMattersNext = [
+        {
+          conceptId: BLENDS,
+          kidName: 'Blends',
+          why: 'Blends are the next unlock.',
+          suggestedVehicle: 'quest',
+        },
+      ]
+    }
+    moved.conceptStates[LONG].evidence = [
+      ...moved.conceptStates[LONG].evidence,
+      {
+        kind: 'attestation',
+        sourceId: 'reviewChat',
+        note: 'He read the silent-e page to me',
+        observedAt: '2026-07-25T00:00:00.000Z',
+        overriddenBy: 'parent',
+      },
+    ]
+    mockUseLearnerModel.mockReturnValue({ loading: false, model: moved })
+    rerender(<FoundationsTab />)
+
+    // Same concept, no sibling swap — and the evidence refreshed under it.
+    const sheet = focusSheet()
+    expect(within(sheet).getByText(LONG_NAME)).toBeInTheDocument()
+    expect(within(sheet).getByText('You confirmed this · 2026-07-25')).toBeInTheDocument()
+    expect(within(sheet).queryByText(BLENDS_NAME)).not.toBeInTheDocument()
+  })
+
+  it('shows the honest empty state for a known concept with nothing recorded', async () => {
+    const bare = focusModel()
+    bare.conceptStates[LONG] = { state: 'not-yet', evidence: [] }
+    mockUseLearnerModel.mockReturnValue({ loading: false, model: bare })
+    const user = userEvent.setup()
+    render(<FoundationsTab />)
+    await openFocusEvidence(user)
+
+    expect(within(focusSheet()).getByText('No evidence captured yet.')).toBeInTheDocument()
+  })
+
+  it('explains instead of offering a dead button when the saved concept is unresolvable', () => {
+    const orphan = focusModel()
+    delete orphan.conceptStates[LONG]
+    mockUseLearnerModel.mockReturnValue({ loading: false, model: orphan })
+    render(<FoundationsTab />)
+
+    expect(
+      screen.queryByRole('button', { name: FOCUS_EVIDENCE_LABEL }),
+    ).not.toBeInTheDocument()
+    expect(screen.getByText(FOCUS_EVIDENCE_UNAVAILABLE)).toBeInTheDocument()
+    // The suggestion itself still reads.
+    expect(screen.getAllByText(/Long vowel words/).length).toBeGreaterThan(0)
+  })
+
+  it('warns on the stale marker wherever the saved suggestion reads, and not otherwise', () => {
+    mockUseLearnerModel.mockReturnValue({
+      loading: false,
+      model: { ...focusModel(), synthesisStaleAt: '2026-07-20T00:00:00.000Z' },
+    })
+    const { rerender, unmount } = render(<FoundationsTab />)
+    // Both places the stored prose appears carry the qualification.
+    expect(screen.getAllByText(SYNTHESIS_STALE_NOTICE)).toHaveLength(2)
+
+    // A marker that reads OLDER than the synthesis is still a stale marker —
+    // truthiness is the signal, never a date comparison.
+    mockUseLearnerModel.mockReturnValue({
+      loading: false,
+      model: { ...focusModel(), synthesisStaleAt: '2026-01-01T00:00:00.000Z' },
+    })
+    rerender(<FoundationsTab />)
+    expect(screen.getAllByText(SYNTHESIS_STALE_NOTICE).length).toBeGreaterThan(0)
+
+    // Null (the beat cleared it) and absent both claim nothing.
+    mockUseLearnerModel.mockReturnValue({
+      loading: false,
+      model: { ...focusModel(), synthesisStaleAt: null },
+    })
+    rerender(<FoundationsTab />)
+    expect(screen.queryByText(SYNTHESIS_STALE_NOTICE)).not.toBeInTheDocument()
+    unmount()
+
+    mockUseLearnerModel.mockReturnValue({ loading: false, model: focusModel() })
+    render(<FoundationsTab />)
+    expect(screen.queryByText(SYNTHESIS_STALE_NOTICE)).not.toBeInTheDocument()
   })
 })
