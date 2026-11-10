@@ -94,6 +94,7 @@ const noop = () => {}
 
 function renderInvitation(
   props: Partial<{
+    identityEpoch: number
     focusGeneration: number
     onFocusServed: (generation: number, landed: boolean) => void
     onOffer: (invitation: unknown, observedEpoch: number) => void
@@ -103,6 +104,8 @@ function renderInvitation(
     <StonebridgeMineInvitation
       familyId="fam-1"
       childId="lincoln"
+      // The live epoch by default: the committed render agrees with the store.
+      identityEpoch={props.identityEpoch ?? getLibraryIdentityEpoch()}
       focusGeneration={props.focusGeneration ?? 0}
       onFocusServed={props.onFocusServed ?? noop}
       onOffer={props.onOffer ?? noop}
@@ -178,6 +181,23 @@ describe('the tap', () => {
     // The component has no writer and no session: the host owns the trip.
     expect(onOffer).toHaveBeenCalledTimes(1)
   })
+
+  it('is REFUSED when the identity moved after the render it came from', () => {
+    // The `A → B → A` shape: the committed epoch is behind the store's, which a
+    // handler that sampled the store inside itself could never have noticed.
+    const onOffer = vi.fn()
+    renderInvitation({ identityEpoch: getLibraryIdentityEpoch() - 1, onOffer })
+    fireEvent.click(screen.getByRole('button', { name: MINE_READING_DIG_LABEL }))
+    expect(onOffer).not.toHaveBeenCalled()
+  })
+
+  it('and hands over the epoch it was RENDERED with, never a fresh reading', () => {
+    const onOffer = vi.fn()
+    const committed = getLibraryIdentityEpoch()
+    renderInvitation({ identityEpoch: committed, onOffer })
+    fireEvent.click(screen.getByRole('button', { name: MINE_READING_DIG_LABEL }))
+    expect(onOffer.mock.calls[0][1]).toBe(committed)
+  })
 })
 
 describe('the focus a return is owed', () => {
@@ -191,6 +211,7 @@ describe('the focus a return is owed', () => {
       <StonebridgeMineInvitation
         familyId="fam-1"
         childId="lincoln"
+        identityEpoch={getLibraryIdentityEpoch()}
         focusGeneration={7}
         onFocusServed={onFocusServed}
         onOffer={noop}
@@ -205,6 +226,13 @@ describe('the focus a return is owed', () => {
     const onFocusServed = vi.fn()
     renderInvitation({ focusGeneration: 9, onFocusServed })
     expect(onFocusServed).toHaveBeenCalledWith(9, false)
+  })
+
+  it('is not served at all when the identity moved under the commit', () => {
+    const onFocusServed = vi.fn()
+    renderInvitation({ identityEpoch: getLibraryIdentityEpoch() - 1, focusGeneration: 13, onFocusServed })
+    expect(onFocusServed).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: MINE_READING_DIG_LABEL })).not.toHaveFocus()
   })
 
   it('waits for the reads rather than falling back on an unsettled one', () => {

@@ -13,6 +13,7 @@ import { ErrorState } from '../../components/states'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { evaluationSessionsCollection } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
+import { useProfile } from '../../core/profile/useProfile'
 import { useChildSkillSnapshot } from '../../core/hooks/useChildSkillSnapshot'
 import type { EvaluationSession, SkillSnapshot } from '../../core/types'
 import { EvaluationDomain, SkillLevel } from '../../core/types/enums'
@@ -21,10 +22,12 @@ import MinecraftAvatar from '../avatar/MinecraftAvatar'
 import { MINE_RETURN_LABEL } from '../avatar/stonebridge/libraryReturnCopy'
 import {
   LibraryReturnDestination,
+  getLibraryIdentityEpoch,
   getLibraryReturnFlow,
   libraryReturnForDestination,
   libraryReturnPath,
   requestLibraryReturn,
+  subscribeLibraryIdentityEpoch,
   subscribeLibraryReturnFlow,
 } from '../avatar/stonebridge/libraryReturnFlow'
 import {
@@ -132,9 +135,12 @@ export default function KnowledgeMinePage() {
   const {
     activeChild,
     activeChildId,
+    childrenFamilyId,
+    isChildProfile,
     isLoading: childrenLoading,
     loadFailed: childrenLoadFailed,
   } = useActiveChild()
+  const { profile } = useProfile()
   const familyId = useFamilyId()
   const quest = useQuestSession()
   const xpLedger = useXpLedger(familyId, activeChildId ?? '')
@@ -223,24 +229,60 @@ export default function KnowledgeMinePage() {
    * child and a journey to the shelf all leave this null, and then this page is
    * exactly the page it has always been.
    *
-   * The identity has to be SETTLED, not merely present: `useChildren` keeps the
-   * previous answer's `activeChild` beside an unsettled or FAILED read, so the
-   * id alone would vouch for a child nobody can confirm. The shell's own
-   * readiness watch is what ENDS such a journey; this gate is what stops it
-   * being served in the frames before that lands.
+   * The identity has to be SETTLED, and it has to be THIS family's answer:
+   * `useChildren` keeps the previous answer's list and `activeChild` beside an
+   * unsettled, failed or newly-scoped read, so the id alone would vouch for a
+   * child nobody can confirm — or for one belonging to another family. The
+   * resolved object must also BE the resolved id. Fail-closed on all of it; the
+   * shell's own readiness watch is what ENDS such a journey, and this gate is
+   * what stops it being served in the frames before that lands.
+   *
+   * The epoch is subscribed rather than sampled for the same reason the town
+   * subscribes it: a raw same-tick `A → B → A` leaves family and child
+   * unchanged, and it is what keys the arrival suggestion's reads below.
    */
   const returnFlow = useSyncExternalStore(subscribeLibraryReturnFlow, getLibraryReturnFlow)
-  const mineTrip =
-    !childrenLoading && !childrenLoadFailed
-      ? libraryReturnForDestination(
-          returnFlow,
-          { familyId, childId: activeChildId ?? '' },
-          LibraryReturnDestination.Mine,
-        )
-      : null
+  const identityEpoch = useSyncExternalStore(
+    subscribeLibraryIdentityEpoch,
+    getLibraryIdentityEpoch,
+  )
+  const tripScopeTrusted =
+    !childrenLoading &&
+    !childrenLoadFailed &&
+    isChildProfile &&
+    profile !== null &&
+    Boolean(familyId) &&
+    childrenFamilyId === familyId &&
+    Boolean(activeChildId) &&
+    activeChild?.id === activeChildId
+  const mineTrip = tripScopeTrusted
+    ? libraryReturnForDestination(
+        returnFlow,
+        { familyId, childId: activeChildId },
+        LibraryReturnDestination.Mine,
+      )
+    : null
 
-  /** The ordinary Start, taken by the suggested mode's own card. */
-  const startMode = (config: QuestDomainConfig) => {
+  /**
+   * The ordinary Start, taken by the suggested mode's own card — and only by a
+   * tap that is still the trip it was drawn for.
+   *
+   * Keying the suggestion does not protect a handler already captured by a
+   * rendered card, which is how a role change to parent still started a real
+   * quest (and a real AI call). So the activation re-checks, against the store
+   * rather than against the closure: the identity epoch this page committed
+   * with, and a live Mine journey of this generation for this scope. Refused
+   * means nothing starts.
+   */
+  const startSuggestedMode = (config: QuestDomainConfig, generation: number) => {
+    if (!tripScopeTrusted) return
+    if (identityEpoch !== getLibraryIdentityEpoch()) return
+    const live = libraryReturnForDestination(
+      getLibraryReturnFlow(),
+      { familyId, childId: activeChildId },
+      LibraryReturnDestination.Mine,
+    )
+    if (!live || live.generation !== generation) return
     setActiveDomain(config)
     void quest.startQuest(config.domain, config.questMode)
   }
@@ -318,6 +360,12 @@ export default function KnowledgeMinePage() {
         >
           ← Back to mine
         </Button>
+        {/* The trip's way back, on the fluency SUMMARY only — this branch
+            returns before the general summary's copy of it. A fluency session
+            still in progress keeps only its own existing exit. */}
+        {mineTrip && quest.screen === QuestScreen.FluencySummary && (
+          <MineTripExit generation={mineTrip.generation} />
+        )}
         {ownerBanner}
         <FluencyPractice quest={quest} />
       </Page>
@@ -423,19 +471,21 @@ export default function KnowledgeMinePage() {
           )}
 
           {/* ── The village's suggestion, revalidated here (UX-493) ──
-              Mounted under the scope key so its two reads are destroyed by a
-              child change rather than carried into it, and rendered only when
-              THIS page's own fresh read still recommends the mode the village
-              offered. It is an offer with the mode's ordinary Start; the
-              sections below keep every calibrated choice, and the Resume card
-              above keeps its place. */}
+              Mounted under family, child, profile and the identity epoch, so a
+              child change, a role change and a raw same-tick A → B → A each
+              destroy its reads rather than carrying them, and rendered only
+              while THIS page's own read still recommends the mode the village
+              offered. It is an offer with the mode's ordinary Start, guarded at
+              activation; the sections below keep every calibrated choice, and
+              the Resume card above keeps its place. */}
           {mineTrip && (
             <MineTripSuggestion
-              key={`${familyId}_${activeChildId ?? ''}`}
+              key={`${familyId}_${activeChildId}|${profile}|${identityEpoch}`}
               familyId={familyId}
-              childId={activeChildId ?? ''}
+              childId={activeChildId}
               suggestion={mineTrip.suggestion}
-              onStart={startMode}
+              generation={mineTrip.generation}
+              onStart={startSuggestedMode}
             />
           )}
 
@@ -700,12 +750,15 @@ function MineTripSuggestion({
   familyId,
   childId,
   suggestion,
+  generation,
   onStart,
 }: {
   familyId: string
   childId: string
   suggestion: MineInvitation | null
-  onStart: (config: QuestDomainConfig) => void
+  /** The journey this card was drawn for — re-checked at activation. */
+  generation: number
+  onStart: (config: QuestDomainConfig, generation: number) => void
 }) {
   const { snapshot, loaded } = useChildSkillSnapshot(familyId, childId)
   const { model, loading } = useLearnerModel(familyId, childId)
@@ -743,7 +796,9 @@ function MineTripSuggestion({
         // no level, count or score in the offer.
         config={{ ...config, label: agreed.label, description: config.label }}
         suggested
-        onSelect={() => onStart(config)}
+        // The host re-checks the identity and the journey before starting; this
+        // render's own agreement is what says the mode is still the right one.
+        onSelect={() => onStart(config, generation)}
       />
     </Box>
   )

@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Typography from '@mui/material/Typography'
@@ -33,8 +33,11 @@ import { selectMineInvitation, type MineInvitation } from './mineInvitation'
  * the last document — so a surface that simply re-rendered on a child change
  * could offer the PREVIOUS child's next move, authorised by the previous child's
  * calibration, for one render against the new child's id. The host mounts this
- * with `key={`${familyId}_${childId}`}`, so a change destroys the reads instead
- * of carrying them, and there is no frame in which an answer outlives its scope.
+ * with a key made of family, child, profile and the identity EPOCH, so a change
+ * destroys the reads instead of carrying them, and there is no frame in which an
+ * answer outlives its scope. The epoch is in the key because a raw same-tick
+ * `A → B → A` leaves family and child unchanged while the store has counted two
+ * movements — the one case a scope string cannot see.
  *
  * It reads and offers; it never writes, never selects a child, never generates a
  * synthesis and never starts a session. The host owns the trip.
@@ -52,12 +55,19 @@ import { selectMineInvitation, type MineInvitation } from './mineInvitation'
 export default function StonebridgeMineInvitation({
   familyId,
   childId,
+  identityEpoch,
   focusGeneration,
   onFocusServed,
   onOffer,
 }: {
   familyId: string
   childId: string
+  /**
+   * The identity epoch this surface was RENDERED with — part of its key, and
+   * the only epoch its handlers may act on. A handler that sampled the store
+   * instead would always agree with it and so could never be refused.
+   */
+  identityEpoch: number
   /**
    * The generation of a Mine return waiting for its focus, or `0` for none.
    * The host has already checked the journey is this scope's and this entry's.
@@ -90,11 +100,31 @@ export default function StonebridgeMineInvitation({
       })
     : null
 
+  /**
+   * Is this render's identity still the live one, and is this mount still here?
+   *
+   * The fresh reading is used ONLY to refuse: the epoch this surface may act on
+   * is the one it was rendered with, and a disagreement means the identity moved
+   * after the render whose handler is now running. A retained handler from an
+   * unmounted tree is refused for the same reason.
+   */
+  const mounted = useRef(true)
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+    }
+  }, [])
+  const stillLive = () => mounted.current && identityEpoch === getLibraryIdentityEpoch()
+
   const actionRef = useRef<HTMLButtonElement | null>(null)
   const servedGeneration = useRef(0)
   useLayoutEffect(() => {
     if (!focusGeneration || !settled) return
     if (servedGeneration.current === focusGeneration) return
+    // The focus is a movement on screen: a return whose identity moved between
+    // this render and this commit is not served and nothing is focused.
+    if (identityEpoch !== getLibraryIdentityEpoch()) return
     servedGeneration.current = focusGeneration
     const action = actionRef.current
     // `isConnected`, as everywhere else in this feature: focusing a detached
@@ -102,7 +132,7 @@ export default function StonebridgeMineInvitation({
     const landed = Boolean(action?.isConnected)
     if (landed) action?.focus()
     onFocusServed(focusGeneration, landed)
-  }, [focusGeneration, settled, onFocusServed])
+  }, [focusGeneration, settled, identityEpoch, onFocusServed])
 
   if (!invitation) return null
 
@@ -137,12 +167,11 @@ export default function StonebridgeMineInvitation({
         variant="contained"
         color="warning"
         onClick={() => {
-          // Read HERE because here IS the tap: this is a plain control on the
-          // page with no view closing between the press and the navigation, so
-          // the epoch the journey is created against is the one the child's tap
-          // was made under. The host stamps the journey with it and never takes
-          // a fresh reading of its own.
-          onOffer(invitation, getLibraryIdentityEpoch())
+          // The epoch this render COMMITTED with, never a fresh sample: a
+          // retained handler whose identity has moved is refused here and
+          // again by the store, so no trip is created and no route changes.
+          if (!stillLive()) return
+          onOffer(invitation, identityEpoch)
         }}
         sx={{
           minHeight: 44,
