@@ -11,9 +11,31 @@ import { useFamilyId } from '../../core/auth/useAuth'
 import { activityConfigsCollection, daysCollection, db, evaluationSessionsCollection, hoursCollection, learnerModelsCollection, sightWordProgressCollection, skillSnapshotsCollection } from '../../core/firebase/firestore'
 import { dayLogDocId } from '../today/daylog.model'
 import { updateDayLogGuarded } from '../today/dayWriteGuard'
-import { selectQuestTargets } from '../../core/foundations/questTargeting'
-import type { QuestTargetConcept } from '../../core/foundations/questTargeting'
-import { syncQuestResultsToModel } from './questModelSync'
+import { captureQuestTargetPlan, parseQuestTargetPlan, selectQuestTargets } from '../../core/foundations/questTargeting'
+import type { QuestAskPlanRow, QuestTargetConcept } from '../../core/foundations/questTargeting'
+import {
+  projectQuestSourceToModel,
+  projectionReachedGraph,
+  type QuestProjectionOutcome,
+} from './questModelSync'
+import {
+  markQuestProjectionFailed,
+  markQuestSourceResumed,
+  questSourceRef,
+  saveFinalQuestSource,
+  saveResumableQuestSource,
+  type QuestSourcePayload,
+  type QuestSourceSaveOutcome,
+} from './questSourceWrites'
+import {
+  finalizedQuestSourcePayload,
+  isLiveRun,
+  mayRecoverQuestSource,
+  nextRunStamp,
+  questRunId as buildQuestRunId,
+  resumableQuestSourcePayload,
+  type QuestRun,
+} from './questRun'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
 import {
   questLeftItsChild,
@@ -432,9 +454,61 @@ export function useQuestSession() {
   const [previousSessions, setPreviousSessions] = useState<Array<{ evaluatedAt: string }>>([])
   const activeDomainRef = useRef<EvaluationDomain>('reading')
   const activeQuestModeRef = useRef<QuestMode | undefined>(undefined)
-  // FEAT-54 — preferred concepts the Foundations Review Chat queued for this
-  // session, pulled from the learner model at start (empty when nothing queued).
-  const targetConceptsRef = useRef<QuestTargetConcept[]>([])
+
+  /**
+   * UX-494 — THE RUN. Family, child, run id, domain, mode and selected plan, in
+   * one object, decided at start (or restored by Resume) and never mutated.
+   *
+   * The refs above still drive question GENERATION, which is what they are for.
+   * Nothing that finalizes a session reads them: `endSession` freezes this run
+   * before its first await and every write it makes resolves through the frozen
+   * copy, so a close that resumes after a newer session has started cannot take
+   * that session's id, mode, domain, child, targets, timer or reward keys.
+   */
+  const runRef = useRef<QuestRun | null>(null)
+  /**
+   * Runs whose close has been ADMITTED. Close happens at most once per run,
+   * whichever path reaches it — the adaptive end condition, a null provider
+   * response, a thrown AI call, or a time-out — and a run in this set also
+   * refuses `resetToIntro`'s partial save, because its answers are already on
+   * their way to a finalized record.
+   */
+  const closedRunsRef = useRef<Set<string>>(new Set())
+  /** Runs that have logged their instructional minutes. Per run, not per hook. */
+  const hoursLoggedRunsRef = useRef<Set<string>>(new Set())
+  /**
+   * A start/resume generation. A `startQuest` does several awaited reads before
+   * it can establish the run; without this, a second Start (or a Resume) landing
+   * in that window let the first one finish and overwrite the newer run's
+   * identity. Bumped by both doors; the loser returns having changed nothing.
+   */
+  const runGenerationRef = useRef(0)
+  /** Keeps two runs started in the same millisecond from sharing an id. */
+  const lastRunStampRef = useRef(0)
+
+  /**
+   * The final payload whose save has not been acknowledged, held in memory for
+   * the retry its own summary offers. Sufficient before the first ack, and
+   * deliberately NOT a new persistence store — an unsaved payload that outlives
+   * the tab is out of scope for this repair.
+   */
+  const pendingSourceRef = useRef<{ run: QuestRun; payload: QuestSourcePayload } | null>(null)
+
+  /** What the summary says about the SOURCE save (his answers). */
+  const [sourceSave, setSourceSave] = useState<{
+    state: 'idle' | 'saving' | 'saved' | 'failed' | 'conflict'
+    /** True only while a held payload can still be retried. */
+    canRetry: boolean
+  }>({ state: 'idle', canRetry: false })
+
+  /** What the summary says about the GRAPH projection — a separate success. */
+  const [graphSync, setGraphSync] = useState<{
+    state: 'idle' | 'pending' | 'running' | 'reached' | 'skipped' | 'failed'
+    outcome?: QuestProjectionOutcome
+    /** The saved source a retry would act on. */
+    sessionId?: string
+    childId?: string
+  }>({ state: 'idle' })
 
   // Fluency-specific state
   const [fluencyPassages, setFluencyPassages] = useState<FluencyPassage[]>([])
@@ -523,6 +597,13 @@ export function useQuestSession() {
     async (domain: EvaluationDomain, questMode?: QuestMode) => {
       if (!activeChildId || !activeChild) return
 
+      // UX-494 — claim this start. Everything below re-checks the claim before
+      // it establishes the run, so a Start raced by another Start or by a Resume
+      // finishes having changed nothing rather than half-overwriting the winner.
+      const generation = (runGenerationRef.current += 1)
+      const startingChildId = activeChildId
+      const startingChildName = activeChild.name
+
       activeQuestModeRef.current = questMode
 
       // Determine starting level via workingLevels fallback chain
@@ -546,15 +627,23 @@ export function useQuestSession() {
       // Read-only + best-effort — a missing/failed model just yields zero targets,
       // so the session generates exactly as it does today.
       let targetConcepts: QuestTargetConcept[] = []
+      // UX-494 — the exact queued ROWS those targets came from, captured in the
+      // same read. Carried on the session document so close can resolve the
+      // request it actually selected and nothing appended since.
+      let targetPlan: QuestAskPlanRow[] = []
       try {
-        const modelSnap = await getDoc(doc(learnerModelsCollection(familyId), activeChildId))
+        const modelSnap = await getDoc(doc(learnerModelsCollection(familyId), startingChildId))
         if (modelSnap.exists()) {
-          targetConcepts = selectQuestTargets(modelSnap.data(), { domain })
+          const model = modelSnap.data()
+          targetConcepts = selectQuestTargets(model, { domain })
+          targetPlan = captureQuestTargetPlan(
+            model,
+            targetConcepts.map((t) => t.conceptId),
+          )
         }
       } catch (err) {
         console.warn('[startQuest] Failed to load learner model for quest targets', err)
       }
-      targetConceptsRef.current = targetConcepts
 
       // Build curriculum hint from activity configs (reading domain only)
       if (domain === 'reading') {
@@ -615,6 +704,10 @@ export function useQuestSession() {
         }
       }
 
+      // The claim, re-checked after every awaited read above. A Start that lost
+      // the race stops here: it has written nothing and established nothing.
+      if (runGenerationRef.current !== generation) return
+
       const startLevel = computeStartLevel(snapshot, questMode, curriculumHint)
 
       const now = new Date().toISOString()
@@ -646,13 +739,31 @@ export function useQuestSession() {
       setCurrentPassageText('')
       conversationRef.current = []
       bonusRoundUsedRef.current = false
+      setSourceSave({ state: 'idle', canRetry: false })
+      setGraphSync({ state: 'idle' })
       // UX-339 — capture the owner in the same breath as the session identity.
       // From here every write in this session resolves through it, including
       // the per-answer diamonds banked while the quest is still running.
-      sessionOwnerRef.current = { childId: activeChildId, childName: activeChild.name }
+      sessionOwnerRef.current = { childId: startingChildId, childName: startingChildName }
       // Establish the session identity up front so per-answer reward banking has a
       // stable doc id to dedup against (endSession / resetToIntro reuse it).
-      sessionIdRef.current = `interactive_${activeChildId}_${Date.now()}`
+      const runStamp = nextRunStamp(lastRunStampRef.current, Date.now())
+      lastRunStampRef.current = runStamp
+      const newRunId = buildQuestRunId(startingChildId, runStamp)
+      sessionIdRef.current = newRunId
+      // UX-494 — and the frozen run, in the same breath. Every finalizing write
+      // resolves through this and never through the refs beside it.
+      runRef.current = {
+        runId: newRunId,
+        familyId,
+        childId: startingChildId,
+        childName: startingChildName,
+        domain,
+        questMode,
+        targetPlan,
+        targetConceptIds: targetConcepts.map((t) => t.conceptId),
+        startedAt: now,
+      }
       hoursLoggedRef.current = false
       // ── Spell-the-word: reset per-session bookkeeping + load the word bank ──
       // Only the reading/phonics surface mixes in spell-word (encoding lives in
@@ -708,11 +819,16 @@ export function useQuestSession() {
 
           const response = await chat({
             familyId,
-            childId: activeChildId,
+            childId: startingChildId,
             taskType: TaskType.Quest,
             messages: [fluencyMessage],
             domain,
           })
+
+          // A passage that arrives after another run has taken over belongs to
+          // nobody: it must not become the live question or clear the new run's
+          // loading screen.
+          if (runGenerationRef.current !== generation) return
 
           if (!response) {
             setStartQuestError('Failed to generate passage. Tap to try again!')
@@ -746,6 +862,7 @@ export function useQuestSession() {
 
           setScreen(QuestScreen.FluencyPassage)
         } catch (err) {
+          if (runGenerationRef.current !== generation) return
           const errMsg = err instanceof Error ? err.message : String(err)
           setStartQuestError(`Fluency failed: ${errMsg}`)
           setScreen(QuestScreen.Intro)
@@ -795,13 +912,14 @@ export function useQuestSession() {
       try {
         response = await chat({
           familyId,
-          childId: activeChildId,
+          childId: startingChildId,
           taskType: TaskType.Quest,
           messages: [userMessage],
           domain,
         })
       } catch (err) {
         clearTimeout(timeoutId)
+        if (runGenerationRef.current !== generation) return
         const errMsg = err instanceof Error ? err.message : String(err)
         console.error('[startQuest] AI call threw:', err)
         setStartQuestError(`Quest failed: ${errMsg}`)
@@ -811,6 +929,9 @@ export function useQuestSession() {
       }
 
       clearTimeout(timeoutId)
+
+      // The first question of a run nobody is on any more goes nowhere.
+      if (runGenerationRef.current !== generation) return
 
       if (!response || timedOut) {
         // aiError from useAI contains the real Cloud Function error
@@ -856,30 +977,171 @@ export function useQuestSession() {
   // mid-session progress is durable (partials count by construction), and again
   // as an idempotent backfill at endSession — the matching key guarantees a
   // diamond is never awarded twice across the two paths.
+  // UX-494 — it takes the RUN, not a loose id + domain, so the reward keys, the
+  // child and the domain cannot come from three different sessions. The amounts,
+  // the key shape and the per-correct rate are untouched.
   const bankAnswerReward = useCallback(
-    (sessionId: string, index: number, domain: EvaluationDomain) => {
-      if (!familyId || !activeChildId) return
+    (run: QuestRun, index: number) => {
+      if (!run.familyId || !run.childId) return
       // 1 diamond (spendable) — this is what fills the bag as it's mined.
       void addDiamondEvent({
-        familyId,
-        childId: activeChildId,
+        familyId: run.familyId,
+        childId: run.childId,
         amount: 1,
         type: DIAMOND_EVENTS.QUEST_COMPLETE,
-        reason: `Quest: ${domain} (correct answer)`,
-        dedupKey: perAnswerDiamondKey(sessionId, index),
+        reason: `Quest: ${run.domain} (correct answer)`,
+        dedupKey: perAnswerDiamondKey(run.runId, index),
       }).catch((err) => console.warn('Failed to bank quest diamond', err))
       // XP toward armor progression (kept identical per-correct rate).
       void addXpEvent(
-        familyId,
-        activeChildId,
+        run.familyId,
+        run.childId,
         'QUEST_DIAMOND',
         XP_PER_DIAMOND,
-        perAnswerXpKey(sessionId, index),
-        { domain },
+        perAnswerXpKey(run.runId, index),
+        { domain: run.domain },
       ).catch((err) => console.warn('Failed to bank quest diamond XP', err))
     },
-    [familyId, activeChildId],
+    [],
   )
+
+  // ── Graph projection (and its retry) ──────────────────────────
+  //
+  // One lane for both doors: the close that follows an acknowledged save, and
+  // the scoped retry a reload offers for a source whose projection failed. Both
+  // read the SAVED source, so the retry needs nothing from memory.
+  //
+  // `claim` is what keeps a delayed run out of a newer run's UI: the writes are
+  // the delayed run's business and happen either way, the screen is not.
+
+  const projectGraph = useCallback(
+    async (
+      target: { familyId: string; childId: string; sessionId: string; expectedRunId?: string },
+      claim: () => boolean = () => true,
+    ): Promise<QuestProjectionOutcome | 'failed'> => {
+      if (claim()) {
+        setGraphSync({
+          state: 'running',
+          sessionId: target.sessionId,
+          childId: target.childId,
+        })
+      }
+      const nowIso = new Date().toISOString()
+      try {
+        const outcome = await projectQuestSourceToModel({ ...target, nowIso })
+        if (claim()) {
+          setGraphSync({
+            state: projectionReachedGraph(outcome) ? 'reached' : 'skipped',
+            outcome,
+            sessionId: target.sessionId,
+            childId: target.childId,
+          })
+        }
+        return outcome
+      } catch (err) {
+        // The transaction rolled back, so nothing half-landed and the pending
+        // work is still pending. Record the failure against the source itself
+        // so a reload can offer the retry.
+        console.warn('[quest] Failed to project quest source onto learner model', err)
+        if (target.expectedRunId) {
+          await markQuestProjectionFailed(
+            questSourceRef(target.familyId, target.sessionId),
+            target.expectedRunId,
+            err instanceof Error ? err.message.slice(0, 120) : 'error',
+            nowIso,
+          ).catch((stampErr) =>
+            console.warn('[quest] Failed to record the projection failure', stampErr),
+          )
+        }
+        if (claim()) {
+          setGraphSync({
+            state: 'failed',
+            sessionId: target.sessionId,
+            childId: target.childId,
+          })
+        }
+        return 'failed'
+      }
+    },
+    [],
+  )
+
+  /**
+   * The scoped retry, bound to the current authorised family and the correct
+   * child. Used by the summary and by the Mine's recovery card; it repeats no
+   * completion side effect, because the only thing it does is the projection.
+   */
+  const retryGraphProjection = useCallback(
+    async (sessionId: string, childId: string, expectedRunId?: string) => {
+      if (
+        !mayRecoverQuestSource(familyId, children.map((c) => c.id), {
+          familyId: familyId ?? '',
+          childId,
+        })
+      ) {
+        return 'identity-mismatch' as const
+      }
+      return projectGraph({
+        familyId,
+        childId,
+        sessionId,
+        expectedRunId: expectedRunId ?? sessionId,
+      })
+    },
+    [familyId, children, projectGraph],
+  )
+
+  /**
+   * Retry the held final payload — the source retry its own summary offers.
+   *
+   * In memory, and deliberately so: before the first acknowledgement there is no
+   * saved document to recover from, and a new local store for unsaved answers is
+   * outside this repair. It writes the SAME payload under the SAME id, so a first
+   * attempt that actually committed and lost its acknowledgement is recognised
+   * rather than written twice, and it runs the graph projection afterwards —
+   * nothing else, so no completion side effect is repeated.
+   */
+  const retrySourceSave = useCallback(async () => {
+    const pending = pendingSourceRef.current
+    if (!pending) return 'nothing-pending' as const
+    const { run, payload } = pending
+    if (!mayRecoverQuestSource(familyId, children.map((c) => c.id), run)) {
+      return 'identity-mismatch' as const
+    }
+
+    setSourceSave({ state: 'saving', canRetry: false })
+    let outcome: QuestSourceSaveOutcome | 'failed'
+    try {
+      outcome = await saveFinalQuestSource(questSourceRef(run.familyId, run.runId), payload)
+    } catch (err) {
+      console.error('Failed to save quest session on retry', err)
+      outcome = 'failed'
+    }
+
+    if (outcome === 'saved' || outcome === 'already-committed') {
+      pendingSourceRef.current = null
+      setSessionSaved(true)
+      setSourceSave({ state: 'saved', canRetry: false })
+      if (payload.status === 'complete') {
+        await projectGraph({
+          familyId: run.familyId,
+          childId: run.childId,
+          sessionId: run.runId,
+          expectedRunId: run.runId,
+        })
+      } else {
+        setGraphSync({ state: 'skipped', sessionId: run.runId, childId: run.childId })
+      }
+      return outcome
+    }
+    if (outcome === 'conflict') {
+      pendingSourceRef.current = null
+      setSourceSave({ state: 'conflict', canRetry: false })
+      return outcome
+    }
+    setSourceSave({ state: 'failed', canRetry: true })
+    return outcome
+  }, [familyId, children, projectGraph])
 
   // ── End session ───────────────────────────────────────────────
 
@@ -889,6 +1151,30 @@ export function useQuestSession() {
       finalState: QuestState,
       timedOut: boolean,
     ) => {
+      // ── UX-494: freeze the run, and admit the close once ────
+      //
+      // Everything this function writes is decided HERE, before the first
+      // await, from one object. After the AI summary returns, the refs beside
+      // `runRef` may belong to a newer session (the owner's own reproduction:
+      // hold a Math summary, tap *Try another quest*, Start Phonics) — and this
+      // close must still finish Math's record under Math's own id and mode.
+      const run = runRef.current
+      if (!run) return
+      if (closedRunsRef.current.has(run.runId)) return
+      closedRunsRef.current.add(run.runId)
+      /** Is this still the session on screen? Guards UI, never the writes. */
+      const live = () => isLiveRun(runRef.current, run)
+      const docId = run.runId
+      /**
+       * This run's own active minutes, read WITHOUT stopping the shared timer.
+       * `useSessionTimer.startTimer` replaces its timer instance, so a newer
+       * session owns the live one: a delayed close calling `stop()` would read
+       * the newer run's seconds and kill its timer. The ordinary close is still
+       * the ordinary `stop()` below — byte-identical arithmetic — and only a
+       * superseded close falls back to this reading.
+       */
+      const frozenActiveSeconds = sessionTimer.getCurrentSeconds()
+
       // Lock out resetToIntro's partial-save path immediately — the Done button
       // is visible as soon as Summary renders, but setSessionSaved(true) doesn't
       // fire until after the AI summary awaits complete.
@@ -902,6 +1188,8 @@ export function useQuestSession() {
 
       setScreen(QuestScreen.Summary)
       setSummarizing(true)
+      setSourceSave({ state: 'saving', canRetry: false })
+      setGraphSync({ state: 'pending', sessionId: docId, childId: run.childId })
 
       // Calculate streak (including this session)
       const todayStr = getDateString(new Date())
@@ -911,8 +1199,6 @@ export function useQuestSession() {
       ]
       const newStreak = calculateStreak(sessionsIncludingToday)
       setStreak(newStreak)
-
-      if (!activeChildId) return
 
       // FEAT-11: writing seeding findings from the spell-the-word (spelling) and
       // build-the-sentence (sentence) questions this session. Emerging/not-yet
@@ -924,7 +1210,7 @@ export function useQuestSession() {
       const writingFindings = [...spellingFindings, ...sentenceFindings]
 
       // Request AI-generated summary
-      const domain = activeDomainRef.current
+      const domain = run.domain
       let summaryText = `Interactive ${domain} quest: ${finalState.totalCorrect}/${finalState.totalQuestions} correct, reached level ${finalState.currentLevel}`
       let sessionRecommendations: EvaluationSession['recommendations'] = []
 
@@ -943,8 +1229,8 @@ export function useQuestSession() {
         }
 
         const summaryResponse = await chat({
-          familyId,
-          childId: activeChildId,
+          familyId: run.familyId,
+          childId: run.childId,
           taskType: TaskType.Quest,
           messages: [...conversationRef.current, summaryMessage],
           domain,
@@ -969,7 +1255,9 @@ export function useQuestSession() {
       } catch (err) {
         console.warn('Failed to generate AI quest summary, using fallback', err)
       } finally {
-        setSummarizing(false)
+        // A summary that lands after a newer session started must not clear that
+        // session's own spinner.
+        if (live()) setSummarizing(false)
       }
 
       // Fallback: generate client-side recommendations if AI didn't produce any
@@ -982,71 +1270,95 @@ export function useQuestSession() {
         sessionRecommendations = generateFallbackRecommendations([], finalState.currentLevel, domain)
       }
 
-      // Save to Firestore — reuse existing sessionId if resuming, else generate new
-      const docId = sessionIdRef.current ?? `interactive_${activeChildId}_${Date.now()}`
-      sessionIdRef.current = docId
-
       // Conservative completion gate: only a session with enough answered signal
       // moves working levels / the snapshot and earns the completion bonus. A
       // short bail still persists (marked 'partial'), banks its diamonds, and
       // counts toward hours — it just never moves his level or the foundation map.
       const sufficient = hasSufficientCompletion(questions)
+      const questMode = run.questMode
 
-      const skippedCount = questions.filter((q) => q.skipped).length
-      const flaggedErrorCount = questions.filter((q) => q.flaggedAsError).length
-
-      const questMode = activeQuestModeRef.current
-      const session: EvaluationSession & InteractiveSessionData = {
-        childId: activeChildId,
-        domain,
-        status: sufficient ? 'complete' : 'partial',
-        messages: [],
+      // ── The one immutable final payload (UX-494) ──────────
+      const payload = finalizedQuestSourcePayload({
+        run,
+        questions,
+        finalState,
+        timedOut,
         findings: [...findings, ...writingFindings],
         recommendations: sessionRecommendations,
         summary: summaryText,
-        evaluatedAt: new Date().toISOString(),
-        sessionType: 'interactive',
-        questMode,
-        questions,
-        finalLevel: finalState.currentLevel,
-        totalCorrect: finalState.totalCorrect,
-        totalQuestions: finalState.totalQuestions,
-        diamondsMined: finalState.totalCorrect,
         streakDays: newStreak.currentStreak,
-        timedOut,
-        skippedCount: skippedCount || undefined,
-        flaggedErrorCount: flaggedErrorCount || undefined,
-      }
+        sufficient,
+        nowIso: new Date().toISOString(),
+      })
 
+      // Conditional, under the run's ORIGINAL id. It recognises its own already
+      // committed payload (an acknowledgement lost in flight is a success that
+      // writes nothing) and preserves a conflicting finalized source rather than
+      // overwriting it.
+      let saveOutcome: QuestSourceSaveOutcome | 'failed'
       try {
-        const ref = doc(evaluationSessionsCollection(familyId), docId)
-        await setDoc(ref, JSON.parse(JSON.stringify(session)))
-        setSessionSaved(true)
+        saveOutcome = await saveFinalQuestSource(questSourceRef(run.familyId, docId), payload)
       } catch (err) {
         console.error('Failed to save quest session', err)
+        saveOutcome = 'failed'
       }
 
-      // FEAT-54 — fold any queued preferred-concept results back into the learner
-      // model (quest evidence + conservative upgrade + resolve the consumed asks).
-      // Fire-and-forget + no-ops when the session tagged no concept — never blocks
-      // close, and leaves the snapshot/findings pipeline (below) untouched.
-      void syncQuestResultsToModel(
-        familyId,
-        activeChildId,
-        docId,
-        questions,
-        targetConceptsRef.current.map((t) => t.conceptId),
-        new Date().toISOString(),
-      )
+      // The held payload belongs to ONE run — the one whose summary is on screen
+      // — so a delayed close neither clears another run's pending retry nor
+      // installs a payload no surface can offer.
+      const clearPendingIfMine = () => {
+        if (pendingSourceRef.current?.run.runId === run.runId) pendingSourceRef.current = null
+      }
+      const sourceCommitted = saveOutcome === 'saved' || saveOutcome === 'already-committed'
+      if (sourceCommitted) {
+        clearPendingIfMine()
+        if (live()) {
+          setSessionSaved(true)
+          setSourceSave({ state: 'saved', canRetry: false })
+        }
+      } else if (saveOutcome === 'conflict') {
+        clearPendingIfMine()
+        if (live()) setSourceSave({ state: 'conflict', canRetry: false })
+      } else if (live()) {
+        // Held in memory so this summary can offer a real retry of THIS payload.
+        pendingSourceRef.current = { run, payload }
+        setSourceSave({ state: 'failed', canRetry: true })
+      }
 
-      // Log instructional hours (idle-aware timer)
-      if (!hoursLoggedRef.current) {
+      // FEAT-54 / UX-494 — fold the queued preferred-concept results back into
+      // the learner model, FROM THE SAVED SOURCE and only once it is an
+      // acknowledged, sufficient, complete record. A denied save now produces
+      // zero graph changes, and an insufficient close stays a preserved partial
+      // with its request still waiting. Never blocks close; the snapshot /
+      // findings pipeline below is untouched.
+      if (sourceCommitted && sufficient) {
+        void projectGraph(
+          {
+            familyId: run.familyId,
+            childId: run.childId,
+            sessionId: docId,
+            expectedRunId: run.runId,
+          },
+          live,
+        )
+      } else if (live()) {
+        setGraphSync({
+          state: 'skipped',
+          sessionId: docId,
+          childId: run.childId,
+        })
+      }
+
+      // Log instructional hours (idle-aware timer). Per RUN, so a delayed close
+      // still logs its own minutes and cannot be credited twice.
+      if (!hoursLoggedRunsRef.current.has(run.runId)) {
+        hoursLoggedRunsRef.current.add(run.runId)
         hoursLoggedRef.current = true
-        const activeSeconds = sessionTimer.stop()
+        const activeSeconds = live() ? sessionTimer.stop() : frozenActiveSeconds
         const minutes = Math.ceil(activeSeconds / 60 / 5) * 5
         if (minutes >= 5) {
-          addDoc(hoursCollection(familyId), {
-            childId: activeChildId,
+          addDoc(hoursCollection(run.familyId), {
+            childId: run.childId,
             date: todayKey(),
             minutes,
             subjectBucket: domainToSubjectBucket(domain),
@@ -1065,7 +1377,7 @@ export function useQuestSession() {
       //    resumed under this doc id, still lands every diamond exactly once.
       //    Never double-awards: the keys match the live path.
       for (const idx of correctAnswerIndices(questions)) {
-        bankAnswerReward(docId, idx, domain)
+        bankAnswerReward(run, idx)
       }
 
       // 2) Quest completion bonus (flat 15 XP) — a real, sufficiently-complete
@@ -1073,8 +1385,8 @@ export function useQuestSession() {
       //    completion bonus (it didn't complete a quest).
       if (sufficient) {
         addXpEvent(
-          familyId,
-          activeChildId,
+          run.familyId,
+          run.childId,
           'QUEST_COMPLETE',
           15,
           `quest-complete_${docId}`,
@@ -1091,7 +1403,7 @@ export function useQuestSession() {
       // coverage update, so a 2-question bail leaves the snapshot untouched.)
       if (sufficient) {
         try {
-          const snapshotRef = doc(skillSnapshotsCollection(familyId), activeChildId)
+          const snapshotRef = doc(skillSnapshotsCollection(run.familyId), run.childId)
           const snapshotSnap = await getDoc(snapshotRef)
           const existing: Partial<SkillSnapshot> = snapshotSnap.exists()
             ? snapshotSnap.data()
@@ -1170,7 +1482,7 @@ export function useQuestSession() {
           }
 
           const updated = {
-            childId: activeChildId,
+            childId: run.childId,
             prioritySkills: combinedFindings.length > 0
               ? [...existingSkills, ...newPrioritySkills]
               : existing.prioritySkills || [],
@@ -1228,7 +1540,7 @@ export function useQuestSession() {
               newLevel: newWorkingLevel?.level,
               sessionHighWater: sessionHighWaterLevel(questions, finalState.currentLevel),
             })
-            await writeSnapshotUpdate(familyId, activeChildId, {
+            await writeSnapshotUpdate(run.familyId, run.childId, {
               masteredSkills: [],
               recordQuestActivity: { domain: questMode, marker },
             }).catch((err) => console.warn('Failed to record quest activity marker', err))
@@ -1240,7 +1552,7 @@ export function useQuestSession() {
 
         // Update Learning Map from findings (fire-and-forget)
         if (findings.length > 0) {
-          updateSkillMapFromFindings(familyId, activeChildId, findings)
+          updateSkillMapFromFindings(run.familyId, run.childId, findings)
             .catch((err) => console.warn('[LearningMap] Failed to update from quest findings', err))
         }
       }
@@ -1259,7 +1571,7 @@ export function useQuestSession() {
 
           try {
             const wordRef = doc(
-              collection(db, `families/${familyId}/children/${activeChildId}/wordProgress`),
+              collection(db, `families/${run.familyId}/children/${run.childId}/wordProgress`),
               wordDocId,
             )
             const existingSnap = await getDoc(wordRef)
@@ -1301,8 +1613,8 @@ export function useQuestSession() {
       // Trigger pattern detection if 3+ evaluation sessions exist (fire-and-forget)
       try {
         const sessionsQuery = query(
-          evaluationSessionsCollection(familyId),
-          where('childId', '==', activeChildId),
+          evaluationSessionsCollection(run.familyId),
+          where('childId', '==', run.childId),
           orderBy('evaluatedAt', 'desc'),
           firestoreLimit(10),
         )
@@ -1310,8 +1622,8 @@ export function useQuestSession() {
 
         if (sessionsSnap.size >= 3) {
           analyzePatterns({
-            familyId,
-            childId: activeChildId,
+            familyId: run.familyId,
+            childId: run.childId,
             evaluationSessionId: docId,
             currentFindings: findings.map((f) => ({
               skill: f.skill,
@@ -1331,13 +1643,12 @@ export function useQuestSession() {
         // Canonical `{date}_{childId}` id (FEAT-114) — the previous legacy
         // `{childId}_{date}` id never matched today's doc, so quest completions
         // (and their minutes) silently never reached Today.
-        const dayRef = doc(daysCollection(familyId), dayLogDocId(today, activeChildId))
+        const dayRef = doc(daysCollection(run.familyId), dayLogDocId(today, run.childId))
         const daySnap = await getDoc(dayRef)
 
         if (daySnap.exists()) {
           const dayData = daySnap.data()
           const items = dayData.checklist || []
-          const questMode = activeQuestModeRef.current
 
           const matchIdx = items.findIndex((item) =>
             item.itemType === 'evaluation' &&
@@ -1369,7 +1680,10 @@ export function useQuestSession() {
         console.warn('[Quest] Failed to auto-complete evaluation item (non-blocking):', err)
       }
     },
-    [activeChildId, familyId, findings, previousSessions, chat, analyzePatterns, questState?.elapsedSeconds, sessionTimer, bankAnswerReward],
+    // UX-494 — no `activeChildId` / `familyId` here any more: a close resolves
+    // every one of its writes through the frozen run, so the hook's live
+    // identity is not an input to it.
+    [findings, previousSessions, chat, analyzePatterns, questState?.elapsedSeconds, sessionTimer, bankAnswerReward, projectGraph],
   )
 
   // ── Submit answer ─────────────────────────────────────────────
@@ -1377,6 +1691,12 @@ export function useQuestSession() {
   const submitAnswer = useCallback(
     async (childAnswer: string, inputMethod?: AnswerInputMethod) => {
       if (!currentQuestion || !questState || !activeChildId) return
+
+      // UX-494 — the run this answer belongs to. Re-checked after every await
+      // below, so a next question (or a close) that lands once another session
+      // has taken over does not mutate that session or take its refs.
+      const run = runRef.current
+      const stillMine = () => !run || isLiveRun(runRef.current, run)
 
       const responseTimeMs = Date.now() - questionStartRef.current
       const correct = checkAnswer(childAnswer, currentQuestion)
@@ -1411,8 +1731,10 @@ export function useQuestSession() {
       // question's index in the session). This is what makes a partial count: the
       // reward is durable even if the child stops before the session ends. The
       // end-of-session backfill re-banks idempotently, so no double-award.
-      if (correct && sessionIdRef.current) {
-        bankAnswerReward(sessionIdRef.current, updatedQuestions.length - 1, activeDomainRef.current)
+      // UX-494 — keyed on the RUN, so the per-answer dedup key, the child and the
+      // domain are one session's. The key shape and the amount are unchanged.
+      if (correct && run) {
+        bankAnswerReward(run, updatedQuestions.length - 1)
       }
 
       // Show feedback
@@ -1438,6 +1760,11 @@ export function useQuestSession() {
       // Feedback pause
       const feedbackDuration = correct ? 1200 : 2000
       await new Promise((resolve) => setTimeout(resolve, feedbackDuration))
+
+      // A feedback pause the child walked out of (Back to mine, then a new
+      // quest) must not go on to close or to request a question for the run
+      // that replaced it.
+      if (!stillMine()) return
 
       // Check end conditions
       const { end: shouldEnd, timedOut } = shouldEndSession(newState)
@@ -1566,6 +1893,8 @@ export function useQuestSession() {
           domain: activeDomainRef.current,
         })
 
+        if (!stillMine()) return
+
         if (!response) {
           // AI failed — end session gracefully
           await endSession(updatedQuestions, newState, false)
@@ -1612,6 +1941,8 @@ export function useQuestSession() {
               domain: activeDomainRef.current,
             })
 
+            if (!stillMine()) return
+
             if (retryResponse) {
               conversationRef.current.push({ role: 'assistant', content: retryResponse.message })
               const retryFinding = extractQuestFinding(retryResponse.message)
@@ -1647,6 +1978,8 @@ export function useQuestSession() {
           totalQuestions: newState.totalQuestions,
         })
 
+        if (!stillMine()) return
+
         // If no questions answered yet, return to intro with a friendly message
         if (updatedQuestions.filter((q) => !q.skipped).length === 0) {
           setStartQuestError('Hmm, the mine is being tricky. Try again in a minute.')
@@ -1666,6 +1999,11 @@ export function useQuestSession() {
   const handleSkip = useCallback(
     async () => {
       if (!currentQuestion || !questState || !activeChildId) return
+
+      // UX-494 — same run guard as `submitAnswer`: a replacement question that
+      // lands after another session started goes nowhere.
+      const run = runRef.current
+      const stillMine = () => !run || isLiveRun(runRef.current, run)
 
       const responseTimeMs = Date.now() - questionStartRef.current
 
@@ -1739,6 +2077,8 @@ export function useQuestSession() {
           domain: activeDomainRef.current,
         })
 
+        if (!stillMine()) return
+
         if (!response) {
           // AI failed — end session gracefully
           await endSession(updatedQuestions, questState, false)
@@ -1785,6 +2125,8 @@ export function useQuestSession() {
               domain: activeDomainRef.current,
             })
 
+            if (!stillMine()) return
+
             if (retryResponse) {
               conversationRef.current.push({ role: 'assistant', content: retryResponse.message })
               const retryFinding = extractQuestFinding(retryResponse.message)
@@ -1819,6 +2161,8 @@ export function useQuestSession() {
           childId: activeChildId,
           totalQuestions: questState.totalQuestions,
         })
+
+        if (!stillMine()) return
 
         if (updatedQuestions.filter((q) => !q.skipped).length === 0) {
           setStartQuestError('Hmm, the mine is being tricky. Try again in a minute.')
@@ -2050,6 +2394,9 @@ export function useQuestSession() {
         console.warn('[resumeSession] Partial session missing doc id — cannot resume')
         return false
       }
+      // UX-494 — a Resume claims the run, so a `startQuest` still awaiting its
+      // reads cannot establish itself on top of the session just reopened.
+      runGenerationRef.current += 1
       sessionIdRef.current = docId
 
       // UX-339 — a resumed session belongs to the child on the DOCUMENT, never
@@ -2057,10 +2404,41 @@ export function useQuestSession() {
       // the earlier run wrote, so resuming under a different active child
       // continues that child's quest rather than adopting it.
       const resumedChildId = partialDoc.childId || liveChildId
+      const resumedChildName = children.find((c) => c.id === resumedChildId)?.name ?? ''
       sessionOwnerRef.current = {
         childId: resumedChildId,
-        childName: children.find((c) => c.id === resumedChildId)?.name ?? '',
+        childName: resumedChildName,
       }
+
+      /**
+       * UX-494 — the target plan comes off THIS partial, and only off this
+       * partial.
+       *
+       * The ref was simply never touched here, so cold and warm Resume
+       * disagreed: a freshly mounted hook resumed with no targets, and a hook
+       * that had already run a session resumed holding the PREVIOUS run's
+       * targets — which that session's close then attributed evidence to and
+       * resolved requests for. A legacy partial saved before the plan existed
+       * carries no field, and `parseQuestTargetPlan` answers `[]` for it, which
+       * is what makes the two agree.
+       */
+      const resumedPlan = parseQuestTargetPlan(partialDoc.targetPlan)
+      runRef.current = {
+        runId: docId,
+        familyId,
+        childId: resumedChildId,
+        childName: resumedChildName,
+        domain: partialDoc.domain as EvaluationDomain,
+        questMode: partialDoc.questMode,
+        targetPlan: resumedPlan,
+        targetConceptIds: resumedPlan.map((row) => row.conceptId),
+        startedAt: partialDoc.evaluatedAt,
+      }
+      // A reopened run has not been closed, however many times it was resumed.
+      closedRunsRef.current.delete(docId)
+      hoursLoggedRunsRef.current.delete(docId)
+      setSourceSave({ state: 'idle', canRetry: false })
+      setGraphSync({ state: 'idle' })
 
       // Restore adaptive state
       setQuestState(saved)
@@ -2118,9 +2496,10 @@ export function useQuestSession() {
         setScreen(QuestScreen.Question)
       }
 
-      // Mark the Firestore doc as 'resumed' so it doesn't show up in the resume card again
-      const ref = doc(evaluationSessionsCollection(familyId), docId)
-      updateDoc(ref, { status: 'resumed' }).catch((err) =>
+      // Mark the Firestore doc as 'resumed' so it doesn't show up in the resume
+      // card again — conditionally (UX-494), so a stale Resume cannot push a
+      // record that has since been finalized back into a resumable state.
+      markQuestSourceResumed(questSourceRef(familyId, docId)).catch((err) =>
         console.error('[resumeSession] Failed to mark session as resumed', err),
       )
 
@@ -2134,72 +2513,58 @@ export function useQuestSession() {
   const resetToIntro = useCallback(() => {
     // Auto-save partial session if quest is in progress with answered questions.
     // Skip if session was saved or is currently being saved as complete — the
-    // ref is set synchronously at endSession start, so this blocks ghost docs
-    // even if Done is tapped before setSessionSaved(true) propagates.
+    // run is admitted to `closedRunsRef` synchronously at endSession start, so
+    // this blocks ghost docs even if Done is tapped before setSessionSaved(true)
+    // propagates, and does so PER RUN rather than per hook (UX-494).
+    const exitingRun = runRef.current
     if (
       questState &&
       questState.totalQuestions > 0 &&
-      !sessionSavedRef.current &&
-      activeChildId &&
-      familyId
+      exitingRun &&
+      !closedRunsRef.current.has(exitingRun.runId) &&
+      !sessionSavedRef.current
     ) {
-      // Reuse existing sessionId if resuming, otherwise generate new one
-      const docId = sessionIdRef.current ?? `interactive_${activeChildId}_${Date.now()}`
-      const domain = activeDomainRef.current
-      const skippedCount = answeredQuestions.filter((q) => q.skipped).length
-      const flaggedErrorCount = answeredQuestions.filter((q) => q.flaggedAsError).length
-
-      const partialSession: EvaluationSession & InteractiveSessionData = {
-        childId: activeChildId,
-        domain,
-        // 'partial' — persists AND shows in Records → Evaluations (alongside
-        // 'complete') with the diamonds already banked per-answer, while staying
-        // resumable (the resume card + resumeSession both accept 'partial'). His
-        // reading/phonics work no longer evaporates when he stops early.
-        status: 'partial',
-        messages: [],
-        findings,
-        recommendations: [],
-        summary: `Partial session: ${questState.totalCorrect}/${questState.totalQuestions} correct at level ${questState.currentLevel} (exited early)`,
-        evaluatedAt: new Date().toISOString(),
-        sessionType: 'interactive',
-        questMode: activeQuestModeRef.current,
+      const docId = exitingRun.runId
+      const domain = exitingRun.domain
+      const partialSession = resumableQuestSourcePayload({
+        run: exitingRun,
         questions: answeredQuestions,
-        finalLevel: questState.currentLevel,
-        totalCorrect: questState.totalCorrect,
-        totalQuestions: questState.totalQuestions,
-        diamondsMined: questState.totalCorrect,
-        streakDays: streak.currentStreak,
-        skippedCount: skippedCount || undefined,
-        flaggedErrorCount: flaggedErrorCount || undefined,
-        // Resume support: save full state needed to restore session
-        savedQuestState: questState,
-        savedCurrentQuestion: currentQuestion ?? undefined,
+        questState,
+        currentQuestion,
+        findings,
         bonusRoundUsed: bonusRoundUsedRef.current,
-      }
+        streakDays: streak.currentStreak,
+        nowIso: new Date().toISOString(),
+      })
 
-      // Fire-and-forget save — don't block the UI reset
-      const ref = doc(evaluationSessionsCollection(familyId), docId)
-      setDoc(ref, JSON.parse(JSON.stringify(partialSession))).catch((err) =>
-        console.error('Failed to auto-save partial quest session', err),
-      )
+      // Fire-and-forget, and CONDITIONAL (UX-494): a partial may never land on
+      // top of a finalized record. A late exit tap used to turn a completed
+      // session back into a resumable one, resume point and all.
+      saveResumableQuestSource(questSourceRef(exitingRun.familyId, docId), partialSession)
+        .then((outcome) => {
+          if (outcome === 'refused-finalized') {
+            console.warn('[quest] Partial save refused — this session is already finalized')
+          }
+        })
+        .catch((err) => console.error('Failed to auto-save partial quest session', err))
 
       // Count the partial toward instructional hours (idle-aware), exactly like a
-      // completed session. Additive + guarded by hoursLoggedRef so a session that
-      // already logged at endSession can't double-count (resetToIntro and
-      // endSession are mutually exclusive per session anyway).
-      if (!hoursLoggedRef.current) {
+      // completed session. Additive + guarded per run so a session that already
+      // logged at endSession can't double-count (resetToIntro and endSession are
+      // mutually exclusive per session anyway).
+      if (!hoursLoggedRunsRef.current.has(docId)) {
+        hoursLoggedRunsRef.current.add(docId)
         hoursLoggedRef.current = true
         const activeSeconds = sessionTimer.stop()
         const minutes = Math.ceil(activeSeconds / 60 / 5) * 5
         if (minutes >= 5) {
-          addDoc(hoursCollection(familyId), {
-            childId: activeChildId,
+          addDoc(hoursCollection(exitingRun.familyId), {
+            childId: exitingRun.childId,
             date: todayKey(),
             minutes,
             subjectBucket: domainToSubjectBucket(domain),
             quickCapture: true,
-            notes: `${activeQuestModeRef.current || domain} quest session (partial)`,
+            notes: `${exitingRun.questMode || domain} quest session (partial)`,
             source: 'knowledge-mine',
           }).catch((err) => console.error('[SessionTimer] Failed to log partial quest hours:', err))
         }
@@ -2229,10 +2594,15 @@ export function useQuestSession() {
     bonusRoundUsedRef.current = false
     activeQuestModeRef.current = undefined
     sessionIdRef.current = null
+    // UX-494 — the run ends here, which is also what makes every delayed
+    // callback from it stop being allowed to touch this hook's state. Its
+    // Firestore writes still finish, under its own identity.
+    runRef.current = null
+    runGenerationRef.current += 1
     // UX-339 — the session is over, so the hook goes back to following the live
     // child. Cleared LAST, after the partial save above has used it.
     sessionOwnerRef.current = null
-  }, [questState, currentQuestion, activeChildId, familyId, answeredQuestions, findings, streak.currentStreak, sessionTimer])
+  }, [questState, currentQuestion, answeredQuestions, findings, streak.currentStreak, sessionTimer])
 
   // UX-339 — what the quest screen needs to say whose quest this is. Read from
   // the ref at render: a header change re-renders this hook's consumers, so the
@@ -2251,6 +2621,16 @@ export function useQuestSession() {
     streak,
     lastAnswer,
     sessionSaved,
+    /**
+     * UX-494 — the two successes, separately. `sourceSave` is his answers under
+     * this run's id; `graphSync` is the learner model's evidence, concept states
+     * and the parent's queued requests. A surface that reported one as the other
+     * is the defect this repair exists for.
+     */
+    sourceSave,
+    graphSync,
+    retrySourceSave,
+    retryGraphProjection,
     summarizing,
     aiLoading,
     aiError,

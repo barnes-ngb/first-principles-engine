@@ -43,6 +43,7 @@ import FluencyPractice from './FluencyPractice'
 import { questOwnerLines } from './questSessionOwner'
 import { extractTargetWord } from './questHelpers'
 import { hasMathCalibration, hasReadingCalibration } from './knowledgeMineAccess'
+import { QUEST_RECOVERY_COPY } from './questSaveCopy'
 import type { InteractiveSessionData, QuestDomainConfig } from './questTypes'
 import { QuestScreen } from './questTypes'
 import { useQuestSession } from './useQuestSession'
@@ -181,10 +182,27 @@ export default function KnowledgeMinePage() {
    * changed value"; this repo's lint forbids the set-state-in-effect form
    * (the `ArmorTab` / UX-336 precedent).
    */
+  /**
+   * UX-494 — a saved source whose MAP update failed, waiting for its scoped
+   * retry.
+   *
+   * Durable by construction: the failure is recorded on the source document, so
+   * this survives the reload that destroys everything the close held in memory.
+   * It is a second read over the SAME collection and the SAME
+   * `childId + status + evaluatedAt` index the resume card already uses — no new
+   * index, no new store — with the one filter that cannot be a `where` clause
+   * (an optional field absent on every legacy record) done in the client, exactly
+   * as the resume card filters on `savedQuestState`.
+   */
+  const [graphRecovery, setGraphRecovery] = useState<
+    (EvaluationSession & Partial<InteractiveSessionData> & { id: string }) | null
+  >(null)
+
   const [resumeChildId, setResumeChildId] = useState(activeChildId)
   if (resumeChildId !== activeChildId) {
     setResumeChildId(activeChildId)
     setResumeSession(null)
+    setGraphRecovery(null)
     setActiveDomain(null)
   }
 
@@ -219,6 +237,37 @@ export default function KnowledgeMinePage() {
     void loadResume()
     return () => { cancelled = true }
   }, [activeChildId, familyId, quest.screen]) // re-query when returning to intro
+
+  useEffect(() => {
+    if (!activeChildId || !familyId) return
+    let cancelled = false
+    async function loadGraphRecovery() {
+      try {
+        const q = query(
+          evaluationSessionsCollection(familyId),
+          where('childId', '==', activeChildId),
+          where('status', '==', 'complete'),
+          orderBy('evaluatedAt', 'desc'),
+          firestoreLimit(5),
+        )
+        const snap = await getDocs(q)
+        if (cancelled) return
+        const waiting = snap.docs
+          .map((d) => ({ ...d.data(), id: d.id }) as EvaluationSession & Partial<InteractiveSessionData> & { id: string })
+          .filter(
+            (s) =>
+              s.sessionType === 'interactive' &&
+              s.childId === activeChildId &&
+              s.modelProjection === 'failed',
+          )
+        setGraphRecovery(waiting[0] ?? null)
+      } catch {
+        // Non-blocking — the recovery card is optional, exactly like the resume card.
+      }
+    }
+    void loadGraphRecovery()
+    return () => { cancelled = true }
+  }, [activeChildId, familyId, quest.screen])
 
   /**
    * A trip here from the village's Square invitation, if there is one (UX-493).
@@ -470,6 +519,22 @@ export default function KnowledgeMinePage() {
             />
           )}
 
+          {/* ── Map still waiting (UX-494) ───────────────────── */}
+          {graphRecovery && (
+            <GraphRecoveryCard
+              onRetry={async () => {
+                const outcome = await quest.retryGraphProjection(
+                  graphRecovery.id,
+                  graphRecovery.childId,
+                  graphRecovery.questRunId ?? graphRecovery.id,
+                )
+                // Anything other than a failure has settled this source, so the
+                // card goes. A failure leaves it, and the pending work with it.
+                if (outcome !== 'failed') setGraphRecovery(null)
+              }}
+            />
+          )}
+
           {/* ── The village's suggestion, revalidated here (UX-493) ──
               Mounted under family, child, profile and the identity epoch, so a
               child change, a role change and a raw same-tick A → B → A each
@@ -681,6 +746,17 @@ export default function KnowledgeMinePage() {
           )]}
           hitLevelCap={quest.hitLevelCap}
           questMode={quest.questMode}
+          // UX-494 — the two save successes, and their retries. The source
+          // retry is the held payload's own; the map retry reads the saved
+          // source, so it works here and again after a reload.
+          sourceSave={quest.sourceSave}
+          graphSync={quest.graphSync}
+          onRetrySourceSave={() => void quest.retrySourceSave()}
+          onRetryGraphSync={() => {
+            const { sessionId, childId } = quest.graphSync
+            if (!sessionId || !childId) return
+            void quest.retryGraphProjection(sessionId, childId)
+          }}
           onDone={quest.resetToIntro}
           onTryAgain={() => {
             quest.resetToIntro()
@@ -1007,6 +1083,57 @@ function QuestCard({
           </Typography>
         )}
       </Box>
+    </Box>
+  )
+}
+
+/**
+ * The Mine's scoped map-retry card (UX-494).
+ *
+ * One source, one control, and nothing about a level, a score or a count: his
+ * answers are already safe, and the only thing left is the map. The retry runs
+ * the projection and NOTHING else, so no completion side effect is repeated,
+ * and a second tap while the first is running converges in the transaction
+ * rather than doing the work twice.
+ *
+ * NEW child-facing text: plain, at least 14px, on a 44px target.
+ */
+function GraphRecoveryCard({ onRetry }: { onRetry: () => void | Promise<void> }) {
+  const [retrying, setRetrying] = useState(false)
+  return (
+    <Box
+      sx={{
+        bgcolor: MC.darkStone,
+        border: `2px solid ${MC.gold}`,
+        borderRadius: 2,
+        p: 2,
+        mb: 2,
+        textAlign: 'left',
+      }}
+    >
+      <Typography sx={{ fontSize: '16px', fontWeight: 700, lineHeight: 1.4, color: MC.white }}>
+        {QUEST_RECOVERY_COPY.title}
+      </Typography>
+      <Typography sx={{ fontSize: '14px', lineHeight: 1.45, color: MC.stone, mt: 0.5 }}>
+        {QUEST_RECOVERY_COPY.body}
+      </Typography>
+      <Button
+        disabled={retrying}
+        onClick={() => {
+          setRetrying(true)
+          void Promise.resolve(onRetry()).finally(() => setRetrying(false))
+        }}
+        sx={{
+          fontSize: '14px',
+          textTransform: 'none',
+          minHeight: 44,
+          mt: 1,
+          color: MC.gold,
+          border: `1px solid ${MC.gold}`,
+        }}
+      >
+        {QUEST_RECOVERY_COPY.action}
+      </Button>
     </Box>
   )
 }

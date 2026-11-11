@@ -8,6 +8,7 @@ import type { ArmorTierInfo } from '../../core/xp/armorTiers'
 import { getArmorTier, getNextTierProgress } from '../../core/xp/armorTiers'
 import MinecraftAvatar from '../avatar/MinecraftAvatar'
 import type { QuestStreak } from './questTypes'
+import { QUEST_GRAPH_COPY, QUEST_SOURCE_COPY } from './questSaveCopy'
 import { kidPalette } from '../../app/tokens'
 
 const MC = {
@@ -46,6 +47,111 @@ function formatSkillLabel(tag: string): string {
 
 const XP_PER_DIAMOND = 2
 
+/**
+ * The save lines on the summary (UX-494).
+ *
+ * NEW child-facing text, so this run's readability rule applies and the legacy
+ * Mine's pixel font around it does not: plain, at least 14px, 44px targets.
+ * Every string is in `questSaveCopy.ts` and held to the shared kid bar.
+ *
+ * It renders NOTHING until a close has something to report, so the ordinary
+ * summary a child sees is exactly the summary he saw before.
+ */
+function QuestSaveStatus({
+  sourceSave,
+  graphSync,
+  onRetrySourceSave,
+  onRetryGraphSync,
+}: Pick<
+  QuestSummaryProps,
+  'sourceSave' | 'graphSync' | 'onRetrySourceSave' | 'onRetryGraphSync'
+>) {
+  const sourceState = sourceSave?.state ?? 'idle'
+  const graphState = graphSync?.state ?? 'idle'
+  if (sourceState === 'idle') return null
+
+  const sourceLine =
+    sourceState === 'saving'
+      ? QUEST_SOURCE_COPY.saving
+      : sourceState === 'saved'
+        ? QUEST_SOURCE_COPY.saved
+        : sourceState === 'conflict'
+          ? QUEST_SOURCE_COPY.conflict
+          : QUEST_SOURCE_COPY.failed
+
+  // The map line exists only once his answers are safe: offering a map retry
+  // for a quest that did not save would be the two successes confused again.
+  const graphLine =
+    sourceState !== 'saved'
+      ? null
+      : graphState === 'pending' || graphState === 'running'
+        ? QUEST_GRAPH_COPY.pending
+        : graphState === 'reached'
+          ? QUEST_GRAPH_COPY.reached
+          : graphState === 'failed'
+            ? QUEST_GRAPH_COPY.failed
+            : null // `skipped` claims nothing — the saved line above is the truth
+
+  const showSourceRetry = sourceState === 'failed' && Boolean(sourceSave?.canRetry && onRetrySourceSave)
+  const showGraphRetry = graphState === 'failed' && sourceState === 'saved' && Boolean(onRetryGraphSync)
+  const failed = sourceState === 'failed' || graphState === 'failed'
+
+  return (
+    <Box
+      sx={{
+        bgcolor: MC.darkStone,
+        borderRadius: 2,
+        p: 2,
+        mb: 2,
+        border: `1px solid ${failed ? MC.gold : MC.stone}`,
+      }}
+    >
+      <Typography sx={{ fontSize: '14px', lineHeight: 1.45, color: MC.white }}>
+        {sourceLine}
+      </Typography>
+      {graphLine && (
+        <Typography sx={{ fontSize: '14px', lineHeight: 1.45, color: MC.stone, mt: 0.5 }}>
+          {graphLine}
+        </Typography>
+      )}
+      {(showSourceRetry || showGraphRetry) && (
+        <Stack direction="row" spacing={1} sx={{ mt: 1, flexWrap: 'wrap', rowGap: 1 }}>
+          {showSourceRetry && (
+            <Button
+              size="small"
+              onClick={onRetrySourceSave}
+              sx={{
+                fontSize: '14px',
+                textTransform: 'none',
+                minHeight: 44,
+                color: MC.gold,
+                border: `1px solid ${MC.gold}`,
+              }}
+            >
+              {QUEST_SOURCE_COPY.retry}
+            </Button>
+          )}
+          {showGraphRetry && (
+            <Button
+              size="small"
+              onClick={onRetryGraphSync}
+              sx={{
+                fontSize: '14px',
+                textTransform: 'none',
+                minHeight: 44,
+                color: MC.diamond,
+                border: `1px solid ${MC.diamond}`,
+              }}
+            >
+              {QUEST_GRAPH_COPY.retry}
+            </Button>
+          )}
+        </Stack>
+      )}
+    </Box>
+  )
+}
+
 interface QuestSummaryProps {
   totalCorrect: number
   finalLevel: number
@@ -61,6 +167,26 @@ interface QuestSummaryProps {
   hitLevelCap?: boolean
   /** Current quest mode (for handoff messaging) */
   questMode?: string
+  /**
+   * UX-494 — the SOURCE save: his answers, under this run's own id. Its own
+   * line and its own retry, because if this did not land nothing else matters.
+   */
+  sourceSave?: {
+    state: 'idle' | 'saving' | 'saved' | 'failed' | 'conflict'
+    canRetry: boolean
+  }
+  /**
+   * UX-494 — the GRAPH projection: the learner model's evidence, concept states
+   * and the parent's queued requests. A SEPARATE success, said separately, and
+   * never claimed for a source that only saved.
+   */
+  graphSync?: {
+    state: 'idle' | 'pending' | 'running' | 'reached' | 'skipped' | 'failed'
+    sessionId?: string
+    childId?: string
+  }
+  onRetrySourceSave?: () => void
+  onRetryGraphSync?: () => void
   onDone: () => void
   onTryAgain: () => void
 }
@@ -75,6 +201,10 @@ export default function QuestSummary({
   strugglingWords = [],
   hitLevelCap = false,
   questMode,
+  sourceSave,
+  graphSync,
+  onRetrySourceSave,
+  onRetryGraphSync,
   onDone,
   onTryAgain,
 }: QuestSummaryProps) {
@@ -150,6 +280,17 @@ export default function QuestSummary({
           Level {finalLevel} reached
         </Typography>
       </Box>
+
+      {/* ── Two successes, said separately (UX-494) ──────────────
+          The source is his answers; the graph is the map. A denied save used
+          to leave this screen silent while the map claimed the work had
+          landed, so each gets its own sentence and its own retry. */}
+      <QuestSaveStatus
+        sourceSave={sourceSave}
+        graphSync={graphSync}
+        onRetrySourceSave={onRetrySourceSave}
+        onRetryGraphSync={onRetryGraphSync}
+      />
 
       {/* Flagged errors notice */}
       {flaggedErrorCount > 0 && (
