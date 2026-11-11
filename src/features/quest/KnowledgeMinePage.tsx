@@ -771,25 +771,26 @@ export default function KnowledgeMinePage() {
               child's unsaved answers are neither that child's business nor
               retryable from there — by a parent either. It comes back when an
               authorised view returns to the owning child. */}
-          {quest.sourceSave.kind === 'partial' &&
+          {quest.visibleSourceSave.kind === 'partial' &&
             Boolean(activeChildId) &&
-            quest.sourceSave.originalChildId === activeChildId &&
-            (quest.sourceSave.state === 'failed' || quest.sourceSave.state === 'saving') && (
+            quest.visibleSourceSave.originalChildId === activeChildId &&
+            (quest.visibleSourceSave.state === 'failed' ||
+              quest.visibleSourceSave.state === 'saving') && (
               <RecoveryNotice
-                key={quest.sourceSave.runInstanceId ?? 'partial-save'}
+                key={quest.visibleSourceSave.runInstanceId ?? 'partial-save'}
                 title={
-                  quest.sourceSave.state === 'saving'
+                  quest.visibleSourceSave.state === 'saving'
                     ? QUEST_UNSAVED_COPY.saving
                     : QUEST_UNSAVED_COPY.title
                 }
                 body={QUEST_UNSAVED_COPY.body}
-                action={quest.sourceSave.canRetry ? QUEST_UNSAVED_COPY.action : undefined}
+                action={quest.visibleSourceSave.canRetry ? QUEST_UNSAVED_COPY.action : undefined}
                 onAction={
-                  quest.sourceSave.canRetry
+                  quest.visibleSourceSave.canRetry
                     ? () =>
                         quest.retrySourceSave({
-                          runInstanceId: quest.sourceSave.runInstanceId,
-                          viewGeneration: quest.sourceSave.viewGeneration,
+                          runInstanceId: quest.visibleSourceSave.runInstanceId,
+                          viewGeneration: quest.visibleSourceSave.viewGeneration,
                           // This render's identity, which is what authorises the
                           // tap — the payload's own run selects what it writes.
                           scopeKey: recoveryScope,
@@ -1070,15 +1071,15 @@ export default function KnowledgeMinePage() {
           // UX-494 — the two save successes, and their retries. The source
           // retry is the held payload's own; the map retry reads the saved
           // source, so it works here and again after a reload.
-          sourceSave={quest.sourceSave}
+          sourceSave={quest.visibleSourceSave}
           graphSync={quest.graphSync}
           // Both retries carry the identity of the view they were RENDERED in,
           // so an old summary's settled attempt cannot relabel a newer
           // same-child summary (UX-494).
           onRetrySourceSave={() =>
             void quest.retrySourceSave({
-              runInstanceId: quest.sourceSave.runInstanceId,
-              viewGeneration: quest.sourceSave.viewGeneration,
+              runInstanceId: quest.visibleSourceSave.runInstanceId,
+              viewGeneration: quest.visibleSourceSave.viewGeneration,
               // A summary stays bound to its owner across a same-family child
               // change (UX-339), so a FRESH button here is authorised by this
               // render's identity rather than by the close's (UX-494).

@@ -87,6 +87,7 @@ vi.mock('./useQuestSession', () => ({
     sessionLeftItsChild: false,
     sessionOwnerName: 'Lincoln',
     sourceSave: { state: 'idle', canRetry: false },
+    visibleSourceSave: { state: 'idle', canRetry: false },
     graphSync: { state: 'idle' },
     recoveryScope: fx.recoveryScope,
     recoveryEpoch: fx.recoveryEpoch,
