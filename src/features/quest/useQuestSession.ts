@@ -566,10 +566,14 @@ export function useQuestSession() {
     run: QuestRun
     payload: QuestSourcePayload
     kind: 'final' | 'partial'
-    /** The view that holds it — the summary that closed, or the intro it exited to. */
+    /**
+     * The view that holds it — the summary that closed, or the intro it exited
+     * to. This and the run's `instanceId` are the whole of what SELECTS the
+     * payload. The scope the close happened in is deliberately not kept: a
+     * summary outlives a same-family child change still bound to its owner, so
+     * the retry is authorised against the scope its button was RENDERED under.
+     */
     viewGeneration: number
-    /** The settled scope that view was rendered under. */
-    scope: string
   } | null>(null)
 
   /**
@@ -1379,29 +1383,54 @@ export function useQuestSession() {
    * afterwards only when the saved source is eligible, and nothing else, so no
    * AI summary, reward, hours or snapshot side effect is repeated.
    *
-   * Bound to the payload it was captured with and to that payload's own owner
-   * scope. A retained control cannot pick up a DIFFERENT pending payload: the
-   * run it was rendered for has to be the run still held.
+   * Two separate questions, deliberately. WHICH payload is selected by the
+   * original run instance and view generation the control was rendered for, so
+   * a retained control cannot pick up a different one. WHETHER it may write is
+   * the current committed family, a settled view, and the scope and epoch THIS
+   * button was rendered under — never the close's, which a same-family child
+   * change moves while the summary stays bound to its owner (UX-339). The
+   * captured run is used only for the write itself and the one graph projection
+   * that may follow it.
    */
   const retrySourceSave = useCallback(
-    async (expect?: { runInstanceId?: string; viewGeneration?: number; epoch?: number }) => {
+    async (expect?: {
+      runInstanceId?: string
+      viewGeneration?: number
+      /** The scope the control was RENDERED under — this render's, not the close's. */
+      scopeKey?: string
+      epoch?: number
+    }) => {
       const pending = pendingSourceRef.current
       if (!pending) return 'nothing-pending' as const
-      const { run, payload, kind, viewGeneration, scope } = pending
+      const { run, payload, kind, viewGeneration } = pending
 
       // ── The control that tapped has to be THIS payload's own ──
       // A retained control cannot pick up a different held payload, and a
-      // control drawn for an older view cannot act for the current one.
+      // control drawn for an older view cannot act for the current one. The
+      // ORIGINAL run instance and view generation are what SELECT the payload —
+      // never the child, which is the payload's own (UX-339).
       if (expect?.runInstanceId && expect.runInstanceId !== run.instanceId) {
         return 'identity-mismatch' as const
       }
       if (expect?.viewGeneration !== undefined && expect.viewGeneration !== viewGeneration) {
         return 'identity-mismatch' as const
       }
-      // The view that holds the payload must still be the view on screen, under
-      // the scope it was rendered with — and the epoch catches an A → B → A.
       if (runGenerationRef.current !== viewGeneration) return 'identity-mismatch' as const
-      if (!scopeStillLive(scope, expect?.epoch ?? identityEpoch)) {
+      /**
+       * And the BUTTON has to be a current one.
+       *
+       * Checked against the scope and epoch this control was rendered under,
+       * not against the scope the close happened in. A summary stays bound to
+       * its owner across a same-family child change (UX-339) — the parent can
+       * be looking at his brother's chip while these answers are still on
+       * screen — so pinning authorisation to the old close's child and epoch
+       * made the Retry on that retained summary dead, including after a switch
+       * back. A retained PRIOR button still fails closed: it carries the scope
+       * and epoch of the render it was drawn in, and neither is the live one.
+       */
+      const renderedScope = expect?.scopeKey ?? recoveryScope
+      const renderedEpoch = expect?.epoch ?? identityEpoch
+      if (!scopeStillLive(renderedScope, renderedEpoch)) {
         return 'identity-mismatch' as const
       }
       // The authorised owner: a payload is never written into a family nobody
@@ -1417,11 +1446,14 @@ export function useQuestSession() {
        * and re-asked for every status and graph change: an accepted write
        * settles for its ORIGINAL source whatever the screen is doing now, but a
        * newer same-child summary's labels, refs and controls are not its to
-       * move.
+       * move. The view is identified by its generation; the identity is the one
+       * the tap was authorised under, so a scope that moves mid-await reports
+       * nowhere.
        */
       const ownsView = () =>
         runGenerationRef.current === viewGeneration &&
-        committedScopeRef.current.scope === scope
+        committedScopeRef.current.scope === renderedScope &&
+        committedScopeRef.current.epoch === renderedEpoch
       if (ownsView()) setSourceSave({ state: 'saving', kind, canRetry: false })
 
       try {
@@ -1470,6 +1502,12 @@ export function useQuestSession() {
         if (mayReport) {
           setSessionSaved(true)
           setSourceSave({ state: 'saved', kind, canRetry: false })
+          // A partial that lands on RETRY is as new to the intro already on
+          // screen as one that landed first time — the resume query behind that
+          // card finished long before this write. Same one-more-read mechanism,
+          // in the intro that owns this notice; no other side effect is
+          // repeated.
+          if (kind === 'partial') setResumeReloadNonce((n) => n + 1)
         }
         // Only a final, eligible source reaches the graph. A partial, and a
         // complete source with no selected request, make no attempt at all.
@@ -1492,7 +1530,7 @@ export function useQuestSession() {
         sourceRetryInFlightRef.current = false
       }
     },
-    [familyId, projectGraph, identityEpoch, scopeStillLive],
+    [familyId, projectGraph, recoveryScope, identityEpoch, scopeStillLive],
   )
 
   // ── End session ───────────────────────────────────────────────
@@ -1516,9 +1554,8 @@ export function useQuestSession() {
       closedRunsRef.current.add(run.runId)
       /** Is this still the session on screen? Guards UI, never the writes. */
       const live = () => isLiveRun(runRef.current, run)
-      /** The view this close owns, and the scope it closed under. */
+      /** The view this close owns. */
       const closeViewGeneration = runGenerationRef.current
-      const closeScope = committedScopeRef.current.scope
       const docId = run.runId
       /**
        * This run's own active minutes, read WITHOUT stopping the shared timer.
@@ -1683,7 +1720,6 @@ export function useQuestSession() {
           payload,
           kind: 'final',
           viewGeneration: closeViewGeneration,
-          scope: closeScope,
         }
         setSourceSave({
           state: 'failed',
@@ -2367,6 +2403,57 @@ export function useQuestSession() {
     [currentQuestion, questState, activeChildId, answeredQuestions, familyId, chat, endSession, bankAnswerReward],
   )
 
+  /**
+   * Retire a run that failed before it had a single COUNTED answer (UX-494).
+   *
+   * `handleSkip`'s friendly no-counted-answers return put the intro back on
+   * screen but left the run established — its id, owner, live state and the
+   * timer all still in place. Every later Start was then refused as
+   * `already-running`, so the intro's own *Try Again* and every mode card went
+   * dead until the page was reloaded.
+   *
+   * It does exactly what an ordinary reset's cleanup does and nothing else: a
+   * skipped-only failed start has no counted answers, so there is no partial to
+   * save, no minutes to credit and no reward to bank. The caller's friendly
+   * error and the intro screen are deliberately left alone.
+   *
+   * Only the NAMED run is retired, so a late response from a superseded run
+   * cannot tear down the session that replaced it.
+   */
+  const retireUnansweredRun = useCallback(
+    (run: QuestRun | null) => {
+      if (!run || !isLiveRun(runRef.current, run)) return
+      // The same bump a reset makes: every callback this run still has in
+      // flight stops being allowed to touch this hook's state.
+      runGenerationRef.current += 1
+      startClaimRef.current = null
+      if (timerRef.current) {
+        clearInterval(timerRef.current)
+        timerRef.current = null
+      }
+      sessionTimer.stop()
+      setQuestState(null)
+      setCurrentQuestion(null)
+      setAnsweredQuestions([])
+      setFindings([])
+      setLastAnswer(null)
+      setSessionSaved(false)
+      sessionSavedRef.current = false
+      setSummarizing(false)
+      setHitLevelCap(false)
+      setFluencyPassages([])
+      setFluencyDiamonds(0)
+      setCurrentPassageText('')
+      conversationRef.current = []
+      bonusRoundUsedRef.current = false
+      activeQuestModeRef.current = undefined
+      sessionIdRef.current = null
+      runRef.current = null
+      sessionOwnerRef.current = null
+    },
+    [sessionTimer],
+  )
+
   // ── Skip question ───────────────────────────────────────────
 
   const handleSkip = useCallback(
@@ -2540,13 +2627,25 @@ export function useQuestSession() {
         if (updatedQuestions.filter((q) => !q.skipped).length === 0) {
           setStartQuestError('Hmm, the mine is being tricky. Try again in a minute.')
           setScreen(QuestScreen.Intro)
+          // The intro is back, so this run ends with it (UX-494). Leaving it
+          // established is what made every later Start `already-running`.
+          retireUnansweredRun(run)
           return
         }
 
         await endSession(updatedQuestions, questState, false)
       }
     },
-    [currentQuestion, questState, activeChildId, answeredQuestions, familyId, chat, endSession],
+    [
+      currentQuestion,
+      questState,
+      activeChildId,
+      answeredQuestions,
+      familyId,
+      chat,
+      endSession,
+      retireUnansweredRun,
+    ],
   )
 
   // ── Fluency: record attempt and advance ───────────────────────
@@ -3091,7 +3190,6 @@ export function useQuestSession() {
             payload: partialSession,
             kind: 'partial',
             viewGeneration: introGeneration,
-            scope: introScope,
           }
           setSourceSave({
             state: 'failed',

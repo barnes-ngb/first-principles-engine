@@ -23,6 +23,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
  *     Start cannot replace an established run, and an old summary's settled
  *     retry cannot relabel a newer same-child summary.
  *
+ * The three release-review paths it pins on top of those:
+ *
+ *   • a FIRST-question Skip whose replacement throws retires that run, so the
+ *     intro's own Start works again;
+ *   • an acknowledged partial RETRY asks its open intro to re-read the resume
+ *     card, with one source and one time credit;
+ *   • a freshly rendered Retry on a retained summary is authorised after a
+ *     same-family child change, while the button retained from before it is
+ *     not — and the payload it writes is still the original owner's.
+ *
  * **Real timers**, like the `childSwitch` harness: the feedback pauses are
  * genuinely awaited, which is why this file sets its own generous timeout. Fake
  * timers raced `renderHook` and returned null results.
@@ -433,6 +443,57 @@ describe('an ordinary Start is bound to the identity it was rendered under', () 
     expect(await start(view)).toBe('started')
     expect(view.result.current.screen).toBe('question')
   })
+
+  /**
+   * The release-review path: the FIRST question is skipped and the replacement
+   * provider throws. `handleSkip`'s friendly no-counted-answers return left the
+   * run established, so every card afterwards was refused as `already-running`.
+   */
+  it('retires a skipped-only run whose replacement threw, and starts again', async () => {
+    const view = mountHook()
+    expect(await start(view)).toBe('started')
+    const stopsBefore = stopCalls
+
+    chat.mockRejectedValueOnce(new Error('provider down'))
+    await act(async () => {
+      await view.result.current.handleSkip()
+    })
+
+    expect(view.result.current.screen).toBe('intro')
+    expect(view.result.current.startQuestError).toBe(
+      'Hmm, the mine is being tricky. Try again in a minute.',
+    )
+    // A skipped-only failed start has no counted answers: nothing is saved,
+    // credited or rewarded.
+    expect(sourceWrites()).toHaveLength(0)
+    expect(hoursRows()).toHaveLength(0)
+    expect(addDiamondEvent).not.toHaveBeenCalled()
+    expect(addXpEvent).not.toHaveBeenCalled()
+    // The run went with the intro — its ownership, its live state and its timer.
+    expect(view.result.current.questState).toBeNull()
+    expect(view.result.current.currentQuestion).toBeNull()
+    expect(view.result.current.sessionOwnerName).toBe('')
+    expect(stopCalls).toBeGreaterThan(stopsBefore)
+
+    // So the intro's own Start is a first-class one, not `already-running`.
+    chat.mockResolvedValue({ message: `<quest>${QUESTION}</quest>` })
+    expect(await start(view)).toBe('started')
+    expect(view.result.current.screen).toBe('question')
+  })
+
+  /** A normal counted-answer close after a skip is untouched by that retirement. */
+  it('still closes normally when a skip is followed by counted answers', async () => {
+    const view = mountHook()
+    expect(await start(view)).toBe('started')
+    await act(async () => {
+      await view.result.current.handleSkip()
+    })
+    await answer(view, 5)
+
+    expect(view.result.current.screen).toBe('summary')
+    expect(sourceWrites()).toHaveLength(1)
+    expect(sourceWrites()[0].data).toMatchObject({ status: 'complete', childId: 'lincoln' })
+  })
 })
 
 describe('a denied complete source', () => {
@@ -690,6 +751,47 @@ describe('a manual partial exit whose save is rejected', () => {
   })
 
   /**
+   * The release-review path: the retry RESOLVED the partial and cleared the
+   * error, but the intro already open never asked for the resume card again, so
+   * the quest looked gone until the page was reloaded.
+   */
+  it('re-reads the resume card after an acknowledged RETRY of the partial', async () => {
+    const view = mountHook()
+    await start(view)
+    await answer(view, 2)
+
+    transactionError = new Error('offline')
+    await act(async () => {
+      view.result.current.resetToIntro()
+    })
+    // A refused save asks for no read: there is nothing stored to resume yet.
+    const nonceBefore = view.result.current.resumeReloadNonce
+    const chatCalls = chat.mock.calls.length
+    const xpBefore = addXpEvent.mock.calls.length
+    const diamondCalls = addDiamondEvent.mock.calls.length
+
+    transactionError = null
+    await act(async () => {
+      await view.result.current.retrySourceSave({
+        runInstanceId: view.result.current.sourceSave.runInstanceId,
+        viewGeneration: view.result.current.sourceSave.viewGeneration,
+      })
+    })
+
+    // One source, one more read for the intro that owns the notice.
+    expect(view.result.current.sourceSave.state).toBe('saved')
+    expect(sourceWrites()).toHaveLength(1)
+    expect(sourceWrites()[0].data).toMatchObject({ status: 'partial', childId: 'lincoln' })
+    expect(view.result.current.resumeReloadNonce).toBe(nonceBefore + 1)
+    // One time credit, and no repeated AI, reward or projection work.
+    expect(hoursRows()).toHaveLength(1)
+    expect(chat.mock.calls).toHaveLength(chatCalls)
+    expect(addXpEvent.mock.calls).toHaveLength(xpBefore)
+    expect(addDiamondEvent.mock.calls).toHaveLength(diamondCalls)
+    expect(projectQuestSourceToModel).not.toHaveBeenCalled()
+  })
+
+  /**
    * Sol's reproduction: the delayed partial that replaced the newer Retry's
    * payload, so the button on screen saved the wrong answers — or nothing.
    */
@@ -810,6 +912,102 @@ describe('stale controls and stale scope', () => {
     // The newer summary's labels and its map status are untouched.
     expect(view.result.current.sourceSave.state).toBe('saved')
     expect(projectQuestSourceToModel.mock.calls.length).toBe(projectionsSoFar)
+  })
+
+  /**
+   * The release-review path (UX-339 × UX-494): the parent taps a sibling's chip
+   * — and taps back — while the original summary is still on screen, bound to
+   * its owner. The Retry rendered NOW on that summary must work; the one
+   * retained from before the switch must not.
+   */
+  it('authorises a freshly rendered retry after a same-family child change', async () => {
+    selectedPlan = PLAN
+    seedTargetedModel()
+    const view = mountHook()
+    await start(view)
+    transactionError = new Error('offline')
+    await answer(view, 5)
+    const runId = runIdFromRewardKey()
+    // The button as drawn while Lincoln was the chip on screen.
+    const retained = {
+      runInstanceId: view.result.current.sourceSave.runInstanceId,
+      viewGeneration: view.result.current.sourceSave.viewGeneration,
+      scopeKey: view.result.current.recoveryScope,
+      epoch: view.result.current.recoveryEpoch,
+    }
+
+    identityEpoch = 2
+    setActive(LONDON)
+    view.rerender()
+    identityEpoch = 3
+    setActive(LINCOLN)
+    view.rerender()
+    // The summary is still his, and still offering its retry.
+    expect(view.result.current.sourceSave).toMatchObject({
+      state: 'failed',
+      kind: 'final',
+      canRetry: true,
+      runInstanceId: retained.runInstanceId,
+    })
+
+    transactionError = null
+    let stale: unknown
+    await act(async () => {
+      stale = await view.result.current.retrySourceSave(retained)
+    })
+    expect(stale).toBe('identity-mismatch')
+    expect(sourceWrites()).toHaveLength(0)
+
+    let fresh: unknown
+    await act(async () => {
+      fresh = await view.result.current.retrySourceSave({
+        runInstanceId: view.result.current.sourceSave.runInstanceId,
+        viewGeneration: view.result.current.sourceSave.viewGeneration,
+        scopeKey: view.result.current.recoveryScope,
+        epoch: view.result.current.recoveryEpoch,
+      })
+    })
+    expect(fresh).toBe('saved')
+    // The ORIGINAL run's id, child and payload — the header's move changed
+    // nothing about whose answers these are.
+    expect(sourceWrites()).toHaveLength(1)
+    expect(sourceWrites()[0].path).toBe(`sessions-fam-1/${runId}`)
+    expect(sourceWrites()[0].data).toMatchObject({
+      questRunId: runId,
+      childId: 'lincoln',
+      questMode: 'phonics',
+      status: 'complete',
+      targetPlan: PLAN,
+    })
+    expect(view.result.current.sourceSave.state).toBe('saved')
+    // One write, one projection, and no other close side effect.
+    expect(projectQuestSourceToModel).toHaveBeenCalledTimes(1)
+    expect(hoursRows()).toHaveLength(1)
+  })
+
+  it('fails a retry closed on an unsettled, other-family or other-profile scope', async () => {
+    const view = mountHook()
+    await start(view)
+    transactionError = new Error('offline')
+    await answer(view, 5)
+    const control = {
+      runInstanceId: view.result.current.sourceSave.runInstanceId,
+      viewGeneration: view.result.current.sourceSave.viewGeneration,
+      epoch: view.result.current.recoveryEpoch,
+    }
+    transactionError = null
+
+    // `familyId|childId|profile|epoch` — none of these is the live scope.
+    for (const scopeKey of ['unsettled', 'fam-2|lincoln|parent|1', 'fam-1|lincoln|child|1']) {
+      let outcome: unknown
+      await act(async () => {
+        outcome = await view.result.current.retrySourceSave({ ...control, scopeKey })
+      })
+      expect(outcome).toBe('identity-mismatch')
+    }
+    expect(sourceWrites()).toHaveLength(0)
+    // The payload is still held, so the honest button can still land it.
+    expect(view.result.current.sourceSave).toMatchObject({ state: 'failed', canRetry: true })
   })
 
   it('refuses a graph retry for a child who is no longer the active one', async () => {

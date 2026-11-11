@@ -783,6 +783,9 @@ export default function KnowledgeMinePage() {
                         quest.retrySourceSave({
                           runInstanceId: quest.sourceSave.runInstanceId,
                           viewGeneration: quest.sourceSave.viewGeneration,
+                          // This render's identity, which is what authorises the
+                          // tap — the payload's own run selects what it writes.
+                          scopeKey: recoveryScope,
                           epoch: recoveryEpoch,
                         })
                     : undefined
@@ -1069,6 +1072,10 @@ export default function KnowledgeMinePage() {
             void quest.retrySourceSave({
               runInstanceId: quest.sourceSave.runInstanceId,
               viewGeneration: quest.sourceSave.viewGeneration,
+              // A summary stays bound to its owner across a same-family child
+              // change (UX-339), so a FRESH button here is authorised by this
+              // render's identity rather than by the close's (UX-494).
+              scopeKey: recoveryScope,
               epoch: recoveryEpoch,
             })
           }
