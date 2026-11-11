@@ -1173,6 +1173,169 @@ describe('a manual partial exit whose save is rejected', () => {
   })
 
   /**
+   * Sol's first partial overlap: a later run that goes back to Intro WITHOUT a
+   * counted answer does not replace the old partial's notice — nothing was
+   * saved, so there is nothing to publish. Settling (and showing) on the
+   * attempt id alone then offered that retired intro's Retry on the live one,
+   * where the generation guard refuses every tap: a dead control.
+   */
+  it('hides a retired intro’s partial notice without discarding it', async () => {
+    const view = mountHook()
+    await start(view)
+    await answer(view, 2)
+
+    transactionError = new Error('offline')
+    await act(async () => {
+      view.result.current.resetToIntro()
+    })
+    expect(view.result.current.visibleSourceSave).toMatchObject({
+      state: 'failed',
+      kind: 'partial',
+      canRetry: true,
+    })
+    const retiredControl = {
+      runInstanceId: view.result.current.sourceSave.runInstanceId,
+      viewGeneration: view.result.current.sourceSave.viewGeneration,
+    }
+
+    // A later quest starts and is retired back to Intro with no counted answer.
+    transactionError = null
+    expect(await start(view)).toBe('started')
+    chat.mockRejectedValueOnce(new Error('provider down'))
+    await act(async () => {
+      await view.result.current.handleSkip()
+    })
+    expect(view.result.current.screen).toBe('intro')
+    expect(view.result.current.viewGeneration).not.toBe(retiredControl.viewGeneration)
+
+    // The live intro is told nothing: the old notice belongs to a retired view.
+    expect(view.result.current.visibleSourceSave).toMatchObject({
+      state: 'idle',
+      canRetry: false,
+    })
+    // And nothing is discarded — the status and the held answers are as found.
+    expect(view.result.current.sourceSave).toMatchObject({
+      state: 'failed',
+      kind: 'partial',
+      canRetry: true,
+      runInstanceId: retiredControl.runInstanceId,
+    })
+    let refused: unknown
+    await act(async () => {
+      refused = await view.result.current.retrySourceSave(retiredControl)
+    })
+    expect(refused).toBe('identity-mismatch')
+    expect(sourceWrites()).toHaveLength(0)
+  })
+
+  /**
+   * Sol's second partial overlap: the partial Retry is admitted on its own
+   * intro and acknowledged after an `A → B → A`. Family and child come back
+   * the same, so the intro that owns the payload is still this generation,
+   * while the epoch `ownsView` checks has moved — and dropping the intro's
+   * one-more-read left the acknowledged partial unresumable until the page was
+   * navigated again.
+   */
+  it('re-reads the owning intro after an A → B → A acknowledged retry', async () => {
+    const view = mountHook()
+    await start(view)
+    await answer(view, 2)
+
+    transactionError = new Error('offline')
+    await act(async () => {
+      view.result.current.resetToIntro()
+    })
+    const nonceBefore = view.result.current.resumeReloadNonce
+    const generation = view.result.current.sourceSave.viewGeneration
+
+    transactionError = null
+    const release = holdNextTransaction()
+    const retrying = view.result.current.retrySourceSave({
+      runInstanceId: view.result.current.sourceSave.runInstanceId,
+      viewGeneration: generation,
+      scopeKey: view.result.current.recoveryScope,
+      epoch: view.result.current.recoveryEpoch,
+    })
+    await settle()
+
+    // The parent taps London's chip and taps back while it is in flight.
+    identityEpoch = 2
+    setActive(LONDON)
+    view.rerender()
+    identityEpoch = 3
+    setActive(LINCOLN)
+    view.rerender()
+    release()
+    await act(async () => {
+      expect(await retrying).toBe('saved')
+    })
+
+    // The same intro, same generation: one more read, and the partial is
+    // resumable without another navigation.
+    expect(view.result.current.viewGeneration).toBe(generation)
+    expect(view.result.current.resumeReloadNonce).toBe(nonceBefore + 1)
+    expect(sourceWrites()).toHaveLength(1)
+    expect(sourceWrites()[0].data).toMatchObject({ status: 'partial', childId: 'lincoln' })
+    expect(view.result.current.visibleSourceSave).toMatchObject({
+      state: 'saved',
+      kind: 'partial',
+      originalChildId: 'lincoln',
+      viewGeneration: generation,
+    })
+    // Nothing outside that read: no completion side effect is repeated, and the
+    // retired render's own view flag is not moved.
+    expect(view.result.current.sessionSaved).toBe(false)
+    expect(hoursRows()).toHaveLength(1)
+    expect(projectQuestSourceToModel).not.toHaveBeenCalled()
+  })
+
+  /** A NEWER generation is never refreshed, however the retry lands. */
+  it('asks for no read when the owning intro retires mid-retry', async () => {
+    const view = mountHook()
+    await start(view)
+    await answer(view, 2)
+
+    transactionError = new Error('offline')
+    await act(async () => {
+      view.result.current.resetToIntro()
+    })
+    const nonceBefore = view.result.current.resumeReloadNonce
+
+    transactionError = null
+    const release = holdNextTransaction()
+    const retrying = view.result.current.retrySourceSave({
+      runInstanceId: view.result.current.sourceSave.runInstanceId,
+      viewGeneration: view.result.current.sourceSave.viewGeneration,
+      scopeKey: view.result.current.recoveryScope,
+      epoch: view.result.current.recoveryEpoch,
+    })
+    await settle()
+    expect(view.result.current.sourceSave.state).toBe('saving')
+
+    // A later run takes the intro, then retires back to it.
+    expect(await start(view, 'reading', 'comprehension')).toBe('started')
+    chat.mockRejectedValueOnce(new Error('provider down'))
+    await act(async () => {
+      await view.result.current.handleSkip()
+    })
+
+    release()
+    await act(async () => {
+      expect(await retrying).toBe('saved')
+    })
+
+    // His answers landed under their own id, and the retired view reported
+    // nowhere: no read asked for, and nothing shown on the live intro.
+    expect(sourceWrites()).toHaveLength(1)
+    expect(sourceWrites()[0].data).toMatchObject({ status: 'partial', childId: 'lincoln' })
+    expect(view.result.current.resumeReloadNonce).toBe(nonceBefore)
+    expect(view.result.current.visibleSourceSave).toMatchObject({
+      state: 'idle',
+      canRetry: false,
+    })
+  })
+
+  /**
    * Sol's reproduction: the delayed partial that replaced the newer Retry's
    * payload, so the button on screen saved the wrong answers — or nothing.
    */

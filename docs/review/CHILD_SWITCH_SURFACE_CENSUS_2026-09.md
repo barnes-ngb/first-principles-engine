@@ -539,7 +539,15 @@ for the exact attempt that produced it rather than dropped when the rendered sco
 and *visibility* is derived at render from the current committed family and the authorised viewer — so
 a Retry admitted before a child change settles instead of leaving *Saving…* on the bound summary, a
 newer run's notice is never overwritten, and an unsettled, wrong-family or unauthorised render is told
-nothing at all. Both rows are
+nothing at all. The promotion settlement completes that rule without moving a verdict either: every
+settled notice — Saving, Saved, Conflict and Failed, on a close as well as on a retry — carries the
+original child, family and the generation of the view that owns it, a settlement requires **both** its
+exact attempt id and that still-live generation, and visibility requires the generation to match. So a
+later run that returns to Intro without replacing the old notice hides it rather than offering a dead
+Retry from the retired intro, nothing newer is overwritten and no held payload is discarded; and an
+acknowledged *partial* retry asks its own intro — identified by that same generation, which an
+`A → B → A` leaves alone — for one more read, while the view flag and the map status stay with the
+authorised original view. Both rows are
 edited in place for exactly the three things §4 allows — the affected surface verdicts, the scoped
 recovery identity, and the evidence for each — and **no row is added or removed**, so the derived
 tallies above are still expected to be unchanged.
