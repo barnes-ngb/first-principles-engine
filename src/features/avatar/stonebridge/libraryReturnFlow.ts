@@ -45,7 +45,11 @@
  * like any other identity movement.
  */
 import { subscribeActiveChildId } from '../../../core/hooks/activeChildStore'
-import { STONEBRIDGE_TOWN_PATH } from './stonebridgeDestinations'
+import {
+  STONEBRIDGE_MINE_PATH,
+  STONEBRIDGE_TOWN_PATH,
+} from './stonebridgeDestinations'
+import type { MineInvitation } from './mineInvitation'
 
 /** The legacy village entry: the Hero Hub, whose mission card hosts the board. */
 export const LIBRARY_RETURN_VILLAGE_PATH = '/avatar'
@@ -83,6 +87,57 @@ export const LIBRARY_RETURN_ORIGIN_PATHS: Record<LibraryReturnOrigin, string> = 
 }
 
 /**
+ * WHERE a journey went — and so which routes it is still ON (UX-493).
+ *
+ * A journey has always had an away-set; it was the Books area, named as the
+ * routes the shelf really opens. A second destination makes that a property of
+ * the INTENT rather than a constant: the Mine's away-set is exactly its own
+ * route, and a Books trip keeps exactly the Books routes it already had. They
+ * are never unioned — a Mine trip arriving at `/books` has left the journey, and
+ * a Books trip arriving at `/quest` has too.
+ *
+ * `Books` is the default everywhere, so every existing caller and every stored
+ * assumption about a Books trip is untouched.
+ */
+export const LibraryReturnDestination = {
+  Books: 'books',
+  Mine: 'mine',
+} as const
+export type LibraryReturnDestination =
+  (typeof LibraryReturnDestination)[keyof typeof LibraryReturnDestination]
+
+/** The away-set per destination: the real routes, named rather than prefixed. */
+const DESTINATION_IS_AWAY: Record<
+  LibraryReturnDestination,
+  (pathname: string) => boolean
+> = {
+  [LibraryReturnDestination.Books]: (pathname) => isBooksAreaPath(pathname),
+  // One route, and the hub's own screens are all on it (intro, a running
+  // session, the summary), so a Mine trip survives a quest and ends the moment
+  // the child goes anywhere else.
+  [LibraryReturnDestination.Mine]: (pathname) =>
+    normalise(pathname) === STONEBRIDGE_MINE_PATH,
+}
+
+/**
+ * WHAT a return focuses when it gets back to the village.
+ *
+ * `Mission` is the existing behaviour: the location tile the child left from,
+ * focused by the board. `SquareInvitation` is the town's Square-side invitation
+ * anchor — a landmark, not a mission, so there is no tile to name and
+ * `missionId` is empty for such a journey. The host owes a SAFE fallback for it:
+ * the invitation may legitimately be gone by the time the child is back (fresh
+ * evidence retired it), and focusing a node that is not there moves the focus to
+ * `body` while reporting success.
+ */
+export const LibraryReturnFocus = {
+  Mission: 'mission',
+  SquareInvitation: 'squareInvitation',
+} as const
+export type LibraryReturnFocus =
+  (typeof LibraryReturnFocus)[keyof typeof LibraryReturnFocus]
+
+/**
  * `away` — on the shelf or somewhere it leads, with the way back offered.
  * `returning` — the way back was taken, and the village board owes one
  * open-with-focus, which it serves once.
@@ -97,10 +152,26 @@ export type LibraryReturnPhase =
 export interface LibraryReturnFlow {
   readonly familyId: string
   readonly childId: string
-  /** The location the child left from — the tile a return focuses. */
+  /**
+   * The location the child left from — the tile a return focuses. Empty for a
+   * journey whose focus is the Square invitation, which has no mission.
+   */
   readonly missionId: string
   /** WHICH village entry it left: the canonical town page, or the legacy hub. */
   readonly origin: LibraryReturnOrigin
+  /** WHERE it went, which is also the set of routes it is still on. */
+  readonly destination: LibraryReturnDestination
+  /** WHAT its return focuses back at the village. */
+  readonly focus: LibraryReturnFocus
+  /**
+   * The temporary, scoped suggestion a Mine trip carries (UX-493) — the mode the
+   * town offered, so the hub can REVALIDATE it against its own fresh read rather
+   * than trust it. It is carried on the journey and nowhere else, so every way a
+   * journey ends — an identity movement, a failed read, an abandoned route, a
+   * reload, a served return — retires the suggestion with it. Absent on a Books
+   * trip, which suggests nothing.
+   */
+  readonly suggestion: MineInvitation | null
   /** Monotonic, never reused: a stale callback cannot act on an old one. */
   readonly generation: number
   readonly phase: LibraryReturnPhase
@@ -273,11 +344,19 @@ export function beginLibraryReturnFlow(origin: {
   missionId: string
   /** The entry the surface asking is itself rendering. */
   origin: LibraryReturnOrigin
+  /** Where it is going. Omitted = the shelf, exactly as before. */
+  destination?: LibraryReturnDestination
+  /** What its return focuses. Omitted = the location tile, exactly as before. */
+  focus?: LibraryReturnFocus
+  /** The Mine mode the town offered, revalidated on arrival. */
+  suggestion?: MineInvitation | null
   /** `getLibraryIdentityEpoch()` as read at the tap. */
   observedEpoch: number
 }): LibraryReturnFlow | null {
   if (!origin.familyId || !origin.childId) return null
   if (!LIBRARY_RETURN_ORIGIN_PATHS[origin.origin]) return null
+  const destination = origin.destination ?? LibraryReturnDestination.Books
+  if (!DESTINATION_IS_AWAY[destination]) return null
   if (origin.observedEpoch !== identityEpoch) return null
   generations += 1
   leftOrigin = false
@@ -286,6 +365,9 @@ export function beginLibraryReturnFlow(origin: {
     childId: origin.childId,
     missionId: origin.missionId,
     origin: origin.origin,
+    destination,
+    focus: origin.focus ?? LibraryReturnFocus.Mission,
+    suggestion: origin.suggestion ?? null,
     generation: generations,
     phase: LibraryReturnPhase.Away,
   }
@@ -325,6 +407,24 @@ export function liveLibraryReturnFlow(
  * One definition, used by both hosts, so "whose return is this" cannot be
  * answered two ways.
  */
+/**
+ * Is this journey's a trip to THIS destination — the shelf, or the Mine?
+ *
+ * The scope and phase checks are not enough once a journey can go two places: a
+ * Mine trip must not be adopted by the shelf's way-back control, and the Mine's
+ * own suggestion and exit must not appear for a Books trip. One definition, so
+ * "whose trip is this" is answered the same way on both sides.
+ */
+export function libraryReturnForDestination(
+  candidate: LibraryReturnFlow | null,
+  scope: LibraryReturnScope,
+  destination: LibraryReturnDestination,
+  phase: LibraryReturnPhase = LibraryReturnPhase.Away,
+): LibraryReturnFlow | null {
+  const live = liveLibraryReturnFlow(candidate, scope, phase)
+  return live && live.destination === destination ? live : null
+}
+
 export function libraryReturnForOrigin(
   candidate: LibraryReturnFlow | null,
   scope: LibraryReturnScope,
@@ -417,6 +517,22 @@ export function isVillagePath(pathname: string): boolean {
   return Object.values(LIBRARY_RETURN_ORIGIN_PATHS).includes(path)
 }
 
+/**
+ * Is this path one THIS journey's own destination really mounts?
+ *
+ * The journey's destination decides, never the union of both away-sets — see
+ * {@link LibraryReturnDestination}. A destination with no away-set behind it
+ * (which `beginLibraryReturnFlow` refuses to create) reads as "not away", so a
+ * journey that somehow held one would end at the next route change rather than
+ * surviving everywhere.
+ */
+export function isAwayPath(
+  candidate: LibraryReturnFlow,
+  pathname: string,
+): boolean {
+  return Boolean(DESTINATION_IS_AWAY[candidate.destination]?.(pathname))
+}
+
 /** Is this path the entry THIS journey left from — not merely a village one? */
 export function isOwnOriginPath(
   candidate: LibraryReturnFlow,
@@ -428,7 +544,9 @@ export function isOwnOriginPath(
 /**
  * A route transition: keep the flow only where its phase belongs.
  *
- *   • **away** — inside the Books area, or still standing where it began (its
+ *   • **away** — inside its OWN destination's away-set (the Books area for a
+ *     shelf trip, the Mine's single route for a Mine trip — never either), or
+ *     still standing where it began (its
  *     OWN entry, before the first step into the shelf). Coming back to that
  *     entry by ordinary navigation ENDS it: the journey is over whether or not
  *     the way back was used, and an origin that outlives it would reopen the
@@ -453,7 +571,7 @@ export function reconcileLibraryReturnFlowPath(pathname: string): void {
     if (!isOwnOriginPath(flow, pathname)) endLibraryReturnFlow()
     return
   }
-  if (isBooksAreaPath(pathname)) {
+  if (isAwayPath(flow, pathname)) {
     leftOrigin = true
     return
   }

@@ -5,7 +5,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { setActiveChildIdShared } from '../../../core/hooks/activeChildStore'
 import { getMission } from './missions'
-import { LIBRARY_RETURN_LABEL, LIBRARY_RETURN_LINE } from './libraryReturnCopy'
+import {
+  LIBRARY_RETURN_LABEL,
+  LIBRARY_RETURN_LINE,
+  MINE_INVITATION_LINE,
+  MINE_MATH_DIG_LABEL,
+  MINE_READING_DIG_LABEL,
+  MINE_RETURN_LABEL,
+} from './libraryReturnCopy'
 import {
   clearForgeFocusRequest,
   consumeForgeFocus,
@@ -14,11 +21,14 @@ import {
 import {
   STONEBRIDGE_TOWN_PATH,
   STONEBRIDGE_BOOKS_PATH,
+  STONEBRIDGE_MINE_PATH,
   STONEBRIDGE_TODAY_PATH,
 } from './stonebridgeDestinations'
 import type { StonebridgeProgressData } from './useStonebridgeProgress'
 import {
   LIBRARY_RETURN_VILLAGE_PATH,
+  LibraryReturnDestination,
+  LibraryReturnFocus,
   LibraryReturnOrigin,
   LibraryReturnPhase,
   beginLibraryReturnFlow,
@@ -77,6 +87,36 @@ const fx = vi.hoisted(() => ({
    */
   childrenLoading: false,
   childrenLoadFailed: false,
+  /**
+   * Whether a KID is looking at the town (UX-493).
+   *
+   * Default `false` — a parent — which is the state every claim written before
+   * the Square's Mine invitation existed was written under, and the state in
+   * which that invitation is not on the page at all.
+   */
+  isChildProfile: false,
+  /**
+   * The family the ANSWERED children list belongs to.
+   *
+   * Its own value, not `familyId`, because the two really can disagree: the
+   * shared list survives a family change until the next read lands. The
+   * invitation is gated on them agreeing.
+   */
+  childrenFamilyId: 'fam-1' as string | null | undefined,
+  /**
+   * The resolved id, when a test wants it to DISAGREE with the object.
+   *
+   * `null` means "whatever the object says", which is the real hook's own
+   * relationship between the two and the shape every existing claim here was
+   * written against. A test sets it to drive the state where the selected id has
+   * moved and the list that resolves it has not answered yet.
+   */
+  activeChildId: null as string | null,
+  /** What the invitation's two scoped reads report. Nothing by default. */
+  snapshot: null as unknown,
+  snapshotLoaded: true,
+  model: null as unknown,
+  modelLoading: false,
   /**
    * The hook's own retry and the hook's own setter, as spies.
    *
@@ -145,17 +185,34 @@ vi.mock('../../../core/profile/useProfile', () => ({
 vi.mock('../../../core/hooks/useActiveChild', () => ({
   useActiveChild: () => ({
     activeChild: fx.activeChild,
-    activeChildId: fx.activeChild?.id ?? '',
+    activeChildId: fx.activeChildId ?? fx.activeChild?.id ?? '',
+    childrenFamilyId: fx.childrenFamilyId,
     children: [
       { id: 'lincoln', name: 'Lincoln' },
       { id: 'london', name: 'London' },
     ],
     setActiveChildId: fx.setActiveChildId,
-    isChildProfile: false,
+    isChildProfile: fx.isChildProfile,
     isLoading: fx.childrenLoading,
     loadFailed: fx.childrenLoadFailed,
     retryLoad: fx.retryLoad,
   }),
+}))
+
+/**
+ * The invitation's two scoped reads — a Firestore subscription and a get.
+ *
+ * Stubbed here for the same reason the hero read is: this file is about routes
+ * and journeys. WHICH mode a model and snapshot produce is
+ * `mineInvitation.test.ts` against the real selector, and the mounted gate,
+ * focus and fallback are `StonebridgeMineInvitation.test.tsx`.
+ */
+vi.mock('../../../core/hooks/useChildSkillSnapshot', () => ({
+  useChildSkillSnapshot: () => ({ snapshot: fx.snapshot, loaded: fx.snapshotLoaded }),
+}))
+
+vi.mock('../../../core/hooks/useLearnerModel', () => ({
+  useLearnerModel: () => ({ model: fx.model, loading: fx.modelLoading }),
 }))
 
 // A full-screen overlay with Web Audio behind it; this file is about routes.
@@ -272,6 +329,33 @@ function BooksSubPage({ name }: { name: string }) {
   )
 }
 
+/**
+ * `/quest` — the Mine, as far as this journey is concerned.
+ *
+ * The one thing the real hub does on the way out of a trip, which is the real
+ * `requestLibraryReturn` + the journey's own path — the same stand-in shape the
+ * shelf above is. What the real page draws on arrival (the revalidated
+ * suggestion, the guarded Start, the exits) is `KnowledgeMinePage.invitation`.
+ */
+function MineRoute() {
+  const navigate = useNavigate()
+  const flow = getLibraryReturnFlow()
+  return (
+    <div>
+      <h1>Knowledge Mine</h1>
+      <button
+        onClick={() => {
+          const returning = requestLibraryReturn(flow?.generation ?? 0)
+          if (!returning) return
+          navigate(libraryReturnPath(returning))
+        }}
+      >
+        {MINE_RETURN_LABEL}
+      </button>
+    </div>
+  )
+}
+
 /** What sits ABOVE the router in the real app (`App.tsx`'s observer). */
 function IdentityObserver({ signedIn }: { signedIn: boolean }) {
   useLibraryReturnIdentityWatch(signedIn ? 'fam-1' : '', signedIn ? 'lincoln' : null)
@@ -290,6 +374,7 @@ function renderTown(initial = STONEBRIDGE_TOWN_PATH) {
           { path: LIBRARY_RETURN_VILLAGE_PATH, element: <h1>Hero Hub</h1> },
           { path: '/books', element: <ShelfRoute /> },
           { path: '/books/:bookId/read', element: <BooksSubPage name="Book reader" /> },
+          { path: STONEBRIDGE_MINE_PATH, element: <MineRoute /> },
           { path: STONEBRIDGE_TODAY_PATH, element: <h1>Today</h1> },
           { path: '*', element: <h1>Not found</h1> },
         ],
@@ -297,13 +382,16 @@ function renderTown(initial = STONEBRIDGE_TOWN_PATH) {
     ],
     { initialEntries: [initial] },
   )
-  render(
+  // The real render result, plus the router — so a test that needs to tear one
+  // town down before rendering the next can use testing-library's own
+  // `unmount`. Every existing `{ router }` caller is unaffected.
+  const result = render(
     <>
       <IdentityObserver signedIn />
       <RouterProvider router={router} />
     </>,
   )
-  return { router }
+  return Object.assign(result, { router })
 }
 
 /** Begin a journey directly, against the epoch the module has observed. */
@@ -359,8 +447,15 @@ beforeEach(() => {
   emulateReducedMotion()
   fx.data = LIBRARY_REPAIRED
   fx.activeChild = { id: 'lincoln', name: 'Lincoln' }
+  fx.activeChildId = null
+  fx.childrenFamilyId = 'fam-1'
   fx.childrenLoading = false
   fx.childrenLoadFailed = false
+  fx.isChildProfile = false
+  fx.snapshot = null
+  fx.snapshotLoaded = true
+  fx.model = null
+  fx.modelLoading = false
   fx.retryLoad.mockClear()
   fx.setActiveChildId.mockClear()
   fx.hero = {
@@ -1563,5 +1658,245 @@ describe('a return taken in the window before the shelf’s arrival was observed
     })
     await screen.findByRole('region', { name: 'Stonebridge Village' })
     await waitFor(() => expect(tile(LIBRARY)).not.toHaveFocus())
+  })
+})
+
+// ── The Square's Mine invitation, and the trip it makes (UX-493) ────────────
+
+/** Reading-calibrated: a real phonics working level. */
+const READING_CALIBRATED = { childId: 'lincoln', prioritySkills: [], workingLevels: { phonics: 3 } }
+
+/** A model whose queue is waiting on the one supported reading concept. */
+const CVC_QUEUED = {
+  childId: 'lincoln',
+  openQuestions: [
+    { conceptId: 'reading.phonics.cvc', question: 'see this?', routedTo: 'quest', reason: 'queued' },
+  ],
+  synthesis: {
+    whatMattersNext: [],
+    narrative: '',
+    openQuestionsSummary: [],
+    generatedAt: '2026-11-01T00:00:00.000Z',
+  },
+  synthesisStaleAt: null,
+}
+
+/** A kid looking at a calibrated town with a supported next move. */
+function kidWithInvitation() {
+  fx.isChildProfile = true
+  fx.snapshot = READING_CALIBRATED
+  fx.model = CVC_QUEUED
+}
+
+function invitationAction() {
+  return screen.getByRole('button', { name: MINE_READING_DIG_LABEL })
+}
+
+describe('the Square’s invitation into a Mine mode', () => {
+  it('offers one line and one action to a calibrated CHILD', async () => {
+    kidWithInvitation()
+    renderTown()
+    await screen.findByRole('region', { name: 'Stonebridge Village' })
+    expect(screen.getByText(`⛏️ ${MINE_INVITATION_LINE}`)).toBeInTheDocument()
+    expect(invitationAction()).toBeInTheDocument()
+    // The Square is a landmark: no tile, no mission, no counter appeared with it.
+    expect(
+      screen.queryByRole('button', { name: /^Visit the Village Square/ }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('and nothing at all to a parent — no new launcher', async () => {
+    fx.snapshot = READING_CALIBRATED
+    fx.model = CVC_QUEUED
+    fx.isChildProfile = false
+    renderTown()
+    await screen.findByRole('region', { name: 'Stonebridge Village' })
+    expect(screen.queryByText(`⛏️ ${MINE_INVITATION_LINE}`)).not.toBeInTheDocument()
+  })
+
+  it('and nothing when the answered children list is ANOTHER family’s', async () => {
+    // The shared list survives a family change until the next read lands, so
+    // `familyId` and the list's own family really can disagree. A's offer must
+    // not be drawn against B's page.
+    kidWithInvitation()
+    fx.childrenFamilyId = 'fam-other'
+    renderTown()
+    await screen.findByRole('region', { name: 'Stonebridge Village' })
+    expect(screen.queryByText(`⛏️ ${MINE_INVITATION_LINE}`)).not.toBeInTheDocument()
+  })
+
+  it('and nothing when the resolved id is not the resolved child', async () => {
+    kidWithInvitation()
+    fx.activeChildId = 'london' // selected B; the list still resolves A
+    renderTown()
+    await screen.findByRole('region', { name: 'Stonebridge Village' })
+    expect(screen.queryByText(`⛏️ ${MINE_INVITATION_LINE}`)).not.toBeInTheDocument()
+  })
+
+  it('and nothing while the children read is unsettled or has FAILED', async () => {
+    kidWithInvitation()
+    fx.childrenLoadFailed = true
+    const { unmount } = renderTown()
+    expect(screen.queryByText(`⛏️ ${MINE_INVITATION_LINE}`)).not.toBeInTheDocument()
+    unmount()
+
+    fx.childrenLoadFailed = false
+    fx.childrenLoading = true
+    renderTown()
+    expect(screen.queryByText(`⛏️ ${MINE_INVITATION_LINE}`)).not.toBeInTheDocument()
+  })
+
+  it('and nothing when the source is missing, failed, stale or uncalibrated', async () => {
+    kidWithInvitation()
+    fx.model = null // missing, and the shape a failed read arrives as
+    const { unmount } = renderTown()
+    await screen.findByRole('region', { name: 'Stonebridge Village' })
+    expect(screen.queryByText(`⛏️ ${MINE_INVITATION_LINE}`)).not.toBeInTheDocument()
+    unmount()
+
+    kidWithInvitation()
+    fx.snapshot = null // uncalibrated
+    renderTown()
+    await screen.findByRole('region', { name: 'Stonebridge Village' })
+    expect(screen.queryByText(`⛏️ ${MINE_INVITATION_LINE}`)).not.toBeInTheDocument()
+  })
+
+  it('the tap makes a Mine journey and lands on the real hub', async () => {
+    kidWithInvitation()
+    const { router } = renderTown()
+    await screen.findByRole('region', { name: 'Stonebridge Village' })
+    fireEvent.click(invitationAction())
+
+    await waitFor(() => expect(router.state.location.pathname).toBe(STONEBRIDGE_MINE_PATH))
+    const flow = getLibraryReturnFlow()
+    expect(flow).toMatchObject({
+      familyId: 'fam-1',
+      childId: 'lincoln',
+      // The Square is a landmark: no mission id, and the focus says so.
+      missionId: '',
+      origin: LibraryReturnOrigin.Town,
+      destination: LibraryReturnDestination.Mine,
+      focus: LibraryReturnFocus.SquareInvitation,
+      phase: LibraryReturnPhase.Away,
+    })
+    expect(flow?.suggestion).toMatchObject({
+      conceptId: 'reading.phonics.cvc',
+      questMode: 'phonics',
+    })
+  })
+
+  it('comes back to the town with the focus on the invitation, once', async () => {
+    kidWithInvitation()
+    const { router } = renderTown()
+    await screen.findByRole('region', { name: 'Stonebridge Village' })
+    fireEvent.click(invitationAction())
+    await screen.findByRole('heading', { name: 'Knowledge Mine' })
+
+    fireEvent.click(screen.getByRole('button', { name: MINE_RETURN_LABEL }))
+    await waitFor(() => expect(router.state.location.pathname).toBe(STONEBRIDGE_TOWN_PATH))
+    await waitFor(() => expect(invitationAction()).toHaveFocus())
+    // Consumed: the journey is over and a later arrival is an ordinary town.
+    expect(getLibraryReturnFlow()).toBeNull()
+  })
+
+  it('and falls back to the top of the town when fresh evidence retired it', async () => {
+    kidWithInvitation()
+    const { router } = renderTown()
+    await screen.findByRole('region', { name: 'Stonebridge Village' })
+    fireEvent.click(invitationAction())
+    await screen.findByRole('heading', { name: 'Knowledge Mine' })
+
+    // The source moved while the child was away: there is nothing to focus.
+    fx.model = null
+    fireEvent.click(screen.getByRole('button', { name: MINE_RETURN_LABEL }))
+    await waitFor(() => expect(router.state.location.pathname).toBe(STONEBRIDGE_TOWN_PATH))
+    await screen.findByRole('region', { name: 'Stonebridge Village' })
+    expect(screen.queryByText(`⛏️ ${MINE_INVITATION_LINE}`)).not.toBeInTheDocument()
+    // Served anyway — no journey left waiting for a focus that cannot land.
+    await waitFor(() => expect(getLibraryReturnFlow()).toBeNull())
+  })
+
+  it('a same-tick A → B → A while away retires the journey', async () => {
+    kidWithInvitation()
+    const { router } = renderTown()
+    await screen.findByRole('region', { name: 'Stonebridge Village' })
+    fireEvent.click(invitationAction())
+    await screen.findByRole('heading', { name: 'Knowledge Mine' })
+
+    act(() => {
+      setActiveChildIdShared('london')
+      setActiveChildIdShared('lincoln')
+    })
+    expect(getLibraryReturnFlow()).toBeNull()
+
+    // And the way back is gone with it — the route is left alone.
+    fireEvent.click(screen.getByRole('button', { name: MINE_RETURN_LABEL }))
+    expect(router.state.location.pathname).toBe(STONEBRIDGE_MINE_PATH)
+  })
+
+  it('leaving the Mine for anywhere else abandons the journey', async () => {
+    kidWithInvitation()
+    const { router } = renderTown()
+    await screen.findByRole('region', { name: 'Stonebridge Village' })
+    fireEvent.click(invitationAction())
+    await screen.findByRole('heading', { name: 'Knowledge Mine' })
+
+    await act(async () => {
+      await router.navigate(STONEBRIDGE_TODAY_PATH)
+    })
+    expect(getLibraryReturnFlow()).toBeNull()
+  })
+
+  it('the two away-sets are never unioned', async () => {
+    // A BOOKS journey at the Mine's route has left the journey, and a Mine
+    // journey at the shelf has too.
+    const { router } = renderTown('/books')
+    await screen.findByRole('heading', { name: 'My Books' })
+    act(() => {
+      begin()
+    })
+    await act(async () => {
+      await router.navigate(STONEBRIDGE_MINE_PATH)
+    })
+    expect(getLibraryReturnFlow()).toBeNull()
+
+    kidWithInvitation()
+    await act(async () => {
+      await router.navigate(STONEBRIDGE_TOWN_PATH)
+    })
+    await screen.findByRole('region', { name: 'Stonebridge Village' })
+    fireEvent.click(invitationAction())
+    await screen.findByRole('heading', { name: 'Knowledge Mine' })
+    await act(async () => {
+      await router.navigate('/books')
+    })
+    expect(getLibraryReturnFlow()).toBeNull()
+    expect(screen.queryByRole('button', { name: LIBRARY_RETURN_LABEL })).not.toBeInTheDocument()
+  })
+
+  it('a math-calibrated child is offered the math dig instead', async () => {
+    fx.isChildProfile = true
+    fx.snapshot = {
+      childId: 'lincoln',
+      prioritySkills: [
+        { tag: 'math.operations.add', level: 'developing', masteryGate: 'not-yet' },
+      ],
+      workingLevels: { math: 2 },
+    }
+    fx.model = {
+      childId: 'lincoln',
+      openQuestions: [
+        {
+          conceptId: 'math.operations.addWithin20',
+          question: 'see this?',
+          routedTo: 'quest',
+          reason: 'queued',
+        },
+      ],
+      synthesisStaleAt: null,
+    }
+    renderTown()
+    await screen.findByRole('region', { name: 'Stonebridge Village' })
+    expect(screen.getByRole('button', { name: MINE_MATH_DIG_LABEL })).toBeInTheDocument()
   })
 })

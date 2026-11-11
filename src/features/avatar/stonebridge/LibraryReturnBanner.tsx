@@ -8,9 +8,10 @@ import { useFamilyId } from '../../../core/auth/useAuth'
 import { useActiveChild } from '../../../core/hooks/useActiveChild'
 import { LIBRARY_RETURN_LABEL, LIBRARY_RETURN_LINE } from './libraryReturnCopy'
 import {
+  LibraryReturnDestination,
   getLibraryReturnFlow,
+  libraryReturnForDestination,
   libraryReturnPath,
-  liveLibraryReturnFlow,
   requestLibraryReturn,
   subscribeLibraryReturnFlow,
 } from './libraryReturnFlow'
@@ -74,8 +75,20 @@ export default function LibraryReturnBanner() {
    */
   useLibraryReturnReadinessWatch(isLoading, loadFailed)
   const settled = !isLoading && !loadFailed
+  /**
+   * And it has to be a SHELF trip.
+   *
+   * A journey can now also go to the Mine (UX-493), whose away-set is its own
+   * route, so one cannot be live here in ordinary use. The check is explicit
+   * anyway: "whose trip is this" is answered by one predicate on both sides,
+   * rather than by the route happening to make the other case unreachable.
+   */
   const live = settled
-    ? liveLibraryReturnFlow(flow, { familyId, childId: activeChild?.id ?? '' })
+    ? libraryReturnForDestination(
+        flow,
+        { familyId, childId: activeChild?.id ?? '' },
+        LibraryReturnDestination.Books,
+      )
     : null
 
   if (!live) return null
