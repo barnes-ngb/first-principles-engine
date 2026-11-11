@@ -829,7 +829,7 @@ describe('a manual partial exit whose save is rejected', () => {
       originalChildId: 'lincoln',
     })
 
-    // The parent taps London's chip; her intro settles with its own live scope.
+    // The parent selects London and the intro settles under his scope.
     identityEpoch = 2
     setActive(LONDON)
     view.rerender()
@@ -1089,8 +1089,8 @@ describe('stale controls and stale scope', () => {
     const held = view.result.current.sourceSave.runInstanceId
     expect(held).toBeTruthy()
 
-    // London's own profile is selected and her view settles. The summary is
-    // still Lincoln's (UX-339), and its Retry is now drawn in HER scope.
+    // London's profile settles. The summary still belongs to Lincoln (UX-339).
+    // The fresh Retry now belongs to London's scope.
     identityEpoch = 2
     activeProfile = UserProfile.London
     setActive(LONDON, true)
