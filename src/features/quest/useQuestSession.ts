@@ -26,10 +26,12 @@ import {
   type QuestProjectionOutcome,
 } from './questModelSync'
 import {
+  abandonQuestSource,
   claimQuestSourceForResume,
   questSourceRef,
   saveFinalQuestSource,
   saveResumableQuestSource,
+  type QuestAbandonOutcome,
   type QuestSourcePayload,
   type QuestSourceSaveOutcome,
 } from './questSourceWrites'
@@ -527,8 +529,20 @@ export function useQuestSession() {
    * what a second tap did, and that is precisely how a second tap replaced an
    * established run. The claim is checked BEFORE anything is read, mutated or
    * sent to a provider, so a stale or duplicate Start costs nothing.
+   *
+   * ONE lane, shared by every intro action that can decide what the screen
+   * becomes: Start, Resume and *Start fresh instead* (UX-494). Resume awaits a
+   * transaction, and bumping the generation without holding this claim was not
+   * enough — a Start in that window established a new run, and Resume then
+   * discarded its own restore after its `resumed` stamp had landed, leaving the
+   * only discoverable partial filtered out of the card. Each holder releases
+   * only its own claim, and anything reentrant is refused while it is held.
    */
-  const startClaimRef = useRef<{ generation: number; scope: string } | null>(null)
+  const startClaimRef = useRef<{
+    generation: number
+    scope: string
+    kind: 'start' | 'resume' | 'discard'
+  } | null>(null)
   /** Keeps two runs started in the same millisecond from sharing an id. */
   const lastRunStampRef = useRef(0)
   /**
@@ -770,7 +784,7 @@ export function useQuestSession() {
       if (runRef.current) return 'already-running'
 
       const generation = (runGenerationRef.current += 1)
-      startClaimRef.current = { generation, scope: renderedScope }
+      startClaimRef.current = { generation, scope: renderedScope, kind: 'start' }
       /** Still this Start's claim, and still its scope? */
       const claimHolds = () =>
         startClaimRef.current?.generation === generation &&
@@ -2764,12 +2778,31 @@ export function useQuestSession() {
       const renderedScope = recoveryScope
       const renderedEpoch = identityEpoch
       if (!scopeStillLive(renderedScope, renderedEpoch)) return 'stale-scope'
-      // A Resume already in flight, or a Start mid-read, owns the run.
+      // The partial has to be THIS child's — the card is drawn for the active
+      // child, and a retained one must not reopen a sibling's answers.
+      if (!resumedChildId || resumedChildId !== liveChildId) return 'wrong-child'
+      // A run already established is not replaced by a retained Resume: that
+      // would abandon a live quest's answers to reopen an old one.
+      if (runRef.current) return 'stale-scope'
+      // A Start mid-read, another Resume, or a discard owns the intro lane.
       if (startClaimRef.current) return 'stale-scope'
 
-      // Claim the Resume, so a `startQuest` still awaiting its own reads cannot
-      // establish itself on top of this one; re-checked after the transaction.
+      /**
+       * Claim the lane SYNCHRONOUSLY, for the whole transition (UX-494).
+       *
+       * Bumping the generation alone only invalidated this Resume's own result:
+       * a Start tapped while the claim transaction was in flight established a
+       * new run, and Resume — having already stamped the document `resumed` —
+       * threw its restore away, so the partial was neither open nor offered
+       * again. Holding the same claim Start holds makes that Start a refused
+       * `busy` instead, and the claim is released only by this Resume, only
+       * once its transition has resolved either way.
+       */
       const generation = (runGenerationRef.current += 1)
+      startClaimRef.current = { generation, scope: renderedScope, kind: 'resume' }
+      const releaseResumeClaim = () => {
+        if (startClaimRef.current?.generation === generation) startClaimRef.current = null
+      }
 
       /**
        * Re-read, judge and claim — in ONE transaction, which returns the EXACT
@@ -2789,18 +2822,25 @@ export function useQuestSession() {
         })
       } catch (err) {
         console.warn('[resumeSession] Could not claim the saved session — not resuming', err)
+        releaseResumeClaim()
         return 'missing'
       }
       if (!claim.ok) {
         console.warn('[resumeSession] Refusing to resume this session:', claim.refusal)
+        releaseResumeClaim()
         return claim.refusal
       }
-      // Accepted — but only this render's Resume may act on it. A Start or a
-      // second Resume that claimed the run while the transaction was in flight
-      // wins the screen; the stamp is harmless (the document was eligible and is
-      // simply marked reopened, which the resume card already filters out).
-      if (runGenerationRef.current !== generation) return 'stale-scope'
-      if (!scopeStillLive(renderedScope, renderedEpoch)) return 'stale-scope'
+      // Accepted — and, because the lane was claimed before the transaction, no
+      // Start or second Resume can have established anything in that window: a
+      // generation that has moved means a RESET, whose own claim this is not.
+      if (runGenerationRef.current !== generation) {
+        releaseResumeClaim()
+        return 'stale-scope'
+      }
+      if (!scopeStillLive(renderedScope, renderedEpoch)) {
+        releaseResumeClaim()
+        return 'stale-scope'
+      }
 
       // Everything played from here is the STORED document's, which is the only
       // copy whose eligibility was checked.
@@ -2896,7 +2936,9 @@ export function useQuestSession() {
       }
 
       // The `status: 'resumed'` stamp already landed, inside the claim above —
-      // there is no second, detached write for it to disagree with.
+      // there is no second, detached write for it to disagree with. The run is
+      // established and on screen, so the intro lane is free again.
+      releaseResumeClaim()
       return true
     },
     [
@@ -2908,6 +2950,54 @@ export function useQuestSession() {
       identityEpoch,
       scopeStillLive,
     ],
+  )
+
+  // ── Start fresh instead: close a partial out ──────────────────
+
+  /**
+   * The *Start fresh instead* write, in the SAME intro lane as Start and Resume
+   * (UX-494).
+   *
+   * The page called the guarded transition directly, so a discard tapped while
+   * a Resume's claim transaction was in flight could land its `abandoned` stamp
+   * and let that Resume then open the answers of a record now closed out — the
+   * one case where the card's two buttons could still disagree. Sharing the
+   * claim refuses the second action instead of racing it; the refusal is
+   * reported, so the card says so rather than pretending.
+   */
+  const discardPartial = useCallback(
+    async (
+      partialDoc: { id?: string; childId?: string },
+      expect?: { scopeKey?: string; epoch?: number },
+    ): Promise<QuestAbandonOutcome | 'failed' | 'stale-scope'> => {
+      const docId = partialDoc.id
+      const owner = partialDoc.childId
+      if (!familyId || !docId || !owner) return 'missing'
+
+      const renderedScope = expect?.scopeKey ?? recoveryScope
+      const renderedEpoch = expect?.epoch ?? identityEpoch
+      if (!scopeStillLive(renderedScope, renderedEpoch)) return 'stale-scope'
+      // The row is the active child's, and no other intro action — a Resume
+      // above all — may be mid-transition.
+      if (owner !== liveChildId) return 'refused'
+      if (startClaimRef.current) return 'stale-scope'
+      if (runRef.current) return 'stale-scope'
+
+      const generation = runGenerationRef.current
+      startClaimRef.current = { generation, scope: renderedScope, kind: 'discard' }
+      try {
+        return await abandonQuestSource(questSourceRef(familyId, docId), { childId: owner })
+      } catch (err) {
+        console.error('Failed to mark session as abandoned', err)
+        return 'failed'
+      } finally {
+        // Only its own claim, and only if no reset has taken the lane since.
+        if (startClaimRef.current?.kind === 'discard' && startClaimRef.current.generation === generation) {
+          startClaimRef.current = null
+        }
+      }
+    },
+    [familyId, liveChildId, recoveryScope, identityEpoch, scopeStillLive],
   )
 
   // ── Reset to intro ────────────────────────────────────────────
@@ -2980,8 +3070,20 @@ export function useQuestSession() {
         })
         .catch((err) => {
           console.error('Failed to auto-save partial quest session', err)
-          // The payload is kept whatever the screen is doing — those answers are
-          // not saved anywhere else — but only the owning intro is told.
+          /**
+           * The SLOT is guarded, not just the notice (UX-494).
+           *
+           * This rejection can arrive long after the intro it belonged to has
+           * been replaced — by a newer run on the same child whose own close
+           * failed and is already offering a Retry for ITS payload. Writing the
+           * old partial in here silently swapped the payload under that live
+           * control, so the Retry on screen re-saved a stale partial and did
+           * nothing for the answers it named. A retired attempt owns neither
+           * the slot nor the status: it leaves both exactly as found, and the
+           * owning intro — the only surface that can offer this payload a
+           * retry — is the only one that takes it.
+           */
+          if (!ownsIntro()) return
           pendingSourceRef.current = {
             run: exitingRun,
             payload: partialSession,
@@ -2989,7 +3091,6 @@ export function useQuestSession() {
             viewGeneration: introGeneration,
             scope: introScope,
           }
-          if (!ownsIntro()) return
           setSourceSave({
             state: 'failed',
             kind: 'partial',
@@ -3099,6 +3200,8 @@ export function useQuestSession() {
     questDomain: runRef.current?.domain,
     startQuest,
     resumeSession,
+    /** *Start fresh instead* — the discard, in the shared intro lane (UX-494). */
+    discardPartial,
     submitAnswer,
     handleSkip,
     resetToIntro,

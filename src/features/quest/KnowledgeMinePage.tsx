@@ -48,11 +48,6 @@ import {
   QUEST_RESUME_REFUSAL_COPY,
   QUEST_UNSAVED_COPY,
 } from './questSaveCopy'
-import {
-  abandonQuestSource,
-  questSourceRef,
-  type QuestAbandonOutcome,
-} from './questSourceWrites'
 import type { QuestResumeRefusal } from './questRun'
 import type { InteractiveSessionData, QuestDomainConfig } from './questTypes'
 import { QuestScreen } from './questTypes'
@@ -219,9 +214,18 @@ export default function KnowledgeMinePage() {
    * successful retry, so a queue of two drains in two taps rather than
    * disappearing.
    */
-  const [graphRecovery, setGraphRecovery] = useState<
-    (EvaluationSession & Partial<InteractiveSessionData> & { id: string }) | null
-  >(null)
+  /**
+   * The answer is kept WITH the identity it was read under, not beside it: a
+   * bare session could outlive its scope and then be drawn — or retried — in a
+   * new one that happens to name the same id. The card shown is DERIVED from
+   * this binding during render, which is also what lets the effect below
+   * return without a synchronous setState.
+   */
+  const [graphRecovery, setGraphRecovery] = useState<{
+    scope: string
+    epoch: number
+    session: (EvaluationSession & Partial<InteractiveSessionData> & { id: string }) | null
+  } | null>(null)
   /** Bumped to re-run the pending read after a retry settles one source. */
   const [graphRecoveryNonce, setGraphRecoveryNonce] = useState(0)
 
@@ -287,13 +291,16 @@ export default function KnowledgeMinePage() {
   }, [recoveryScope, recoveryEpoch])
 
   useEffect(() => {
-    // An unsettled identity vouches for nobody, so it reads nothing.
-    if (recoveryScope === 'unsettled' || !activeChildId || !familyId) {
-      setGraphRecovery(null)
-      return
-    }
+    // An unsettled identity vouches for nobody, so it reads nothing — and it
+    // writes nothing here either. Clearing the state synchronously was both a
+    // lint failure (`react-hooks/set-state-in-effect`) and the wrong place for
+    // the decision: the render-time derivation below retires a previous
+    // scope's card on the frame the identity moves, without waiting for an
+    // effect or for the new query to settle.
+    if (recoveryScope === 'unsettled' || !activeChildId || !familyId) return
     let cancelled = false
     const scopeAtRead = recoveryScope
+    const epochAtRead = recoveryEpoch
     const childAtRead = activeChildId
     async function loadGraphRecovery() {
       try {
@@ -305,11 +312,14 @@ export default function KnowledgeMinePage() {
         )
         const snap = await getDocs(q)
         // Three things, not one: this effect was not torn down, the committed
-        // scope is still the one that asked (an A → B → A moves the epoch while
-        // leaving family and child alone), and the child has not moved under us.
+        // identity is still the one that asked (an A → B → A moves the epoch
+        // while leaving family and child alone), and that epoch is still the
+        // store's own — comparing the closure's child against the closure's
+        // child, as this did, could never fail and guarded nothing.
         if (cancelled) return
-        if (liveRecovery.current.scope !== scopeAtRead) return
-        if (childAtRead !== activeChildId) return
+        const live = liveRecovery.current
+        if (live.scope !== scopeAtRead || live.epoch !== epochAtRead) return
+        if (epochAtRead !== getLibraryIdentityEpoch()) return
         const waiting = snap.docs
           .map((d) => ({ ...d.data(), id: d.id }) as EvaluationSession & Partial<InteractiveSessionData> & { id: string })
           .filter(
@@ -319,14 +329,33 @@ export default function KnowledgeMinePage() {
               Boolean(s.sourceCommittedAt) &&
               s.childId === childAtRead,
           )
-        setGraphRecovery(waiting[0] ?? null)
+        setGraphRecovery({
+          scope: scopeAtRead,
+          epoch: epochAtRead,
+          session: waiting[0] ?? null,
+        })
       } catch {
         // Non-blocking — the recovery card is optional, exactly like the resume card.
       }
     }
     void loadGraphRecovery()
     return () => { cancelled = true }
-  }, [activeChildId, familyId, quest.screen, recoveryScope, graphRecoveryNonce])
+  }, [activeChildId, familyId, quest.screen, recoveryScope, recoveryEpoch, graphRecoveryNonce])
+
+  /**
+   * The card to draw, decided during render: the loaded answer counts only
+   * while the identity it was READ under is still the identity on screen. Any
+   * other state — unsettled, a newer scope whose query has not landed, a
+   * same-tick A → B → A — draws nothing.
+   */
+  const graphRecoveryCard =
+    graphRecovery &&
+    graphRecovery.session &&
+    recoveryScope !== 'unsettled' &&
+    graphRecovery.scope === recoveryScope &&
+    graphRecovery.epoch === recoveryEpoch
+      ? graphRecovery
+      : null
 
   /**
    * A trip here from the village's Square invitation, if there is one (UX-493).
@@ -573,39 +602,44 @@ export default function KnowledgeMinePage() {
                 })()
               }}
               onStartFresh={() => {
-                // UX-494 — the SAME guarded transition the Resume claim uses,
-                // so the card's two buttons cannot disagree about which
-                // document they are looking at. The bare `updateDoc` this
-                // replaces could close out a run a delayed close had already
-                // finalized, or one belonging to the child a parent had just
-                // switched away from.
-                const sessionId = resumeSession.id
-                const owner = resumeSession.childId
+                // UX-494 — the hook's discard, which holds the SAME intro
+                // action claim Start and Resume hold, so the card's two buttons
+                // cannot race each other: a discard tapped while a Resume's
+                // claim transaction is in flight is refused rather than landing
+                // an `abandoned` stamp on the record that Resume is about to
+                // reopen. (It is still the guarded transition underneath, so a
+                // finalized or another child's record is refused as before.)
+                const session = resumeSession
                 const scopeAtTap = recoveryScope
-                if (!sessionId || !owner || scopeAtTap === 'unsettled') {
+                const epochAtTap = recoveryEpoch
+                if (!session.id || !session.childId || scopeAtTap === 'unsettled') {
                   setResumeSession(null)
                   return
                 }
+                setResumeRefusal(null)
                 void (async () => {
-                  let outcome: QuestAbandonOutcome | 'failed'
-                  try {
-                    outcome = await abandonQuestSource(questSourceRef(familyId, sessionId), {
-                      childId: owner,
-                    })
-                  } catch (err) {
-                    console.error('Failed to mark session as abandoned', err)
-                    outcome = 'failed'
-                  }
+                  const outcome = await quest.discardPartial(
+                    { id: session.id, childId: session.childId },
+                    { scopeKey: scopeAtTap, epoch: epochAtTap },
+                  )
                   // Scoped AFTER the await: a result that arrives once the
                   // identity has moved belongs to nobody's screen.
-                  if (liveRecovery.current.scope !== scopeAtTap) return
-                  if (outcome === 'refused' || outcome === 'failed') {
-                    // The record was not closed out, so the card must not
-                    // pretend it was.
-                    setResumeRefusal(outcome === 'refused' ? 'finalized' : 'missing')
+                  const live = liveRecovery.current
+                  if (live.scope !== scopeAtTap || live.epoch !== epochAtTap) return
+                  if (outcome === 'abandoned' || outcome === 'already-abandoned') {
+                    setResumeSession(null)
                     return
                   }
-                  setResumeSession(null)
+                  // The record was not closed out, so the card must not pretend
+                  // it was — and it stays on screen, because a refused discard
+                  // during a Resume is a *tap it again*, not a loss.
+                  setResumeRefusal(
+                    outcome === 'refused'
+                      ? 'finalized'
+                      : outcome === 'stale-scope'
+                        ? 'stale-scope'
+                        : 'missing',
+                  )
                 })()
               }}
             />
@@ -654,20 +688,26 @@ export default function KnowledgeMinePage() {
               card on any identity change, the scope and epoch the tap carries
               are compared against the committed ones, and only this card's own
               settled attempt may clear and re-read it. */}
-          {graphRecovery && recoveryScope !== 'unsettled' && (
+          {graphRecoveryCard?.session && (
             <RecoveryNotice
-              key={`${recoveryScope}|${graphRecovery.id}`}
+              key={`${graphRecoveryCard.scope}|${graphRecoveryCard.epoch}|${graphRecoveryCard.session.id}`}
               title={QUEST_RECOVERY_COPY.title}
               body={QUEST_RECOVERY_COPY.body}
               action={QUEST_RECOVERY_COPY.action}
               onAction={async () => {
-                const cardId = graphRecovery.id
-                const scopeAtTap = recoveryScope
-                const outcome = await quest.retryGraphProjection(cardId, graphRecovery.childId, {
-                  domain: graphRecovery.domain,
-                  questMode: graphRecovery.questMode,
+                // The retry targets the binding the card was DRAWN from — the
+                // same session, scope and epoch the query read under — so it
+                // can never address a coincidentally equal id in a newer scope.
+                const card = graphRecoveryCard.session
+                if (!card) return
+                const cardId = card.id
+                const scopeAtTap = graphRecoveryCard.scope
+                const epochAtTap = graphRecoveryCard.epoch
+                const outcome = await quest.retryGraphProjection(cardId, card.childId, {
+                  domain: card.domain,
+                  questMode: card.questMode,
                   scopeKey: scopeAtTap,
-                  epoch: recoveryEpoch,
+                  epoch: epochAtTap,
                   viewGeneration: quest.viewGeneration,
                 })
                 // A failure, a refusal, an attempt already in flight, or a model
@@ -681,11 +721,19 @@ export default function KnowledgeMinePage() {
                 ) {
                   return
                 }
-                // Only THIS card's own settled attempt may retire it: the scope
-                // must still be the one it was tapped under, and the card on
-                // screen must still be the one it was drawn for.
-                if (liveRecovery.current.scope !== scopeAtTap) return
-                setGraphRecovery((current) => (current?.id === cardId ? null : current))
+                // Only THIS card's own settled attempt may retire it: the
+                // identity must still be the one it was tapped under, and the
+                // loaded answer must still be the one it was drawn from.
+                const live = liveRecovery.current
+                if (live.scope !== scopeAtTap || live.epoch !== epochAtTap) return
+                setGraphRecovery((current) =>
+                  current &&
+                  current.scope === scopeAtTap &&
+                  current.epoch === epochAtTap &&
+                  current.session?.id === cardId
+                    ? { ...current, session: null }
+                    : current,
+                )
                 setGraphRecoveryNonce((n) => n + 1)
               }}
             />

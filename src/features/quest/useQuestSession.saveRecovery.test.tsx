@@ -66,6 +66,32 @@ let transactionError: Error | null = null
  * lost in flight — the client never hears that its own payload landed.
  */
 let lostAcknowledgement = false
+/**
+ * Set per test: hold the NEXT transaction in flight until this resolves.
+ *
+ * One transaction only, consumed by the first call after it is set — which is
+ * how a rejection from an abandoned attempt, or a Resume claim a Start is
+ * tapped on top of, can be made to land at a chosen moment. The outcome a
+ * gated call reports is the one captured when it was MADE, not whatever the
+ * test has moved on to by the time it settles.
+ */
+let transactionGate: Promise<void> | null = null
+
+/** Gate the next transaction; returns the release. */
+function holdNextTransaction(): () => void {
+  let release: () => void = () => {}
+  transactionGate = new Promise<void>((resolve) => {
+    release = () => resolve()
+  })
+  return release
+}
+
+/** Let a held promise's own continuations run. */
+async function settle(): Promise<void> {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  })
+}
 
 function seed(path: string, value: object): void {
   store.set(path, value)
@@ -93,7 +119,14 @@ vi.mock('firebase/firestore', () => ({
       set: (ref: { path: string }, data: unknown, opts?: { merge?: boolean }) => void
     }) => unknown,
   ) => {
-    if (transactionError) throw transactionError
+    // Captured when the call was MADE, then held if this one is gated.
+    const failWith = transactionError
+    const gate = transactionGate
+    if (gate) {
+      transactionGate = null
+      await gate
+    }
+    if (failWith) throw failWith
     const staged: Array<{ path: string; data: Record<string, unknown>; merge: boolean }> = []
     const out = await fn({
       get: async (ref) => {
@@ -166,6 +199,35 @@ const PLAN = [
 ]
 /** Set per test: does this run select a queued request? */
 let selectedPlan: typeof PLAN = []
+
+/**
+ * The synthetic learner model a TARGETED Start reads.
+ *
+ * `selectedPlan` alone is not enough: `startQuest` only consults the targeting
+ * helpers when this document EXISTS, so without it the run saved an untagged
+ * source and there was nothing for a retry to project. Seeded at the same path
+ * the hook reads, with the queued ask the plan row names.
+ */
+function seedTargetedModel(childId = 'lincoln') {
+  seed(`models-fam-1/${childId}`, {
+    childId,
+    graphVersion: 'reading@1+math@1',
+    status: 'seeded',
+    conceptStates: {},
+    whatMattersNext: [],
+    changeFeed: [],
+    openQuestions: [
+      {
+        conceptId: PLAN[0].conceptId,
+        question: 'Test CVC with a quick quest?',
+        routedTo: 'quest',
+        reason: 'Parent asked to verify this by testing.',
+      },
+    ],
+    seededAt: PLAN[0].modelSeededAt,
+    updatedAt: PLAN[0].modelSeededAt,
+  })
+}
 vi.mock('../../core/foundations/questTargeting', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../core/foundations/questTargeting')>()
   return {
@@ -292,6 +354,7 @@ beforeEach(() => {
   writes.length = 0
   transactionError = null
   lostAcknowledgement = false
+  transactionGate = null
   selectedPlan = []
   activeSeconds = 27 * 60
   stopCalls = 0
@@ -367,6 +430,7 @@ describe('an ordinary Start is bound to the identity it was rendered under', () 
 describe('a denied complete source', () => {
   it('produces ZERO graph changes and offers a retry for that payload', async () => {
     selectedPlan = PLAN
+    seedTargetedModel()
     const view = mountHook()
     await start(view)
     transactionError = new Error('permission-denied')
@@ -386,6 +450,7 @@ describe('a denied complete source', () => {
 
   it('retries the held payload, saves it, and projects exactly once', async () => {
     selectedPlan = PLAN
+    seedTargetedModel()
     const view = mountHook()
     await start(view)
     transactionError = new Error('permission-denied')
@@ -401,7 +466,13 @@ describe('a denied complete source', () => {
       })
     })
 
+    // The payload this retry wrote really is the TARGETED one: a pending
+    // request on the saved source is what makes the projection its own work.
     expect(sourceWrites()).toHaveLength(1)
+    expect(sourceWrites()[0].data).toMatchObject({
+      targetPlan: PLAN,
+      modelProjection: 'pending',
+    })
     expect(view.result.current.sourceSave.state).toBe('saved')
     expect(projectQuestSourceToModel).toHaveBeenCalledTimes(1)
     // The retry repeats NO other close side effect.
@@ -414,13 +485,19 @@ describe('a denied complete source', () => {
 describe('a committed acknowledgement lost before the retry', () => {
   it('recognises the matching payload, writes nothing more, and projects once', async () => {
     selectedPlan = PLAN
+    seedTargetedModel()
     const view = mountHook()
     await start(view)
     lostAcknowledgement = true
     await answer(view, 5)
 
-    // The write DID land; the client never heard so.
+    // The write DID land, as the targeted payload with its request still
+    // pending; the client never heard so.
     expect(sourceWrites()).toHaveLength(1)
+    expect(sourceWrites()[0].data).toMatchObject({
+      targetPlan: PLAN,
+      modelProjection: 'pending',
+    })
     expect(view.result.current.sourceSave).toMatchObject({ state: 'failed', canRetry: true })
     expect(projectQuestSourceToModel).not.toHaveBeenCalled()
 
@@ -602,6 +679,62 @@ describe('a manual partial exit whose save is rejected', () => {
     // confirmed save asks for one more read.
     expect(view.result.current.sourceSave.state).toBe('saved')
     expect(view.result.current.resumeReloadNonce).toBeGreaterThan(nonceBefore)
+  })
+
+  /**
+   * Sol's reproduction: the delayed partial that replaced the newer Retry's
+   * payload, so the button on screen saved the wrong answers — or nothing.
+   */
+  it('cannot replace a newer failed final’s held payload when it rejects late', async () => {
+    const view = mountHook()
+    await start(view)
+    await answer(view, 2)
+
+    // The manual exit's partial is denied, and its rejection is HELD in flight.
+    transactionError = new Error('offline')
+    const releaseOldPartial = holdNextTransaction()
+    await act(async () => {
+      view.result.current.resetToIntro()
+    })
+
+    // A second quest for the same child closes, and its final save fails: this
+    // summary's own Retry is what is on screen now.
+    transactionError = null
+    expect(await start(view, 'reading', 'comprehension')).toBe('started')
+    transactionError = new Error('offline')
+    await answer(view, 5)
+    const newerControl = {
+      runInstanceId: view.result.current.sourceSave.runInstanceId,
+      viewGeneration: view.result.current.sourceSave.viewGeneration,
+    }
+    expect(view.result.current.sourceSave).toMatchObject({
+      state: 'failed',
+      kind: 'final',
+      canRetry: true,
+    })
+
+    // Only now does the old partial reject. It owns neither the notice nor the
+    // slot: the retired attempt leaves both exactly as it found them.
+    releaseOldPartial()
+    await settle()
+    expect(view.result.current.sourceSave).toMatchObject({
+      state: 'failed',
+      kind: 'final',
+      runInstanceId: newerControl.runInstanceId,
+    })
+
+    // And the Retry still on screen saves the payload it names.
+    transactionError = null
+    await act(async () => {
+      await view.result.current.retrySourceSave(newerControl)
+    })
+    expect(sourceWrites()).toHaveLength(1)
+    expect(sourceWrites()[0].data).toMatchObject({
+      status: 'complete',
+      questMode: 'comprehension',
+      childId: 'lincoln',
+    })
+    expect(view.result.current.sourceSave).toMatchObject({ state: 'saved', kind: 'final' })
   })
 })
 
@@ -836,9 +969,16 @@ describe('Resume claims what is stored now, atomically', () => {
   /** Cold and warm Resume agree on a legacy partial with no plan. */
   it('restores an empty plan from a legacy partial, warm or cold', async () => {
     selectedPlan = PLAN
+    seedTargetedModel()
     const warm = mountHook()
     await start(warm)
     await answer(warm, 5)
+    // The ordinary exit from the finished run's summary — *Try another quest* —
+    // which is how a warm hook actually arrives back at the intro the resume
+    // card is drawn on. (It saves no partial: that run is already closed.)
+    await act(async () => {
+      warm.result.current.resetToIntro()
+    })
     projectQuestSourceToModel.mockClear()
 
     seed(path, partialDoc)
@@ -861,6 +1001,95 @@ describe('Resume claims what is stored now, atomically', () => {
     expect(coldSave.data.status).toBe('complete')
     expect(coldSave.data.targetPlan).toEqual([])
     expect(coldSave.data.modelProjection).toBe('skipped')
+  })
+
+  /**
+   * Sol's two Chrome overlaps: a Resume awaiting its claim, then an ordinary
+   * Start — and then *Start fresh instead*. Both used to let the only
+   * discoverable partial disappear: the claim had stamped `resumed`, which the
+   * card filters out, while Resume threw its own restore away.
+   */
+  it('holds the intro lane while its claim is in flight, refusing a Start', async () => {
+    seed(path, partialDoc)
+    const view = mountHook()
+    const release = holdNextTransaction()
+    const resuming = view.result.current.resumeSession(partialDoc)
+    await settle()
+
+    // The ordinary Math Start, tapped while Resume is still awaiting.
+    let startOutcome: unknown
+    await act(async () => {
+      startOutcome = await view.result.current.startQuest('math', 'math')
+    })
+    expect(startOutcome).toBe('busy')
+    expect(chat).not.toHaveBeenCalled()
+
+    release()
+    let resumeOutcome: unknown
+    await act(async () => {
+      resumeOutcome = await resuming
+    })
+    // The Resume keeps its own screen, and the partial is open rather than
+    // stamped-and-lost.
+    expect(resumeOutcome).toBe(true)
+    expect(view.result.current.screen).toBe('question')
+    expect(view.result.current.currentQuestion?.id).toBe('q-saved')
+    expect(view.result.current.questMode).toBe('phonics')
+  })
+
+  it('refuses *Start fresh instead* while a Resume is mid-claim', async () => {
+    seed(path, partialDoc)
+    const view = mountHook()
+    const release = holdNextTransaction()
+    const resuming = view.result.current.resumeSession(partialDoc)
+    await settle()
+
+    let discarded: unknown
+    await act(async () => {
+      discarded = await view.result.current.discardPartial(partialDoc)
+    })
+    expect(discarded).toBe('stale-scope')
+
+    release()
+    await act(async () => {
+      expect(await resuming).toBe(true)
+    })
+    // Reopened, not closed out: the two buttons cannot disagree.
+    expect(store.get(path)).toMatchObject({ status: 'resumed' })
+    expect(view.result.current.screen).toBe('question')
+  })
+
+  it('discards a partial when it owns the lane, and refuses another child’s', async () => {
+    seed(path, partialDoc)
+    const view = mountHook()
+
+    let outcome: unknown
+    await act(async () => {
+      outcome = await view.result.current.discardPartial(partialDoc)
+    })
+    expect(outcome).toBe('abandoned')
+    expect(store.get(path)).toMatchObject({ status: 'abandoned' })
+
+    seed(path, { ...partialDoc, childId: 'london' })
+    writes.length = 0
+    await act(async () => {
+      outcome = await view.result.current.discardPartial({ ...partialDoc, childId: 'london' })
+    })
+    expect(outcome).toBe('refused')
+    expect(writes.filter((w) => w.path === path)).toHaveLength(0)
+  })
+
+  it('refuses a retained Resume rather than replacing a live run', async () => {
+    seed(path, partialDoc)
+    const view = mountHook()
+    expect(await start(view)).toBe('started')
+    const live = view.result.current.currentQuestion
+
+    expect(await resume(view)).toBe('stale-scope')
+    // Nothing stamped, and the live quest is still the one on screen.
+    expect(store.get(path)).toMatchObject({ status: 'partial' })
+    expect(view.result.current.screen).toBe('question')
+    expect(view.result.current.currentQuestion).toBe(live)
   })
 
   it('brings a SAVED plan back off the exact partial', async () => {

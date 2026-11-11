@@ -103,6 +103,9 @@ vi.mock('./useQuestSession', () => ({
     retryGraphProjection: async () => 'identity-mismatch' as const,
     startQuest: fx.startQuest,
     resumeSession: fx.resumeSession,
+    // *Start fresh instead* shares the intro action lane now, so it is the
+    // hook's own door. No test here taps it.
+    discardPartial: async () => 'missing' as const,
     resetToIntro: fx.resetToIntro,
     submitAnswer: () => {},
     handleSkip: () => {},
