@@ -214,6 +214,8 @@ describe('useQuestSession binds every write to the child the quest started for',
       view.result.current.resetToIntro()
     })
 
+    // The write stays attached to its original source; its Saved/Failed outcome
+    // belongs to the intro the exit landed on (hook save-recovery suite).
     const session = setDoc.mock.calls
       .map((c) => c[1] as unknown as { childId?: string; status?: string })
       .find((d) => d.status === 'partial')
