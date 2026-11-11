@@ -36,6 +36,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
  *     current, still cannot save the original owner's held payload — while the
  *     parent and the run's own child profile can, and no profile cannot.
  *
+ * The two promotion findings it pins on top of those:
+ *
+ *   • a FIRST question held while its own scope retires is retired with it —
+ *     timers stopped, state cleared, Intro back — and a newer run is left
+ *     alone (4539941772);
+ *   • a child change while an ADMITTED Retry is in flight settles that
+ *     attempt's status instead of dropping it, so the bound summary stops
+ *     saying *Saving…* and offers a working Retry — while a newer run's notice
+ *     is never overwritten and an unauthorised render is told nothing
+ *     (4539941784).
+ *
  * **Real timers**, like the `childSwitch` harness: the feedback pauses are
  * genuinely awaited, which is why this file sets its own generous timeout. Fake
  * timers raced `renderHook` and returned null results.
@@ -506,6 +517,288 @@ describe('an ordinary Start is bound to the identity it was rendered under', () 
     expect(view.result.current.screen).toBe('summary')
     expect(sourceWrites()).toHaveLength(1)
     expect(sourceWrites()[0].data).toMatchObject({ status: 'complete', childId: 'lincoln' })
+  })
+})
+
+/**
+ * Promotion finding 4539941772 — a first question (or an initial Fluency
+ * passage) still in flight when its own scope retires. The claim release
+ * cleared the owner refs and nothing else, so the attempt's own view sat on
+ * Loading with its one-second interval still ticking and no way back.
+ */
+describe('a first question held while its scope retires', () => {
+  it('retires that attempt: timers stopped, state cleared, Intro back', async () => {
+    const view = mountHook()
+    let releaseQuestion: (value: unknown) => void = () => {}
+    chat.mockImplementationOnce(
+      () => new Promise((resolve) => { releaseQuestion = resolve }),
+    )
+    // Deliberately NOT awaited: the provider call must still be in flight while
+    // the header moves, which is the whole reproduction.
+    const starting = view.result.current.startQuest('reading', 'phonics')
+    await settle()
+    expect(view.result.current.screen).toBe('loading')
+    const stopsBefore = stopCalls
+
+    // The parent selects London while Lincoln's first question is in flight.
+    identityEpoch = 2
+    setActive(LONDON)
+    view.rerender()
+
+    releaseQuestion({ message: `<quest>${QUESTION}</quest>` })
+    let outcome: unknown
+    await act(async () => {
+      outcome = await starting
+    })
+
+    expect(outcome).toBe('stale-scope')
+    // The retired attempt's own view, not a stuck spinner.
+    expect(view.result.current.screen).toBe('intro')
+    expect(view.result.current.questState).toBeNull()
+    expect(view.result.current.currentQuestion).toBeNull()
+    expect(view.result.current.sessionOwnerName).toBe('')
+    expect(stopCalls).toBeGreaterThan(stopsBefore)
+    // Nothing was answered, so there is no source, no reward and no time.
+    expect(sourceWrites()).toHaveLength(0)
+    expect(hoursRows()).toHaveLength(0)
+    expect(addDiamondEvent).not.toHaveBeenCalled()
+    expect(addXpEvent).not.toHaveBeenCalled()
+
+    // And the Mine works for the child who is on screen now.
+    chat.mockResolvedValue({ message: `<quest>${QUESTION}</quest>` })
+    expect(await start(view)).toBe('started')
+    expect(view.result.current.screen).toBe('question')
+  })
+
+  it('leaves a NEWER run, timer and screen alone when the old one lands', async () => {
+    const view = mountHook()
+    let releaseFirst: (value: unknown) => void = () => {}
+    chat.mockImplementationOnce(
+      () => new Promise((resolve) => { releaseFirst = resolve }),
+    )
+    const starting = view.result.current.startQuest('reading', 'phonics')
+    await settle()
+    expect(view.result.current.screen).toBe('loading')
+
+    // He leaves the Mine (no counted answers, so no partial) and starts again.
+    await act(async () => {
+      view.result.current.resetToIntro()
+    })
+    chat.mockResolvedValue({ message: `<quest>${QUESTION}</quest>` })
+    expect(await start(view, 'reading', 'comprehension')).toBe('started')
+    const liveQuestion = view.result.current.currentQuestion
+    const stopsBefore = stopCalls
+
+    releaseFirst({ message: `<quest>${QUESTION}</quest>` })
+    let outcome: unknown
+    await act(async () => {
+      outcome = await starting
+    })
+
+    expect(outcome).toBe('stale-scope')
+    // The run it does not own is untouched — screen, question, mode and timer.
+    expect(view.result.current.screen).toBe('question')
+    expect(view.result.current.currentQuestion).toBe(liveQuestion)
+    expect(view.result.current.questMode).toBe('comprehension')
+    expect(view.result.current.questState).not.toBeNull()
+    expect(stopCalls).toBe(stopsBefore)
+    expect(sourceWrites()).toHaveLength(0)
+  })
+
+  it('releases only its own claim when the scope moves before Loading', async () => {
+    const view = mountHook()
+    const staleStart = view.result.current.startQuest
+    setActive(LONDON)
+    view.rerender()
+
+    let outcome: unknown
+    await act(async () => {
+      outcome = await staleStart('reading', 'phonics')
+    })
+    expect(outcome).toBe('stale-scope')
+    // No run, no Loading, no timer to retire — and the next Start is free.
+    expect(view.result.current.screen).toBe('intro')
+    expect(await start(view)).toBe('started')
+  })
+})
+
+/**
+ * Promotion finding 4539941784 — a child change while an ADMITTED source Retry
+ * is in flight. The settlement was gated on the strict rendered scope, so it
+ * was dropped and the bound summary (UX-339) said *Saving…* for ever.
+ */
+describe('a child change while an admitted source Retry is in flight', () => {
+  it('settles that attempt, and the bound summary offers a working Retry', async () => {
+    selectedPlan = PLAN
+    seedTargetedModel()
+    const view = mountHook()
+    await start(view)
+    transactionError = new Error('offline')
+    await answer(view, 5)
+    const runId = runIdFromRewardKey()
+    const chatCalls = chat.mock.calls.length
+    const xpBefore = addXpEvent.mock.calls.length
+    expect(view.result.current.sourceSave).toMatchObject({
+      state: 'failed',
+      kind: 'final',
+      canRetry: true,
+    })
+
+    // The Retry is admitted under the live scope, and its transaction is HELD.
+    const release = holdNextTransaction()
+    const retrying = view.result.current.retrySourceSave({
+      runInstanceId: view.result.current.sourceSave.runInstanceId,
+      viewGeneration: view.result.current.sourceSave.viewGeneration,
+      scopeKey: view.result.current.recoveryScope,
+      epoch: view.result.current.recoveryEpoch,
+    })
+    await settle()
+    expect(view.result.current.sourceSave.state).toBe('saving')
+
+    // The parent taps London's chip while it is in flight, so the scope that
+    // admitted the attempt is retired before it settles.
+    identityEpoch = 2
+    setActive(LONDON)
+    view.rerender()
+    release()
+    await act(async () => {
+      expect(await retrying).toBe('failed')
+    })
+
+    // Settled, not stuck — and the bound summary is still the parent's to see.
+    expect(view.result.current.sourceSave).toMatchObject({
+      state: 'failed',
+      kind: 'final',
+      canRetry: true,
+      originalChildId: 'lincoln',
+    })
+    expect(view.result.current.visibleSourceSave.state).toBe('failed')
+
+    // A → B → A, and the freshly rendered Retry lands the ORIGINAL payload.
+    identityEpoch = 3
+    setActive(LINCOLN)
+    view.rerender()
+    transactionError = null
+    let fresh: unknown
+    await act(async () => {
+      fresh = await view.result.current.retrySourceSave({
+        runInstanceId: view.result.current.visibleSourceSave.runInstanceId,
+        viewGeneration: view.result.current.visibleSourceSave.viewGeneration,
+        scopeKey: view.result.current.recoveryScope,
+        epoch: view.result.current.recoveryEpoch,
+      })
+    })
+
+    expect(fresh).toBe('saved')
+    expect(sourceWrites()).toHaveLength(1)
+    expect(sourceWrites()[0].path).toBe(`sessions-fam-1/${runId}`)
+    expect(sourceWrites()[0].data).toMatchObject({
+      questRunId: runId,
+      childId: 'lincoln',
+      questMode: 'phonics',
+      status: 'complete',
+    })
+    expect(view.result.current.visibleSourceSave.state).toBe('saved')
+    // One save, one projection, one time credit, no repeated provider work.
+    expect(projectQuestSourceToModel).toHaveBeenCalledTimes(1)
+    expect(hoursRows()).toHaveLength(1)
+    expect(chat.mock.calls).toHaveLength(chatCalls)
+    expect(addXpEvent.mock.calls).toHaveLength(xpBefore)
+  })
+
+  it('presents Saved for the original summary when the held save succeeded', async () => {
+    const view = mountHook()
+    await start(view)
+    transactionError = new Error('offline')
+    await answer(view, 5)
+
+    transactionError = null
+    const release = holdNextTransaction()
+    const retrying = view.result.current.retrySourceSave({
+      runInstanceId: view.result.current.sourceSave.runInstanceId,
+      viewGeneration: view.result.current.sourceSave.viewGeneration,
+      scopeKey: view.result.current.recoveryScope,
+      epoch: view.result.current.recoveryEpoch,
+    })
+    await settle()
+
+    identityEpoch = 2
+    setActive(LONDON)
+    view.rerender()
+    release()
+    await act(async () => {
+      expect(await retrying).toBe('saved')
+    })
+
+    expect(view.result.current.sourceSave).toMatchObject({
+      state: 'saved',
+      kind: 'final',
+      canRetry: false,
+      originalChildId: 'lincoln',
+    })
+    expect(sourceWrites()).toHaveLength(1)
+    expect(sourceWrites()[0].data).toMatchObject({ childId: 'lincoln', status: 'complete' })
+    expect(hoursRows()).toHaveLength(1)
+  })
+
+  it('cannot overwrite a newer run’s notice when it settles late', async () => {
+    const view = mountHook()
+    await start(view)
+    transactionError = new Error('offline')
+    await answer(view, 5)
+
+    const release = holdNextTransaction()
+    const retrying = view.result.current.retrySourceSave({
+      runInstanceId: view.result.current.sourceSave.runInstanceId,
+      viewGeneration: view.result.current.sourceSave.viewGeneration,
+      scopeKey: view.result.current.recoveryScope,
+      epoch: view.result.current.recoveryEpoch,
+    })
+    await settle()
+
+    // A second quest for the same child closes successfully: this summary's
+    // notice is what is on screen now.
+    await act(async () => {
+      view.result.current.resetToIntro()
+    })
+    transactionError = null
+    expect(await start(view, 'reading', 'comprehension')).toBe('started')
+    await answer(view, 5)
+    expect(view.result.current.sourceSave).toMatchObject({ state: 'saved', kind: 'final' })
+
+    // The retired attempt leaves the newer notice exactly as it found it.
+    release()
+    await act(async () => {
+      expect(await retrying).toBe('failed')
+    })
+    expect(view.result.current.sourceSave).toMatchObject({ state: 'saved', kind: 'final' })
+    expect(view.result.current.visibleSourceSave.state).toBe('saved')
+  })
+
+  it('keeps the status out of an unauthorised or wrong-family render', async () => {
+    const view = mountHook()
+    await start(view)
+    transactionError = new Error('offline')
+    await answer(view, 5)
+    expect(view.result.current.visibleSourceSave.state).toBe('failed')
+
+    // No profile vouches for nobody, so no status and no control.
+    identityEpoch = 2
+    activeProfile = null
+    view.rerender()
+    expect(view.result.current.visibleSourceSave).toMatchObject({
+      state: 'idle',
+      canRetry: false,
+    })
+    // The settled status itself is untouched — the payload is still held.
+    expect(view.result.current.sourceSave).toMatchObject({ state: 'failed', canRetry: true })
+
+    // A sibling's own profile is not shown another child's close either.
+    identityEpoch = 3
+    activeProfile = UserProfile.London
+    setActive(LONDON, true)
+    view.rerender()
+    expect(view.result.current.visibleSourceSave.state).toBe('idle')
   })
 })
 

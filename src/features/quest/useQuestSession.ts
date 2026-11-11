@@ -448,6 +448,48 @@ function generateFallbackRecommendations(
  *   is the case the scope guard alone could not see.
  * - No profile vouches for nobody and fails closed.
  */
+/**
+ * What the owning view says about the SOURCE save (his answers).
+ *
+ * `kind` separates the two payloads that can fail to land, because they are
+ * recovered from different screens: a `final` close is retried on its summary,
+ * a `partial` manual exit on the Mine intro the exit lands on.
+ */
+export interface QuestSourceSaveNotice {
+  state: 'idle' | 'saving' | 'saved' | 'failed' | 'conflict'
+  kind?: 'final' | 'partial'
+  /** True only while a held payload can still be retried. */
+  canRetry: boolean
+  /**
+   * The run whose payload is held. A retry control passes this back, so a
+   * control retained across a reset cannot pick up a DIFFERENT pending payload
+   * than the one it was rendered for.
+   */
+  runInstanceId?: string
+  /** The view that owns this notice — see `runGenerationRef`. */
+  viewGeneration?: number
+  /**
+   * The child the held payload belongs to (UX-494). A `partial` notice is drawn
+   * on whatever Mine intro the exit landed on, which a child change re-renders
+   * under a sibling — so the surface hides the notice unless the active child is
+   * this owner. A `final` notice stays on its bound summary and does not use it.
+   */
+  originalChildId?: string
+  /** The family the held payload belongs to — never shown outside it. */
+  originalFamilyId?: string
+  /**
+   * The retry attempt this notice reports (UX-494 promotion).
+   *
+   * A settled status is stored for the exact attempt rather than dropped when
+   * the rendered scope moves mid-flight — a child switch during an admitted
+   * Retry used to leave *Saving…* on the bound summary for ever. Visibility is
+   * derived from the live identity instead, and a settlement is applied only
+   * while the notice on screen is still this attempt's, so it can never
+   * overwrite a newer run or a different held payload.
+   */
+  attemptId?: string
+}
+
 function mayViewerRetryQuestPayload(
   viewer: { profile: UserProfile | null | undefined; liveChildId: string | null | undefined },
   run: { childId: string },
@@ -610,35 +652,17 @@ export function useQuestSession() {
     viewGeneration: number
   } | null>(null)
 
+  /** What the owning view says about the SOURCE save — see the type. */
+  const [sourceSave, setSourceSave] = useState<QuestSourceSaveNotice>({
+    state: 'idle',
+    canRetry: false,
+  })
   /**
-   * What the owning view says about the SOURCE save (his answers).
-   *
-   * `kind` separates the two payloads that can fail to land, because they are
-   * recovered from different screens: a `final` close is retried on its summary,
-   * a `partial` manual exit on the Mine intro the exit lands on.
+   * The attempt sequence behind `QuestSourceSaveNotice.attemptId`. One retry is
+   * one attempt, so a settlement can prove the notice on screen is still its
+   * own before replacing it.
    */
-  const [sourceSave, setSourceSave] = useState<{
-    state: 'idle' | 'saving' | 'saved' | 'failed' | 'conflict'
-    kind?: 'final' | 'partial'
-    /** True only while a held payload can still be retried. */
-    canRetry: boolean
-    /**
-     * The run whose payload is held. A retry control passes this back, so a
-     * control retained across a reset cannot pick up a DIFFERENT pending
-     * payload than the one it was rendered for.
-     */
-    runInstanceId?: string
-    /** The view that owns this notice — see `runGenerationRef`. */
-    viewGeneration?: number
-    /**
-     * The child the held payload belongs to (UX-494). A `partial` notice is
-     * drawn on whatever Mine intro the exit landed on, which a child change
-     * re-renders under a sibling — so the surface hides the notice unless the
-     * active child is this owner. A `final` notice stays on its bound summary
-     * and does not use it.
-     */
-    originalChildId?: string
-  }>({ state: 'idle', canRetry: false })
+  const sourceAttemptSeqRef = useRef(0)
 
   /**
    * Bumped when a partial has just LANDED, so the intro re-reads its resume
@@ -792,6 +816,90 @@ export function useQuestSession() {
     return renderedEpoch === getLibraryIdentityEpoch()
   }, [])
 
+  /**
+   * WHO may see the source-save notice, derived at render (UX-494 promotion).
+   *
+   * The settled status is stored for the attempt that produced it, so a scope
+   * that moved mid-flight no longer loses it. Visibility is a separate
+   * question, answered against the CURRENT committed family and the authorised
+   * viewer — never against the retained scope the attempt was admitted under,
+   * which is exactly what a same-family child change (A → B → A) invalidates
+   * while the bound summary stays on screen.
+   *
+   * A notice with no owner is the live view's own in-flight close, already
+   * guarded by that close's `live()`; everything else is checked. An
+   * unsettled, wrong-family or unauthorised render is told nothing at all.
+   */
+  const noticeOwner = sourceSave.originalChildId
+  const noticeFamily = sourceSave.originalFamilyId
+  const noticeIsVisible =
+    sourceSave.state === 'idle' ||
+    // No owner: the live view's own in-flight close, guarded by that close.
+    !noticeOwner ||
+    (recoveryScopeSettled &&
+      (!noticeFamily || noticeFamily === familyId) &&
+      mayViewerRetryQuestPayload(
+        { profile, liveChildId },
+        { childId: noticeOwner },
+        sourceSave.kind ?? 'partial',
+      ))
+  const visibleSourceSave: QuestSourceSaveNotice = noticeIsVisible
+    ? sourceSave
+    : { state: 'idle', canRetry: false }
+
+  /**
+   * Retire a run that failed before it had a single COUNTED answer (UX-494).
+   *
+   * `handleSkip`'s friendly no-counted-answers return put the intro back on
+   * screen but left the run established — its id, owner, live state and the
+   * timer all still in place. Every later Start was then refused as
+   * `already-running`, so the intro's own *Try Again* and every mode card went
+   * dead until the page was reloaded.
+   *
+   * It does exactly what an ordinary reset's cleanup does and nothing else: a
+   * skipped-only failed start has no counted answers, so there is no partial to
+   * save, no minutes to credit and no reward to bank. The caller's friendly
+   * error and the intro screen are deliberately left alone.
+   *
+   * Only the NAMED run is retired, so a late response from a superseded run
+   * cannot tear down the session that replaced it. Declared ABOVE the doors
+   * because `startQuest` now shares it: a held first question whose scope
+   * retires needs the same cleanup, not just its owner refs cleared.
+   */
+  const retireUnansweredRun = useCallback(
+    (run: QuestRun | null) => {
+      if (!run || !isLiveRun(runRef.current, run)) return
+      // The same bump a reset makes: every callback this run still has in
+      // flight stops being allowed to touch this hook's state.
+      runGenerationRef.current += 1
+      startClaimRef.current = null
+      if (timerRef.current) {
+        clearInterval(timerRef.current)
+        timerRef.current = null
+      }
+      sessionTimer.stop()
+      setQuestState(null)
+      setCurrentQuestion(null)
+      setAnsweredQuestions([])
+      setFindings([])
+      setLastAnswer(null)
+      setSessionSaved(false)
+      sessionSavedRef.current = false
+      setSummarizing(false)
+      setHitLevelCap(false)
+      setFluencyPassages([])
+      setFluencyDiamonds(0)
+      setCurrentPassageText('')
+      conversationRef.current = []
+      bonusRoundUsedRef.current = false
+      activeQuestModeRef.current = undefined
+      sessionIdRef.current = null
+      runRef.current = null
+      sessionOwnerRef.current = null
+    },
+    [sessionTimer],
+  )
+
   // ── Start quest ───────────────────────────────────────────────
 
   const startQuest = useCallback(
@@ -842,14 +950,27 @@ export function useQuestSession() {
        * Give the claim up. `clearRun` is for a failure AFTER establishment —
        * no question was ever asked and nothing was answered, so there is no run
        * to continue and leaving one behind is what blocked the retry.
+       *
+       * It RETIRES that attempt rather than clearing three refs (UX-494
+       * promotion). Clearing the owner refs left this Start's own view sitting
+       * on Loading with its one-second interval still ticking, which is what a
+       * first question (or a Fluency passage) held across a retiring scope
+       * does — nobody was coming back to clear it. The retirement is the same
+       * cleanup an ordinary reset does: timers stopped, live state cleared, the
+       * intro back. The caller's error message is left alone.
+       *
+       * Only an attempt whose exact instance AND generation still own the view
+       * is retired, so a held old response cannot tear down the newer run,
+       * timer or screen that replaced it.
        */
       const releaseClaim = (clearRun: boolean) => {
         if (startClaimRef.current?.generation === generation) startClaimRef.current = null
-        if (clearRun && startedInstanceId && runRef.current?.instanceId === startedInstanceId) {
-          runRef.current = null
-          sessionIdRef.current = null
-          sessionOwnerRef.current = null
-        }
+        if (!clearRun || !startedInstanceId) return
+        const established = runRef.current
+        if (established?.instanceId !== startedInstanceId) return
+        if (runGenerationRef.current !== generation) return
+        retireUnansweredRun(established)
+        setScreen(QuestScreen.Intro)
       }
 
       activeQuestModeRef.current = questMode
@@ -1263,6 +1384,7 @@ export function useQuestSession() {
       recoveryScope,
       identityEpoch,
       scopeStillLive,
+      retireUnansweredRun,
     ],
   )
 
@@ -1511,8 +1633,36 @@ export function useQuestSession() {
         // epoch move the committed ref has not caught up with yet must not let
         // this attempt report into a view that is already retired.
         scopeStillLive(renderedScope, renderedEpoch)
-      if (ownsView())
-        setSourceSave({ state: 'saving', kind, canRetry: false, originalChildId: run.childId })
+
+      /**
+       * This attempt's own status (UX-494 promotion).
+       *
+       * The settlement is NOT gated on the rendered scope. A parent who
+       * switches child while an admitted Retry is in flight retires that
+       * render, and dropping the result left the bound summary — which UX-339
+       * keeps on screen — saying *Saving…* with no way back. The status is
+       * stored for this exact attempt instead, and WHO may see it is derived
+       * from the live identity in `visibleSourceSave`.
+       *
+       * It still cannot overwrite a newer run or a different held payload: the
+       * notice on screen has to carry this attempt's own id, which a newer
+       * close, reset, Resume or second Retry has already replaced.
+       */
+      const attemptId = `${run.instanceId}#${(sourceAttemptSeqRef.current += 1)}`
+      const settle = (next: Omit<QuestSourceSaveNotice, 'attemptId'>) =>
+        setSourceSave((prev) => (prev.attemptId === attemptId ? { ...next, attemptId } : prev))
+      // Admitted: the checks above are exactly `ownsView`, so this attempt owns
+      // the notice from here until something newer takes it.
+      setSourceSave({
+        state: 'saving',
+        kind,
+        canRetry: false,
+        runInstanceId: run.instanceId,
+        viewGeneration,
+        originalChildId: run.childId,
+        originalFamilyId: run.familyId,
+        attemptId,
+      })
 
       try {
         let outcome: QuestSourceSaveOutcome | 'failed'
@@ -1531,9 +1681,11 @@ export function useQuestSession() {
           outcome = 'failed'
         }
 
-        // Visibility is decided first, then the payload is released — the other
-        // order let a view change between the two and lose the notice.
+        // `mayReport` is still the LIVE view's own business — the screen's
+        // saved flag and the intro's re-read belong to whoever is on it now.
+        // The attempt's own status settles either way, just above.
         const mayReport = ownsView()
+        const owner = { originalChildId: run.childId, originalFamilyId: run.familyId }
         if (outcome === 'saved' || outcome === 'already-committed' || outcome === 'conflict') {
           if (pendingSourceRef.current?.run.instanceId === run.instanceId) {
             pendingSourceRef.current = null
@@ -1541,26 +1693,29 @@ export function useQuestSession() {
         }
 
         if (outcome === 'failed') {
-          if (mayReport) {
-            setSourceSave({
-              state: 'failed',
-              kind,
-              canRetry: true,
-              runInstanceId: run.instanceId,
-              viewGeneration,
-              originalChildId: run.childId,
-            })
-          }
+          // The payload is still held, so a freshly rendered Retry on the
+          // owning view is actionable again — including after a switch away
+          // and back.
+          settle({
+            state: 'failed',
+            kind,
+            canRetry: true,
+            runInstanceId: run.instanceId,
+            viewGeneration,
+            ...owner,
+          })
           return outcome
         }
         if (outcome === 'conflict') {
-          if (mayReport) setSourceSave({ state: 'conflict', kind, canRetry: false })
+          settle({ state: 'conflict', kind, canRetry: false, ...owner })
           return outcome
         }
 
+        // It landed: this payload's own view says Saved, whatever the header
+        // did while it was in flight.
+        settle({ state: 'saved', kind, canRetry: false, ...owner })
         if (mayReport) {
           setSessionSaved(true)
-          setSourceSave({ state: 'saved', kind, canRetry: false })
           // A partial that lands on RETRY is as new to the intro already on
           // screen as one that landed first time — the resume query behind that
           // card finished long before this write. Same one-more-read mechanism,
@@ -1787,6 +1942,7 @@ export function useQuestSession() {
           viewGeneration: closeViewGeneration,
           runInstanceId: run.instanceId,
           originalChildId: run.childId,
+          originalFamilyId: run.familyId,
         })
       }
 
@@ -2461,57 +2617,6 @@ export function useQuestSession() {
       }
     },
     [currentQuestion, questState, activeChildId, answeredQuestions, familyId, chat, endSession, bankAnswerReward],
-  )
-
-  /**
-   * Retire a run that failed before it had a single COUNTED answer (UX-494).
-   *
-   * `handleSkip`'s friendly no-counted-answers return put the intro back on
-   * screen but left the run established — its id, owner, live state and the
-   * timer all still in place. Every later Start was then refused as
-   * `already-running`, so the intro's own *Try Again* and every mode card went
-   * dead until the page was reloaded.
-   *
-   * It does exactly what an ordinary reset's cleanup does and nothing else: a
-   * skipped-only failed start has no counted answers, so there is no partial to
-   * save, no minutes to credit and no reward to bank. The caller's friendly
-   * error and the intro screen are deliberately left alone.
-   *
-   * Only the NAMED run is retired, so a late response from a superseded run
-   * cannot tear down the session that replaced it.
-   */
-  const retireUnansweredRun = useCallback(
-    (run: QuestRun | null) => {
-      if (!run || !isLiveRun(runRef.current, run)) return
-      // The same bump a reset makes: every callback this run still has in
-      // flight stops being allowed to touch this hook's state.
-      runGenerationRef.current += 1
-      startClaimRef.current = null
-      if (timerRef.current) {
-        clearInterval(timerRef.current)
-        timerRef.current = null
-      }
-      sessionTimer.stop()
-      setQuestState(null)
-      setCurrentQuestion(null)
-      setAnsweredQuestions([])
-      setFindings([])
-      setLastAnswer(null)
-      setSessionSaved(false)
-      sessionSavedRef.current = false
-      setSummarizing(false)
-      setHitLevelCap(false)
-      setFluencyPassages([])
-      setFluencyDiamonds(0)
-      setCurrentPassageText('')
-      conversationRef.current = []
-      bonusRoundUsedRef.current = false
-      activeQuestModeRef.current = undefined
-      sessionIdRef.current = null
-      runRef.current = null
-      sessionOwnerRef.current = null
-    },
-    [sessionTimer],
   )
 
   // ── Skip question ───────────────────────────────────────────
@@ -3219,6 +3324,7 @@ export function useQuestSession() {
         kind: 'partial',
         canRetry: false,
         originalChildId: exitingRun.childId,
+        originalFamilyId: exitingRun.familyId,
       })
       saveResumableQuestSource(questSourceRef(exitingRun.familyId, docId), partialSession)
         .then((outcome) => {
@@ -3263,6 +3369,7 @@ export function useQuestSession() {
             runInstanceId: exitingRun.instanceId,
             viewGeneration: introGeneration,
             originalChildId: exitingRun.childId,
+            originalFamilyId: exitingRun.familyId,
           })
         })
 
@@ -3345,6 +3452,13 @@ export function useQuestSession() {
      * is the defect this repair exists for.
      */
     sourceSave,
+    /**
+     * The same notice, with WHO may see it derived from the live identity
+     * (UX-494 promotion) — what every surface renders. `sourceSave` above is
+     * the settled status itself, which stays bound to the attempt that
+     * produced it even when the header has moved on.
+     */
+    visibleSourceSave,
     graphSync,
     retrySourceSave,
     retryGraphProjection,

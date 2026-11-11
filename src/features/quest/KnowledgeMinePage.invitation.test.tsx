@@ -93,6 +93,7 @@ vi.mock('./useQuestSession', () => ({
     // file's subject is the village invitation, and an idle save notice renders
     // nothing at all.
     sourceSave: { state: 'idle', canRetry: false },
+    visibleSourceSave: { state: 'idle', canRetry: false },
     graphSync: { state: 'idle' },
     recoveryScope: 'fam-1|lincoln|child|1',
     recoveryEpoch: 1,
