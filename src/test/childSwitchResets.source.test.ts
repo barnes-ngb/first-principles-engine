@@ -177,7 +177,9 @@ describe('UX-338 — the Knowledge Mine resume card does not outlive its child',
       KNOWLEDGE_MINE.indexOf('if (resumeChildId !== activeChildId)'),
       KNOWLEDGE_MINE.indexOf('useEffect(() => {\n    if (!activeChildId || !familyId) return'),
     )
-    expect(block).toMatch(/setResumeSession\(null\)/)
+    // The card's state is the scope-bound read now (`resumeRead`), the
+    // `graphRecovery` shape: the row AND the identity it was read under.
+    expect(block).toMatch(/setResumeRead\(null\)/)
     expect(block).toMatch(/setActiveDomain\(null\)/)
   })
 
