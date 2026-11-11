@@ -36,11 +36,35 @@ export const QUEST_GRAPH_COPY = {
   retry: 'Add to my map',
 } as const
 
-/** The Mine's recovery card, for a saved source whose map update is waiting. */
+/**
+ * The Mine's recovery card, for a SAVED source whose map update is waiting.
+ *
+ * *"Your answers are safe"* is true here and only here: the source committed,
+ * and the one thing left is the map.
+ */
 export const QUEST_RECOVERY_COPY = {
   title: 'One quest is still waiting.',
   body: 'Your answers are safe.',
   action: QUEST_GRAPH_COPY.retry,
+} as const
+
+/**
+ * The card for a payload that never reached Firestore — a held final close, or
+ * a manual exit whose partial write was rejected.
+ *
+ * It deliberately does NOT reuse {@link QUEST_RECOVERY_COPY}'s body: those
+ * answers are *not* safe yet, and pairing an unsaved-error card with a sentence
+ * saying they are is the one thing this card must never do. It says what is true
+ * and what the tap does.
+ */
+export const QUEST_UNSAVED_COPY = {
+  title: QUEST_SOURCE_COPY.failed,
+  body: 'Tap to try saving it.',
+  action: QUEST_SOURCE_COPY.retry,
+  /** While a retry is in flight, on the same card. */
+  saving: QUEST_SOURCE_COPY.saving,
+  /** A refusal: something else already owns that id, so this payload is not it. */
+  refused: QUEST_SOURCE_COPY.conflict,
 } as const
 
 /**
@@ -55,6 +79,9 @@ export const QUEST_RESUME_REFUSAL_COPY = {
   missing: 'That quest is not here.',
   'not-interactive': 'That quest cannot go on.',
   finalized: 'That quest is done.',
+  abandoned: 'That quest was closed.',
   'wrong-child': 'That quest is not yours.',
+  'not-resumable': 'That quest cannot go on.',
   'no-resume-point': 'That quest cannot go on.',
+  'stale-scope': 'Tap it again to go on.',
 } as const

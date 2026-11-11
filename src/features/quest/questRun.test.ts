@@ -13,6 +13,7 @@ import {
   mayRecoverQuestSource,
   mayRetrySavingQuestPayload,
   nextRunStamp,
+  questAbandonRefusal,
   questRecoveryScopeKey,
   questResumeRefusal,
   questRunId,
@@ -251,5 +252,46 @@ describe('questResumeRefusal', () => {
     expect(
       questResumeRefusal({ ...resumable, savedCurrentQuestion: undefined } as never, 'lincoln'),
     ).toBe('no-resume-point')
+  })
+
+  it('refuses a status nothing plays answers into', () => {
+    // A parent already closed this one out with *Start fresh instead*.
+    expect(questResumeRefusal({ ...resumable, status: 'abandoned' } as never, 'lincoln')).toBe(
+      'abandoned',
+    )
+    expect(questResumeRefusal({ ...resumable, status: 'queued' } as never, 'lincoln')).toBe(
+      'not-resumable',
+    )
+    expect(questResumeRefusal({ ...resumable, status: undefined } as never, 'lincoln')).toBe(
+      'not-resumable',
+    )
+  })
+
+  it('keeps every eligible legacy status resumable', () => {
+    for (const status of ['partial', 'in-progress', 'resumed']) {
+      expect(questResumeRefusal({ ...resumable, status } as never, 'lincoln'), status).toBeNull()
+    }
+  })
+})
+
+describe('questAbandonRefusal', () => {
+  const closable = {
+    sessionType: 'interactive' as const,
+    status: 'partial' as const,
+    childId: 'lincoln',
+  }
+
+  it('allows closing out a partial that has no resume point', () => {
+    // Not resumable, but still the row the card's secondary action is for.
+    expect(questResumeRefusal(closable as never, 'lincoln')).toBe('no-resume-point')
+    expect(questAbandonRefusal(closable as never, 'lincoln')).toBeNull()
+  })
+
+  it('refuses exactly what Resume refuses otherwise', () => {
+    expect(questAbandonRefusal(null, 'lincoln')).toBe('missing')
+    expect(questAbandonRefusal({ ...closable, status: 'complete' } as never, 'lincoln')).toBe(
+      'finalized',
+    )
+    expect(questAbandonRefusal(closable as never, 'london')).toBe('wrong-child')
   })
 })

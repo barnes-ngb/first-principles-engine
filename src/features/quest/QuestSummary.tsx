@@ -174,6 +174,9 @@ interface QuestSummaryProps {
   sourceSave?: {
     state: 'idle' | 'saving' | 'saved' | 'failed' | 'conflict'
     canRetry: boolean
+    kind?: 'final' | 'partial'
+    runInstanceId?: string
+    viewGeneration?: number
   }
   /**
    * UX-494 — the GRAPH projection: the learner model's evidence, concept states

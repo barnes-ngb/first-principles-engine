@@ -62,6 +62,24 @@ export function nextRunStamp(previousStamp: number, nowMs: number): number {
   return nowMs > previousStamp ? nowMs : previousStamp + 1
 }
 
+/**
+ * What a Start decided — reported rather than swallowed, because three of these
+ * mean *nothing happened and nothing was spent*.
+ */
+export type QuestStartOutcome =
+  /** Established and running, with its first question on screen. */
+  | 'started'
+  /** The identity this card was rendered under is no longer the live one. */
+  | 'stale-scope'
+  /** Nothing settled to start FOR — no family, no child. */
+  | 'unsettled-scope'
+  /** A Start is already in flight; this tap is not a second one. */
+  | 'busy'
+  /** A run is already established; a second tap does not replace it. */
+  | 'already-running'
+  /** The provider failed or answered unusably. The intro offers a fresh Start. */
+  | 'failed'
+
 /** A fresh live identity for an established run. Monotonic per hook. */
 export function questRunInstanceId(runId: string, sequence: number): string {
   return `${runId}#${sequence}`
@@ -264,8 +282,25 @@ export type QuestResumeRefusal =
   | 'missing'
   | 'not-interactive'
   | 'finalized'
+  /** A parent already closed this one out with *Start fresh instead*. */
+  | 'abandoned'
   | 'wrong-child'
+  /** A status nothing in this feature plays answers into. */
+  | 'not-resumable'
   | 'no-resume-point'
+  /** The scope the control was rendered under is no longer the live one. */
+  | 'stale-scope'
+
+/**
+ * The stored `status` values a partial may still be reopened from.
+ *
+ * `partial` is what this feature writes; `in-progress` is the legacy shape
+ * written before partials counted; `resumed` is already-reopened, kept eligible
+ * so a double tap converges on the same run rather than refusing the second.
+ * Anything else — `complete`, `abandoned`, a guided eval's own statuses — is
+ * not a session answers may be played into.
+ */
+const RESUMABLE_STATUSES = new Set(['partial', 'in-progress', 'resumed'])
 
 /**
  * Is this stored document still safe to reopen and play answers into?
@@ -283,7 +318,25 @@ export function questResumeRefusal(
   if (!stored) return 'missing'
   if (stored.sessionType !== 'interactive') return 'not-interactive'
   if (stored.sourceCommittedAt || stored.status === 'complete') return 'finalized'
+  if (stored.status === 'abandoned') return 'abandoned'
+  if (!stored.status || !RESUMABLE_STATUSES.has(stored.status)) return 'not-resumable'
   if (!stored.childId || stored.childId !== expectedChildId) return 'wrong-child'
   if (!stored.savedQuestState || !stored.savedCurrentQuestion) return 'no-resume-point'
   return null
+}
+
+/**
+ * May a parent close this one out with *Start fresh instead*?
+ *
+ * The same question as {@link questResumeRefusal} minus the resume point: a
+ * partial whose saved question never landed is not resumable but is still
+ * abandonable, and that is the row the card's secondary action is offered for.
+ * A completed or another child's source is refused either way.
+ */
+export function questAbandonRefusal(
+  stored: Partial<EvaluationSession & InteractiveSessionData> | null | undefined,
+  expectedChildId: string,
+): QuestResumeRefusal | null {
+  const refusal = questResumeRefusal(stored, expectedChildId)
+  return refusal === 'no-resume-point' ? null : refusal
 }

@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { doc, getDocs, query, updateDoc, where, orderBy, limit as firestoreLimit } from 'firebase/firestore'
+import { getDocs, query, where, orderBy, limit as firestoreLimit } from 'firebase/firestore'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -46,8 +46,13 @@ import { hasMathCalibration, hasReadingCalibration } from './knowledgeMineAccess
 import {
   QUEST_RECOVERY_COPY,
   QUEST_RESUME_REFUSAL_COPY,
-  QUEST_SOURCE_COPY,
+  QUEST_UNSAVED_COPY,
 } from './questSaveCopy'
+import {
+  abandonQuestSource,
+  questSourceRef,
+  type QuestAbandonOutcome,
+} from './questSourceWrites'
 import type { QuestResumeRefusal } from './questRun'
 import type { InteractiveSessionData, QuestDomainConfig } from './questTypes'
 import { QuestScreen } from './questTypes'
@@ -259,9 +264,28 @@ export default function KnowledgeMinePage() {
     }
     void loadResume()
     return () => { cancelled = true }
-  }, [activeChildId, familyId, quest.screen]) // re-query when returning to intro
+    // `resumeReloadNonce` re-reads after a partial has actually LANDED: this
+    // query can otherwise finish before the exit's own write does (UX-494).
+  }, [activeChildId, familyId, quest.screen, quest.resumeReloadNonce])
 
   const recoveryScope = quest.recoveryScope
+  const recoveryEpoch = quest.recoveryEpoch
+
+  /**
+   * The recovery identity this page most recently COMMITTED (UX-494).
+   *
+   * Written in a layout effect, the `MineTripSuggestion` shape, for the same
+   * reason: a render React abandons must not authorise a read or a write, and a
+   * handler captured by an older render has to have something CURRENT to
+   * compare itself against. The previous version compared `scopeAtRead` to
+   * `quest.recoveryScope` from the same closure — the same value, so the check
+   * could never fail and the guard did nothing.
+   */
+  const liveRecovery = useRef({ scope: recoveryScope, epoch: recoveryEpoch })
+  useLayoutEffect(() => {
+    liveRecovery.current = { scope: recoveryScope, epoch: recoveryEpoch }
+  }, [recoveryScope, recoveryEpoch])
+
   useEffect(() => {
     // An unsettled identity vouches for nobody, so it reads nothing.
     if (recoveryScope === 'unsettled' || !activeChildId || !familyId) {
@@ -270,6 +294,7 @@ export default function KnowledgeMinePage() {
     }
     let cancelled = false
     const scopeAtRead = recoveryScope
+    const childAtRead = activeChildId
     async function loadGraphRecovery() {
       try {
         const q = query(
@@ -279,10 +304,12 @@ export default function KnowledgeMinePage() {
           firestoreLimit(5),
         )
         const snap = await getDocs(q)
-        // The scope is re-checked as well as the cancel flag: an A → B → A
-        // switch moves the identity epoch while leaving family and child the
-        // same, and this answer belongs to the scope that asked for it.
-        if (cancelled || scopeAtRead !== quest.recoveryScope) return
+        // Three things, not one: this effect was not torn down, the committed
+        // scope is still the one that asked (an A → B → A moves the epoch while
+        // leaving family and child alone), and the child has not moved under us.
+        if (cancelled) return
+        if (liveRecovery.current.scope !== scopeAtRead) return
+        if (childAtRead !== activeChildId) return
         const waiting = snap.docs
           .map((d) => ({ ...d.data(), id: d.id }) as EvaluationSession & Partial<InteractiveSessionData> & { id: string })
           .filter(
@@ -290,7 +317,7 @@ export default function KnowledgeMinePage() {
               s.sessionType === 'interactive' &&
               s.status === 'complete' &&
               Boolean(s.sourceCommittedAt) &&
-              s.childId === activeChildId,
+              s.childId === childAtRead,
           )
         setGraphRecovery(waiting[0] ?? null)
       } catch {
@@ -299,7 +326,6 @@ export default function KnowledgeMinePage() {
     }
     void loadGraphRecovery()
     return () => { cancelled = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `quest.recoveryScope` is read live inside, on purpose
   }, [activeChildId, familyId, quest.screen, recoveryScope, graphRecoveryNonce])
 
   /**
@@ -547,45 +573,87 @@ export default function KnowledgeMinePage() {
                 })()
               }}
               onStartFresh={() => {
-                // Mark the partial session as abandoned in Firestore
-                if (resumeSession.id) {
-                  const ref = doc(evaluationSessionsCollection(familyId), resumeSession.id)
-                  updateDoc(ref, { status: 'abandoned' }).catch((err) =>
-                    console.error('Failed to mark session as abandoned', err),
-                  )
+                // UX-494 — the SAME guarded transition the Resume claim uses,
+                // so the card's two buttons cannot disagree about which
+                // document they are looking at. The bare `updateDoc` this
+                // replaces could close out a run a delayed close had already
+                // finalized, or one belonging to the child a parent had just
+                // switched away from.
+                const sessionId = resumeSession.id
+                const owner = resumeSession.childId
+                const scopeAtTap = recoveryScope
+                if (!sessionId || !owner || scopeAtTap === 'unsettled') {
+                  setResumeSession(null)
+                  return
                 }
-                setResumeSession(null)
+                void (async () => {
+                  let outcome: QuestAbandonOutcome | 'failed'
+                  try {
+                    outcome = await abandonQuestSource(questSourceRef(familyId, sessionId), {
+                      childId: owner,
+                    })
+                  } catch (err) {
+                    console.error('Failed to mark session as abandoned', err)
+                    outcome = 'failed'
+                  }
+                  // Scoped AFTER the await: a result that arrives once the
+                  // identity has moved belongs to nobody's screen.
+                  if (liveRecovery.current.scope !== scopeAtTap) return
+                  if (outcome === 'refused' || outcome === 'failed') {
+                    // The record was not closed out, so the card must not
+                    // pretend it was.
+                    setResumeRefusal(outcome === 'refused' ? 'finalized' : 'missing')
+                    return
+                  }
+                  setResumeSession(null)
+                })()
               }}
             />
           )}
 
-          {/* ── A Resume that was refused (UX-494) ───────────── */}
+          {/* ── A Resume or Start fresh that was refused (UX-494) ──
+              One line, and no reassurance underneath it: *"Your answers are
+              safe"* is the saved source's sentence, and a refusal may be about
+              a record that is gone. */}
           {resumeRefusal && (
-            <RecoveryNotice
-              title={QUEST_RESUME_REFUSAL_COPY[resumeRefusal]}
-              body={QUEST_RECOVERY_COPY.body}
-            />
+            <RecoveryNotice title={QUEST_RESUME_REFUSAL_COPY[resumeRefusal]} />
           )}
 
           {/* ── A held payload that never reached Firestore (UX-494) ──
               The manual-exit partial's owning view: its save is a transaction
               and can be rejected offline, and the minutes are already recorded,
-              so the answers get the same scoped retry a failed close gets. */}
-          {quest.sourceSave.state === 'failed' && quest.sourceSave.canRetry && (
-            <RecoveryNotice
-              title={QUEST_SOURCE_COPY.failed}
-              body={QUEST_RECOVERY_COPY.body}
-              key={quest.sourceSave.runInstanceId}
-              action={QUEST_SOURCE_COPY.retry}
-              onAction={() => quest.retrySourceSave(quest.sourceSave.runInstanceId)}
-            />
-          )}
+              so the answers get the same scoped retry a failed close gets.
+              Its copy is its OWN: these answers are not safe yet, and the
+              recovery card's sentence saying they are would be a lie here. */}
+          {quest.sourceSave.kind === 'partial' &&
+            (quest.sourceSave.state === 'failed' || quest.sourceSave.state === 'saving') && (
+              <RecoveryNotice
+                key={quest.sourceSave.runInstanceId ?? 'partial-save'}
+                title={
+                  quest.sourceSave.state === 'saving'
+                    ? QUEST_UNSAVED_COPY.saving
+                    : QUEST_UNSAVED_COPY.title
+                }
+                body={QUEST_UNSAVED_COPY.body}
+                action={quest.sourceSave.canRetry ? QUEST_UNSAVED_COPY.action : undefined}
+                onAction={
+                  quest.sourceSave.canRetry
+                    ? () =>
+                        quest.retrySourceSave({
+                          runInstanceId: quest.sourceSave.runInstanceId,
+                          viewGeneration: quest.sourceSave.viewGeneration,
+                          epoch: recoveryEpoch,
+                        })
+                    : undefined
+                }
+              />
+            )}
 
           {/* ── Map still waiting (UX-494) ─────────────────────
               Scoped at render AND re-checked at the write: the key drops the
-              card on any identity change, and the scope string the tap carries
-              is compared against the live one, so a retained callback cannot
-              write for the child who just left the screen. */}
+              card on any identity change, the scope and epoch the tap carries
+              are compared against the committed ones, and only this card's own
+              settled attempt may clear and re-read it. */}
           {graphRecovery && recoveryScope !== 'unsettled' && (
             <RecoveryNotice
               key={`${recoveryScope}|${graphRecovery.id}`}
@@ -593,19 +661,18 @@ export default function KnowledgeMinePage() {
               body={QUEST_RECOVERY_COPY.body}
               action={QUEST_RECOVERY_COPY.action}
               onAction={async () => {
-                const outcome = await quest.retryGraphProjection(
-                  graphRecovery.id,
-                  graphRecovery.childId,
-                  {
-                    domain: graphRecovery.domain,
-                    questMode: graphRecovery.questMode,
-                    scopeKey: recoveryScope,
-                  },
-                )
-                // A failure, a refusal or an attempt already in flight leaves
-                // the source pending and the card with it. Anything else
-                // stamped it inside the transaction, so re-read: a second
-                // waiting source takes its place rather than disappearing.
+                const cardId = graphRecovery.id
+                const scopeAtTap = recoveryScope
+                const outcome = await quest.retryGraphProjection(cardId, graphRecovery.childId, {
+                  domain: graphRecovery.domain,
+                  questMode: graphRecovery.questMode,
+                  scopeKey: scopeAtTap,
+                  epoch: recoveryEpoch,
+                  viewGeneration: quest.viewGeneration,
+                })
+                // A failure, a refusal, an attempt already in flight, or a model
+                // that does not exist yet all leave the source pending and the
+                // card with it.
                 if (
                   outcome === 'failed' ||
                   outcome === 'identity-mismatch' ||
@@ -614,7 +681,11 @@ export default function KnowledgeMinePage() {
                 ) {
                   return
                 }
-                setGraphRecovery(null)
+                // Only THIS card's own settled attempt may retire it: the scope
+                // must still be the one it was tapped under, and the card on
+                // screen must still be the one it was drawn for.
+                if (liveRecovery.current.scope !== scopeAtTap) return
+                setGraphRecovery((current) => (current?.id === cardId ? null : current))
                 setGraphRecoveryNonce((n) => n + 1)
               }}
             />
@@ -836,14 +907,25 @@ export default function KnowledgeMinePage() {
           // source, so it works here and again after a reload.
           sourceSave={quest.sourceSave}
           graphSync={quest.graphSync}
-          onRetrySourceSave={() => void quest.retrySourceSave(quest.sourceSave.runInstanceId)}
+          // Both retries carry the identity of the view they were RENDERED in,
+          // so an old summary's settled attempt cannot relabel a newer
+          // same-child summary (UX-494).
+          onRetrySourceSave={() =>
+            void quest.retrySourceSave({
+              runInstanceId: quest.sourceSave.runInstanceId,
+              viewGeneration: quest.sourceSave.viewGeneration,
+              epoch: recoveryEpoch,
+            })
+          }
           onRetryGraphSync={() => {
             const { sessionId, childId } = quest.graphSync
             if (!sessionId || !childId) return
             void quest.retryGraphProjection(sessionId, childId, {
               domain: quest.questDomain,
               questMode: quest.questMode,
-              scopeKey: quest.recoveryScope,
+              scopeKey: recoveryScope,
+              epoch: recoveryEpoch,
+              viewGeneration: quest.viewGeneration,
             })
           }}
           onDone={quest.resetToIntro}
@@ -1195,7 +1277,8 @@ function RecoveryNotice({
   onAction,
 }: {
   title: string
-  body: string
+  /** Omitted where the title says the whole truth on its own. */
+  body?: string
   action?: string
   onAction?: () => void | Promise<unknown>
 }) {
@@ -1214,9 +1297,11 @@ function RecoveryNotice({
       <Typography sx={{ fontSize: '16px', fontWeight: 700, lineHeight: 1.4, color: MC.white }}>
         {title}
       </Typography>
-      <Typography sx={{ fontSize: '14px', lineHeight: 1.45, color: MC.stone, mt: 0.5 }}>
-        {body}
-      </Typography>
+      {body && (
+        <Typography sx={{ fontSize: '14px', lineHeight: 1.45, color: MC.stone, mt: 0.5 }}>
+          {body}
+        </Typography>
+      )}
       {action && onAction && (
         <Button
           disabled={busy}

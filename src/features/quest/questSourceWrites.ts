@@ -15,10 +15,12 @@
 //
 // The guided-eval and fluency paths keep their own existing writes untouched.
 
-import { doc, getDoc, runTransaction } from 'firebase/firestore'
+import { doc, runTransaction } from 'firebase/firestore'
 import type { DocumentReference } from 'firebase/firestore'
 
 import { db, evaluationSessionsCollection } from '../../core/firebase/firestore'
+import { questAbandonRefusal, questResumeRefusal } from './questRun'
+import type { QuestResumeRefusal } from './questRun'
 import type { EvaluationSession } from '../../core/types'
 import type { InteractiveSessionData } from './questTypes'
 
@@ -214,42 +216,70 @@ export async function saveResumableQuestSource(
   })
 }
 
-/** What marking a reopened partial as `resumed` decided. */
-export type QuestResumeStampOutcome =
-  | 'marked'
-  | 'refused-finalized'
-  | 'refused-mismatch'
+/**
+ * What a Resume claim decided — and, when it accepted, the EXACT stored partial
+ * it accepted.
+ *
+ * The caller restores from `source`, never from the copy the resume card
+ * loaded: the two can disagree, and the stored one is the only copy whose
+ * eligibility was checked.
+ */
+export type QuestResumeClaim =
+  | { ok: true; source: QuestSourcePayload }
+  | { ok: false; refusal: QuestResumeRefusal }
+
+/**
+ * Re-read a partial, judge it, and claim it as `resumed` — in ONE transaction.
+ *
+ * It used to be a read, then a UI restore, then a detached status write, so
+ * three things could disagree: two taps could both pass the eligibility check
+ * and both restore, and a delayed close finalizing the record in that window was
+ * still stamped `resumed` afterwards. One unit closes all of it — a conflicting
+ * commit re-runs the check against the current document rather than stamping
+ * over it.
+ */
+export async function claimQuestSourceForResume(
+  sessionRef: DocumentReference<QuestSourcePayload>,
+  expect: { childId: string },
+): Promise<QuestResumeClaim> {
+  return runTransaction(db, async (tx) => {
+    const snap = await tx.get(sessionRef)
+    const stored = snap.exists() ? (snap.data() as Partial<QuestSourcePayload>) : null
+    const refusal = questResumeRefusal(stored, expect.childId)
+    if (refusal) return { ok: false, refusal }
+    tx.set(sessionRef, { status: 'resumed' }, { merge: true })
+    return { ok: true, source: stored as QuestSourcePayload }
+  })
+}
+
+/** What closing a partial out with *Start fresh instead* decided. */
+export type QuestAbandonOutcome =
+  | 'abandoned'
+  | 'already-abandoned'
+  | 'refused'
   | 'missing'
 
 /**
- * Mark a reopened partial as `resumed` so the resume card stops offering it —
- * refusing a record that has since been finalized, and one this run does not own.
+ * Close a partial out, conditionally — the write behind *Start fresh instead*.
+ *
+ * It was a bare `updateDoc(ref, { status: 'abandoned' })` on the card's stale
+ * copy, so it could close out a run a delayed close had already finalized, or
+ * one belonging to the child a parent had just switched away from. Now it is the
+ * same guarded transition as the Resume claim and refuses exactly what that
+ * refuses, so the card's two buttons can no longer disagree about which
+ * document they are looking at.
  */
-export async function markQuestSourceResumed(
+export async function abandonQuestSource(
   sessionRef: DocumentReference<QuestSourcePayload>,
-  expect: { childId: string; questRunId: string; domain?: string; questMode?: string },
-): Promise<QuestResumeStampOutcome> {
+  expect: { childId: string },
+): Promise<QuestAbandonOutcome> {
   return runTransaction(db, async (tx) => {
     const snap = await tx.get(sessionRef)
     if (!snap.exists()) return 'missing'
     const stored = snap.data() as Partial<QuestSourcePayload>
-    if (isFinalizedRecord(stored)) return 'refused-finalized'
-    if (!ownsStoredRecord(stored, expect as Partial<QuestSourcePayload>)) return 'refused-mismatch'
-    tx.set(sessionRef, { status: 'resumed' }, { merge: true })
-    return 'marked'
+    if (stored.status === 'abandoned') return 'already-abandoned'
+    if (questAbandonRefusal(stored, expect.childId)) return 'refused'
+    tx.set(sessionRef, { status: 'abandoned' }, { merge: true })
+    return 'abandoned'
   })
-}
-
-/**
- * Read a stored source, for the Resume tap's own eligibility check.
- *
- * The resume card's copy was loaded before the tap, and between the two a
- * delayed close may have finalized the run or a parent may have abandoned it.
- * `questResumeRefusal` judges what comes back.
- */
-export async function readQuestSource(
-  sessionRef: DocumentReference<QuestSourcePayload>,
-): Promise<Partial<QuestSourcePayload> | null> {
-  const snap = await getDoc(sessionRef)
-  return snap.exists() ? (snap.data() as Partial<QuestSourcePayload>) : null
 }

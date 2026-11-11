@@ -60,10 +60,10 @@ vi.mock('../../core/firebase/firestore', () => ({
 }))
 
 import {
+  abandonQuestSource,
   canonicalQuestSourceContent,
-  markQuestSourceResumed,
+  claimQuestSourceForResume,
   questSourceRef,
-  readQuestSource,
   saveFinalQuestSource,
   saveResumableQuestSource,
   type QuestSourcePayload,
@@ -269,48 +269,118 @@ describe('saveResumableQuestSource', () => {
   })
 })
 
-describe('markQuestSourceResumed', () => {
-  const expectation = { childId: CHILD, questRunId: RUN, domain: 'reading', questMode: 'phonics' }
+/**
+ * The Resume claim: re-read, judge and stamp in ONE transaction, returning the
+ * EXACT partial it accepted. Three things used to be able to disagree — the
+ * copy the card loaded, the copy the eligibility check read, and the record the
+ * detached stamp landed on.
+ */
+describe('claimQuestSourceForResume', () => {
+  const resumable = {
+    childId: CHILD,
+    sessionType: 'interactive',
+    domain: 'reading',
+    questMode: 'phonics',
+    questRunId: RUN,
+    status: 'partial',
+    savedQuestState: { currentLevel: 2 },
+    savedCurrentQuestion: { id: 'q-saved' },
+    summary: 'the stored one',
+  }
 
-  it('stamps a reopened partial', async () => {
+  it('accepts, stamps `resumed`, and hands back the stored partial', async () => {
+    seed(PATH, resumable)
+    const claim = await claimQuestSourceForResume(ref(), { childId: CHILD })
+    expect(claim.ok).toBe(true)
+    expect(claim.ok && claim.source.summary).toBe('the stored one')
+    expect(writes).toHaveLength(1)
+    expect(writes[0]).toMatchObject({ data: { status: 'resumed' }, merge: true })
+  })
+
+  it('accepts an already-resumed record, so a double tap converges', async () => {
+    seed(PATH, { ...resumable, status: 'resumed' })
+    expect((await claimQuestSourceForResume(ref(), { childId: CHILD })).ok).toBe(true)
+  })
+
+  it('accepts a legacy in-progress partial with no run id and no plan', async () => {
     seed(PATH, {
       childId: CHILD,
       sessionType: 'interactive',
       domain: 'reading',
-      questMode: 'phonics',
-      questRunId: RUN,
-      status: 'partial',
+      status: 'in-progress',
+      savedQuestState: { currentLevel: 2 },
+      savedCurrentQuestion: { id: 'q-saved' },
     })
-    expect(await markQuestSourceResumed(ref(), expectation)).toBe('marked')
-    expect(writes[0]).toMatchObject({ data: { status: 'resumed' }, merge: true })
+    expect((await claimQuestSourceForResume(ref(), { childId: CHILD })).ok).toBe(true)
   })
 
-  it('refuses a record that has since been finalized', async () => {
+  it('stamps NOTHING when it refuses', async () => {
+    const cases: Array<[Record<string, unknown> | null, string]> = [
+      [null, 'missing'],
+      [{ ...resumable, status: 'complete' }, 'finalized'],
+      [{ ...resumable, sourceCommittedAt: NOW }, 'finalized'],
+      [{ ...resumable, status: 'abandoned' }, 'abandoned'],
+      [{ ...resumable, status: 'something-else' }, 'not-resumable'],
+      [{ ...resumable, childId: 'other-child' }, 'wrong-child'],
+      [{ ...resumable, savedCurrentQuestion: undefined }, 'no-resume-point'],
+      [{ ...resumable, sessionType: 'fluency' }, 'not-interactive'],
+    ]
+    for (const [record, refusal] of cases) {
+      store.clear()
+      writes.length = 0
+      if (record) seed(PATH, record)
+      const claim = await claimQuestSourceForResume(ref(), { childId: CHILD })
+      expect(claim.ok, refusal).toBe(false)
+      expect(!claim.ok && claim.refusal).toBe(refusal)
+      expect(writes).toHaveLength(0)
+    }
+  })
+})
+
+/** *Start fresh instead* — the same guarded transition, never a bare update. */
+describe('abandonQuestSource', () => {
+  const resumable = {
+    childId: CHILD,
+    sessionType: 'interactive',
+    domain: 'reading',
+    status: 'partial',
+    savedQuestState: { currentLevel: 2 },
+    savedCurrentQuestion: { id: 'q-saved' },
+  }
+
+  it('closes out an eligible partial', async () => {
+    seed(PATH, resumable)
+    expect(await abandonQuestSource(ref(), { childId: CHILD })).toBe('abandoned')
+    expect(writes[0]).toMatchObject({ data: { status: 'abandoned' }, merge: true })
+  })
+
+  /** A partial whose saved question never landed is not resumable — but it IS
+   *  the row the card's secondary action is offered for. */
+  it('closes out a partial with no resume point', async () => {
+    seed(PATH, { ...resumable, savedCurrentQuestion: undefined })
+    expect(await abandonQuestSource(ref(), { childId: CHILD })).toBe('abandoned')
+  })
+
+  it('never clobbers a completed source', async () => {
     seed(PATH, stored())
-    expect(await markQuestSourceResumed(ref(), expectation)).toBe('refused-finalized')
+    expect(await abandonQuestSource(ref(), { childId: CHILD })).toBe('refused')
     expect(writes).toHaveLength(0)
   })
 
-  it('refuses a record this run does not own', async () => {
-    seed(PATH, {
-      childId: 'other-child',
-      sessionType: 'interactive',
-      status: 'partial',
-    })
-    expect(await markQuestSourceResumed(ref(), expectation)).toBe('refused-mismatch')
+  it('never clobbers another child’s source', async () => {
+    seed(PATH, { ...resumable, childId: 'other-child' })
+    expect(await abandonQuestSource(ref(), { childId: CHILD })).toBe('refused')
+    expect(writes).toHaveLength(0)
+  })
+
+  it('converges on an already-abandoned record and writes nothing', async () => {
+    seed(PATH, { ...resumable, status: 'abandoned' })
+    expect(await abandonQuestSource(ref(), { childId: CHILD })).toBe('already-abandoned')
     expect(writes).toHaveLength(0)
   })
 
   it('reports a missing record rather than creating one', async () => {
-    expect(await markQuestSourceResumed(ref(), expectation)).toBe('missing')
+    expect(await abandonQuestSource(ref(), { childId: CHILD })).toBe('missing')
     expect(writes).toHaveLength(0)
-  })
-})
-
-describe('readQuestSource', () => {
-  it('returns what is stored now, or null', async () => {
-    expect(await readQuestSource(ref())).toBeNull()
-    seed(PATH, stored({ status: 'partial' }))
-    expect(await readQuestSource(ref())).toMatchObject({ status: 'partial', questRunId: RUN })
   })
 })

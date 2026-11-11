@@ -1,9 +1,9 @@
 import { act, renderHook } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 /**
- * UX-494 — the close saves ONE payload under its own id, and a failure is
- * recoverable.
+ * UX-494 — the close saves ONE payload under its own id, a failure is
+ * recoverable, and every door is bound to the view it was rendered in.
  *
  * The baseline reproductions this file pins at the hook level:
  *
@@ -16,23 +16,48 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
  *   • a held Math summary, then *Try another quest* and Start Phonics, must
  *     finish Math under Math's own id, mode and timer, and must not touch the
  *     Phonics run's screen;
- *   • an ordinary untagged quest makes no model attempt at all, so nothing ever
- *     offers it a retry;
+ *   • an ordinary untagged quest makes no model attempt at all;
  *   • a manual partial exit whose transaction is rejected keeps its answers and
  *     its minutes, and retries through the same scoped affordance;
- *   • a retained control cannot pick up another payload, and a retry after a
- *     child switch is refused.
+ *   • a retained Start cannot run for the child who left the screen, a second
+ *     Start cannot replace an established run, and an old summary's settled
+ *     retry cannot relabel a newer same-child summary.
+ *
+ * **Real timers**, like the `childSwitch` harness: the feedback pauses are
+ * genuinely awaited, which is why this file sets its own generous timeout. Fake
+ * timers raced `renderHook` and returned null results.
  */
+
+vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })
 
 // ── A fake Firestore keyed by document path ────────────────────
 const store = new Map<string, unknown>()
 const writes: Array<{ path: string; data: Record<string, unknown> }> = []
+
+interface DiamondEvent {
+  familyId: string
+  childId: string
+  amount: number
+  type: string
+  reason: string
+  dedupKey: string
+}
+/** Typed to the real signatures, so a call assertion needs no cast. */
+const addDiamondEvent = vi.fn<(event: DiamondEvent) => Promise<void>>(async () => {})
+const addXpEvent = vi.fn<
+  (
+    familyId: string,
+    childId: string,
+    kind: string,
+    amount: number,
+    dedupKey: string,
+    meta?: Record<string, unknown>,
+  ) => Promise<void>
+>(async () => {})
 const addDoc = vi.fn<(ref: unknown, data: unknown) => Promise<{ id: string }>>(
   async () => ({ id: 'new-doc' }),
 )
 const setDoc = vi.fn<(ref: unknown, data: unknown) => Promise<void>>(async () => {})
-const addXpEvent = vi.fn(async () => {})
-const addDiamondEvent = vi.fn(async () => {})
 
 /** Set per test: make every transaction reject, as an offline device does. */
 let transactionError: Error | null = null
@@ -115,10 +140,10 @@ vi.mock('../avatar/stonebridge/libraryReturnFlow', () => ({
 }))
 
 vi.mock('../../core/xp/addXpEvent', () => ({
-  addXpEvent: (...a: unknown[]) => addXpEvent(...(a as [])),
+  addXpEvent: (...a: Parameters<typeof addXpEvent>) => addXpEvent(...a),
 }))
 vi.mock('../../core/xp/addDiamondEvent', () => ({
-  addDiamondEvent: (...a: unknown[]) => addDiamondEvent(...(a as [])),
+  addDiamondEvent: (event: DiamondEvent) => addDiamondEvent(event),
 }))
 vi.mock('../../core/curriculum/updateSkillMapFromFindings', () => ({
   updateSkillMapFromFindings: vi.fn(async () => {}),
@@ -181,6 +206,10 @@ vi.mock('../../core/hooks/useActiveChild', () => ({
   useActiveChild: () => mockUseActiveChild(),
 }))
 
+import { useQuestSession } from './useQuestSession'
+import type { EvaluationDomain } from '../../core/types/enums'
+import type { QuestMode } from './questTypes'
+
 const LINCOLN = { id: 'lincoln', name: 'Lincoln' }
 const LONDON = { id: 'london', name: 'London' }
 
@@ -206,15 +235,13 @@ const QUESTION = JSON.stringify({
   skill: 'phonics.cvc',
 })
 
-type Hook = ReturnType<typeof import('./useQuestSession').useQuestSession>
-
-async function mountHook() {
-  const { useQuestSession } = await import('./useQuestSession')
+function mountHook() {
   return renderHook(() => useQuestSession())
 }
+type View = ReturnType<typeof mountHook>
 
-/** Answer `n` questions correctly. Five of them closes the session. */
-async function answer(view: { result: { current: Hook } }, n: number) {
+/** Answer `n` questions correctly. Five in a run closes the session. */
+async function answer(view: View, n: number) {
   for (let i = 0; i < n; i += 1) {
     await act(async () => {
       await view.result.current.submitAnswer('cat')
@@ -222,16 +249,24 @@ async function answer(view: { result: { current: Hook } }, n: number) {
   }
 }
 
+async function start(
+  view: View,
+  domain: EvaluationDomain = 'reading',
+  mode: QuestMode = 'phonics',
+) {
+  let outcome: unknown
+  await act(async () => {
+    outcome = await view.result.current.startQuest(domain, mode)
+  })
+  return outcome
+}
+
 /** Every saved quest-source document, newest write last. */
 function sourceWrites() {
   return writes.filter((w) => w.path.startsWith('sessions-fam-1/'))
 }
 
-/**
- * The LAST write to one source document. A resumed run stamps `status:
- * 'resumed'` before it plays, so the first write to that path is not the
- * payload under test.
- */
+/** The LAST write to one source document — a resume stamps before it plays. */
 function lastWriteTo(sessionId: string) {
   return sourceWrites()
     .filter((w) => w.path === `sessions-fam-1/${sessionId}`)
@@ -240,8 +275,9 @@ function lastWriteTo(sessionId: string) {
 
 /** The run id behind a banked reward key — the only place the hook exposes it. */
 function runIdFromRewardKey(index = 0): string {
-  const key = (addDiamondEvent.mock.calls[index][0] as { dedupKey: string }).dedupKey
-  return key.replace(/^quest_/, '').replace(/_q\d+-diamond$/, '')
+  return addDiamondEvent.mock.calls[index][0].dedupKey
+    .replace(/^quest_/, '')
+    .replace(/_q\d+-diamond$/, '')
 }
 
 function hoursRows() {
@@ -265,26 +301,78 @@ beforeEach(() => {
   vi.spyOn(console, 'log').mockImplementation(() => {})
   vi.spyOn(console, 'warn').mockImplementation(() => {})
   vi.spyOn(console, 'error').mockImplementation(() => {})
-  // Advance the feedback pauses without waiting for them in real time.
-  vi.useFakeTimers({ shouldAdvanceTime: true, advanceTimeDelta: 20 })
 })
 
-afterEach(() => {
-  vi.useRealTimers()
+describe('an ordinary Start is bound to the identity it was rendered under', () => {
+  it('refuses a retained Start after the child moved, before any provider call', async () => {
+    const view = mountHook()
+    // The card's handler, captured while Lincoln was on screen.
+    const staleStart = view.result.current.startQuest
+
+    setActive(LONDON)
+    view.rerender()
+
+    let outcome: unknown
+    await act(async () => {
+      outcome = await staleStart('reading', 'phonics')
+    })
+    expect(outcome).toBe('stale-scope')
+    // Nothing read, nothing established, nothing spent.
+    expect(chat).not.toHaveBeenCalled()
+    expect(view.result.current.screen).toBe('intro')
+  })
+
+  it('refuses a retained Start after a same-tick A → B → A', async () => {
+    const view = mountHook()
+    const staleStart = view.result.current.startQuest
+
+    // Family, child and profile come back the same; the epoch does not.
+    identityEpoch = 2
+
+    let outcome: unknown
+    await act(async () => {
+      outcome = await staleStart('reading', 'phonics')
+    })
+    expect(outcome).toBe('stale-scope')
+    expect(chat).not.toHaveBeenCalled()
+  })
+
+  it('refuses a second Start rather than replacing an established run', async () => {
+    const view = mountHook()
+    expect(await start(view)).toBe('started')
+    const established = view.result.current.currentQuestion
+    const callsAfterFirst = chat.mock.calls.length
+
+    expect(await start(view, 'reading', 'comprehension')).toBe('already-running')
+    expect(chat.mock.calls).toHaveLength(callsAfterFirst)
+    expect(view.result.current.currentQuestion).toBe(established)
+    expect(view.result.current.questMode).toBe('phonics')
+  })
+
+  it('still allows the intro’s own Try Again after a first-question failure', async () => {
+    const view = mountHook()
+    chat.mockResolvedValueOnce(null)
+
+    expect(await start(view)).toBe('failed')
+    expect(view.result.current.screen).toBe('intro')
+    expect(view.result.current.startQuestError).toBeTruthy()
+
+    // The failed Start RELEASED the run, so the newly rendered retry is a
+    // first-class Start rather than a refused duplicate.
+    expect(await start(view)).toBe('started')
+    expect(view.result.current.screen).toBe('question')
+  })
 })
 
 describe('a denied complete source', () => {
   it('produces ZERO graph changes and offers a retry for that payload', async () => {
     selectedPlan = PLAN
+    const view = mountHook()
+    await start(view)
     transactionError = new Error('permission-denied')
-    const view = await mountHook()
-    await act(async () => {
-      await view.result.current.startQuest('reading', 'phonics')
-    })
     await answer(view, 5)
 
     expect(sourceWrites()).toHaveLength(0)
-    // The whole point: no projection was attempted for a source that does not exist.
     expect(projectQuestSourceToModel).not.toHaveBeenCalled()
     expect(view.result.current.sourceSave).toMatchObject({
       state: 'failed',
@@ -298,26 +386,26 @@ describe('a denied complete source', () => {
 
   it('retries the held payload, saves it, and projects exactly once', async () => {
     selectedPlan = PLAN
+    const view = mountHook()
+    await start(view)
     transactionError = new Error('permission-denied')
-    const view = await mountHook()
-    await act(async () => {
-      await view.result.current.startQuest('reading', 'phonics')
-    })
     await answer(view, 5)
     const xpBefore = addXpEvent.mock.calls.length
-    const summaryCalls = chat.mock.calls.length
+    const chatCalls = chat.mock.calls.length
 
     transactionError = null
     await act(async () => {
-      await view.result.current.retrySourceSave(view.result.current.sourceSave.runInstanceId)
+      await view.result.current.retrySourceSave({
+        runInstanceId: view.result.current.sourceSave.runInstanceId,
+        viewGeneration: view.result.current.sourceSave.viewGeneration,
+      })
     })
 
     expect(sourceWrites()).toHaveLength(1)
     expect(view.result.current.sourceSave.state).toBe('saved')
     expect(projectQuestSourceToModel).toHaveBeenCalledTimes(1)
-    // The retry repeats NO other close side effect: no second AI summary, no
-    // further XP, no second hours row.
-    expect(chat.mock.calls).toHaveLength(summaryCalls)
+    // The retry repeats NO other close side effect.
+    expect(chat.mock.calls).toHaveLength(chatCalls)
     expect(addXpEvent.mock.calls.length).toBe(xpBefore)
     expect(hoursRows()).toHaveLength(1)
   })
@@ -326,15 +414,12 @@ describe('a denied complete source', () => {
 describe('a committed acknowledgement lost before the retry', () => {
   it('recognises the matching payload, writes nothing more, and projects once', async () => {
     selectedPlan = PLAN
+    const view = mountHook()
+    await start(view)
     lostAcknowledgement = true
-    const view = await mountHook()
-    await act(async () => {
-      await view.result.current.startQuest('reading', 'phonics')
-    })
     await answer(view, 5)
 
-    // The write DID land; the client never heard so, so the summary offers the
-    // retry and no projection was attempted on an unacknowledged source.
+    // The write DID land; the client never heard so.
     expect(sourceWrites()).toHaveLength(1)
     expect(view.result.current.sourceSave).toMatchObject({ state: 'failed', canRetry: true })
     expect(projectQuestSourceToModel).not.toHaveBeenCalled()
@@ -345,11 +430,12 @@ describe('a committed acknowledgement lost before the retry', () => {
     writes.length = 0
 
     await act(async () => {
-      await view.result.current.retrySourceSave(view.result.current.sourceSave.runInstanceId)
+      await view.result.current.retrySourceSave({
+        runInstanceId: view.result.current.sourceSave.runInstanceId,
+        viewGeneration: view.result.current.sourceSave.viewGeneration,
+      })
     })
 
-    // A matching committed retry is a success that writes NOTHING — the stored
-    // payload stays byte-for-byte what it was — and the graph runs once.
     expect(writes).toHaveLength(0)
     expect(store.get(savedPath)).toBe(committed)
     expect(view.result.current.sourceSave.state).toBe('saved')
@@ -360,14 +446,13 @@ describe('a committed acknowledgement lost before the retry', () => {
 describe('the same id carrying a different payload', () => {
   it('is a conflict: the stored record is preserved and no graph applies', async () => {
     selectedPlan = PLAN
-    const view = await mountHook()
-    await act(async () => {
-      await view.result.current.startQuest('reading', 'phonics')
-    })
-    // Another writer finalizes this run's id with different answers mid-session.
+    const view = mountHook()
+    await start(view)
     await answer(view, 4)
+
+    // Another writer finalizes this run's id with different answers mid-session.
     const runId = runIdFromRewardKey()
-    const other = {
+    seed(`sessions-fam-1/${runId}`, {
       childId: 'lincoln',
       sessionType: 'interactive',
       domain: 'reading',
@@ -377,8 +462,7 @@ describe('the same id carrying a different payload', () => {
       sourceCommittedAt: 'earlier',
       totalCorrect: 1,
       summary: 'someone else',
-    }
-    seed(`sessions-fam-1/${runId}`, other)
+    })
     writes.length = 0
 
     await answer(view, 1)
@@ -392,15 +476,15 @@ describe('the same id carrying a different payload', () => {
 
 describe('an ordinary untagged quest', () => {
   it('saves, and makes no model attempt, so nothing offers it a retry', async () => {
-    selectedPlan = [] // nothing queued — the overwhelming common case
-    const view = await mountHook()
-    await act(async () => {
-      await view.result.current.startQuest('reading', 'phonics')
-    })
+    selectedPlan = []
+    const view = mountHook()
+    await start(view)
     await answer(view, 5)
 
-    const saved = sourceWrites()[0].data
-    expect(saved).toMatchObject({ status: 'complete', modelProjection: 'skipped' })
+    expect(sourceWrites()[0].data).toMatchObject({
+      status: 'complete',
+      modelProjection: 'skipped',
+    })
     expect(projectQuestSourceToModel).not.toHaveBeenCalled()
     expect(view.result.current.sourceSave.state).toBe('saved')
     expect(view.result.current.graphSync.state).toBe('skipped')
@@ -409,35 +493,27 @@ describe('an ordinary untagged quest', () => {
 
 describe('a held summary, then Try another quest and Start Phonics', () => {
   it('finishes the first run under its OWN id, mode, timer and reward keys', async () => {
-    const view = await mountHook()
-    await act(async () => {
-      await view.result.current.startQuest('math', 'math')
-    })
+    const view = mountHook()
+    await start(view, 'math', 'math')
     await answer(view, 4)
-
     const mathRunId = runIdFromRewardKey()
 
     // The fifth answer closes Math — and its summary call hangs.
     let releaseSummary: (v: unknown) => void = () => {}
-    chat.mockImplementationOnce(
-      () => new Promise((resolve) => { releaseSummary = resolve }),
-    )
-    // Deliberately NOT wrapped in `act`: it must still be in flight while the
-    // taps below run, which is the whole reproduction.
+    chat.mockImplementationOnce(() => new Promise((resolve) => { releaseSummary = resolve }))
+    // Deliberately NOT awaited inside `act`: the close must still be in flight
+    // while the taps below run, which is the whole reproduction.
     const closing = view.result.current.submitAnswer('cat')
     // Let the feedback pause clear and the summary call start.
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 300))
+      await new Promise((resolve) => setTimeout(resolve, 1500))
     })
 
-    // Try another quest, then Start Phonics, while that summary is in flight.
     await act(async () => {
       view.result.current.resetToIntro()
     })
     chat.mockResolvedValue({ message: `<quest>${QUESTION}</quest>` })
-    await act(async () => {
-      await view.result.current.startQuest('reading', 'phonics')
-    })
+    expect(await start(view, 'reading', 'phonics')).toBe('started')
     await answer(view, 1)
     const phonicsRunId = runIdFromRewardKey(addDiamondEvent.mock.calls.length - 1)
     expect(phonicsRunId).not.toBe(mathRunId)
@@ -451,7 +527,6 @@ describe('a held summary, then Try another quest and Start Phonics', () => {
       await closing
     })
 
-    // Math's record is Math's: its own id, mode and domain.
     const mathWrite = lastWriteTo(mathRunId)
     expect(mathWrite.data).toMatchObject({
       questRunId: mathRunId,
@@ -462,11 +537,9 @@ describe('a held summary, then Try another quest and Start Phonics', () => {
     })
     // Its minutes come from the reading it froze at close, not from the timer
     // the Phonics run now owns — and it never stopped that timer.
-    const mathHours = hoursRows().find((r) => r.notes === 'math quest session')!
-    expect(mathHours.minutes).toBe(30)
+    expect(hoursRows().find((r) => r.notes === 'math quest session')!.minutes).toBe(30)
     expect(stopCalls).toBe(stopsBefore)
-    // Its reward keys are its own.
-    const keys = addDiamondEvent.mock.calls.map((c) => (c[0] as { dedupKey: string }).dedupKey)
+    const keys = addDiamondEvent.mock.calls.map((c) => c[0].dedupKey)
     expect(keys.filter((k) => k.startsWith(`quest_${mathRunId}_`)).length).toBeGreaterThan(0)
     // And the delayed close did not take over the Phonics screen.
     expect(view.result.current.questMode).toBe('phonics')
@@ -476,10 +549,8 @@ describe('a held summary, then Try another quest and Start Phonics', () => {
 
 describe('a manual partial exit whose save is rejected', () => {
   it('keeps its answers for the same scoped retry, and its minutes either way', async () => {
-    const view = await mountHook()
-    await act(async () => {
-      await view.result.current.startQuest('reading', 'phonics')
-    })
+    const view = mountHook()
+    await start(view)
     await answer(view, 2)
 
     transactionError = new Error('offline')
@@ -501,49 +572,107 @@ describe('a manual partial exit whose save is rejected', () => {
 
     transactionError = null
     await act(async () => {
-      await view.result.current.retrySourceSave(view.result.current.sourceSave.runInstanceId)
+      await view.result.current.retrySourceSave({
+        runInstanceId: view.result.current.sourceSave.runInstanceId,
+        viewGeneration: view.result.current.sourceSave.viewGeneration,
+      })
     })
 
     const saved = sourceWrites()[0].data
     expect(saved).toMatchObject({ status: 'partial', childId: 'lincoln' })
     expect(saved.savedQuestState).toBeTruthy() // still resumable
     expect(view.result.current.sourceSave.state).toBe('saved')
-    // A partial is never eligible for the graph.
+    // A partial is never eligible for the graph, and the accounting is not
+    // repeated by the retry.
     expect(projectQuestSourceToModel).not.toHaveBeenCalled()
     expect(hoursRows()).toHaveLength(1)
+  })
+
+  it('re-reads the resume card once the partial has actually landed', async () => {
+    const view = mountHook()
+    await start(view)
+    await answer(view, 2)
+    const nonceBefore = view.result.current.resumeReloadNonce
+
+    await act(async () => {
+      view.result.current.resetToIntro()
+    })
+
+    // The intro's own resume query can finish before this write does, so a
+    // confirmed save asks for one more read.
+    expect(view.result.current.sourceSave.state).toBe('saved')
+    expect(view.result.current.resumeReloadNonce).toBeGreaterThan(nonceBefore)
   })
 })
 
 describe('stale controls and stale scope', () => {
   it('a retained source-retry control cannot pick up a different payload', async () => {
+    const view = mountHook()
+    await start(view)
     transactionError = new Error('offline')
-    const view = await mountHook()
-    await act(async () => {
-      await view.result.current.startQuest('reading', 'phonics')
-    })
     await answer(view, 5)
-    const staleInstanceId = view.result.current.sourceSave.runInstanceId
-    expect(staleInstanceId).toBeTruthy()
+    const stale = {
+      runInstanceId: view.result.current.sourceSave.runInstanceId,
+      viewGeneration: view.result.current.sourceSave.viewGeneration,
+    }
+    expect(stale.runInstanceId).toBeTruthy()
 
     // A second run fails the same way, replacing what is held.
     await act(async () => {
-      await view.result.current.startQuest('reading', 'comprehension')
+      view.result.current.resetToIntro()
     })
+    transactionError = null
+    expect(await start(view, 'reading', 'comprehension')).toBe('started')
+    transactionError = new Error('offline')
     await answer(view, 5)
-    const freshInstanceId = view.result.current.sourceSave.runInstanceId
-    expect(freshInstanceId).not.toBe(staleInstanceId)
+    const fresh = view.result.current.sourceSave.runInstanceId
+    expect(fresh).not.toBe(stale.runInstanceId)
 
     transactionError = null
     let outcome: unknown
     await act(async () => {
-      outcome = await view.result.current.retrySourceSave(staleInstanceId)
+      outcome = await view.result.current.retrySourceSave(stale)
     })
     expect(outcome).toBe('identity-mismatch')
     expect(sourceWrites()).toHaveLength(0)
   })
 
+  /** Sol's Chrome reproduction: an old retry relabelling a newer summary. */
+  it('an old summary’s retry cannot relabel a newer same-child summary', async () => {
+    selectedPlan = PLAN
+    const view = mountHook()
+    await start(view)
+    transactionError = new Error('offline')
+    await answer(view, 5)
+    const oldSummaryControl = {
+      runInstanceId: view.result.current.sourceSave.runInstanceId,
+      viewGeneration: view.result.current.sourceSave.viewGeneration,
+    }
+
+    // A SECOND quest for the SAME child closes successfully. Same scope, same
+    // family, same boy — only the view has moved on.
+    await act(async () => {
+      view.result.current.resetToIntro()
+    })
+    transactionError = null
+    expect(await start(view, 'reading', 'comprehension')).toBe('started')
+    await answer(view, 5)
+    expect(view.result.current.sourceSave.state).toBe('saved')
+    const projectionsSoFar = projectQuestSourceToModel.mock.calls.length
+
+    let outcome: unknown
+    await act(async () => {
+      outcome = await view.result.current.retrySourceSave(oldSummaryControl)
+    })
+
+    expect(outcome).toBe('identity-mismatch')
+    // The newer summary's labels and its map status are untouched.
+    expect(view.result.current.sourceSave.state).toBe('saved')
+    expect(projectQuestSourceToModel.mock.calls.length).toBe(projectionsSoFar)
+  })
+
   it('refuses a graph retry for a child who is no longer the active one', async () => {
-    const view = await mountHook()
+    const view = mountHook()
     let outcome: unknown
     await act(async () => {
       outcome = await view.result.current.retryGraphProjection('some-session', 'london')
@@ -553,8 +682,11 @@ describe('stale controls and stale scope', () => {
   })
 
   it('refuses a graph retry carrying the scope it was rendered under after a switch', async () => {
-    const view = await mountHook()
-    const scopeAtRender = view.result.current.recoveryScope
+    const view = mountHook()
+    const rendered = {
+      scopeKey: view.result.current.recoveryScope,
+      epoch: view.result.current.recoveryEpoch,
+    }
 
     // The header moves, and moves back: family and child are the same again,
     // the identity epoch is not.
@@ -566,16 +698,18 @@ describe('stale controls and stale scope', () => {
 
     let outcome: unknown
     await act(async () => {
-      outcome = await view.result.current.retryGraphProjection('some-session', 'lincoln', {
-        scopeKey: scopeAtRender,
-      })
+      outcome = await view.result.current.retryGraphProjection(
+        'some-session',
+        'lincoln',
+        rendered,
+      )
     })
     expect(outcome).toBe('identity-mismatch')
     expect(projectQuestSourceToModel).not.toHaveBeenCalled()
   })
 })
 
-describe('Resume checks what is stored now', () => {
+describe('Resume claims what is stored now, atomically', () => {
   /** One answered question already in the record, so four more reach the floor. */
   const ANSWERED = {
     id: 'q-done',
@@ -632,48 +766,83 @@ describe('Resume checks what is stored now', () => {
     },
   }
 
-  it('refuses a partial the stored record says is already finished, and starts nothing', async () => {
-    seed(`sessions-fam-1/${partialDoc.id}`, {
-      ...partialDoc,
-      status: 'complete',
-      sourceCommittedAt: 'earlier',
-    })
-    const view = await mountHook()
+  const path = `sessions-fam-1/${partialDoc.id}`
+
+  async function resume(view: View, doc = partialDoc) {
     let outcome: unknown
     await act(async () => {
-      outcome = await view.result.current.resumeSession(partialDoc)
+      outcome = await view.result.current.resumeSession(doc)
     })
-    expect(outcome).toBe('finalized')
+    return outcome
+  }
+
+  it('stamps `resumed` in the SAME transaction that accepted it', async () => {
+    seed(path, partialDoc)
+    const view = mountHook()
+
+    expect(await resume(view)).toBe(true)
+    // One write, from the claim itself — no detached second stamp.
+    expect(writes.filter((w) => w.path === path)).toHaveLength(1)
+    expect(store.get(path)).toMatchObject({ status: 'resumed' })
+    expect(view.result.current.screen).toBe('question')
+    expect(view.result.current.currentQuestion?.id).toBe('q-saved')
+  })
+
+  it('refuses a record the stored copy says is finished, and starts nothing', async () => {
+    seed(path, { ...partialDoc, status: 'complete', sourceCommittedAt: 'earlier' })
+    const view = mountHook()
+
+    expect(await resume(view)).toBe('finalized')
     expect(view.result.current.screen).toBe('intro')
-    expect(chat).not.toHaveBeenCalled() // no fresh paid quest was started
+    expect(chat).not.toHaveBeenCalled()
+    // Refused inside the transaction, so nothing was stamped.
+    expect(writes.filter((w) => w.path === path)).toHaveLength(0)
   })
 
-  it('refuses a record that is gone', async () => {
-    const view = await mountHook()
+  it('refuses an abandoned record, a missing one and another child’s', async () => {
+    const view = mountHook()
+    expect(await resume(view)).toBe('missing')
+
+    seed(path, { ...partialDoc, status: 'abandoned' })
+    expect(await resume(view)).toBe('abandoned')
+
+    seed(path, { ...partialDoc, childId: 'london' })
+    expect(await resume(view)).toBe('wrong-child')
+
+    seed(path, { ...partialDoc, status: 'something-else' })
+    expect(await resume(view)).toBe('not-resumable')
+
+    expect(chat).not.toHaveBeenCalled()
+    expect(writes.filter((w) => w.path === path)).toHaveLength(0)
+  })
+
+  it('refuses a retained Resume before it calls Firestore at all', async () => {
+    seed(path, partialDoc)
+    const view = mountHook()
+    const staleResume = view.result.current.resumeSession
+
+    setActive(LONDON)
+    view.rerender()
+
     let outcome: unknown
     await act(async () => {
-      outcome = await view.result.current.resumeSession(partialDoc)
+      outcome = await staleResume(partialDoc)
     })
-    expect(outcome).toBe('missing')
-    expect(chat).not.toHaveBeenCalled()
+    expect(outcome).toBe('stale-scope')
+    expect(writes.filter((w) => w.path === path)).toHaveLength(0)
+    expect(store.get(path)).toMatchObject({ status: 'partial' })
   })
 
-  /** Cold and warm Resume agree, and a saved plan survives both. */
-  it('restores the plan from the exact partial, warm or cold', async () => {
-    // A warm hook that has already run a session with its own selected request.
+  /** Cold and warm Resume agree on a legacy partial with no plan. */
+  it('restores an empty plan from a legacy partial, warm or cold', async () => {
     selectedPlan = PLAN
-    const warm = await mountHook()
-    await act(async () => {
-      await warm.result.current.startQuest('reading', 'phonics')
-    })
+    const warm = mountHook()
+    await start(warm)
     await answer(warm, 5)
     projectQuestSourceToModel.mockClear()
 
-    // A LEGACY partial carrying no plan field at all.
-    seed(`sessions-fam-1/${partialDoc.id}`, partialDoc)
-    await act(async () => {
-      await warm.result.current.resumeSession(partialDoc)
-    })
+    seed(path, partialDoc)
+    expect(await resume(warm)).toBe(true)
     await answer(warm, 4)
     const warmSave = lastWriteTo(partialDoc.id)
     expect(warmSave.data.status).toBe('complete')
@@ -682,32 +851,27 @@ describe('Resume checks what is stored now', () => {
     expect(warmSave.data.modelProjection).toBe('skipped')
     expect(projectQuestSourceToModel).not.toHaveBeenCalled()
 
-    // A cold mount resuming the same legacy partial agrees.
     writes.length = 0
     store.clear()
-    seed(`sessions-fam-1/${partialDoc.id}`, partialDoc)
-    const cold = await mountHook()
-    await act(async () => {
-      await cold.result.current.resumeSession(partialDoc)
-    })
+    seed(path, partialDoc)
+    const cold = mountHook()
+    expect(await resume(cold)).toBe(true)
     await answer(cold, 4)
     const coldSave = lastWriteTo(partialDoc.id)
     expect(coldSave.data.status).toBe('complete')
     expect(coldSave.data.targetPlan).toEqual([])
     expect(coldSave.data.modelProjection).toBe('skipped')
+  })
 
-    // And a partial that DID save a plan brings it back.
-    writes.length = 0
-    store.clear()
+  it('brings a SAVED plan back off the exact partial', async () => {
     const planned = { ...partialDoc, targetPlan: PLAN }
-    seed(`sessions-fam-1/${partialDoc.id}`, planned)
-    const withPlan = await mountHook()
-    await act(async () => {
-      await withPlan.result.current.resumeSession(planned)
-    })
-    await answer(withPlan, 4)
-    const plannedSave = lastWriteTo(partialDoc.id)
-    expect(plannedSave.data.targetPlan).toEqual(PLAN)
-    expect(plannedSave.data.modelProjection).toBe('pending')
+    seed(path, planned)
+    const view = mountHook()
+
+    expect(await resume(view, planned)).toBe(true)
+    await answer(view, 4)
+    const save = lastWriteTo(partialDoc.id)
+    expect(save.data.targetPlan).toEqual(PLAN)
+    expect(save.data.modelProjection).toBe('pending')
   })
 })

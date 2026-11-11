@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react'
 import { addDoc, collection, doc, getDoc, getDocs, limit as firestoreLimit, orderBy, query, setDoc, updateDoc, where } from 'firebase/firestore'
 
 import { useAI, TaskType } from '../../core/ai/useAI'
@@ -19,9 +26,8 @@ import {
   type QuestProjectionOutcome,
 } from './questModelSync'
 import {
-  markQuestSourceResumed,
+  claimQuestSourceForResume,
   questSourceRef,
-  readQuestSource,
   saveFinalQuestSource,
   saveResumableQuestSource,
   type QuestSourcePayload,
@@ -34,12 +40,12 @@ import {
   mayRetrySavingQuestPayload,
   nextRunStamp,
   questRecoveryScopeKey,
-  questResumeRefusal,
   questRunId as buildQuestRunId,
   questRunInstanceId,
   resumableQuestSourcePayload,
   type QuestResumeRefusal,
   type QuestRun,
+  type QuestStartOutcome,
 } from './questRun'
 import { useProfile } from '../../core/profile/useProfile'
 import {
@@ -502,12 +508,27 @@ export function useQuestSession() {
   /** Runs that have logged their instructional minutes. Per run, not per hook. */
   const hoursLoggedRunsRef = useRef<Set<string>>(new Set())
   /**
-   * A start/resume generation. A `startQuest` does several awaited reads before
-   * it can establish the run; without this, a second Start (or a Resume) landing
-   * in that window let the first one finish and overwrite the newer run's
-   * identity. Bumped by both doors; the loser returns having changed nothing.
+   * A start/resume generation — and, equally, **the generation of the view**.
+   *
+   * A `startQuest` does several awaited reads before it can establish the run;
+   * without this, a second Start (or a Resume) landing in that window let the
+   * first one finish and overwrite the newer run's identity. It is bumped by
+   * Start, by Resume and by every reset, so it also answers the question scope
+   * alone cannot: *is this still the screen that asked?* Two consecutive
+   * summaries for the SAME child share a scope and differ here, which is what
+   * stops an old summary's settled retry relabelling the new one.
    */
   const runGenerationRef = useRef(0)
+  /**
+   * The start claim, held synchronously from the first refusal check until the
+   * run is established or the attempt has failed.
+   *
+   * `runGenerationRef` alone could not refuse a duplicate Start: bumping it is
+   * what a second tap did, and that is precisely how a second tap replaced an
+   * established run. The claim is checked BEFORE anything is read, mutated or
+   * sent to a provider, so a stale or duplicate Start costs nothing.
+   */
+  const startClaimRef = useRef<{ generation: number; scope: string } | null>(null)
   /** Keeps two runs started in the same millisecond from sharing an id. */
   const lastRunStampRef = useRef(0)
   /**
@@ -531,6 +552,10 @@ export function useQuestSession() {
     run: QuestRun
     payload: QuestSourcePayload
     kind: 'final' | 'partial'
+    /** The view that holds it — the summary that closed, or the intro it exited to. */
+    viewGeneration: number
+    /** The settled scope that view was rendered under. */
+    scope: string
   } | null>(null)
 
   /**
@@ -551,7 +576,20 @@ export function useQuestSession() {
      * payload than the one it was rendered for.
      */
     runInstanceId?: string
+    /** The view that owns this notice — see `runGenerationRef`. */
+    viewGeneration?: number
   }>({ state: 'idle', canRetry: false })
+
+  /**
+   * Bumped when a partial has just LANDED, so the intro re-reads its resume
+   * card.
+   *
+   * The page's resume query starts as the intro mounts and can finish before
+   * the exit's own write does, in which case the card it drew knew nothing
+   * about the partial the child had just made. One more read, only after a
+   * confirmed save, is the whole mechanism.
+   */
+  const [resumeReloadNonce, setResumeReloadNonce] = useState(0)
 
   /** What the summary says about the GRAPH projection — a separate success. */
   const [graphSync, setGraphSync] = useState<{
@@ -643,22 +681,116 @@ export function useQuestSession() {
     }
   }, [])
 
+  // ── The settled identity every door is bound to ───────────────
+  //
+  // Declared ABOVE the doors, because each of them names it in a dependency
+  // array and that array is evaluated during render.
+
+  /**
+   * The scope a Start, a Resume or a recovery write is allowed to act in — the
+   * settled identity, as one comparable string.
+   */
+  const recoveryScopeSettled =
+    !childrenLoading &&
+    !childrenLoadFailed &&
+    Boolean(familyId) &&
+    childrenFamilyId === familyId &&
+    Boolean(liveChildId) &&
+    liveChild?.id === liveChildId
+  const recoveryScope = recoveryScopeSettled
+    ? questRecoveryScopeKey({ familyId, childId: liveChildId, profile, identityEpoch })
+    : 'unsettled'
+  /**
+   * The scope and epoch this hook most recently COMMITTED.
+   *
+   * Written in a layout effect, not during render: a render React abandons must
+   * not be able to authorise a start or a write, and `MineTripSuggestion` is
+   * the same shape for the same reason. A control retained from an older render
+   * compares the scope it was drawn under against this.
+   */
+  const committedScopeRef = useRef<{ scope: string; epoch: number }>({
+    scope: recoveryScope,
+    epoch: identityEpoch,
+  })
+  useLayoutEffect(() => {
+    committedScopeRef.current = { scope: recoveryScope, epoch: identityEpoch }
+  }, [recoveryScope, identityEpoch])
+  /**
+   * Is the scope a control was RENDERED under still the live one?
+   *
+   * Two checks, because one is not enough. The committed scope catches an
+   * ordinary switch; the raw epoch, read from the STORE rather than from this
+   * render's snapshot, catches a same-tick `A → B → A`, which leaves family,
+   * child and profile exactly as they were and so leaves the scope string equal
+   * to itself. An unsettled scope vouches for nobody and fails both.
+   */
+  const scopeStillLive = useCallback((renderedScope: string, renderedEpoch: number) => {
+    if (renderedScope === 'unsettled') return false
+    const committed = committedScopeRef.current
+    if (committed.scope !== renderedScope) return false
+    if (committed.epoch !== renderedEpoch) return false
+    return renderedEpoch === getLibraryIdentityEpoch()
+  }, [])
+
   // ── Start quest ───────────────────────────────────────────────
 
   const startQuest = useCallback(
-    async (domain: EvaluationDomain, questMode?: QuestMode) => {
-      if (!activeChildId || !activeChild) return
-
-      // UX-494 — claim this start. Everything below re-checks the claim before
-      // it establishes the run, so a Start raced by another Start or by a Resume
-      // finishes having changed nothing rather than half-overwriting the winner.
-      // This also covers a REPEATED Start after a run is established: the second
-      // tap claims the generation and the first one's awaited reads and first
-      // question are discarded.
-      const generation = (runGenerationRef.current += 1)
+    async (
+      domain: EvaluationDomain,
+      questMode?: QuestMode,
+    ): Promise<QuestStartOutcome> => {
+      /**
+       * UX-494 — everything this Start is allowed to trust is captured AT
+       * RENDER, in this callback's own closure, and checked against the live
+       * identity before anything happens.
+       *
+       * The child, the child's name and the family came from the retained
+       * closure while the scope came from the live ref, so a Start tapped on a
+       * card rendered for one boy could pass the scope check and then run for
+       * him after the header had moved to his brother. They are one decision:
+       * the scope string CONTAINS this render's family and child, so an equal
+       * scope is what makes the closure's own identity provably current.
+       */
+      const renderedScope = recoveryScope
+      const renderedEpoch = identityEpoch
       const startingChildId = activeChildId
-      const startingChildName = activeChild.name
-      const startingScope = recoveryScopeRef.current
+      const startingChildName = activeChild?.name
+      const startingFamilyId = familyId
+
+      // ── Refused BEFORE any read, ref mutation or provider call ──
+      if (!startingChildId || !startingChildName || !startingFamilyId) return 'unsettled-scope'
+      // A Start must stand on a settled identity; an unsettled one vouches for
+      // nobody, and this is the door that spends money.
+      if (!scopeStillLive(renderedScope, renderedEpoch)) return 'stale-scope'
+      // A Start already in flight owns the claim until it establishes or fails.
+      if (startClaimRef.current) return 'busy'
+      // And a run already established is not replaced by a second tap. The
+      // first-question failure path RELEASES the run below, so the intro's own
+      // *Try Again* — a newly rendered control — is still a first-class Start.
+      if (runRef.current) return 'already-running'
+
+      const generation = (runGenerationRef.current += 1)
+      startClaimRef.current = { generation, scope: renderedScope }
+      /** Still this Start's claim, and still its scope? */
+      const claimHolds = () =>
+        startClaimRef.current?.generation === generation &&
+        runGenerationRef.current === generation &&
+        scopeStillLive(renderedScope, renderedEpoch)
+      /** Set once this Start establishes its run, so a failure can release it. */
+      let startedInstanceId: string | null = null
+      /**
+       * Give the claim up. `clearRun` is for a failure AFTER establishment —
+       * no question was ever asked and nothing was answered, so there is no run
+       * to continue and leaving one behind is what blocked the retry.
+       */
+      const releaseClaim = (clearRun: boolean) => {
+        if (startClaimRef.current?.generation === generation) startClaimRef.current = null
+        if (clearRun && startedInstanceId && runRef.current?.instanceId === startedInstanceId) {
+          runRef.current = null
+          sessionIdRef.current = null
+          sessionOwnerRef.current = null
+        }
+      }
 
       activeQuestModeRef.current = questMode
 
@@ -668,7 +800,7 @@ export function useQuestSession() {
 
       try {
         // Load skill snapshot for workingLevels
-        const snapshotRef = doc(skillSnapshotsCollection(familyId), activeChildId)
+        const snapshotRef = doc(skillSnapshotsCollection(startingFamilyId), startingChildId)
         const snapshotSnap = await getDoc(snapshotRef)
         if (snapshotSnap.exists()) {
           snapshot = snapshotSnap.data()
@@ -688,7 +820,9 @@ export function useQuestSession() {
       // request it actually selected and nothing appended since.
       let targetPlan: QuestAskPlanRow[] = []
       try {
-        const modelSnap = await getDoc(doc(learnerModelsCollection(familyId), startingChildId))
+        const modelSnap = await getDoc(
+          doc(learnerModelsCollection(startingFamilyId), startingChildId),
+        )
         if (modelSnap.exists()) {
           const model = modelSnap.data()
           targetConcepts = selectQuestTargets(model, { domain })
@@ -706,8 +840,8 @@ export function useQuestSession() {
         try {
           let currLevel = 2
           const activityQuery = query(
-            activityConfigsCollection(familyId),
-            where('childId', 'in', [activeChildId, 'both']),
+            activityConfigsCollection(startingFamilyId),
+            where('childId', 'in', [startingChildId, 'both']),
             where('type', '==', 'workbook'),
           )
           const activitySnap = await getDocs(activityQuery)
@@ -761,11 +895,13 @@ export function useQuestSession() {
       }
 
       // The claim, re-checked after every awaited read above. A Start that lost
-      // the race stops here: it has written nothing and established nothing. The
-      // scope is re-checked with it, so a Start whose reads straddled a child
-      // switch does not establish a run for the child who left the screen.
-      if (runGenerationRef.current !== generation) return
-      if (recoveryScopeRef.current !== startingScope) return
+      // the race — or whose reads straddled a child switch — stops here having
+      // written nothing and established nothing, and gives the claim back so the
+      // newly rendered card can start properly.
+      if (!claimHolds()) {
+        releaseClaim(false)
+        return 'stale-scope'
+      }
 
       const startLevel = computeStartLevel(snapshot, questMode, curriculumHint)
 
@@ -814,10 +950,11 @@ export function useQuestSession() {
       sessionIdRef.current = newRunId
       // UX-494 — and the frozen run, in the same breath. Every finalizing write
       // resolves through this and never through the refs beside it.
+      startedInstanceId = questRunInstanceId(newRunId, (runInstanceSeqRef.current += 1))
       runRef.current = {
         runId: newRunId,
-        instanceId: questRunInstanceId(newRunId, (runInstanceSeqRef.current += 1)),
-        familyId,
+        instanceId: startedInstanceId,
+        familyId: startingFamilyId,
         childId: startingChildId,
         childName: startingChildName,
         domain,
@@ -845,10 +982,10 @@ export function useQuestSession() {
         // function-word scaffold), so an empty/failed bank still yields questions.
         void (async () => {
           try {
-            const snap = await getDocs(query(sightWordProgressCollection(familyId)))
+            const snap = await getDocs(query(sightWordProgressCollection(startingFamilyId)))
             const sightWords: string[] = []
             for (const d of snap.docs) {
-              if (!d.id.startsWith(`${activeChildId}_`)) continue
+              if (!d.id.startsWith(`${startingChildId}_`)) continue
               const data = d.data() as { word?: string; masteryLevel?: string }
               // Words he can already READ — the read/spell asymmetry we're closing.
               if (data.masteryLevel === 'familiar' || data.masteryLevel === 'mastered') {
@@ -875,28 +1012,32 @@ export function useQuestSession() {
               action: 'fluency_passage',
               domain,
               questMode: 'fluency',
-              childName: activeChild.name,
+              childName: startingChildName,
             }),
           }
           conversationRef.current = [fluencyMessage]
 
           const response = await chat({
-            familyId,
+            familyId: startingFamilyId,
             childId: startingChildId,
             taskType: TaskType.Quest,
             messages: [fluencyMessage],
             domain,
           })
 
-          // A passage that arrives after another run has taken over belongs to
-          // nobody: it must not become the live question or clear the new run's
-          // loading screen.
-          if (runGenerationRef.current !== generation) return
+          // A passage that arrives after another run has taken over — or after
+          // the scope moved — belongs to nobody: it must not become the live
+          // question or clear the new run's loading screen.
+          if (!claimHolds()) {
+            releaseClaim(true)
+            return 'stale-scope'
+          }
 
           if (!response) {
             setStartQuestError('Failed to generate passage. Tap to try again!')
             setScreen(QuestScreen.Intro)
-            return
+            releaseClaim(true)
+            return 'failed'
           }
 
           conversationRef.current.push({ role: 'assistant', content: response.message })
@@ -904,7 +1045,8 @@ export function useQuestSession() {
           if (!parsed) {
             setStartQuestError('Passage was unreadable. Tap to try again!')
             setScreen(QuestScreen.Intro)
-            return
+            releaseClaim(true)
+            return 'failed'
           }
 
           setCurrentPassageText(parsed.passage)
@@ -924,13 +1066,20 @@ export function useQuestSession() {
           }, 1000)
 
           setScreen(QuestScreen.FluencyPassage)
+          // Established and running: the claim's work is done.
+          startClaimRef.current = null
+          return 'started'
         } catch (err) {
-          if (runGenerationRef.current !== generation) return
           const errMsg = err instanceof Error ? err.message : String(err)
+          if (!claimHolds()) {
+            releaseClaim(true)
+            return 'stale-scope'
+          }
           setStartQuestError(`Fluency failed: ${errMsg}`)
           setScreen(QuestScreen.Intro)
+          releaseClaim(true)
+          return 'failed'
         }
-        return
       }
 
       setScreen(QuestScreen.Loading)
@@ -952,7 +1101,7 @@ export function useQuestSession() {
           action: 'start_quest',
           domain,
           questMode: questMode || (domain === 'reading' ? 'phonics' : domain),
-          childName: activeChild.name,
+          childName: startingChildName,
           currentLevel: initialState.currentLevel,
           consecutiveCorrect: 0,
           consecutiveWrong: 0,
@@ -974,7 +1123,7 @@ export function useQuestSession() {
       let response: Awaited<ReturnType<typeof chat>>
       try {
         response = await chat({
-          familyId,
+          familyId: startingFamilyId,
           childId: startingChildId,
           taskType: TaskType.Quest,
           messages: [userMessage],
@@ -982,19 +1131,27 @@ export function useQuestSession() {
         })
       } catch (err) {
         clearTimeout(timeoutId)
-        if (runGenerationRef.current !== generation) return
         const errMsg = err instanceof Error ? err.message : String(err)
         console.error('[startQuest] AI call threw:', err)
+        if (!claimHolds()) {
+          releaseClaim(true)
+          return 'stale-scope'
+        }
         setStartQuestError(`Quest failed: ${errMsg}`)
         setScreen(QuestScreen.Intro)
         if (timerRef.current) clearInterval(timerRef.current)
-        return
+        releaseClaim(true)
+        return 'failed'
       }
 
       clearTimeout(timeoutId)
 
-      // The first question of a run nobody is on any more goes nowhere.
-      if (runGenerationRef.current !== generation) return
+      // The first question of a run nobody is on any more goes nowhere — and
+      // neither does the pending initialization behind it.
+      if (!claimHolds()) {
+        releaseClaim(true)
+        return 'stale-scope'
+      }
 
       if (!response || timedOut) {
         // aiError from useAI contains the real Cloud Function error
@@ -1003,7 +1160,8 @@ export function useQuestSession() {
         setStartQuestError(`Quest failed: ${realError}`)
         setScreen(QuestScreen.Intro)
         if (timerRef.current) clearInterval(timerRef.current)
-        return
+        releaseClaim(true)
+        return 'failed'
       }
 
       console.log('[startQuest] AI response received:', response.message.substring(0, 300))
@@ -1019,7 +1177,8 @@ export function useQuestSession() {
         setStartQuestError('Quest response was unreadable. Tap to try again!')
         setScreen(QuestScreen.Intro)
         if (timerRef.current) clearInterval(timerRef.current)
-        return
+        releaseClaim(true)
+        return 'failed'
       }
 
       const finding = extractQuestFinding(response.message)
@@ -1030,8 +1189,21 @@ export function useQuestSession() {
       setCurrentQuestion(question)
       questionStartRef.current = Date.now()
       setScreen(QuestScreen.Question)
+      // Established and running.
+      startClaimRef.current = null
+      return 'started'
     },
-    [activeChildId, activeChild, familyId, chat, aiError],
+    [
+      activeChildId,
+      activeChild,
+      familyId,
+      chat,
+      aiError,
+      sessionTimer,
+      recoveryScope,
+      identityEpoch,
+      scopeStillLive,
+    ],
   )
 
   // ── Per-answer reward banking ─────────────────────────────────
@@ -1076,30 +1248,6 @@ export function useQuestSession() {
   //
   // `claim` is what keeps a delayed run out of a newer run's UI: the write is
   // the delayed run's business and happens either way, the screen is not.
-
-  /**
-   * The scope a recovery read or write is allowed to act in — the settled
-   * identity, as a comparable string. Captured before an await and re-checked
-   * after it, which is what makes an A → B → A switch fail: `identityEpoch`
-   * moves on every switch even when family and child come back the same.
-   */
-  const recoveryScopeSettled =
-    !childrenLoading &&
-    !childrenLoadFailed &&
-    Boolean(familyId) &&
-    childrenFamilyId === familyId &&
-    Boolean(liveChildId) &&
-    liveChild?.id === liveChildId
-  const recoveryScope = recoveryScopeSettled
-    ? questRecoveryScopeKey({ familyId, childId: liveChildId, profile, identityEpoch })
-    : 'unsettled'
-  const recoveryScopeRef = useRef(recoveryScope)
-  recoveryScopeRef.current = recoveryScope
-  /** The settled scope now, or null — an unsettled read vouches for nobody. */
-  const liveRecoveryScope = useCallback(
-    () => (recoveryScopeRef.current === 'unsettled' ? null : recoveryScopeRef.current),
-    [],
-  )
 
   const projectGraph = useCallback(
     async (
@@ -1159,11 +1307,28 @@ export function useQuestSession() {
     async (
       sessionId: string,
       childId: string,
-      expect?: { domain?: string; questMode?: string; scopeKey?: string },
+      expect?: {
+        domain?: string
+        questMode?: string
+        /** The scope the control was RENDERED under. */
+        scopeKey?: string
+        /** The epoch it was rendered under — the same-tick `A → B → A` catch. */
+        epoch?: number
+        /**
+         * The view it was RENDERED in. Scope alone cannot answer this: two
+         * consecutive summaries for the SAME child share a scope, and an old
+         * summary's settled retry used to relabel the new one's map status.
+         * Captured at render, not at the tap, because at the tap the live value
+         * is already the newer view's.
+         */
+        viewGeneration?: number
+      },
     ): Promise<QuestProjectionOutcome | 'failed' | 'identity-mismatch' | 'busy'> => {
-      const scopeNow = liveRecoveryScope()
-      const scopeAtTap = expect?.scopeKey ?? scopeNow
-      if (!scopeNow || scopeAtTap !== scopeNow) return 'identity-mismatch'
+      const renderedScope = expect?.scopeKey ?? recoveryScope
+      const renderedEpoch = expect?.epoch ?? identityEpoch
+      const viewGeneration = expect?.viewGeneration ?? runGenerationRef.current
+      if (!scopeStillLive(renderedScope, renderedEpoch)) return 'identity-mismatch'
+      if (runGenerationRef.current !== viewGeneration) return 'identity-mismatch'
       if (!mayRecoverQuestSource({ familyId, childId: liveChildId }, { familyId, childId })) {
         return 'identity-mismatch'
       }
@@ -1178,13 +1343,15 @@ export function useQuestSession() {
             expectedDomain: expect?.domain,
             expectedQuestMode: expect?.questMode,
           },
-          () => recoveryScopeRef.current === scopeAtTap,
+          () =>
+            runGenerationRef.current === viewGeneration &&
+            scopeStillLive(renderedScope, renderedEpoch),
         )
       } finally {
         graphRetryInFlightRef.current = false
       }
     },
-    [familyId, liveChildId, projectGraph, liveRecoveryScope],
+    [familyId, liveChildId, projectGraph, recoveryScope, identityEpoch, scopeStillLive],
   )
 
   /**
@@ -1203,27 +1370,45 @@ export function useQuestSession() {
    * run it was rendered for has to be the run still held.
    */
   const retrySourceSave = useCallback(
-    async (expectRunInstanceId?: string) => {
+    async (expect?: { runInstanceId?: string; viewGeneration?: number; epoch?: number }) => {
       const pending = pendingSourceRef.current
       if (!pending) return 'nothing-pending' as const
-      const { run, payload, kind } = pending
-      if (expectRunInstanceId && expectRunInstanceId !== run.instanceId) {
+      const { run, payload, kind, viewGeneration, scope } = pending
+
+      // ── The control that tapped has to be THIS payload's own ──
+      // A retained control cannot pick up a different held payload, and a
+      // control drawn for an older view cannot act for the current one.
+      if (expect?.runInstanceId && expect.runInstanceId !== run.instanceId) {
         return 'identity-mismatch' as const
       }
-      const scopeAtTap = liveRecoveryScope()
-      if (!scopeAtTap) return 'identity-mismatch' as const
+      if (expect?.viewGeneration !== undefined && expect.viewGeneration !== viewGeneration) {
+        return 'identity-mismatch' as const
+      }
+      // The view that holds the payload must still be the view on screen, under
+      // the scope it was rendered with — and the epoch catches an A → B → A.
+      if (runGenerationRef.current !== viewGeneration) return 'identity-mismatch' as const
+      if (!scopeStillLive(scope, expect?.epoch ?? identityEpoch)) {
+        return 'identity-mismatch' as const
+      }
+      // The authorised owner: a payload is never written into a family nobody
+      // is authorised for. The child is the payload's own (UX-339).
       if (!mayRetrySavingQuestPayload({ familyId }, run)) {
         return 'identity-mismatch' as const
       }
       if (sourceRetryInFlightRef.current) return 'busy' as const
       sourceRetryInFlightRef.current = true
 
-      /** Still this payload, and still the view that asked? */
-      const mine = () =>
-        pendingSourceRef.current?.run.instanceId === run.instanceId &&
-        recoveryScopeRef.current === scopeAtTap
-      const stillMine = mine()
-      if (stillMine) setSourceSave({ state: 'saving', kind, canRetry: false })
+      /**
+       * May this attempt report? Decided BEFORE the held payload is cleared,
+       * and re-asked for every status and graph change: an accepted write
+       * settles for its ORIGINAL source whatever the screen is doing now, but a
+       * newer same-child summary's labels, refs and controls are not its to
+       * move.
+       */
+      const ownsView = () =>
+        runGenerationRef.current === viewGeneration &&
+        committedScopeRef.current.scope === scope
+      if (ownsView()) setSourceSave({ state: 'saving', kind, canRetry: false })
 
       try {
         let outcome: QuestSourceSaveOutcome | 'failed'
@@ -1242,32 +1427,33 @@ export function useQuestSession() {
           outcome = 'failed'
         }
 
-        // An accepted write settles for its ORIGINAL source whatever the view is
-        // doing now; only the reporting is conditional.
+        // Visibility is decided first, then the payload is released — the other
+        // order let a view change between the two and lose the notice.
+        const mayReport = ownsView()
         if (outcome === 'saved' || outcome === 'already-committed' || outcome === 'conflict') {
           if (pendingSourceRef.current?.run.instanceId === run.instanceId) {
             pendingSourceRef.current = null
           }
         }
+
         if (outcome === 'failed') {
-          if (mine()) {
+          if (mayReport) {
             setSourceSave({
               state: 'failed',
               kind,
               canRetry: true,
               runInstanceId: run.instanceId,
+              viewGeneration,
             })
           }
           return outcome
         }
         if (outcome === 'conflict') {
-          if (recoveryScopeRef.current === scopeAtTap) {
-            setSourceSave({ state: 'conflict', kind, canRetry: false })
-          }
+          if (mayReport) setSourceSave({ state: 'conflict', kind, canRetry: false })
           return outcome
         }
 
-        if (recoveryScopeRef.current === scopeAtTap) {
+        if (mayReport) {
           setSessionSaved(true)
           setSourceSave({ state: 'saved', kind, canRetry: false })
         }
@@ -1282,9 +1468,9 @@ export function useQuestSession() {
               expectedDomain: run.domain,
               expectedQuestMode: run.questMode,
             },
-            () => recoveryScopeRef.current === scopeAtTap,
+            ownsView,
           )
-        } else if (recoveryScopeRef.current === scopeAtTap) {
+        } else if (ownsView()) {
           setGraphSync({ state: 'skipped', sessionId: run.runId, childId: run.childId })
         }
         return outcome
@@ -1292,7 +1478,7 @@ export function useQuestSession() {
         sourceRetryInFlightRef.current = false
       }
     },
-    [familyId, liveChildId, projectGraph, liveRecoveryScope],
+    [familyId, projectGraph, identityEpoch, scopeStillLive],
   )
 
   // ── End session ───────────────────────────────────────────────
@@ -1316,6 +1502,9 @@ export function useQuestSession() {
       closedRunsRef.current.add(run.runId)
       /** Is this still the session on screen? Guards UI, never the writes. */
       const live = () => isLiveRun(runRef.current, run)
+      /** The view this close owns, and the scope it closed under. */
+      const closeViewGeneration = runGenerationRef.current
+      const closeScope = committedScopeRef.current.scope
       const docId = run.runId
       /**
        * This run's own active minutes, read WITHOUT stopping the shared timer.
@@ -1475,11 +1664,18 @@ export function useQuestSession() {
         if (live()) setSourceSave({ state: 'conflict', kind: 'final', canRetry: false })
       } else if (live()) {
         // Held in memory so this summary can offer a real retry of THIS payload.
-        pendingSourceRef.current = { run, payload, kind: 'final' }
+        pendingSourceRef.current = {
+          run,
+          payload,
+          kind: 'final',
+          viewGeneration: closeViewGeneration,
+          scope: closeScope,
+        }
         setSourceSave({
           state: 'failed',
           kind: 'final',
           canRetry: true,
+          viewGeneration: closeViewGeneration,
           runInstanceId: run.instanceId,
         })
       }
@@ -2559,41 +2755,58 @@ export function useQuestSession() {
       const resumedChildId = partialDoc.childId || liveChildId
       const resumedChildName = children.find((c) => c.id === resumedChildId)?.name ?? ''
 
-      // UX-494 — claim the Resume BEFORE the read, so a `startQuest` still
-      // awaiting its own reads cannot establish itself on top of this one, and
-      // re-check it after, so a Start (or a second Resume) that claimed the run
-      // while this read was in flight wins.
+      /**
+       * UX-494 — a retained Resume is refused BEFORE Firestore is called.
+       *
+       * The card's handler is captured at render; a stale one must not spend a
+       * read, let alone claim a document, for an identity that has moved on.
+       */
+      const renderedScope = recoveryScope
+      const renderedEpoch = identityEpoch
+      if (!scopeStillLive(renderedScope, renderedEpoch)) return 'stale-scope'
+      // A Resume already in flight, or a Start mid-read, owns the run.
+      if (startClaimRef.current) return 'stale-scope'
+
+      // Claim the Resume, so a `startQuest` still awaiting its own reads cannot
+      // establish itself on top of this one; re-checked after the transaction.
       const generation = (runGenerationRef.current += 1)
-      const scopeAtTap = recoveryScopeRef.current
 
       /**
-       * What is STORED NOW, not the copy the resume card loaded.
+       * Re-read, judge and claim — in ONE transaction, which returns the EXACT
+       * stored partial it accepted.
        *
-       * Between that read and this tap the run may have been finalized by a
-       * delayed close, abandoned, or reassigned — and replaying answers into a
-       * finalized source is how a completed session became resumable again. A
-       * refusal is REPORTED: the old fallback started an unrelated fresh quest,
-       * which is a paid run the child never asked for.
+       * It used to read, restore the whole screen, and then fire a detached
+       * status write: two taps could both pass the check and both restore, and a
+       * delayed close finalizing the record in that window was stamped `resumed`
+       * anyway. Nothing is restored now until the claim is acknowledged, and a
+       * refusal is REPORTED — the old fallback started an unrelated fresh paid
+       * quest in whatever mode the card happened to name.
        */
-      let stored: Partial<EvaluationSession & InteractiveSessionData> | null
+      let claim: Awaited<ReturnType<typeof claimQuestSourceForResume>>
       try {
-        stored = await readQuestSource(questSourceRef(familyId, docId))
+        claim = await claimQuestSourceForResume(questSourceRef(familyId, docId), {
+          childId: resumedChildId,
+        })
       } catch (err) {
-        console.warn('[resumeSession] Could not read the saved session — not resuming', err)
+        console.warn('[resumeSession] Could not claim the saved session — not resuming', err)
         return 'missing'
       }
-      if (runGenerationRef.current !== generation) return 'missing'
-      if (recoveryScopeRef.current !== scopeAtTap) return 'missing'
-
-      const refusal = questResumeRefusal(stored, resumedChildId)
-      if (refusal) {
-        console.warn('[resumeSession] Refusing to resume this session:', refusal)
-        return refusal
+      if (!claim.ok) {
+        console.warn('[resumeSession] Refusing to resume this session:', claim.refusal)
+        return claim.refusal
       }
+      // Accepted — but only this render's Resume may act on it. A Start or a
+      // second Resume that claimed the run while the transaction was in flight
+      // wins the screen; the stamp is harmless (the document was eligible and is
+      // simply marked reopened, which the resume card already filters out).
+      if (runGenerationRef.current !== generation) return 'stale-scope'
+      if (!scopeStillLive(renderedScope, renderedEpoch)) return 'stale-scope'
+
       // Everything played from here is the STORED document's, which is the only
-      // copy whose eligibility has been checked.
-      const source = stored as EvaluationSession & InteractiveSessionData
+      // copy whose eligibility was checked.
+      const source = claim.source
       const saved = source.savedQuestState!
+      const savedQuestion = source.savedCurrentQuestion ?? null
       sessionIdRef.current = docId
       sessionOwnerRef.current = { childId: resumedChildId, childName: resumedChildName }
 
@@ -2633,18 +2846,17 @@ export function useQuestSession() {
       setFindings(source.findings ?? [])
 
       // Check if the saved currentQuestion was already answered (edge case: save race)
-      const alreadyAnswered = (source.questions ?? []).some(
-        (q) => q.id === source.savedCurrentQuestion!.id,
-      )
+      const alreadyAnswered = (source.questions ?? []).some((q) => q.id === savedQuestion?.id)
 
-      // Restore the exact question or flag that we need a new one
+      // Restore the exact question, or null when we need a fresh one. The
+      // eligibility check already refused a partial with no saved question, so
+      // `savedQuestion` is narrowed rather than asserted.
       if (alreadyAnswered) {
         // Question was answered before save completed — we'll need a fresh one.
-        // Set currentQuestion to null; the normal submitAnswer→fetchNextQuestion flow
-        // doesn't apply here, so we trigger a new AI call after setting screen.
+        // The normal submitAnswer→fetchNextQuestion flow doesn't apply here.
         setCurrentQuestion(null)
       } else {
-        setCurrentQuestion(source.savedCurrentQuestion)
+        setCurrentQuestion(savedQuestion)
       }
 
       // Restore refs
@@ -2683,22 +2895,19 @@ export function useQuestSession() {
         setScreen(QuestScreen.Question)
       }
 
-      // Mark the Firestore doc as 'resumed' so it doesn't show up in the resume
-      // card again — conditionally (UX-494), so a stale Resume cannot push a
-      // record that has since been finalized back into a resumable state, nor
-      // stamp a record this run does not own.
-      markQuestSourceResumed(questSourceRef(familyId, docId), {
-        childId: resumedChildId,
-        questRunId: source.questRunId ?? docId,
-        domain: source.domain,
-        questMode: source.questMode,
-      }).catch((err) =>
-        console.error('[resumeSession] Failed to mark session as resumed', err),
-      )
-
+      // The `status: 'resumed'` stamp already landed, inside the claim above —
+      // there is no second, detached write for it to disagree with.
       return true
     },
-    [familyId, liveChildId, children, sessionTimer],
+    [
+      familyId,
+      liveChildId,
+      children,
+      sessionTimer,
+      recoveryScope,
+      identityEpoch,
+      scopeStillLive,
+    ],
   )
 
   // ── Reset to intro ────────────────────────────────────────────
@@ -2710,6 +2919,20 @@ export function useQuestSession() {
     // this blocks ghost docs even if Done is tapped before setSessionSaved(true)
     // propagates, and does so PER RUN rather than per hook (UX-494).
     const exitingRun = runRef.current
+    /**
+     * UX-494 — the generation of the INTRO this exit lands on, claimed here at
+     * the top rather than at the bottom.
+     *
+     * The bump does two jobs at once: it invalidates every delayed callback the
+     * exiting run still has in flight (what the old bottom-of-function bump
+     * did), and it names the view that will own the partial's own then/catch —
+     * which the bottom version could not, because the promise was already
+     * running by the time it happened.
+     */
+    const introGeneration = (runGenerationRef.current += 1)
+    const introScope = committedScopeRef.current.scope
+    // A Start mid-read no longer owns anything after a reset.
+    startClaimRef.current = null
     if (
       questState &&
       questState.totalQuestions > 0 &&
@@ -2736,11 +2959,20 @@ export function useQuestSession() {
       // be REJECTED offline; the payload is then held for the same scoped retry
       // the summary's failed close uses, offered on the intro this exit lands on.
       // The minutes below are recorded either way: they happened.
+      /** Still the intro this exit landed on, under the same settled scope? */
+      const ownsIntro = () =>
+        runGenerationRef.current === introGeneration &&
+        committedScopeRef.current.scope === introScope
       setSourceSave({ state: 'saving', kind: 'partial', canRetry: false })
       saveResumableQuestSource(questSourceRef(exitingRun.familyId, docId), partialSession)
         .then((outcome) => {
+          if (!ownsIntro()) return
           if (outcome === 'saved') {
             setSourceSave({ state: 'saved', kind: 'partial', canRetry: false })
+            // The intro's resume query can finish BEFORE this write lands, so
+            // the card it drew would not have known about this partial. Ask the
+            // page to read it again now that the record exists.
+            setResumeReloadNonce((n) => n + 1)
             return
           }
           console.warn('[quest] Partial save refused —', outcome)
@@ -2748,12 +2980,22 @@ export function useQuestSession() {
         })
         .catch((err) => {
           console.error('Failed to auto-save partial quest session', err)
-          pendingSourceRef.current = { run: exitingRun, payload: partialSession, kind: 'partial' }
+          // The payload is kept whatever the screen is doing — those answers are
+          // not saved anywhere else — but only the owning intro is told.
+          pendingSourceRef.current = {
+            run: exitingRun,
+            payload: partialSession,
+            kind: 'partial',
+            viewGeneration: introGeneration,
+            scope: introScope,
+          }
+          if (!ownsIntro()) return
           setSourceSave({
             state: 'failed',
             kind: 'partial',
             canRetry: true,
             runInstanceId: exitingRun.instanceId,
+            viewGeneration: introGeneration,
           })
         })
 
@@ -2803,10 +3045,10 @@ export function useQuestSession() {
     activeQuestModeRef.current = undefined
     sessionIdRef.current = null
     // UX-494 — the run ends here, which is also what makes every delayed
-    // callback from it stop being allowed to touch this hook's state. Its
-    // Firestore writes still finish, under its own identity.
+    // callback from it stop being allowed to touch this hook's state (the
+    // generation was claimed at the top of this function). Its Firestore writes
+    // still finish, under its own identity.
     runRef.current = null
-    runGenerationRef.current += 1
     // UX-339 — the session is over, so the hook goes back to following the live
     // child. Cleared LAST, after the partial save above has used it.
     sessionOwnerRef.current = null
@@ -2841,6 +3083,12 @@ export function useQuestSession() {
     retryGraphProjection,
     /** The scope a recovery control must be rendered — and re-checked — under. */
     recoveryScope,
+    /** The epoch it was rendered under — the same-tick `A → B → A` catch. */
+    recoveryEpoch: identityEpoch,
+    /** The view generation a recovery control belongs to. */
+    viewGeneration: runGenerationRef.current,
+    /** Re-read the resume card: a partial has just landed (UX-494). */
+    resumeReloadNonce,
     summarizing,
     aiLoading,
     aiError,
