@@ -805,6 +805,81 @@ describe('a manual partial exit whose save is rejected', () => {
   })
 
   /**
+   * Sol's reproduction (release review): the partial's notice lives on whatever
+   * Mine intro the exit landed on, and a child change re-renders that intro
+   * under a sibling. The parent's cross-child exception is for a BOUND final
+   * summary, so here the active child has to be the payload's own owner — the
+   * notice is hidden on the sibling's intro, and comes back on his.
+   */
+  it('refuses a partial retry on a sibling’s intro, and admits it back on the owner’s', async () => {
+    const view = mountHook()
+    await start(view)
+    await answer(view, 2)
+
+    transactionError = new Error('offline')
+    await act(async () => {
+      view.result.current.resetToIntro()
+    })
+    const held = view.result.current.sourceSave.runInstanceId
+    expect(view.result.current.sourceSave).toMatchObject({
+      state: 'failed',
+      kind: 'partial',
+      canRetry: true,
+      // What the intro gates the notice on.
+      originalChildId: 'lincoln',
+    })
+
+    // The parent taps London's chip; her intro settles with its own live scope.
+    identityEpoch = 2
+    setActive(LONDON)
+    view.rerender()
+    // The notice is not hers to see — the page hides it on this mismatch.
+    expect(view.result.current.sourceSave.originalChildId).not.toBe('london')
+
+    transactionError = null
+    let refused: unknown
+    await act(async () => {
+      refused = await view.result.current.retrySourceSave({
+        runInstanceId: view.result.current.sourceSave.runInstanceId,
+        viewGeneration: view.result.current.sourceSave.viewGeneration,
+        scopeKey: view.result.current.recoveryScope,
+        epoch: view.result.current.recoveryEpoch,
+      })
+    })
+    expect(refused).toBe('identity-mismatch')
+    expect(sourceWrites()).toHaveLength(0)
+    // Nothing consumed: Lincoln's answers are still held for his own view.
+    expect(view.result.current.sourceSave).toMatchObject({
+      state: 'failed',
+      kind: 'partial',
+      canRetry: true,
+      runInstanceId: held,
+      originalChildId: 'lincoln',
+    })
+
+    // Back on Lincoln, the same payload lands and his resume card re-reads.
+    identityEpoch = 3
+    setActive(LINCOLN)
+    view.rerender()
+    const nonceBefore = view.result.current.resumeReloadNonce
+    let allowed: unknown
+    await act(async () => {
+      allowed = await view.result.current.retrySourceSave({
+        runInstanceId: view.result.current.sourceSave.runInstanceId,
+        viewGeneration: view.result.current.sourceSave.viewGeneration,
+        scopeKey: view.result.current.recoveryScope,
+        epoch: view.result.current.recoveryEpoch,
+      })
+    })
+    expect(allowed).toBe('saved')
+    expect(sourceWrites()).toHaveLength(1)
+    expect(sourceWrites()[0].data).toMatchObject({ status: 'partial', childId: 'lincoln' })
+    expect(view.result.current.resumeReloadNonce).toBe(nonceBefore + 1)
+    expect(hoursRows()).toHaveLength(1)
+    expect(projectQuestSourceToModel).not.toHaveBeenCalled()
+  })
+
+  /**
    * Sol's reproduction: the delayed partial that replaced the newer Retry's
    * payload, so the button on screen saved the wrong answers — or nothing.
    */

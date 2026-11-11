@@ -435,8 +435,15 @@ function generateFallbackRecommendations(
  * viewer is checked separately, against the live profile and child rather than
  * against the retained scope key.
  *
- * - The parents profile may retry any payload in its authorised family; that is
- *   the ordinary recovery case, and UX-339 keeps the payload's own child.
+ * - The parents profile may retry a `final` payload anywhere in its authorised
+ *   family: that notice lives on the BOUND summary the close happened on, which
+ *   UX-339 keeps on screen across a same-family child change, and the payload
+ *   keeps its own child.
+ * - Every other case needs the ACTIVE child to be the payload's owner, parents
+ *   included. A `partial` notice has no bound view of its own — it is offered on
+ *   whichever Mine intro the exit landed on — so a parent who then switched to a
+ *   sibling was being offered the previous child's failed answers on the
+ *   sibling's intro, and could save them from there.
  * - A child profile may retry only the run it OWNS. A sibling is refused, which
  *   is the case the scope guard alone could not see.
  * - No profile vouches for nobody and fails closed.
@@ -444,10 +451,12 @@ function generateFallbackRecommendations(
 function mayViewerRetryQuestPayload(
   viewer: { profile: UserProfile | null | undefined; liveChildId: string | null | undefined },
   run: { childId: string },
+  kind: 'final' | 'partial',
 ): boolean {
   if (!viewer.profile) return false
-  if (viewer.profile === UserProfile.Parents) return true
-  // A child profile resolves to its own child id; it must be the run's owner.
+  if (viewer.profile === UserProfile.Parents && kind === 'final') return true
+  // Otherwise the live child — a child profile's own, or the parent's active
+  // selection — must be the run's owner.
   return Boolean(viewer.liveChildId) && viewer.liveChildId === run.childId
 }
 
@@ -621,6 +630,14 @@ export function useQuestSession() {
     runInstanceId?: string
     /** The view that owns this notice — see `runGenerationRef`. */
     viewGeneration?: number
+    /**
+     * The child the held payload belongs to (UX-494). A `partial` notice is
+     * drawn on whatever Mine intro the exit landed on, which a child change
+     * re-renders under a sibling — so the surface hides the notice unless the
+     * active child is this owner. A `final` notice stays on its bound summary
+     * and does not use it.
+     */
+    originalChildId?: string
   }>({ state: 'idle', canRetry: false })
 
   /**
@@ -1471,7 +1488,9 @@ export function useQuestSession() {
        * current scope and a current epoch of its own, so it passes both — and
        * must still not be able to save the original owner's held answers.
        */
-      if (!mayViewerRetryQuestPayload({ profile, liveChildId }, run)) {
+      // For a `partial` this also refuses a parent sitting on a sibling's
+      // intro: that notice is not bound to a view of its own.
+      if (!mayViewerRetryQuestPayload({ profile, liveChildId }, run, kind)) {
         return 'identity-mismatch' as const
       }
       if (sourceRetryInFlightRef.current) return 'busy' as const
@@ -1492,7 +1511,8 @@ export function useQuestSession() {
         // epoch move the committed ref has not caught up with yet must not let
         // this attempt report into a view that is already retired.
         scopeStillLive(renderedScope, renderedEpoch)
-      if (ownsView()) setSourceSave({ state: 'saving', kind, canRetry: false })
+      if (ownsView())
+        setSourceSave({ state: 'saving', kind, canRetry: false, originalChildId: run.childId })
 
       try {
         let outcome: QuestSourceSaveOutcome | 'failed'
@@ -1528,6 +1548,7 @@ export function useQuestSession() {
               canRetry: true,
               runInstanceId: run.instanceId,
               viewGeneration,
+              originalChildId: run.childId,
             })
           }
           return outcome
@@ -1765,6 +1786,7 @@ export function useQuestSession() {
           canRetry: true,
           viewGeneration: closeViewGeneration,
           runInstanceId: run.instanceId,
+          originalChildId: run.childId,
         })
       }
 
@@ -3192,7 +3214,12 @@ export function useQuestSession() {
       const ownsIntro = () =>
         runGenerationRef.current === introGeneration &&
         committedScopeRef.current.scope === introScope
-      setSourceSave({ state: 'saving', kind: 'partial', canRetry: false })
+      setSourceSave({
+        state: 'saving',
+        kind: 'partial',
+        canRetry: false,
+        originalChildId: exitingRun.childId,
+      })
       saveResumableQuestSource(questSourceRef(exitingRun.familyId, docId), partialSession)
         .then((outcome) => {
           if (!ownsIntro()) return
@@ -3235,6 +3262,7 @@ export function useQuestSession() {
             canRetry: true,
             runInstanceId: exitingRun.instanceId,
             viewGeneration: introGeneration,
+            originalChildId: exitingRun.childId,
           })
         })
 

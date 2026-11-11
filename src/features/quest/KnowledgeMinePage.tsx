@@ -766,7 +766,14 @@ export default function KnowledgeMinePage() {
               so the answers get the same scoped retry a failed close gets.
               Its copy is its OWN: these answers are not safe yet, and the
               recovery card's sentence saying they are would be a lie here. */}
+          {/* The notice follows its OWNER, not the intro (UX-494): a child
+              change re-renders this intro under a sibling, and the previous
+              child's unsaved answers are neither that child's business nor
+              retryable from there — by a parent either. It comes back when an
+              authorised view returns to the owning child. */}
           {quest.sourceSave.kind === 'partial' &&
+            Boolean(activeChildId) &&
+            quest.sourceSave.originalChildId === activeChildId &&
             (quest.sourceSave.state === 'failed' || quest.sourceSave.state === 'saving') && (
               <RecoveryNotice
                 key={quest.sourceSave.runInstanceId ?? 'partial-save'}
