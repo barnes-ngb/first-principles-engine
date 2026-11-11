@@ -1,4 +1,5 @@
 import type { EvaluationDomain } from '../../core/types/enums'
+import type { QuestAskPlanRow } from '../../core/foundations/questTargeting'
 
 // ── Quest domain and mode ────────────────────────────────────
 
@@ -340,6 +341,46 @@ export interface InteractiveSessionData {
   savedCurrentQuestion?: QuestQuestion
   /** Whether bonus round was already used this session */
   bonusRoundUsed?: boolean
+  // ── The source record (UX-494) ─────────────────────────────
+  //
+  // Additive and optional, so every session written before this run reads
+  // exactly as it always did: absent `questRunId` / `sourceCommittedAt` means
+  // "a legacy record", and the conditional writes treat a legacy `complete` as
+  // finalized rather than overwriting it.
+  /**
+   * The RUN that owns this payload — `interactive_{childId}_{startedAt}`, the
+   * document id itself. Stamped so a conditional retry can recognise its own
+   * already-committed write (an acknowledgement lost in flight) and refuse
+   * another run's, and so a delayed close cannot write under an id that now
+   * belongs to a newer session.
+   */
+  questRunId?: string
+  /**
+   * The exact queued requests this run selected — concept, row index, a digest
+   * of the row's immutable fields and the model's `seededAt`. Saved on the
+   * resumable partial AND on the final payload, so Resume restores the plan from
+   * the partial it reopened rather than from whatever a warm hook still held,
+   * and so the graph projection can be re-derived from the saved source alone
+   * after a reload. Carries no parent ask prose.
+   */
+  targetPlan?: QuestAskPlanRow[]
+  /** When the immutable final payload landed. Absent ⇒ not finalized. */
+  sourceCommittedAt?: string
+  /**
+   * Where the learner-model (graph) projection for THIS source stands. Separate
+   * from `status`, because a saved source and a projected source are two
+   * different successes and a reader must be able to tell them apart:
+   *   • `pending`   — saved, not yet folded into the model.
+   *   • `projected` — folded in; replaying it does nothing.
+   *   • `skipped`   — honestly nothing to project (no plan, no probed concept,
+   *                   or no model document yet). NOT an evidence-success claim.
+   *   • `failed`    — the attempt failed; recoverable from this source alone.
+   */
+  modelProjection?: 'pending' | 'projected' | 'skipped' | 'failed'
+  /** The honest one-word outcome of the last projection attempt. */
+  modelProjectionOutcome?: string
+  modelProjectedAt?: string
+  modelProjectionFailedAt?: string
 }
 
 // ── Fluency practice types ───────────────────────────────────

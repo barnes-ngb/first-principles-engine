@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { doc, getDocs, query, updateDoc, where, orderBy, limit as firestoreLimit } from 'firebase/firestore'
+import { getDocs, query, where, orderBy, limit as firestoreLimit } from 'firebase/firestore'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -43,6 +43,12 @@ import FluencyPractice from './FluencyPractice'
 import { questOwnerLines } from './questSessionOwner'
 import { extractTargetWord } from './questHelpers'
 import { hasMathCalibration, hasReadingCalibration } from './knowledgeMineAccess'
+import {
+  QUEST_RECOVERY_COPY,
+  QUEST_RESUME_REFUSAL_COPY,
+  QUEST_UNSAVED_COPY,
+} from './questSaveCopy'
+import { questResumeCardRefusal, type QuestResumeFailure } from './questRun'
 import type { InteractiveSessionData, QuestDomainConfig } from './questTypes'
 import { QuestScreen } from './questTypes'
 import { useQuestSession } from './useQuestSession'
@@ -151,8 +157,30 @@ export default function KnowledgeMinePage() {
   // Load skill snapshot for recommendation badges (shared eligibility fetch)
   const { snapshot } = useChildSkillSnapshot(familyId, activeChildId || undefined)
 
-  // Load in-progress quest sessions (within 24h) for resume card
-  const [resumeSession, setResumeSession] = useState<(EvaluationSession & Partial<InteractiveSessionData>) | null>(null)
+  /**
+   * The saved quest offered on the intro (within 24h), WITH the recovery
+   * identity it was read under — the `graphRecovery` shape, for the same reason
+   * and checked the same way (UX-494).
+   *
+   * A bare session outlived its scope: the previous child's card stayed live
+   * over the new one until the next read landed, and `onResume` then updated
+   * state after its await with no guard at all, unlike *Start fresh*. Binding
+   * the row to the committed scope/epoch lets render retire a previous scope's
+   * card on the frame the identity moves, before any new read completes.
+   */
+  const [resumeRead, setResumeRead] = useState<{
+    scope: string
+    epoch: number
+    session: (EvaluationSession & Partial<InteractiveSessionData>) | null
+  } | null>(null)
+  /**
+   * UX-494 — why a Resume tap did nothing, when it did nothing.
+   *
+   * The old fallback started an unrelated fresh quest, which is a paid run the
+   * child never asked for, in a mode a parent never picked. A refusal now says
+   * so and leaves every mode card exactly where it was.
+   */
+  const [resumeRefusal, setResumeRefusal] = useState<QuestResumeFailure | null>(null)
 
   /**
    * UX-338 — the resume card belongs to the child whose session it is, and a
@@ -181,44 +209,219 @@ export default function KnowledgeMinePage() {
    * changed value"; this repo's lint forbids the set-state-in-effect form
    * (the `ArmorTab` / UX-336 precedent).
    */
+  /**
+   * UX-494 — ONE saved source whose map update has not been applied, waiting for
+   * its scoped retry.
+   *
+   * Durable by construction: `modelProjection` stays `pending` until the
+   * projection stamps it inside its own transaction, so a rejected attempt and a
+   * lost response leave exactly the same recoverable state and no failure stamp
+   * or raw provider error is written onto a child's record.
+   *
+   * The query asks for pending work DIRECTLY — `childId ==` plus
+   * `modelProjection == 'pending'`, no `orderBy`, which Firestore serves by
+   * merging two single-field indexes, so no composite index is added. Reading
+   * the newest five completes and filtering them was the wrong shape: five newer
+   * unrelated quests hid the one still waiting.
+   *
+   * Exactly one is consumed at a time, and the query is re-run after a
+   * successful retry, so a queue of two drains in two taps rather than
+   * disappearing.
+   */
+  /**
+   * The answer is kept WITH the identity it was read under, not beside it: a
+   * bare session could outlive its scope and then be drawn — or retried — in a
+   * new one that happens to name the same id. The card shown is DERIVED from
+   * this binding during render, which is also what lets the effect below
+   * return without a synchronous setState.
+   */
+  const [graphRecovery, setGraphRecovery] = useState<{
+    scope: string
+    epoch: number
+    session: (EvaluationSession & Partial<InteractiveSessionData> & { id: string }) | null
+  } | null>(null)
+  /** Bumped to re-run the pending read after a retry settles one source. */
+  const [graphRecoveryNonce, setGraphRecoveryNonce] = useState(0)
+
   const [resumeChildId, setResumeChildId] = useState(activeChildId)
   if (resumeChildId !== activeChildId) {
     setResumeChildId(activeChildId)
-    setResumeSession(null)
+    setResumeRead(null)
+    setGraphRecovery(null)
+    setResumeRefusal(null)
     setActiveDomain(null)
   }
 
+  const recoveryScope = quest.recoveryScope
+  const recoveryEpoch = quest.recoveryEpoch
+
+  /**
+   * The recovery identity this page most recently COMMITTED (UX-494).
+   *
+   * Written in a layout effect, the `MineTripSuggestion` shape, for the same
+   * reason: a render React abandons must not authorise a read or a write, and a
+   * handler captured by an older render has to have something CURRENT to
+   * compare itself against. The previous version compared `scopeAtRead` to
+   * `quest.recoveryScope` from the same closure — the same value, so the check
+   * could never fail and the guard did nothing.
+   *
+   * Both recovery reads and all three of the cards' handlers — Resume included
+   * — check themselves against this one ref.
+   */
+  const liveRecovery = useRef({ scope: recoveryScope, epoch: recoveryEpoch })
+  useLayoutEffect(() => {
+    liveRecovery.current = { scope: recoveryScope, epoch: recoveryEpoch }
+  }, [recoveryScope, recoveryEpoch])
+
   useEffect(() => {
     if (!activeChildId || !familyId) return
+    // Same gate as the graph card: an unsettled identity vouches for nobody, so
+    // it reads nothing and the render below draws nothing.
+    if (recoveryScope === 'unsettled') return
     let cancelled = false
+    const scopeAtRead = recoveryScope
+    const epochAtRead = recoveryEpoch
+    const childAtRead = activeChildId
     async function loadResume() {
       try {
         const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
         // Resumable sessions are saved as 'partial' (new) — also accept legacy
-        // 'in-progress' docs saved before the partials-count change.
+        // 'in-progress' docs saved before the partials-count change, and
+        // 'resumed' docs (UX-494): an accepted claim whose UI was retired — a
+        // reload, a child switch, a route change before the child ever saw the
+        // question — left an intact saved point stored under a status nothing
+        // offered again. The claim helper already accepts `resumed` and
+        // converges on the same run, so reoffering it reopens the ORIGINAL id
+        // and plan rather than starting anything. Nothing reopens by itself.
         const q = query(
           evaluationSessionsCollection(familyId),
           where('childId', '==', activeChildId),
-          where('status', 'in', ['partial', 'in-progress']),
+          where('status', 'in', ['partial', 'in-progress', 'resumed']),
           orderBy('evaluatedAt', 'desc'),
-          firestoreLimit(1),
+          // Three statuses can match now, so the newest row is not necessarily
+          // an eligible one: read a few and take the first that is. Same
+          // query and same index, bounded.
+          firestoreLimit(5),
         )
         const snap = await getDocs(q)
         if (cancelled) return
+        // Scoped like the graph read: the effect is live, the committed
+        // identity is still the one that asked, and that epoch is still the
+        // store's own.
+        const live = liveRecovery.current
+        if (live.scope !== scopeAtRead || live.epoch !== epochAtRead) return
+        if (epochAtRead !== getLibraryIdentityEpoch()) return
         const sessions = snap.docs
           .map((d) => ({ ...d.data(), id: d.id }) as EvaluationSession & Partial<InteractiveSessionData>)
-          // Only offer to resume genuinely resumable docs: a 'partial' saved at
-          // endSession (e.g. AI failed before the mastery threshold) carries no
-          // savedQuestState, so it counts in Records but isn't resumable.
-          .filter((s) => s.sessionType === 'interactive' && s.evaluatedAt >= cutoff && !!s.savedQuestState)
-        setResumeSession(sessions[0] ?? null)
+          // The shared eligibility, against what is stored: finalized,
+          // abandoned, another child's and non-interactive rows stay out.
+          // `savedQuestState` is still required on top of it — a 'partial'
+          // saved at endSession (e.g. AI failed before the mastery threshold)
+          // counts in Records but is no saved point.
+          .filter(
+            (s) =>
+              s.evaluatedAt >= cutoff &&
+              !!s.savedQuestState &&
+              questResumeCardRefusal(s, childAtRead) === null,
+          )
+        setResumeRead({
+          scope: scopeAtRead,
+          epoch: epochAtRead,
+          session: sessions[0] ?? null,
+        })
       } catch {
         // Non-blocking — resume card is optional
       }
     }
     void loadResume()
     return () => { cancelled = true }
-  }, [activeChildId, familyId, quest.screen]) // re-query when returning to intro
+    // `resumeReloadNonce` re-reads after a partial has actually LANDED: this
+    // query can otherwise finish before the exit's own write does (UX-494).
+  }, [
+    activeChildId,
+    familyId,
+    quest.screen,
+    quest.resumeReloadNonce,
+    recoveryScope,
+    recoveryEpoch,
+  ])
+
+  useEffect(() => {
+    // An unsettled identity vouches for nobody, so it reads nothing — and it
+    // writes nothing here either. Clearing the state synchronously was both a
+    // lint failure (`react-hooks/set-state-in-effect`) and the wrong place for
+    // the decision: the render-time derivation below retires a previous
+    // scope's card on the frame the identity moves, without waiting for an
+    // effect or for the new query to settle.
+    if (recoveryScope === 'unsettled' || !activeChildId || !familyId) return
+    let cancelled = false
+    const scopeAtRead = recoveryScope
+    const epochAtRead = recoveryEpoch
+    const childAtRead = activeChildId
+    async function loadGraphRecovery() {
+      try {
+        const q = query(
+          evaluationSessionsCollection(familyId),
+          where('childId', '==', activeChildId),
+          where('modelProjection', '==', 'pending'),
+          firestoreLimit(5),
+        )
+        const snap = await getDocs(q)
+        // Three things, not one: this effect was not torn down, the committed
+        // identity is still the one that asked (an A → B → A moves the epoch
+        // while leaving family and child alone), and that epoch is still the
+        // store's own — comparing the closure's child against the closure's
+        // child, as this did, could never fail and guarded nothing.
+        if (cancelled) return
+        const live = liveRecovery.current
+        if (live.scope !== scopeAtRead || live.epoch !== epochAtRead) return
+        if (epochAtRead !== getLibraryIdentityEpoch()) return
+        const waiting = snap.docs
+          .map((d) => ({ ...d.data(), id: d.id }) as EvaluationSession & Partial<InteractiveSessionData> & { id: string })
+          .filter(
+            (s) =>
+              s.sessionType === 'interactive' &&
+              s.status === 'complete' &&
+              Boolean(s.sourceCommittedAt) &&
+              s.childId === childAtRead,
+          )
+        setGraphRecovery({
+          scope: scopeAtRead,
+          epoch: epochAtRead,
+          session: waiting[0] ?? null,
+        })
+      } catch {
+        // Non-blocking — the recovery card is optional, exactly like the resume card.
+      }
+    }
+    void loadGraphRecovery()
+    return () => { cancelled = true }
+  }, [activeChildId, familyId, quest.screen, recoveryScope, recoveryEpoch, graphRecoveryNonce])
+
+  /**
+   * The card to draw, decided during render: the loaded answer counts only
+   * while the identity it was READ under is still the identity on screen. Any
+   * other state — unsettled, a newer scope whose query has not landed, a
+   * same-tick A → B → A — draws nothing.
+   */
+  const graphRecoveryCard =
+    graphRecovery &&
+    graphRecovery.session &&
+    recoveryScope !== 'unsettled' &&
+    graphRecovery.scope === recoveryScope &&
+    graphRecovery.epoch === recoveryEpoch
+      ? graphRecovery
+      : null
+
+  /** The Resume card, decided the same way and under the same identity. */
+  const resumeCard =
+    resumeRead &&
+    resumeRead.session &&
+    recoveryScope !== 'unsettled' &&
+    resumeRead.scope === recoveryScope &&
+    resumeRead.epoch === recoveryEpoch
+      ? { ...resumeRead, session: resumeRead.session }
+      : null
 
   /**
    * A trip here from the village's Square invitation, if there is one (UX-493).
@@ -440,32 +643,216 @@ export default function KnowledgeMinePage() {
           )}
 
           {/* ── Resume card ──────────────────────────────────── */}
-          {resumeSession && (
+          {resumeCard && (
             <ResumeCard
-              session={resumeSession}
+              /* Keyed by the identity it was read under, so a card from a
+                 previous scope cannot be reused for a new one. */
+              key={`${resumeCard.scope}|${resumeCard.epoch}|${resumeCard.session.id ?? 'row'}`}
+              session={resumeCard.session}
+              /* UX-494 — a reoffered `resumed` row may still be open in
+                 another tab, where discarding it would write `abandoned` over
+                 that run's only saved point. Resume converges; discard cannot,
+                 so it is not offered (and the write refuses it too). The
+                 ordinary fresh mode cards below are the way on. */
+              allowStartFresh={resumeCard.session.status !== 'resumed'}
               onResume={() => {
-                const domain = resumeSession.domain as EvaluationDomain
-                const mode = resumeSession.questMode
-                setActiveDomain(
-                  [...READING_MODES, ...MATH_MODES].find(
-                    (m) => m.domain === domain && m.questMode === mode,
-                  ) ?? READING_MODES[0],
-                )
-                const ok = quest.resumeSession(resumeSession)
-                if (!ok) {
-                  // Fallback: resume fields missing — start fresh instead
-                  void quest.startQuest(domain, mode)
-                }
+                const session = resumeCard.session
+                const domain = session.domain as EvaluationDomain
+                const mode = session.questMode
+                const scopeAtTap = resumeCard.scope
+                const epochAtTap = resumeCard.epoch
+                setResumeRefusal(null)
+                void (async () => {
+                  const outcome = await quest.resumeSession(session)
+                  // Scoped AFTER the await, like *Start fresh* and the graph
+                  // retry: a result arriving once the identity has moved
+                  // belongs to nobody's screen, and it must not write a
+                  // refusal or a domain onto the new child's intro.
+                  const live = liveRecovery.current
+                  if (live.scope !== scopeAtTap || live.epoch !== epochAtTap) return
+                  if (outcome !== true) {
+                    // UX-494 — say so, and start NOTHING. The old fallback ran a
+                    // fresh paid quest nobody asked for, in whatever mode this
+                    // card happened to name.
+                    setResumeRefusal(outcome)
+                    // Retire ONLY this exact row, and only when the SOURCE
+                    // refused it. A rejected claim transport and a busy intro
+                    // lane leave the saved point intact and still eligible, so
+                    // the card stays and the copy asks for another tap —
+                    // dropping it there told a child their quest was gone.
+                    if (outcome !== 'claim-failed' && outcome !== 'stale-scope') {
+                      setResumeRead((current) =>
+                        current &&
+                        current.scope === scopeAtTap &&
+                        current.epoch === epochAtTap &&
+                        current.session?.id === session.id
+                          ? { ...current, session: null }
+                          : current,
+                      )
+                    }
+                    return
+                  }
+                  setActiveDomain(
+                    [...READING_MODES, ...MATH_MODES].find(
+                      (m) => m.domain === domain && m.questMode === mode,
+                    ) ?? READING_MODES[0],
+                  )
+                })()
               }}
               onStartFresh={() => {
-                // Mark the partial session as abandoned in Firestore
-                if (resumeSession.id) {
-                  const ref = doc(evaluationSessionsCollection(familyId), resumeSession.id)
-                  updateDoc(ref, { status: 'abandoned' }).catch((err) =>
-                    console.error('Failed to mark session as abandoned', err),
+                // UX-494 — the hook's discard, which holds the SAME intro
+                // action claim Start and Resume hold, so the card's two buttons
+                // cannot race each other: a discard tapped while a Resume's
+                // claim transaction is in flight is refused rather than landing
+                // an `abandoned` stamp on the record that Resume is about to
+                // reopen. (It is still the guarded transition underneath, so a
+                // finalized or another child's record is refused as before.)
+                const session = resumeCard.session
+                const scopeAtTap = resumeCard.scope
+                const epochAtTap = resumeCard.epoch
+                const retireThisCard = () =>
+                  setResumeRead((current) =>
+                    current &&
+                    current.scope === scopeAtTap &&
+                    current.epoch === epochAtTap &&
+                    current.session?.id === session.id
+                      ? { ...current, session: null }
+                      : current,
                   )
+                if (!session.id || !session.childId) {
+                  retireThisCard()
+                  return
                 }
-                setResumeSession(null)
+                setResumeRefusal(null)
+                void (async () => {
+                  const outcome = await quest.discardPartial(
+                    { id: session.id, childId: session.childId },
+                    { scopeKey: scopeAtTap, epoch: epochAtTap },
+                  )
+                  // Scoped AFTER the await: a result that arrives once the
+                  // identity has moved belongs to nobody's screen.
+                  const live = liveRecovery.current
+                  if (live.scope !== scopeAtTap || live.epoch !== epochAtTap) return
+                  if (outcome === 'abandoned' || outcome === 'already-abandoned') {
+                    retireThisCard()
+                    return
+                  }
+                  // The record was not closed out, so the card must not pretend
+                  // it was — and it stays on screen, because a refused discard
+                  // during a Resume is a *tap it again*, not a loss.
+                  setResumeRefusal(
+                    outcome === 'refused'
+                      ? 'finalized'
+                      : outcome === 'stale-scope'
+                        ? 'stale-scope'
+                        : 'missing',
+                  )
+                })()
+              }}
+            />
+          )}
+
+          {/* ── A Resume or Start fresh that was refused (UX-494) ──
+              One line, and no reassurance underneath it: *"Your answers are
+              safe"* is the saved source's sentence, and a refusal may be about
+              a record that is gone. */}
+          {resumeRefusal && (
+            <RecoveryNotice title={QUEST_RESUME_REFUSAL_COPY[resumeRefusal]} />
+          )}
+
+          {/* ── A held payload that never reached Firestore (UX-494) ──
+              The manual-exit partial's owning view: its save is a transaction
+              and can be rejected offline, and the minutes are already recorded,
+              so the answers get the same scoped retry a failed close gets.
+              Its copy is its OWN: these answers are not safe yet, and the
+              recovery card's sentence saying they are would be a lie here. */}
+          {/* The notice follows its OWNER, not the intro (UX-494): a child
+              change re-renders this intro under a sibling, and the previous
+              child's unsaved answers are neither that child's business nor
+              retryable from there — by a parent either. It comes back when an
+              authorised view returns to the owning child. */}
+          {quest.visibleSourceSave.kind === 'partial' &&
+            Boolean(activeChildId) &&
+            quest.visibleSourceSave.originalChildId === activeChildId &&
+            (quest.visibleSourceSave.state === 'failed' ||
+              quest.visibleSourceSave.state === 'saving') && (
+              <RecoveryNotice
+                key={quest.visibleSourceSave.runInstanceId ?? 'partial-save'}
+                title={
+                  quest.visibleSourceSave.state === 'saving'
+                    ? QUEST_UNSAVED_COPY.saving
+                    : QUEST_UNSAVED_COPY.title
+                }
+                body={QUEST_UNSAVED_COPY.body}
+                action={quest.visibleSourceSave.canRetry ? QUEST_UNSAVED_COPY.action : undefined}
+                onAction={
+                  quest.visibleSourceSave.canRetry
+                    ? () =>
+                        quest.retrySourceSave({
+                          runInstanceId: quest.visibleSourceSave.runInstanceId,
+                          viewGeneration: quest.visibleSourceSave.viewGeneration,
+                          // This render's identity, which is what authorises the
+                          // tap — the payload's own run selects what it writes.
+                          scopeKey: recoveryScope,
+                          epoch: recoveryEpoch,
+                        })
+                    : undefined
+                }
+              />
+            )}
+
+          {/* ── Map still waiting (UX-494) ─────────────────────
+              Scoped at render AND re-checked at the write: the key drops the
+              card on any identity change, the scope and epoch the tap carries
+              are compared against the committed ones, and only this card's own
+              settled attempt may clear and re-read it. */}
+          {graphRecoveryCard?.session && (
+            <RecoveryNotice
+              key={`${graphRecoveryCard.scope}|${graphRecoveryCard.epoch}|${graphRecoveryCard.session.id}`}
+              title={QUEST_RECOVERY_COPY.title}
+              body={QUEST_RECOVERY_COPY.body}
+              action={QUEST_RECOVERY_COPY.action}
+              onAction={async () => {
+                // The retry targets the binding the card was DRAWN from — the
+                // same session, scope and epoch the query read under — so it
+                // can never address a coincidentally equal id in a newer scope.
+                const card = graphRecoveryCard.session
+                if (!card) return
+                const cardId = card.id
+                const scopeAtTap = graphRecoveryCard.scope
+                const epochAtTap = graphRecoveryCard.epoch
+                const outcome = await quest.retryGraphProjection(cardId, card.childId, {
+                  domain: card.domain,
+                  questMode: card.questMode,
+                  scopeKey: scopeAtTap,
+                  epoch: epochAtTap,
+                  viewGeneration: quest.viewGeneration,
+                })
+                // A failure, a refusal, an attempt already in flight, or a model
+                // that does not exist yet all leave the source pending and the
+                // card with it.
+                if (
+                  outcome === 'failed' ||
+                  outcome === 'identity-mismatch' ||
+                  outcome === 'busy' ||
+                  outcome === 'no-model'
+                ) {
+                  return
+                }
+                // Only THIS card's own settled attempt may retire it: the
+                // identity must still be the one it was tapped under, and the
+                // loaded answer must still be the one it was drawn from.
+                const live = liveRecovery.current
+                if (live.scope !== scopeAtTap || live.epoch !== epochAtTap) return
+                setGraphRecovery((current) =>
+                  current &&
+                  current.scope === scopeAtTap &&
+                  current.epoch === epochAtTap &&
+                  current.session?.id === cardId
+                    ? { ...current, session: null }
+                    : current,
+                )
+                setGraphRecoveryNonce((n) => n + 1)
               }}
             />
           )}
@@ -681,6 +1068,36 @@ export default function KnowledgeMinePage() {
           )]}
           hitLevelCap={quest.hitLevelCap}
           questMode={quest.questMode}
+          // UX-494 — the two save successes, and their retries. The source
+          // retry is the held payload's own; the map retry reads the saved
+          // source, so it works here and again after a reload.
+          sourceSave={quest.visibleSourceSave}
+          graphSync={quest.graphSync}
+          // Both retries carry the identity of the view they were RENDERED in,
+          // so an old summary's settled attempt cannot relabel a newer
+          // same-child summary (UX-494).
+          onRetrySourceSave={() =>
+            void quest.retrySourceSave({
+              runInstanceId: quest.visibleSourceSave.runInstanceId,
+              viewGeneration: quest.visibleSourceSave.viewGeneration,
+              // A summary stays bound to its owner across a same-family child
+              // change (UX-339), so a FRESH button here is authorised by this
+              // render's identity rather than by the close's (UX-494).
+              scopeKey: recoveryScope,
+              epoch: recoveryEpoch,
+            })
+          }
+          onRetryGraphSync={() => {
+            const { sessionId, childId } = quest.graphSync
+            if (!sessionId || !childId) return
+            void quest.retryGraphProjection(sessionId, childId, {
+              domain: quest.questDomain,
+              questMode: quest.questMode,
+              scopeKey: recoveryScope,
+              epoch: recoveryEpoch,
+              viewGeneration: quest.viewGeneration,
+            })
+          }}
           onDone={quest.resetToIntro}
           onTryAgain={() => {
             quest.resetToIntro()
@@ -1011,6 +1428,73 @@ function QuestCard({
   )
 }
 
+/**
+ * The Mine's one scoped recovery notice (UX-494).
+ *
+ * Three callers, one shape: a refused Resume, a held payload that never reached
+ * Firestore, and a saved source whose map update has not been applied. Nothing
+ * about a level, a score or a count — his answers are safe and the notice says
+ * only what is left to do. A retry runs its ONE write and nothing else, so no
+ * completion side effect is repeated, and the button is disabled while it is in
+ * flight so a second tap is not a second attempt.
+ *
+ * NEW child-facing text: plain, at least 14px, on a 44px target.
+ */
+function RecoveryNotice({
+  title,
+  body,
+  action,
+  onAction,
+}: {
+  title: string
+  /** Omitted where the title says the whole truth on its own. */
+  body?: string
+  action?: string
+  onAction?: () => void | Promise<unknown>
+}) {
+  const [busy, setBusy] = useState(false)
+  return (
+    <Box
+      sx={{
+        bgcolor: MC.darkStone,
+        border: `2px solid ${MC.gold}`,
+        borderRadius: 2,
+        p: 2,
+        mb: 2,
+        textAlign: 'left',
+      }}
+    >
+      <Typography sx={{ fontSize: '16px', fontWeight: 700, lineHeight: 1.4, color: MC.white }}>
+        {title}
+      </Typography>
+      {body && (
+        <Typography sx={{ fontSize: '14px', lineHeight: 1.45, color: MC.stone, mt: 0.5 }}>
+          {body}
+        </Typography>
+      )}
+      {action && onAction && (
+        <Button
+          disabled={busy}
+          onClick={() => {
+            setBusy(true)
+            void Promise.resolve(onAction()).finally(() => setBusy(false))
+          }}
+          sx={{
+            fontSize: '14px',
+            textTransform: 'none',
+            minHeight: 44,
+            mt: 1,
+            color: MC.gold,
+            border: `1px solid ${MC.gold}`,
+          }}
+        >
+          {action}
+        </Button>
+      )}
+    </Box>
+  )
+}
+
 /** Quest mode labels for resume card display */
 const QUEST_MODE_LABELS: Record<string, string> = {
   phonics: 'Phonics Quest',
@@ -1023,10 +1507,13 @@ function ResumeCard({
   session,
   onResume,
   onStartFresh,
+  /** Off for a reoffered `resumed` row, which may still be live elsewhere. */
+  allowStartFresh = true,
 }: {
   session: EvaluationSession & Partial<InteractiveSessionData>
   onResume: () => void
   onStartFresh: () => void
+  allowStartFresh?: boolean
 }) {
   const [timeLabel] = useState(() => {
     const elapsed = Date.now() - new Date(session.evaluatedAt).getTime()
@@ -1084,35 +1571,37 @@ function ResumeCard({
           </Typography>
         </Box>
       </Stack>
-      <Typography
-        component="span"
-        role="button"
-        tabIndex={0}
-        onClick={(e) => {
-          e.stopPropagation()
-          onStartFresh()
-        }}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault()
+      {allowStartFresh && (
+        <Typography
+          component="span"
+          role="button"
+          tabIndex={0}
+          onClick={(e) => {
             e.stopPropagation()
             onStartFresh()
-          }
-        }}
-        sx={{
-          display: 'block',
-          fontFamily: MC.font,
-          fontSize: '0.3rem',
-          color: MC.stone,
-          mt: 1,
-          textAlign: 'center',
-          textDecoration: 'underline',
-          cursor: 'pointer',
-          '&:hover': { color: MC.gold },
-        }}
-      >
-        Start fresh instead
-      </Typography>
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              e.stopPropagation()
+              onStartFresh()
+            }
+          }}
+          sx={{
+            display: 'block',
+            fontFamily: MC.font,
+            fontSize: '0.3rem',
+            color: MC.stone,
+            mt: 1,
+            textAlign: 'center',
+            textDecoration: 'underline',
+            cursor: 'pointer',
+            '&:hover': { color: MC.gold },
+          }}
+        >
+          Start fresh instead
+        </Typography>
+      )}
     </Box>
   )
 }

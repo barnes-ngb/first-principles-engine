@@ -89,8 +89,24 @@ vi.mock('./useQuestSession', () => ({
     aiError: null,
     sessionLeftItsChild: false,
     sessionOwnerName: 'Lincoln',
+    // UX-494 — the save/recovery surface the page now reads. Idle here: this
+    // file's subject is the village invitation, and an idle save notice renders
+    // nothing at all.
+    sourceSave: { state: 'idle', canRetry: false },
+    visibleSourceSave: { state: 'idle', canRetry: false },
+    graphSync: { state: 'idle' },
+    recoveryScope: 'fam-1|lincoln|child|1',
+    recoveryEpoch: 1,
+    viewGeneration: 0,
+    resumeReloadNonce: 0,
+    questDomain: 'reading',
+    retrySourceSave: async () => 'nothing-pending' as const,
+    retryGraphProjection: async () => 'identity-mismatch' as const,
     startQuest: fx.startQuest,
     resumeSession: fx.resumeSession,
+    // *Start fresh instead* shares the intro action lane now, so it is the
+    // hook's own door. No test here taps it.
+    discardPartial: async () => 'missing' as const,
     resetToIntro: fx.resetToIntro,
     submitAnswer: () => {},
     handleSkip: () => {},
@@ -117,6 +133,7 @@ vi.mock('./BuildWordQuestion', () => ({ default: () => null }))
 vi.mock('./BuildSentenceQuestion', () => ({ default: () => null }))
 vi.mock('../avatar/MinecraftAvatar', () => ({ default: () => null }))
 vi.mock('../../core/firebase/firestore', () => ({
+  db: {},
   evaluationSessionsCollection: () => ({}),
 }))
 vi.mock('firebase/firestore', () => ({
@@ -127,6 +144,9 @@ vi.mock('firebase/firestore', () => ({
   where: () => ({}),
   orderBy: () => ({}),
   limit: () => ({}),
+  // UX-494 — *Start fresh instead* is a guarded transaction now. No test here
+  // taps it; the import has to resolve.
+  runTransaction: async () => undefined,
 }))
 
 /** Reading-calibrated. */

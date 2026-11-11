@@ -39,6 +39,20 @@ vi.mock('firebase/firestore', () => ({
   setDoc: (ref: unknown, data: unknown) => setDoc(ref, data),
   updateDoc: vi.fn(async () => {}),
   where: vi.fn(() => ({})),
+  // UX-494 — the quest source save is now a conditional transaction. A working
+  // fake whose get/set route to the same spies these tests already assert on
+  // (the `questModelSync.test.ts` / `workbookPositionSync.test.ts` shape), so
+  // the attribution assertions below are unchanged.
+  runTransaction: async (
+    _db: unknown,
+    fn: (tx: {
+      get: (ref: unknown) => unknown
+      set: (ref: unknown, data: unknown, opts?: unknown) => void
+    }) => unknown,
+  ) => fn({
+    get: async () => ({ exists: () => false, data: () => undefined }),
+    set: (ref: unknown, data: unknown) => { void setDoc(ref, data) },
+  }),
 }))
 
 vi.mock('../../core/firebase/firestore', () => ({
@@ -53,6 +67,13 @@ vi.mock('../../core/firebase/firestore', () => ({
 }))
 
 vi.mock('../../core/auth/useAuth', () => ({ useFamilyId: () => 'fam-1' }))
+// UX-494 — the hook now also reads the settled identity (profile + the
+// subscribed identity epoch) to scope its recovery controls.
+vi.mock('../../core/profile/useProfile', () => ({ useProfile: () => ({ profile: 'parent' }) }))
+vi.mock('../avatar/stonebridge/libraryReturnFlow', () => ({
+  getLibraryIdentityEpoch: () => 1,
+  subscribeLibraryIdentityEpoch: () => () => {},
+}))
 vi.mock('../../core/xp/addXpEvent', () => ({
   addXpEvent: (...a: unknown[]) => addXpEvent(...(a as [])),
 }))
@@ -63,9 +84,16 @@ vi.mock('../../core/curriculum/updateSkillMapFromFindings', () => ({
   updateSkillMapFromFindings: vi.fn(async () => {}),
 }))
 vi.mock('../evaluate/skillSnapshotWrites', () => ({ writeSnapshotUpdate: vi.fn(async () => {}) }))
-vi.mock('./questModelSync', () => ({ syncQuestResultsToModel: vi.fn(async () => {}) }))
+vi.mock('./questModelSync', () => ({
+  projectQuestSourceToModel: vi.fn(async () => 'no-targets'),
+  projectionReachedGraph: () => false,
+}))
 vi.mock('../today/dayWriteGuard', () => ({ updateDayLogGuarded: vi.fn(async () => {}) }))
-vi.mock('../../core/foundations/questTargeting', () => ({ selectQuestTargets: () => [] }))
+vi.mock('../../core/foundations/questTargeting', () => ({
+  selectQuestTargets: () => [],
+  captureQuestTargetPlan: () => [],
+  parseQuestTargetPlan: () => [],
+}))
 
 /** The idle-aware timer, so the hours arithmetic below is driven, not guessed. */
 let activeSeconds = 0
@@ -73,6 +101,9 @@ vi.mock('../../core/utils/sessionTimer', () => ({
   useSessionTimer: () => ({
     startTimer: vi.fn(),
     stop: () => activeSeconds,
+    // UX-494 — a close freezes its own reading without stopping the shared
+    // timer, so a delayed close cannot read (or kill) a newer run's timer.
+    getCurrentSeconds: () => activeSeconds,
     pause: vi.fn(),
     resume: vi.fn(),
     isActive: true,
@@ -102,9 +133,11 @@ function setActive(child: { id: string; name: string }) {
     activeChildId: child.id,
     activeChild: child,
     children: [LINCOLN, LONDON],
+    childrenFamilyId: 'fam-1',
     setActiveChildId: vi.fn(),
     isChildProfile: false,
     isLoading: false,
+    loadFailed: false,
     addChild: vi.fn(),
   })
 }
@@ -181,6 +214,8 @@ describe('useQuestSession binds every write to the child the quest started for',
       view.result.current.resetToIntro()
     })
 
+    // The write stays attached to its original source; its Saved/Failed outcome
+    // belongs to the intro the exit landed on (hook save-recovery suite).
     const session = setDoc.mock.calls
       .map((c) => c[1] as unknown as { childId?: string; status?: string })
       .find((d) => d.status === 'partial')
