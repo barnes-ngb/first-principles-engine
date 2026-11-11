@@ -89,6 +89,15 @@ vi.mock('./useQuestSession', () => ({
     aiError: null,
     sessionLeftItsChild: false,
     sessionOwnerName: 'Lincoln',
+    // UX-494 — the save/recovery surface the page now reads. Idle here: this
+    // file's subject is the village invitation, and an idle save notice renders
+    // nothing at all.
+    sourceSave: { state: 'idle', canRetry: false },
+    graphSync: { state: 'idle' },
+    recoveryScope: 'fam-1|lincoln|child|1',
+    questDomain: 'reading',
+    retrySourceSave: async () => 'nothing-pending' as const,
+    retryGraphProjection: async () => 'identity-mismatch' as const,
     startQuest: fx.startQuest,
     resumeSession: fx.resumeSession,
     resetToIntro: fx.resetToIntro,

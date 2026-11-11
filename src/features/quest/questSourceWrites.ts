@@ -2,28 +2,20 @@
 //
 // `endSession`, `resetToIntro` and `resumeSession` each did an unconditional
 // `setDoc` / `updateDoc` on `evaluationSessions/{id}`, and the id is shared by
-// every write a run makes. So the last writer won, whoever it was:
+// every write a run makes. So the last writer won, whoever it was: a close whose
+// AI summary was still awaiting wrote its answers under whatever id the refs then
+// held; a late partial landed on top of a finalized record and made it resumable
+// again; a retry of a save whose acknowledgement was lost wrote the payload a
+// second time, indistinguishably from a fresh write.
 //
-//   • a close whose AI summary was still awaiting wrote the run's answers under
-//     whatever id the refs held by the time it resumed — a NEWER run's;
-//   • `resetToIntro`'s partial save could land on top of a finalized record and
-//     turn a complete session back into a resumable one;
-//   • a retry of a save whose acknowledgement was lost in flight wrote the
-//     payload a second time, with no way to tell that from a fresh write;
-//   • a `status: 'resumed'` stamp could be applied to a document that had since
-//     been finalized.
+// Every write here reads the document and decides inside one `runTransaction`,
+// so a conflicting commit re-runs the check against the current document instead
+// of overwriting it. It writes `evaluationSessions` and nothing else, and takes
+// the reference from the caller, so it cannot be pointed at another collection.
 //
-// This module is the conditional answer, in one place: each write reads the
-// document and decides inside a single `runTransaction`, so a conflicting commit
-// re-runs the check against the current document instead of overwriting it. It
-// writes `evaluationSessions` and nothing else, and it takes the document
-// reference from the caller, so it cannot be pointed at another collection.
-//
-// Deliberately NOT a new store and NOT a general session writer: the guided-eval
-// and fluency paths keep their own existing writes untouched. This is the
-// interactive quest's save, with its conditions made explicit.
+// The guided-eval and fluency paths keep their own existing writes untouched.
 
-import { doc, runTransaction } from 'firebase/firestore'
+import { doc, getDoc, runTransaction } from 'firebase/firestore'
 import type { DocumentReference } from 'firebase/firestore'
 
 import { db, evaluationSessionsCollection } from '../../core/firebase/firestore'
@@ -37,9 +29,8 @@ export type QuestSourcePayload = EvaluationSession & InteractiveSessionData
  * The one typed handle on a quest source document.
  *
  * `evaluationSessionsCollection` is typed to the shared `EvaluationSession`, so
- * the interactive-only source fields live outside its view. Narrowing happens
- * here, once, rather than at every call site — and it is still the SAME
- * collection and the same converter, so every existing reader is untouched.
+ * the interactive-only source fields sit outside its view. Narrowing happens
+ * here, once — same collection, same converter, every existing reader untouched.
  */
 export function questSourceRef(
   familyId: string,
@@ -57,15 +48,84 @@ function scrub<T>(payload: T): T {
 }
 
 /**
+ * The graph-projection fields, which are the ONLY mutable part of a committed
+ * source: the projection stamps itself as applied or skipped long after the
+ * answers are immutable.
+ */
+const MUTABLE_SOURCE_FIELDS = new Set([
+  'id',
+  'modelProjection',
+  'modelProjectionOutcome',
+  'modelProjectedAt',
+  'modelProjectionFailedAt',
+])
+
+/** Stable-key-ordered JSON, so two equal payloads always produce one string. */
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null'
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter(([, v]) => v !== undefined)
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+  return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonicalJson(v)}`).join(',')}}`
+}
+
+/**
+ * The immutable content of a source, canonically.
+ *
+ * This is what makes "a matching committed retry" mean what it says. Comparing
+ * `questRunId` alone was wrong: a run writes ONE final payload, so a second
+ * payload arriving under the same run id with different answers is not a lost
+ * acknowledgement — it is two different records competing for one document, and
+ * reporting it as `already-committed` would have the caller claim a save for
+ * answers nobody stored and then project a graph from the other ones.
+ */
+export function canonicalQuestSourceContent(
+  source: Partial<QuestSourcePayload>,
+): string {
+  const immutable: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(source)) {
+    if (MUTABLE_SOURCE_FIELDS.has(key)) continue
+    if (value === undefined) continue
+    immutable[key] = value
+  }
+  return canonicalJson(immutable)
+}
+
+/**
  * Is a stored record one we must never write over?
  *
- * Two shapes qualify. A record carrying `sourceCommittedAt` is a finalized
- * payload written by this repair. A record whose `status` is already `complete`
- * with no commit stamp is a **legacy** finalized session: it predates the stamp,
- * and the honest reading of it is still "finished", not "free to overwrite".
+ * A record carrying `sourceCommittedAt` is a finalized payload written by this
+ * repair. A record whose `status` is already `complete` without that stamp is a
+ * LEGACY finalized session: it predates the stamp, and the honest reading of it
+ * is still "finished", not "free to overwrite".
  */
 function isFinalizedRecord(stored: Partial<QuestSourcePayload>): boolean {
   return Boolean(stored.sourceCommittedAt) || stored.status === 'complete'
+}
+
+/**
+ * Does the stored record belong to the same run, child, type and original
+ * domain/mode as the payload about to be written?
+ *
+ * Guarded on EVERY write to an existing document. A document id collision, a
+ * reassigned record, or a payload whose domain/mode came from a newer session
+ * must not be allowed to edit a record it does not own — a `questMode` rewritten
+ * under an existing id is exactly the mis-stamping this repair exists for.
+ */
+function ownsStoredRecord(
+  stored: Partial<QuestSourcePayload>,
+  payload: Partial<QuestSourcePayload>,
+): boolean {
+  if (stored.sessionType && stored.sessionType !== 'interactive') return false
+  if (stored.childId && payload.childId && stored.childId !== payload.childId) return false
+  if (stored.questRunId && payload.questRunId && stored.questRunId !== payload.questRunId) {
+    return false
+  }
+  if (stored.domain && payload.domain && stored.domain !== payload.domain) return false
+  // `questMode` is optional on both sides; only a DISAGREEMENT disqualifies.
+  if (stored.questMode && payload.questMode && stored.questMode !== payload.questMode) return false
+  return true
 }
 
 /** What a final save decided. */
@@ -73,30 +133,28 @@ export type QuestSourceSaveOutcome =
   /** The immutable final payload landed now. */
   | 'saved'
   /**
-   * This run's payload was ALREADY committed under this id. The common cause is
-   * an acknowledgement lost before the retry — the first write did commit and the
-   * client never heard so. A matching committed retry is a success, and it writes
-   * nothing, so the stored payload stays immutable.
+   * This exact payload was ALREADY committed under this id — an acknowledgement
+   * lost before the retry. A success that writes nothing, so the stored payload
+   * stays immutable.
    */
   | 'already-committed'
   /**
-   * A DIFFERENT run has finalized this id. The stored record is preserved exactly
-   * as found and this payload is not written. The caller keeps its payload and can
-   * offer a retry; what it must not do is report a save.
+   * The stored record is finalized and is NOT this payload — another run's, a
+   * legacy complete, or the same run id carrying different answers. Preserved
+   * exactly as found. The caller keeps its payload; what it must not do is
+   * report a save or project a graph.
    */
   | 'conflict'
 
 /**
- * Write a run's one immutable final payload under its original id, conditionally.
- *
- * Throws on a transport failure (the caller holds the payload and offers a retry);
- * returns an outcome for every case the document itself decides.
+ * Write a run's one immutable final payload under its original id,
+ * conditionally. Throws on a transport failure (the caller holds the payload and
+ * offers a retry); returns an outcome for every case the document decides.
  */
 export async function saveFinalQuestSource(
   sessionRef: DocumentReference<QuestSourcePayload>,
   payload: QuestSourcePayload,
 ): Promise<QuestSourceSaveOutcome> {
-  const runId = payload.questRunId
   return runTransaction(db, async (tx) => {
     const snap = await tx.get(sessionRef)
     if (!snap.exists()) {
@@ -104,14 +162,20 @@ export async function saveFinalQuestSource(
       return 'saved'
     }
     const stored = snap.data() as Partial<QuestSourcePayload>
-    if (stored.sourceCommittedAt) {
-      // Already finalized. Ours, or somebody else's?
-      return runId && stored.questRunId === runId ? 'already-committed' : 'conflict'
+
+    if (isFinalizedRecord(stored)) {
+      // The one success: byte-for-byte the same immutable content, ours.
+      if (
+        ownsStoredRecord(stored, payload) &&
+        canonicalQuestSourceContent(stored) === canonicalQuestSourceContent(scrub(payload))
+      ) {
+        return 'already-committed'
+      }
+      return 'conflict'
     }
-    if (isFinalizedRecord(stored)) return 'conflict' // legacy complete — preserved
-    // A partial / resumed / in-progress record of this run: the final payload is
-    // what that document becomes.
-    if (stored.questRunId && runId && stored.questRunId !== runId) return 'conflict'
+
+    // An un-finalized record (this run's partial / resumed / in-progress doc).
+    if (!ownsStoredRecord(stored, payload)) return 'conflict'
     tx.set(sessionRef, scrub(payload))
     return 'saved'
   })
@@ -121,15 +185,18 @@ export async function saveFinalQuestSource(
 export type QuestPartialSaveOutcome =
   | 'saved'
   /**
-   * The document is already a finalized record, so this partial is NOT written.
-   * A stale exit, a stale Start or a late `resetToIntro` can no longer turn a
-   * completed session back into a resumable one.
+   * The document is a finalized record, so this partial is NOT written. A stale
+   * exit, a stale Start or a late `resetToIntro` can no longer turn a completed
+   * session back into a resumable one.
    */
   | 'refused-finalized'
+  /** The document belongs to another run, child or mode. Left exactly as found. */
+  | 'refused-mismatch'
 
 /**
- * Save the resumable partial for a run that exited early — refusing to overwrite
- * a finalized record under the same id.
+ * Save the resumable partial for a run that exited early. Throws on a transport
+ * failure — the caller retains the payload and offers the in-memory retry, so a
+ * manual exit that could not reach Firestore is reported rather than lost.
  */
 export async function saveResumableQuestSource(
   sessionRef: DocumentReference<QuestSourcePayload>,
@@ -137,62 +204,52 @@ export async function saveResumableQuestSource(
 ): Promise<QuestPartialSaveOutcome> {
   return runTransaction(db, async (tx) => {
     const snap = await tx.get(sessionRef)
-    if (snap.exists() && isFinalizedRecord(snap.data() as Partial<QuestSourcePayload>)) {
-      return 'refused-finalized'
+    if (snap.exists()) {
+      const stored = snap.data() as Partial<QuestSourcePayload>
+      if (isFinalizedRecord(stored)) return 'refused-finalized'
+      if (!ownsStoredRecord(stored, payload)) return 'refused-mismatch'
     }
     tx.set(sessionRef, scrub(payload))
     return 'saved'
   })
 }
 
+/** What marking a reopened partial as `resumed` decided. */
+export type QuestResumeStampOutcome =
+  | 'marked'
+  | 'refused-finalized'
+  | 'refused-mismatch'
+  | 'missing'
+
 /**
  * Mark a reopened partial as `resumed` so the resume card stops offering it —
- * refusing, for the same reason, to stamp a record that has since been finalized.
+ * refusing a record that has since been finalized, and one this run does not own.
  */
 export async function markQuestSourceResumed(
   sessionRef: DocumentReference<QuestSourcePayload>,
-): Promise<'marked' | 'refused-finalized' | 'missing'> {
+  expect: { childId: string; questRunId: string; domain?: string; questMode?: string },
+): Promise<QuestResumeStampOutcome> {
   return runTransaction(db, async (tx) => {
     const snap = await tx.get(sessionRef)
     if (!snap.exists()) return 'missing'
-    if (isFinalizedRecord(snap.data() as Partial<QuestSourcePayload>)) return 'refused-finalized'
+    const stored = snap.data() as Partial<QuestSourcePayload>
+    if (isFinalizedRecord(stored)) return 'refused-finalized'
+    if (!ownsStoredRecord(stored, expect as Partial<QuestSourcePayload>)) return 'refused-mismatch'
     tx.set(sessionRef, { status: 'resumed' }, { merge: true })
     return 'marked'
   })
 }
 
 /**
- * Record that this source's graph projection failed, so the failure survives a
- * reload and the Mine can offer the scoped retry.
+ * Read a stored source, for the Resume tap's own eligibility check.
  *
- * A separate, guarded write rather than part of the model transaction: that
- * transaction ROLLS BACK on failure, which is exactly the behaviour that keeps
- * pending work pending — so the only place a failure can be recorded is outside
- * it. Conditional on the run id so it cannot stamp a record another run owns, and
- * it never touches a source already marked `projected`: a failure arriving after
- * a concurrent retry succeeded is not news.
+ * The resume card's copy was loaded before the tap, and between the two a
+ * delayed close may have finalized the run or a parent may have abandoned it.
+ * `questResumeRefusal` judges what comes back.
  */
-export async function markQuestProjectionFailed(
+export async function readQuestSource(
   sessionRef: DocumentReference<QuestSourcePayload>,
-  runId: string,
-  outcome: string,
-  nowIso: string,
-): Promise<'marked' | 'skipped'> {
-  return runTransaction(db, async (tx) => {
-    const snap = await tx.get(sessionRef)
-    if (!snap.exists()) return 'skipped'
-    const stored = snap.data() as Partial<QuestSourcePayload>
-    if (runId && stored.questRunId !== runId) return 'skipped'
-    if (stored.modelProjection === 'projected') return 'skipped'
-    tx.set(
-      sessionRef,
-      {
-        modelProjection: 'failed',
-        modelProjectionOutcome: outcome,
-        modelProjectionFailedAt: nowIso,
-      },
-      { merge: true },
-    )
-    return 'marked'
-  })
+): Promise<Partial<QuestSourcePayload> | null> {
+  const snap = await getDoc(sessionRef)
+  return snap.exists() ? (snap.data() as Partial<QuestSourcePayload>) : null
 }

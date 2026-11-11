@@ -1,20 +1,15 @@
 // ── One quest run, frozen (UX-494) ─────────────────────────────────────────
 //
-// A Knowledge Mine session's identity used to live in SIX mutable refs —
-// `sessionIdRef`, `activeDomainRef`, `activeQuestModeRef`, `targetConceptsRef`,
-// `sessionOwnerRef` and the shared idle-aware timer — and `endSession` read them
-// AFTER awaiting an AI summary. So the owner's own reproduction: hold a Math
-// summary, tap *Try another quest*, Start Phonics, and the Math close resumes to
-// find every one of those refs pointing at the Phonics run. It wrote Math's
-// answers under the Phonics document id, stamped `questMode: 'phonics'` on them,
-// backfilled Math's per-answer diamond keys against the Phonics id, and stopped
-// the Phonics timer to read Math's minutes off it.
+// A session's identity used to live in six mutable refs — the id, domain, mode,
+// targets, owner and the shared idle-aware timer — and `endSession` read them
+// AFTER awaiting an AI summary. Hold a Math summary, tap *Try another quest*,
+// Start Phonics, and the Math close resumed to find every ref pointing at the
+// Phonics run: it wrote Math's answers under the Phonics id and mode, backfilled
+// Math's reward keys against that id, and stopped the Phonics timer.
 //
-// A run is therefore frozen into ONE object before any await, and every write a
-// close makes resolves through that object. The live refs still drive question
-// GENERATION (that is what they are for); nothing that finalizes reads them.
-//
-// Pure: no React, no Firestore, no clock of its own — the caller passes `nowIso`.
+// A run is frozen into ONE object before any await; every write a close makes
+// resolves through it. The live refs still drive question GENERATION. Pure: no
+// React, no Firestore, no clock of its own.
 
 import type { EvaluationDomain } from '../../core/types/enums'
 import type { QuestAskPlanRow } from '../../core/foundations/questTargeting'
@@ -30,13 +25,19 @@ import type {
 /**
  * Everything a close needs to know, captured once.
  *
- * `runId` IS the `evaluationSessions` document id, so "the run" and "the record"
- * cannot drift apart: there is one id, decided at start (or restored by Resume),
- * and the reward dedup keys, the completion-bonus key, the word-progress session
- * stamp and the evidence `sourceId` are all derived from it.
+ * `runId` IS the `evaluationSessions` document id, so the run and the record
+ * cannot drift apart: the reward dedup keys, the completion-bonus key, the
+ * word-progress stamp and the evidence `sourceId` all derive from it.
+ *
+ * `instanceId` is the LIVE identity, and it is not the same question. Resume
+ * deliberately reuses a saved `runId`, so two mounts of one saved source share
+ * it — and a guard that compared only the id let an old mount's awaited question,
+ * skip, summary or retry land on the new one. `instanceId` is unique per
+ * established run, including a re-Resume of the same document.
  */
 export interface QuestRun {
   runId: string
+  instanceId: string
   familyId: string
   childId: string
   childName: string
@@ -44,8 +45,6 @@ export interface QuestRun {
   questMode?: QuestMode
   /** The exact queued requests this run selected. Empty when nothing was queued. */
   targetPlan: QuestAskPlanRow[]
-  /** The capture allowlist — the concepts this run may attribute evidence to. */
-  targetConceptIds: string[]
   startedAt: string
 }
 
@@ -55,20 +54,79 @@ export function questRunId(childId: string, startedAtMs: number): string {
 }
 
 /**
- * The stamp the next run id is built from — strictly increasing.
- *
- * `Date.now()` alone can repeat: *Try another quest* then a mode card is two
- * taps that can land in the same millisecond, and two runs sharing an id share
- * a document, a reward key set and an evidence `sourceId`. The shape of the id
- * is untouched; only its uniqueness is guaranteed.
+ * The stamp the next run id is built from — strictly increasing. `Date.now()`
+ * alone can repeat (two taps in one millisecond), and two runs sharing an id
+ * share a document, a reward key set and an evidence `sourceId`.
  */
 export function nextRunStamp(previousStamp: number, nowMs: number): number {
   return nowMs > previousStamp ? nowMs : previousStamp + 1
 }
 
-/** True when `run` is still the hook's live run — the guard on every post-await setState. */
+/** A fresh live identity for an established run. Monotonic per hook. */
+export function questRunInstanceId(runId: string, sequence: number): string {
+  return `${runId}#${sequence}`
+}
+
+/**
+ * Is `run` still the hook's live run? Compares the LIVE identity, so a second
+ * Resume of one saved source does not inherit the first mount's callbacks.
+ */
 export function isLiveRun(live: QuestRun | null | undefined, run: QuestRun): boolean {
-  return live?.runId === run.runId
+  return Boolean(live) && live!.instanceId === run.instanceId
+}
+
+// ── The scope a recovery control is allowed to act in ───────────────────────
+
+/**
+ * The settled identity a recovery read or write belongs to.
+ *
+ * A string rather than an object so a captured value can be compared after an
+ * await by equality, which is what makes an A → B → A switch fail the check:
+ * `identityEpoch` moves on every switch even when family and child come back.
+ */
+export function questRecoveryScopeKey(input: {
+  familyId: string | null | undefined
+  childId: string | null | undefined
+  profile: string | null | undefined
+  identityEpoch: number
+}): string {
+  return `${input.familyId ?? ''}|${input.childId ?? ''}|${input.profile ?? ''}|${input.identityEpoch}`
+}
+
+/**
+ * May this surface act on a SAVED source right now?
+ *
+ * The child has to be the ACTIVE one, not merely on the roster: this control
+ * writes evidence and resolves a parent's queued request, and a card rendered
+ * for the boy on screen must not be able to do that for his brother because a
+ * retained callback still held his id.
+ */
+export function mayRecoverQuestSource(
+  scope: { familyId: string | null | undefined; childId: string | null | undefined },
+  payload: { familyId: string; childId: string },
+): boolean {
+  if (!scope.familyId || !scope.childId) return false
+  if (!payload.familyId || !payload.childId) return false
+  return payload.familyId === scope.familyId && payload.childId === scope.childId
+}
+
+/**
+ * May this surface retry a payload the RUN still holds in memory?
+ *
+ * A different question, deliberately: the payload is a particular run's own and
+ * carries that run's child, which UX-339 says every write of that session
+ * belongs to however the header has since moved. So the active child is NOT the
+ * test — refusing on it would throw away answers a child gave because a parent
+ * tapped another chip. What must hold is the FAMILY: a payload may never be
+ * written into a family nobody is authorised for.
+ */
+export function mayRetrySavingQuestPayload(
+  scope: { familyId: string | null | undefined },
+  payload: { familyId: string; childId: string },
+): boolean {
+  if (!scope.familyId) return false
+  if (!payload.familyId || !payload.childId) return false
+  return payload.familyId === scope.familyId
 }
 
 // ── The final payload ──────────────────────────────────────────────────────
@@ -92,14 +150,12 @@ export interface FinalizedQuestSourceInput {
  * Build a run's one immutable final payload.
  *
  * Every field comes from the frozen run or from arguments the caller captured
- * before its own first await, so the payload cannot acquire a newer run's id,
- * mode, domain, child or plan between being composed and being written. The
- * shape is the shape `endSession` already wrote, plus the additive source
- * record; nothing is computed differently here.
+ * before its first await, so the payload cannot acquire a newer run's id, mode,
+ * domain, child or plan between being composed and being written.
  *
- * It deliberately carries NO `savedQuestState` / `savedCurrentQuestion`: a
- * finalized source is not resumable, and leaving a resume point on it is how a
- * finished session reappeared on the resume card.
+ * It carries NO `savedQuestState` / `savedCurrentQuestion`: a finalized source
+ * is not resumable, and a resume point left on one is how a finished session
+ * reappeared on the resume card.
  */
 export function finalizedQuestSourcePayload(
   input: FinalizedQuestSourceInput,
@@ -107,6 +163,10 @@ export function finalizedQuestSourcePayload(
   const { run, questions, finalState, timedOut, sufficient, nowIso } = input
   const skippedCount = questions.filter((q) => q.skipped).length
   const flaggedErrorCount = questions.filter((q) => q.flaggedAsError).length
+  // Only a sufficient close with a selected request has anything to project. An
+  // ordinary untagged quest is `skipped` from the moment it is written, so the
+  // close makes no model attempt and no surface ever offers it a retry.
+  const eligible = sufficient && run.targetPlan.length > 0
 
   return {
     childId: run.childId,
@@ -132,10 +192,12 @@ export function finalizedQuestSourcePayload(
     questRunId: run.runId,
     targetPlan: run.targetPlan,
     sourceCommittedAt: nowIso,
-    // Only a sufficient, complete source is eligible for the graph at all; an
-    // insufficient close is honestly `skipped`, which is not a success claim.
-    modelProjection: sufficient ? 'pending' : 'skipped',
-    modelProjectionOutcome: sufficient ? 'pending' : 'insufficient-completion',
+    modelProjection: eligible ? 'pending' : 'skipped',
+    modelProjectionOutcome: eligible
+      ? 'pending'
+      : sufficient
+        ? 'no-targets'
+        : 'insufficient-completion',
   }
 }
 
@@ -155,10 +217,10 @@ export interface ResumableQuestSourceInput {
  * Build the resumable partial — unchanged in shape and wording from what
  * `resetToIntro` already wrote, plus the run id and the selected plan.
  *
- * Saving the PLAN here is what makes cold and warm Resume agree: the plan comes
- * back off the exact partial that was reopened, so a hook that still holds the
- * previous run's targets in a ref cannot lend them to this one, and a legacy
- * partial with no plan field resumes with an empty target list either way.
+ * Saving the PLAN is what makes cold and warm Resume agree: it comes back off
+ * the exact partial that was reopened, so a hook still holding the previous
+ * run's targets cannot lend them to this one, and a legacy partial with no plan
+ * field resumes with an empty target list either way.
  */
 export function resumableQuestSourcePayload(
   input: ResumableQuestSourceInput,
@@ -195,25 +257,33 @@ export function resumableQuestSourcePayload(
   }
 }
 
-// ── Recovery identity ──────────────────────────────────────────────────────
+// ── Resume eligibility ─────────────────────────────────────────────────────
+
+/** Why a stored document may not be replayed as a resumable session. */
+export type QuestResumeRefusal =
+  | 'missing'
+  | 'not-interactive'
+  | 'finalized'
+  | 'wrong-child'
+  | 'no-resume-point'
 
 /**
- * May this surface act on this payload right now?
+ * Is this stored document still safe to reopen and play answers into?
  *
- * A recovery control is the one place in the Mine where a write is addressed to
- * a child the screen is no longer necessarily on, so it is checked rather than
- * assumed: the payload's family must be the authorised one, and its child must
- * still be a member of that family's roster. The payload carries its own
- * `childId`, so a permitted retry is correctly attributed by construction — this
- * is about whether the retry may happen at all.
+ * Checked against what is STORED NOW, not against the copy the resume card
+ * loaded: between that read and the tap the run may have been finalized by a
+ * delayed close, abandoned, or reassigned. A refusal is reported so the caller
+ * can say so — never silently turned into an unrelated fresh quest, which would
+ * start a paid run the child did not ask for.
  */
-export function mayRecoverQuestSource(
-  authorizedFamilyId: string | null | undefined,
-  familyChildIds: readonly string[],
-  payload: { familyId: string; childId: string },
-): boolean {
-  if (!authorizedFamilyId) return false
-  if (payload.familyId !== authorizedFamilyId) return false
-  if (!payload.childId) return false
-  return familyChildIds.includes(payload.childId)
+export function questResumeRefusal(
+  stored: Partial<EvaluationSession & InteractiveSessionData> | null | undefined,
+  expectedChildId: string,
+): QuestResumeRefusal | null {
+  if (!stored) return 'missing'
+  if (stored.sessionType !== 'interactive') return 'not-interactive'
+  if (stored.sourceCommittedAt || stored.status === 'complete') return 'finalized'
+  if (!stored.childId || stored.childId !== expectedChildId) return 'wrong-child'
+  if (!stored.savedQuestState || !stored.savedCurrentQuestion) return 'no-resume-point'
+  return null
 }

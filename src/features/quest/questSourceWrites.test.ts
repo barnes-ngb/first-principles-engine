@@ -3,23 +3,33 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 /**
  * UX-494 — a quest source document is written conditionally, or not at all.
  *
- * Four hazards, one per case below:
+ * The hazards, one per case below:
  *   • a RETRY whose first attempt actually committed and lost its
- *     acknowledgement must be recognised, not written twice;
- *   • a payload from a DIFFERENT run must never overwrite a finalized record;
+ *     acknowledgement must be recognised — but ONLY when it is the same
+ *     immutable content, because one run writes one payload and a second
+ *     payload under the same id is two records competing for one document;
+ *   • a payload from a different run, child, mode or domain must never
+ *     overwrite or edit a record it does not own;
  *   • a late `resetToIntro` partial must never turn a completed session back
  *     into a resumable one;
  *   • a stale Resume must never stamp `status: 'resumed'` onto a finalized one.
  */
 
-type Stored = Record<string, unknown> | undefined
-const store = new Map<string, Stored>()
+const store = new Map<string, unknown>()
 const writes: Array<{ path: string; data: Record<string, unknown>; merge: boolean }> = []
 let transactionError: Error | null = null
+
+function seed(path: string, value: object): void {
+  store.set(path, value)
+}
 
 vi.mock('firebase/firestore', () => ({
   collection: (_db: unknown, path: string) => path,
   doc: (col: string, id: string) => ({ path: `${col}/${id}` }),
+  getDoc: async (ref: { path: string }) => {
+    const data = store.get(ref.path)
+    return { exists: () => data !== undefined, data: () => data }
+  },
   runTransaction: async (
     _db: unknown,
     fn: (tx: {
@@ -50,22 +60,24 @@ vi.mock('../../core/firebase/firestore', () => ({
 }))
 
 import {
-  markQuestProjectionFailed,
+  canonicalQuestSourceContent,
   markQuestSourceResumed,
   questSourceRef,
+  readQuestSource,
   saveFinalQuestSource,
   saveResumableQuestSource,
   type QuestSourcePayload,
 } from './questSourceWrites'
 
 const FAM = 'fam-1'
+const CHILD = 'child-1'
 const RUN = 'interactive_child-1_1000'
 const PATH = `sessions-${FAM}/${RUN}`
 const NOW = '2026-11-10T12:00:00.000Z'
 
 function payload(partial: Partial<QuestSourcePayload> = {}): QuestSourcePayload {
   return {
-    childId: 'child-1',
+    childId: CHILD,
     domain: 'reading',
     status: 'complete',
     messages: [],
@@ -74,6 +86,7 @@ function payload(partial: Partial<QuestSourcePayload> = {}): QuestSourcePayload 
     summary: 'five of five',
     evaluatedAt: NOW,
     sessionType: 'interactive',
+    questMode: 'phonics',
     questions: [],
     finalLevel: 3,
     totalCorrect: 5,
@@ -88,6 +101,11 @@ function payload(partial: Partial<QuestSourcePayload> = {}): QuestSourcePayload 
   } as QuestSourcePayload
 }
 
+/** What the SAME payload looks like once stored and read back. */
+function stored(partial: Partial<QuestSourcePayload> = {}): Record<string, unknown> {
+  return JSON.parse(JSON.stringify(payload(partial))) as Record<string, unknown>
+}
+
 const ref = () => questSourceRef(FAM, RUN)
 
 beforeEach(() => {
@@ -95,6 +113,32 @@ beforeEach(() => {
   writes.length = 0
   transactionError = null
   vi.spyOn(console, 'warn').mockImplementation(() => {})
+})
+
+describe('canonicalQuestSourceContent', () => {
+  it('ignores key order', () => {
+    expect(canonicalQuestSourceContent({ childId: CHILD, summary: 'a' })).toBe(
+      canonicalQuestSourceContent({ summary: 'a', childId: CHILD }),
+    )
+  })
+
+  it('ignores only the mutable graph-projection fields', () => {
+    const base = payload()
+    expect(
+      canonicalQuestSourceContent({
+        ...base,
+        modelProjection: 'projected',
+        modelProjectionOutcome: 'projected',
+        modelProjectedAt: NOW,
+      }),
+    ).toBe(canonicalQuestSourceContent(base))
+  })
+
+  it('separates payloads whose ANSWERS differ', () => {
+    expect(canonicalQuestSourceContent(payload({ totalCorrect: 4 }))).not.toBe(
+      canonicalQuestSourceContent(payload()),
+    )
+  })
 })
 
 describe('saveFinalQuestSource', () => {
@@ -106,34 +150,79 @@ describe('saveFinalQuestSource', () => {
   })
 
   it('finalizes over this run’s own resumable partial', async () => {
-    store.set(PATH, { questRunId: RUN, status: 'partial', savedQuestState: {} })
+    seed(PATH, {
+      childId: CHILD,
+      sessionType: 'interactive',
+      domain: 'reading',
+      questMode: 'phonics',
+      questRunId: RUN,
+      status: 'partial',
+      savedQuestState: {},
+    })
     expect(await saveFinalQuestSource(ref(), payload())).toBe('saved')
     expect(writes).toHaveLength(1)
   })
 
   /** A committed acknowledgement lost before the retry. */
   it('recognises its own already-committed payload and writes nothing', async () => {
-    store.set(PATH, { questRunId: RUN, status: 'complete', sourceCommittedAt: NOW })
+    seed(PATH, stored())
     expect(await saveFinalQuestSource(ref(), payload())).toBe('already-committed')
     expect(writes).toHaveLength(0)
   })
 
+  it('still recognises it once the projection has stamped the record', async () => {
+    seed(PATH, {
+      ...stored(),
+      modelProjection: 'projected',
+      modelProjectionOutcome: 'projected',
+      modelProjectedAt: NOW,
+    })
+    expect(await saveFinalQuestSource(ref(), payload())).toBe('already-committed')
+    expect(writes).toHaveLength(0)
+  })
+
+  /** The same id carrying DIFFERENT answers is not a lost acknowledgement. */
+  it('reports a conflict for the same run id with a different payload', async () => {
+    seed(PATH, stored({ totalCorrect: 4, summary: 'four of five' }))
+    expect(await saveFinalQuestSource(ref(), payload())).toBe('conflict')
+    expect(writes).toHaveLength(0)
+  })
+
   it('preserves a conflicting already-finalized source from another run', async () => {
-    store.set(PATH, { questRunId: 'interactive_child-1_9999', status: 'complete', sourceCommittedAt: NOW })
+    seed(PATH, stored({ questRunId: 'interactive_child-1_9999' }))
     expect(await saveFinalQuestSource(ref(), payload())).toBe('conflict')
     expect(writes).toHaveLength(0)
   })
 
   it('preserves a LEGACY complete record, which carries no commit stamp', async () => {
-    store.set(PATH, { status: 'complete', questions: [{ id: 'old' }] })
+    seed(PATH, { status: 'complete', sessionType: 'interactive', questions: [{ id: 'old' }] })
     expect(await saveFinalQuestSource(ref(), payload())).toBe('conflict')
     expect(writes).toHaveLength(0)
   })
 
-  it('refuses a partial record stamped with a different run', async () => {
-    store.set(PATH, { questRunId: 'interactive_child-1_9999', status: 'partial' })
-    expect(await saveFinalQuestSource(ref(), payload())).toBe('conflict')
-    expect(writes).toHaveLength(0)
+  it('refuses an un-finalized record owned by another run, child, domain or mode', async () => {
+    const cases: Array<Record<string, unknown>> = [
+      { questRunId: 'interactive_child-1_9999' },
+      { childId: 'other-child' },
+      { domain: 'math' },
+      { questMode: 'comprehension' },
+      { sessionType: 'guided' },
+    ]
+    for (const overrides of cases) {
+      store.clear()
+      writes.length = 0
+      seed(PATH, {
+        childId: CHILD,
+        sessionType: 'interactive',
+        domain: 'reading',
+        questMode: 'phonics',
+        questRunId: RUN,
+        status: 'partial',
+        ...overrides,
+      })
+      expect(await saveFinalQuestSource(ref(), payload())).toBe('conflict')
+      expect(writes).toHaveLength(0)
+    }
   })
 
   it('throws on a transport failure, so the caller keeps its payload', async () => {
@@ -143,64 +232,85 @@ describe('saveFinalQuestSource', () => {
 })
 
 describe('saveResumableQuestSource', () => {
+  const partial = () => payload({ status: 'partial', sourceCommittedAt: undefined })
+
   it('writes the resumable partial when nothing is finalized', async () => {
-    expect(await saveResumableQuestSource(ref(), payload({ status: 'partial', sourceCommittedAt: undefined }))).toBe('saved')
+    expect(await saveResumableQuestSource(ref(), partial())).toBe('saved')
     expect(writes).toHaveLength(1)
   })
 
   it('REFUSES to overwrite a finalized record', async () => {
-    store.set(PATH, { questRunId: RUN, status: 'complete', sourceCommittedAt: NOW })
-    expect(await saveResumableQuestSource(ref(), payload({ status: 'partial', sourceCommittedAt: undefined }))).toBe('refused-finalized')
+    seed(PATH, stored())
+    expect(await saveResumableQuestSource(ref(), partial())).toBe('refused-finalized')
     expect(writes).toHaveLength(0)
   })
 
-  it('refuses over an insufficient close, which is committed even though it reads partial', async () => {
-    store.set(PATH, { questRunId: RUN, status: 'partial', sourceCommittedAt: NOW })
-    expect(await saveResumableQuestSource(ref(), payload({ status: 'partial', sourceCommittedAt: undefined }))).toBe('refused-finalized')
+  it('refuses over an insufficient close, which is committed though it reads partial', async () => {
+    seed(PATH, stored({ status: 'partial' }))
+    expect(await saveResumableQuestSource(ref(), partial())).toBe('refused-finalized')
     expect(writes).toHaveLength(0)
+  })
+
+  it('refuses a record owned by another run or child', async () => {
+    seed(PATH, {
+      childId: 'other-child',
+      sessionType: 'interactive',
+      domain: 'reading',
+      status: 'partial',
+    })
+    expect(await saveResumableQuestSource(ref(), partial())).toBe('refused-mismatch')
+    expect(writes).toHaveLength(0)
+  })
+
+  /** A manual exit that could not reach Firestore is reported, not lost. */
+  it('throws on a transport failure so the exit can hold its payload', async () => {
+    transactionError = new Error('offline')
+    await expect(saveResumableQuestSource(ref(), partial())).rejects.toThrow('offline')
   })
 })
 
 describe('markQuestSourceResumed', () => {
+  const expectation = { childId: CHILD, questRunId: RUN, domain: 'reading', questMode: 'phonics' }
+
   it('stamps a reopened partial', async () => {
-    store.set(PATH, { questRunId: RUN, status: 'partial' })
-    expect(await markQuestSourceResumed(ref())).toBe('marked')
+    seed(PATH, {
+      childId: CHILD,
+      sessionType: 'interactive',
+      domain: 'reading',
+      questMode: 'phonics',
+      questRunId: RUN,
+      status: 'partial',
+    })
+    expect(await markQuestSourceResumed(ref(), expectation)).toBe('marked')
     expect(writes[0]).toMatchObject({ data: { status: 'resumed' }, merge: true })
   })
 
   it('refuses a record that has since been finalized', async () => {
-    store.set(PATH, { questRunId: RUN, status: 'complete', sourceCommittedAt: NOW })
-    expect(await markQuestSourceResumed(ref())).toBe('refused-finalized')
+    seed(PATH, stored())
+    expect(await markQuestSourceResumed(ref(), expectation)).toBe('refused-finalized')
+    expect(writes).toHaveLength(0)
+  })
+
+  it('refuses a record this run does not own', async () => {
+    seed(PATH, {
+      childId: 'other-child',
+      sessionType: 'interactive',
+      status: 'partial',
+    })
+    expect(await markQuestSourceResumed(ref(), expectation)).toBe('refused-mismatch')
     expect(writes).toHaveLength(0)
   })
 
   it('reports a missing record rather than creating one', async () => {
-    expect(await markQuestSourceResumed(ref())).toBe('missing')
+    expect(await markQuestSourceResumed(ref(), expectation)).toBe('missing')
     expect(writes).toHaveLength(0)
   })
 })
 
-describe('markQuestProjectionFailed', () => {
-  it('records the failure against the source so a reload can offer the retry', async () => {
-    store.set(PATH, { questRunId: RUN, status: 'complete', sourceCommittedAt: NOW, modelProjection: 'pending' })
-    expect(await markQuestProjectionFailed(ref(), RUN, 'offline', NOW)).toBe('marked')
-    expect(writes[0].data).toMatchObject({
-      modelProjection: 'failed',
-      modelProjectionOutcome: 'offline',
-      modelProjectionFailedAt: NOW,
-    })
-  })
-
-  /** Overlapping retries: a late failure must not undo a retry that succeeded. */
-  it('skips a source a concurrent retry has already projected', async () => {
-    store.set(PATH, { questRunId: RUN, modelProjection: 'projected' })
-    expect(await markQuestProjectionFailed(ref(), RUN, 'offline', NOW)).toBe('skipped')
-    expect(writes).toHaveLength(0)
-  })
-
-  it('skips a source owned by another run', async () => {
-    store.set(PATH, { questRunId: 'interactive_child-1_9999' })
-    expect(await markQuestProjectionFailed(ref(), RUN, 'offline', NOW)).toBe('skipped')
-    expect(writes).toHaveLength(0)
+describe('readQuestSource', () => {
+  it('returns what is stored now, or null', async () => {
+    expect(await readQuestSource(ref())).toBeNull()
+    seed(PATH, stored({ status: 'partial' }))
+    expect(await readQuestSource(ref())).toMatchObject({ status: 'partial', questRunId: RUN })
   })
 })

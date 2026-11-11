@@ -67,6 +67,13 @@ vi.mock('../../core/firebase/firestore', () => ({
 }))
 
 vi.mock('../../core/auth/useAuth', () => ({ useFamilyId: () => 'fam-1' }))
+// UX-494 — the hook now also reads the settled identity (profile + the
+// subscribed identity epoch) to scope its recovery controls.
+vi.mock('../../core/profile/useProfile', () => ({ useProfile: () => ({ profile: 'parent' }) }))
+vi.mock('../avatar/stonebridge/libraryReturnFlow', () => ({
+  getLibraryIdentityEpoch: () => 1,
+  subscribeLibraryIdentityEpoch: () => () => {},
+}))
 vi.mock('../../core/xp/addXpEvent', () => ({
   addXpEvent: (...a: unknown[]) => addXpEvent(...(a as [])),
 }))
@@ -126,9 +133,11 @@ function setActive(child: { id: string; name: string }) {
     activeChildId: child.id,
     activeChild: child,
     children: [LINCOLN, LONDON],
+    childrenFamilyId: 'fam-1',
     setActiveChildId: vi.fn(),
     isChildProfile: false,
     isLoading: false,
+    loadFailed: false,
     addChild: vi.fn(),
   })
 }

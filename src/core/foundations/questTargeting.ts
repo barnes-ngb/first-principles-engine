@@ -346,6 +346,15 @@ export interface ApplyQuestResultsOptions {
    * unresolved quest ask for a probed concept.
    */
   plan?: readonly QuestAskPlanRow[]
+  /**
+   * When the child ANSWERED (UX-494) — the saved source's own `evaluatedAt`.
+   *
+   * Evidence is dated by observation; `nowIso` dates the model's freshness
+   * (`updatedAt`, `synthesisStaleAt`, the change line, the resolved ask). A
+   * retry a day after the quest must not post-date the evidence or backdate the
+   * model. Defaults to `nowIso`, which is what every pre-UX-494 caller did.
+   */
+  observedAt?: string
 }
 
 /**
@@ -375,7 +384,8 @@ export function applyQuestResultsToModel(
     return { model, changedConceptIds: [], projectedConceptIds: [] }
   }
 
-  const dateSlice = nowIso.slice(0, 10)
+  const observedAt = opts.observedAt ?? nowIso
+  const dateSlice = observedAt.slice(0, 10)
   const conceptStates = { ...model.conceptStates }
   const changeFeed = [...model.changeFeed]
   const changedConceptIds: string[] = []
@@ -398,7 +408,7 @@ export function applyQuestResultsToModel(
       kind: 'quest',
       sourceId: sessionId,
       note: questEvidenceNote(result, dateSlice),
-      observedAt: nowIso,
+      observedAt,
       ...(establishesState ? { readState: toState } : {}),
     }
     conceptStates[result.conceptId] = {

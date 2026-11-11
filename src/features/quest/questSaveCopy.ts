@@ -36,9 +36,25 @@ export const QUEST_GRAPH_COPY = {
   retry: 'Add to my map',
 } as const
 
-/** The Mine's recovery card, for a saved source whose map update failed. */
+/** The Mine's recovery card, for a saved source whose map update is waiting. */
 export const QUEST_RECOVERY_COPY = {
   title: 'One quest is still waiting.',
   body: 'Your answers are safe.',
   action: QUEST_GRAPH_COPY.retry,
+} as const
+
+/**
+ * Why a Resume did nothing — one line per refusal.
+ *
+ * It says so instead of quietly starting a fresh quest, which is what the old
+ * fallback did: a paid run in whatever mode the card named, that nobody asked
+ * for. Each line is true about a different thing, because the right next move
+ * differs: a finished quest needs no resuming, and a missing one is gone.
+ */
+export const QUEST_RESUME_REFUSAL_COPY = {
+  missing: 'That quest is not here.',
+  'not-interactive': 'That quest cannot go on.',
+  finalized: 'That quest is done.',
+  'wrong-child': 'That quest is not yours.',
+  'no-resume-point': 'That quest cannot go on.',
 } as const
