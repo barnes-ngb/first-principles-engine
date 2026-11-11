@@ -68,7 +68,7 @@ import {
 } from '../../core/utils/blockerLifecycle'
 import { detectBlockersFromSession } from './detectBlockers'
 import type { EvaluationDomain } from '../../core/types/enums'
-import { MasteryGate, SkillLevel } from '../../core/types/enums'
+import { MasteryGate, SkillLevel, UserProfile } from '../../core/types/enums'
 import { domainToSubjectBucket } from '../../core/utils/domainMapping'
 import { useSessionTimer } from '../../core/utils/sessionTimer'
 import { todayKey } from '../../core/utils/dateKey'
@@ -425,6 +425,31 @@ function generateFallbackRecommendations(
 }
 
 // ── Hook ────────────────────────────────────────────────────────
+
+/**
+ * UX-494 — WHO is sitting in front of this retry?
+ *
+ * The scope string and epoch answer "is this control's render still the live
+ * one?", which a FRESH render under a new identity passes by construction: a
+ * sibling's profile mounts, settles, and its own buttons are current. So the
+ * viewer is checked separately, against the live profile and child rather than
+ * against the retained scope key.
+ *
+ * - The parents profile may retry any payload in its authorised family; that is
+ *   the ordinary recovery case, and UX-339 keeps the payload's own child.
+ * - A child profile may retry only the run it OWNS. A sibling is refused, which
+ *   is the case the scope guard alone could not see.
+ * - No profile vouches for nobody and fails closed.
+ */
+function mayViewerRetryQuestPayload(
+  viewer: { profile: UserProfile | null | undefined; liveChildId: string | null | undefined },
+  run: { childId: string },
+): boolean {
+  if (!viewer.profile) return false
+  if (viewer.profile === UserProfile.Parents) return true
+  // A child profile resolves to its own child id; it must be the run's owner.
+  return Boolean(viewer.liveChildId) && viewer.liveChildId === run.childId
+}
 
 export function useQuestSession() {
   const familyId = useFamilyId()
@@ -1438,6 +1463,17 @@ export function useQuestSession() {
       if (!mayRetrySavingQuestPayload({ familyId }, run)) {
         return 'identity-mismatch' as const
       }
+      /**
+       * And the VIEWER has to be authorised for this run.
+       *
+       * The two checks above are about the retained render; this one is about
+       * who is actually looking. A freshly mounted sibling child profile has a
+       * current scope and a current epoch of its own, so it passes both — and
+       * must still not be able to save the original owner's held answers.
+       */
+      if (!mayViewerRetryQuestPayload({ profile, liveChildId }, run)) {
+        return 'identity-mismatch' as const
+      }
       if (sourceRetryInFlightRef.current) return 'busy' as const
       sourceRetryInFlightRef.current = true
 
@@ -1452,8 +1488,10 @@ export function useQuestSession() {
        */
       const ownsView = () =>
         runGenerationRef.current === viewGeneration &&
-        committedScopeRef.current.scope === renderedScope &&
-        committedScopeRef.current.epoch === renderedEpoch
+        // `scopeStillLive`, not a bare `committedScopeRef` comparison: a raw
+        // epoch move the committed ref has not caught up with yet must not let
+        // this attempt report into a view that is already retired.
+        scopeStillLive(renderedScope, renderedEpoch)
       if (ownsView()) setSourceSave({ state: 'saving', kind, canRetry: false })
 
       try {
@@ -1530,7 +1568,7 @@ export function useQuestSession() {
         sourceRetryInFlightRef.current = false
       }
     },
-    [familyId, projectGraph, recoveryScope, identityEpoch, scopeStillLive],
+    [familyId, liveChildId, profile, projectGraph, recoveryScope, identityEpoch, scopeStillLive],
   )
 
   // ── End session ───────────────────────────────────────────────

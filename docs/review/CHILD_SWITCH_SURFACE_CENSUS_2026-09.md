@@ -525,7 +525,10 @@ because refusing it on the active child would discard answers a child actually g
 review of PR #1962 moved one line of that exception and no verdict: the retry's *authorisation* is
 the scope and epoch its button was rendered under rather than the close's, so a freshly rendered
 Retry on a summary that outlived a same-family child change works while a retained one still fails
-closed; the saved-source recovery card keeps its active-child restriction unchanged. Both rows are
+closed; the saved-source recovery card keeps its active-child restriction unchanged. The same review's
+correction adds the one thing a scope key cannot answer — a freshly mounted *sibling child profile* is
+current by construction, so the held-payload retry also admits only the `parents` profile or the run's
+own child and fails closed for a sibling or no profile. Both rows are
 edited in place for exactly the three things §4 allows — the affected surface verdicts, the scoped
 recovery identity, and the evidence for each — and **no row is added or removed**, so the derived
 tallies above are still expected to be unchanged.

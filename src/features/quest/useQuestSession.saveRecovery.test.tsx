@@ -31,7 +31,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
  *     card, with one source and one time credit;
  *   • a freshly rendered Retry on a retained summary is authorised after a
  *     same-family child change, while the button retained from before it is
- *     not — and the payload it writes is still the original owner's.
+ *     not — and the payload it writes is still the original owner's;
+ *   • a freshly MOUNTED sibling child profile, whose own scope and epoch are
+ *     current, still cannot save the original owner's held payload — while the
+ *     parent and the run's own child profile can, and no profile cannot.
  *
  * **Real timers**, like the `childSwitch` harness: the feedback pauses are
  * genuinely awaited, which is why this file sets its own generous timeout. Fake
@@ -174,7 +177,15 @@ vi.mock('../../core/firebase/firestore', () => ({
 }))
 
 vi.mock('../../core/auth/useAuth', () => ({ useFamilyId: () => 'fam-1' }))
-vi.mock('../../core/profile/useProfile', () => ({ useProfile: () => ({ profile: 'parent' }) }))
+/**
+ * The live profile, as the real app spells it — `UserProfile.Parents` is
+ * `'parents'`. Settable per test, because a child profile mounting is exactly
+ * the case a scope key cannot see: a sibling's own view is freshly current.
+ */
+let activeProfile: string | null = 'parents'
+vi.mock('../../core/profile/useProfile', () => ({
+  useProfile: () => ({ profile: activeProfile }),
+}))
 
 let identityEpoch = 1
 vi.mock('../avatar/stonebridge/libraryReturnFlow', () => ({
@@ -280,19 +291,20 @@ vi.mock('../../core/hooks/useActiveChild', () => ({
 
 import { useQuestSession } from './useQuestSession'
 import type { EvaluationDomain } from '../../core/types/enums'
+import { UserProfile } from '../../core/types/enums'
 import type { QuestMode } from './questTypes'
 
 const LINCOLN = { id: 'lincoln', name: 'Lincoln' }
 const LONDON = { id: 'london', name: 'London' }
 
-function setActive(child: { id: string; name: string }) {
+function setActive(child: { id: string; name: string }, isChildProfile = false) {
   mockUseActiveChild.mockReturnValue({
     activeChildId: child.id,
     activeChild: child,
     children: [LINCOLN, LONDON],
     childrenFamilyId: 'fam-1',
     setActiveChildId: vi.fn(),
-    isChildProfile: false,
+    isChildProfile,
     isLoading: false,
     loadFailed: false,
     addChild: vi.fn(),
@@ -377,6 +389,7 @@ beforeEach(() => {
   activeSeconds = 27 * 60
   stopCalls = 0
   identityEpoch = 1
+  activeProfile = UserProfile.Parents
   setActive(LINCOLN)
   chat.mockResolvedValue({ message: `<quest>${QUESTION}</quest>` })
   vi.spyOn(console, 'log').mockImplementation(() => {})
@@ -985,6 +998,123 @@ describe('stale controls and stale scope', () => {
     expect(hoursRows()).toHaveLength(1)
   })
 
+  /**
+   * The review correction: the scope guard above is about the retained RENDER,
+   * and a sibling child profile that mounts afresh passes it by construction —
+   * its own scope and epoch are the live ones. So the VIEWER is checked too,
+   * with a real mounted profile change rather than a fabricated scope key.
+   */
+  it('refuses a freshly rendered retry under a sibling child profile', async () => {
+    selectedPlan = PLAN
+    seedTargetedModel()
+    const view = mountHook()
+    await start(view)
+    transactionError = new Error('offline')
+    await answer(view, 5)
+    const held = view.result.current.sourceSave.runInstanceId
+    expect(held).toBeTruthy()
+
+    // London's own profile is selected and her view settles. The summary is
+    // still Lincoln's (UX-339), and its Retry is now drawn in HER scope.
+    identityEpoch = 2
+    activeProfile = UserProfile.London
+    setActive(LONDON, true)
+    view.rerender()
+    expect(view.result.current.recoveryScope).toBe('fam-1|london|london|2')
+
+    transactionError = null
+    let outcome: unknown
+    await act(async () => {
+      outcome = await view.result.current.retrySourceSave({
+        runInstanceId: view.result.current.sourceSave.runInstanceId,
+        viewGeneration: view.result.current.sourceSave.viewGeneration,
+        scopeKey: view.result.current.recoveryScope,
+        epoch: view.result.current.recoveryEpoch,
+      })
+    })
+
+    expect(outcome).toBe('identity-mismatch')
+    expect(sourceWrites()).toHaveLength(0)
+    expect(projectQuestSourceToModel).not.toHaveBeenCalled()
+    // Nothing was consumed: the payload is still held for whoever may land it.
+    expect(view.result.current.sourceSave).toMatchObject({
+      state: 'failed',
+      kind: 'final',
+      canRetry: true,
+      runInstanceId: held,
+    })
+
+    // Back to the parent, who may. Same payload, same original owner.
+    identityEpoch = 3
+    activeProfile = UserProfile.Parents
+    setActive(LINCOLN)
+    view.rerender()
+    let allowed: unknown
+    await act(async () => {
+      allowed = await view.result.current.retrySourceSave({
+        runInstanceId: view.result.current.sourceSave.runInstanceId,
+        viewGeneration: view.result.current.sourceSave.viewGeneration,
+        scopeKey: view.result.current.recoveryScope,
+        epoch: view.result.current.recoveryEpoch,
+      })
+    })
+    expect(allowed).toBe('saved')
+    expect(sourceWrites()).toHaveLength(1)
+    expect(sourceWrites()[0].data).toMatchObject({ childId: 'lincoln', status: 'complete' })
+  })
+
+  /** The run's OWN child profile is still a first-class retry. */
+  it('admits a retry under the original authorised child’s own profile', async () => {
+    const view = mountHook()
+    await start(view)
+    transactionError = new Error('offline')
+    await answer(view, 5)
+
+    identityEpoch = 2
+    activeProfile = UserProfile.Lincoln
+    setActive(LINCOLN, true)
+    view.rerender()
+
+    transactionError = null
+    let outcome: unknown
+    await act(async () => {
+      outcome = await view.result.current.retrySourceSave({
+        runInstanceId: view.result.current.sourceSave.runInstanceId,
+        viewGeneration: view.result.current.sourceSave.viewGeneration,
+        scopeKey: view.result.current.recoveryScope,
+        epoch: view.result.current.recoveryEpoch,
+      })
+    })
+    expect(outcome).toBe('saved')
+    expect(sourceWrites()[0].data).toMatchObject({ childId: 'lincoln', status: 'complete' })
+  })
+
+  /** No profile vouches for nobody, even with a settled family and child. */
+  it('refuses a retry with no profile selected', async () => {
+    const view = mountHook()
+    await start(view)
+    transactionError = new Error('offline')
+    await answer(view, 5)
+
+    identityEpoch = 2
+    activeProfile = null
+    view.rerender()
+
+    transactionError = null
+    let outcome: unknown
+    await act(async () => {
+      outcome = await view.result.current.retrySourceSave({
+        runInstanceId: view.result.current.sourceSave.runInstanceId,
+        viewGeneration: view.result.current.sourceSave.viewGeneration,
+        scopeKey: view.result.current.recoveryScope,
+        epoch: view.result.current.recoveryEpoch,
+      })
+    })
+    expect(outcome).toBe('identity-mismatch')
+    expect(sourceWrites()).toHaveLength(0)
+    expect(view.result.current.sourceSave).toMatchObject({ state: 'failed', canRetry: true })
+  })
+
   it('fails a retry closed on an unsettled, other-family or other-profile scope', async () => {
     const view = mountHook()
     await start(view)
@@ -998,7 +1128,7 @@ describe('stale controls and stale scope', () => {
     transactionError = null
 
     // `familyId|childId|profile|epoch` — none of these is the live scope.
-    for (const scopeKey of ['unsettled', 'fam-2|lincoln|parent|1', 'fam-1|lincoln|child|1']) {
+    for (const scopeKey of ['unsettled', 'fam-2|lincoln|parents|1', 'fam-1|london|london|1']) {
       let outcome: unknown
       await act(async () => {
         outcome = await view.result.current.retrySourceSave({ ...control, scopeKey })
