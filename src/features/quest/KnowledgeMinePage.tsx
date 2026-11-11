@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { doc, getDocs, query, updateDoc, where, orderBy, limit as firestoreLimit } from 'firebase/firestore'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
@@ -12,10 +13,27 @@ import { ErrorState } from '../../components/states'
 import { useFamilyId } from '../../core/auth/useAuth'
 import { evaluationSessionsCollection } from '../../core/firebase/firestore'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
+import { useProfile } from '../../core/profile/useProfile'
 import { useChildSkillSnapshot } from '../../core/hooks/useChildSkillSnapshot'
 import type { EvaluationSession, SkillSnapshot } from '../../core/types'
 import { EvaluationDomain, SkillLevel } from '../../core/types/enums'
+import { useLearnerModel } from '../../core/hooks/useLearnerModel'
 import MinecraftAvatar from '../avatar/MinecraftAvatar'
+import { MINE_RETURN_LABEL } from '../avatar/stonebridge/libraryReturnCopy'
+import {
+  LibraryReturnDestination,
+  getLibraryIdentityEpoch,
+  getLibraryReturnFlow,
+  libraryReturnForDestination,
+  libraryReturnPath,
+  requestLibraryReturn,
+  subscribeLibraryIdentityEpoch,
+  subscribeLibraryReturnFlow,
+} from '../avatar/stonebridge/libraryReturnFlow'
+import {
+  selectMineInvitation,
+  type MineInvitation,
+} from '../avatar/stonebridge/mineInvitation'
 import { useXpLedger } from '../../core/xp/useXpLedger'
 import QuestQuestionScreen, { QuestFeedback, QuestLoading } from './ReadingQuest'
 import BuildWordQuestionScreen from './BuildWordQuestion'
@@ -114,7 +132,15 @@ function isPhonicsSecure(snapshot: SkillSnapshot | null): boolean {
 }
 
 export default function KnowledgeMinePage() {
-  const { activeChild, activeChildId } = useActiveChild()
+  const {
+    activeChild,
+    activeChildId,
+    childrenFamilyId,
+    isChildProfile,
+    isLoading: childrenLoading,
+    loadFailed: childrenLoadFailed,
+  } = useActiveChild()
+  const { profile } = useProfile()
   const familyId = useFamilyId()
   const quest = useQuestSession()
   const xpLedger = useXpLedger(familyId, activeChildId ?? '')
@@ -194,6 +220,73 @@ export default function KnowledgeMinePage() {
     return () => { cancelled = true }
   }, [activeChildId, familyId, quest.screen]) // re-query when returning to intro
 
+  /**
+   * A trip here from the village's Square invitation, if there is one (UX-493).
+   *
+   * The SAME module-memory journey the Books trip uses — no second store, no URL
+   * state, nothing persisted — read for this scope and this destination only. A
+   * direct arrival at `/quest`, a reload, a journey that belongs to another
+   * child and a journey to the shelf all leave this null, and then this page is
+   * exactly the page it has always been.
+   *
+   * The identity has to be SETTLED, and it has to be THIS family's answer:
+   * `useChildren` keeps the previous answer's list and `activeChild` beside an
+   * unsettled, failed or newly-scoped read, so the id alone would vouch for a
+   * child nobody can confirm — or for one belonging to another family. The
+   * resolved object must also BE the resolved id. Fail-closed on all of it; the
+   * shell's own readiness watch is what ENDS such a journey, and this gate is
+   * what stops it being served in the frames before that lands.
+   *
+   * The epoch is subscribed rather than sampled for the same reason the town
+   * subscribes it: a raw same-tick `A → B → A` leaves family and child
+   * unchanged, and it is what keys the arrival suggestion's reads below.
+   */
+  const returnFlow = useSyncExternalStore(subscribeLibraryReturnFlow, getLibraryReturnFlow)
+  const identityEpoch = useSyncExternalStore(
+    subscribeLibraryIdentityEpoch,
+    getLibraryIdentityEpoch,
+  )
+  const tripScopeTrusted =
+    !childrenLoading &&
+    !childrenLoadFailed &&
+    isChildProfile &&
+    profile !== null &&
+    Boolean(familyId) &&
+    childrenFamilyId === familyId &&
+    Boolean(activeChildId) &&
+    activeChild?.id === activeChildId
+  const mineTrip = tripScopeTrusted
+    ? libraryReturnForDestination(
+        returnFlow,
+        { familyId, childId: activeChildId },
+        LibraryReturnDestination.Mine,
+      )
+    : null
+
+  /**
+   * The ordinary Start, taken by the suggested mode's own card — and only by a
+   * tap that is still the trip it was drawn for.
+   *
+   * Keying the suggestion does not protect a handler already captured by a
+   * rendered card, which is how a role change to parent still started a real
+   * quest (and a real AI call). So the activation re-checks, against the store
+   * rather than against the closure: the identity epoch this page committed
+   * with, and a live Mine journey of this generation for this scope. Refused
+   * means nothing starts.
+   */
+  const startSuggestedMode = (config: QuestDomainConfig, generation: number) => {
+    if (!tripScopeTrusted) return
+    if (identityEpoch !== getLibraryIdentityEpoch()) return
+    const live = libraryReturnForDestination(
+      getLibraryReturnFlow(),
+      { familyId, childId: activeChildId },
+      LibraryReturnDestination.Mine,
+    )
+    if (!live || live.generation !== generation) return
+    setActiveDomain(config)
+    void quest.startQuest(config.domain, config.questMode)
+  }
+
   const phonicsSecure = isPhonicsSecure(snapshot)
 
   // Per-quest domain gating (ARCH-16): each quest family requires its own
@@ -267,6 +360,12 @@ export default function KnowledgeMinePage() {
         >
           ← Back to mine
         </Button>
+        {/* The trip's way back, on the fluency SUMMARY only — this branch
+            returns before the general summary's copy of it. A fluency session
+            still in progress keeps only its own existing exit. */}
+        {mineTrip && quest.screen === QuestScreen.FluencySummary && (
+          <MineTripExit generation={mineTrip.generation} />
+        )}
         {ownerBanner}
         <FluencyPractice quest={quest} />
       </Page>
@@ -277,6 +376,9 @@ export default function KnowledgeMinePage() {
   if (quest.screen === QuestScreen.Intro) {
     return (
       <Page>
+        {/* The way back to the village, for THIS trip only. Nothing starts,
+            finishes or saves here: it is the journey's own one-use request. */}
+        {mineTrip && <MineTripExit generation={mineTrip.generation} />}
         <Box
           sx={{
             bgcolor: MC.bg,
@@ -365,6 +467,25 @@ export default function KnowledgeMinePage() {
                 }
                 setResumeSession(null)
               }}
+            />
+          )}
+
+          {/* ── The village's suggestion, revalidated here (UX-493) ──
+              Mounted under family, child, profile and the identity epoch, so a
+              child change, a role change and a raw same-tick A → B → A each
+              destroy its reads rather than carrying them, and rendered only
+              while THIS page's own read still recommends the mode the village
+              offered. It is an offer with the mode's ordinary Start, guarded at
+              activation; the sections below keep every calibrated choice, and
+              the Resume card above keeps its place. */}
+          {mineTrip && (
+            <MineTripSuggestion
+              key={`${familyId}_${activeChildId}|${profile}|${identityEpoch}`}
+              familyId={familyId}
+              childId={activeChildId}
+              suggestion={mineTrip.suggestion}
+              generation={mineTrip.generation}
+              onStart={startSuggestedMode}
             />
           )}
 
@@ -535,6 +656,13 @@ export default function KnowledgeMinePage() {
         />
       )}
 
+      {/* The same one way back, on the summary — the other screen this trip is
+          offered from. Done, Try again and every writer behind them are
+          untouched; an active quest still exits through its own reset. */}
+      {mineTrip && quest.screen === QuestScreen.Summary && (
+        <MineTripExit generation={mineTrip.generation} />
+      )}
+
       {/* Summary */}
       {quest.screen === QuestScreen.Summary && quest.questState && (
         <QuestSummary
@@ -572,6 +700,148 @@ export default function KnowledgeMinePage() {
 
 // ── Sub-components ──────────────────────────────────────────────
 
+/**
+ * The village's way back, for a live Mine trip only (UX-493).
+ *
+ * Holds nothing and reads nothing: the journey decides whether the tap is
+ * accepted and WHERE it goes (the entry the child actually left from), so a tap
+ * that lands after the scope moved navigates nowhere at all. One use per
+ * journey, by the generation this render was given.
+ */
+function MineTripExit({ generation }: { generation: number }) {
+  const navigate = useNavigate()
+  return (
+    <Button
+      onClick={() => {
+        const returning = requestLibraryReturn(generation)
+        if (!returning) return
+        navigate(libraryReturnPath(returning))
+      }}
+      sx={{
+        // NEW child-facing text, so this feature's readability rule applies and
+        // the legacy Mine's 0.4rem pixel font around it does not: plain, at
+        // least 14px, on the 44px target it already had.
+        fontSize: '14px',
+        lineHeight: 1.45,
+        color: MC.stone,
+        textTransform: 'none',
+        minHeight: 44,
+        mb: 1,
+        '&:hover': { color: MC.white },
+      }}
+    >
+      🏰 {MINE_RETURN_LABEL}
+    </Button>
+  )
+}
+
+/**
+ * The village's suggested mode, revalidated against this page's own read.
+ *
+ * The journey carries what the village offered; it is a suggestion, not an
+ * authorisation, so nothing here trusts it. This re-reads the child's own model
+ * and snapshot inside its own mount scope, runs the SAME pure selector the
+ * village ran, and offers the mode only while the two agree. A recommendation
+ * that moved while the child was walking over (an evaluation, a quest, a review
+ * apply) simply leaves the Mine as it is — every calibrated mode is still listed
+ * below, so nothing is taken away by the suggestion going quiet.
+ *
+ * Nothing autostarts: the card's tap is the mode's ordinary Start, the same call
+ * its own section card makes.
+ */
+function MineTripSuggestion({
+  familyId,
+  childId,
+  suggestion,
+  generation,
+  onStart,
+}: {
+  familyId: string
+  childId: string
+  suggestion: MineInvitation | null
+  /** The journey this card was drawn for — re-checked at activation. */
+  generation: number
+  onStart: (config: QuestDomainConfig, generation: number) => void
+}) {
+  const { snapshot, loaded } = useChildSkillSnapshot(familyId, childId)
+  const { model, loading } = useLearnerModel(familyId, childId)
+  const settled = loaded && !loading
+
+  const current = settled
+    ? selectMineInvitation({
+        model,
+        readingCalibrated: hasReadingCalibration(snapshot),
+        mathCalibrated: hasMathCalibration(snapshot),
+      })
+    : null
+
+  // The mode is what was offered and what is still recommended — the concept may
+  // legitimately differ (the queue moved on inside the same mode), and the offer
+  // was only ever a mode.
+  const agreed =
+    current &&
+    suggestion &&
+    current.domain === suggestion.domain &&
+    current.questMode === suggestion.questMode
+      ? current
+      : null
+  const config = agreed
+    ? [...READING_MODES, ...MATH_MODES].find(
+        (m) => m.domain === agreed.domain && m.questMode === agreed.questMode,
+      )
+    : undefined
+
+  /**
+   * The agreement this card most recently COMMITTED.
+   *
+   * Keying this component protects it from a change of IDENTITY; the host's own
+   * guard protects the start from a change of identity or journey. Neither sees
+   * the third case, which is the one that reached a real AI call: the identity
+   * and the journey are untouched and the OFFER goes away — the model is
+   * removed, the read fails, or the recommendation moves to another mode — while
+   * this component stays mounted. The card stops rendering, but a callback a
+   * test (or a browser) already captured still held the old agreement.
+   *
+   * Written in a layout effect, not during render: a render React abandons must
+   * not be able to authorise a start, and a commit that renders no card records
+   * `null`, which refuses.
+   */
+  const committed = useRef<{ settled: boolean; agreed: MineInvitation | null }>({
+    settled: false,
+    agreed: null,
+  })
+  useLayoutEffect(() => {
+    committed.current = { settled, agreed }
+  }, [settled, agreed])
+
+  if (!agreed || !config) return null
+
+  return (
+    <Box sx={{ mb: 2, textAlign: 'left' }}>
+      <QuestCard
+        // The invitation's own words, and the mode it opens named underneath —
+        // no level, count or score in the offer.
+        config={{ ...config, label: agreed.label, description: config.label }}
+        suggested
+        // Three things have to hold, and this is the one only this component
+        // can check: the offer committed on screen is still the offer this
+        // handler was drawn for. The host then re-checks the identity and the
+        // journey before anything starts.
+        onSelect={() => {
+          const live = committed.current
+          if (!live.settled || !live.agreed) return
+          if (
+            live.agreed.questMode !== agreed.questMode ||
+            live.agreed.domain !== agreed.domain
+          )
+            return
+          onStart(config, generation)
+        }}
+      />
+    </Box>
+  )
+}
+
 function DomainSection({ label, icon, children }: { label: string; icon: string; children: React.ReactNode }) {
   return (
     <Box sx={{ mb: 2, textAlign: 'left' }}>
@@ -593,7 +863,16 @@ function DomainSection({ label, icon, children }: { label: string; icon: string;
   )
 }
 
-function QuestCard({ config, onSelect }: { config: QuestDomainConfig; onSelect: () => void }) {
+function QuestCard({
+  config,
+  onSelect,
+  suggested,
+}: {
+  config: QuestDomainConfig
+  onSelect: () => void
+  /** The village's revalidated offer (UX-493) — a label, never a gate. */
+  suggested?: boolean
+}) {
   const { enabled, icon, label, description, recommended } = config
 
   return (
@@ -626,17 +905,54 @@ function QuestCard({ config, onSelect }: { config: QuestDomainConfig; onSelect: 
       }}
     >
       <Typography sx={{ fontSize: '1.5rem' }}>{icon}</Typography>
-      <Box sx={{ textAlign: 'left', flex: 1 }}>
-        <Stack direction="row" alignItems="center" spacing={1}>
+      <Box sx={{ textAlign: 'left', flex: 1, minWidth: 0 }}>
+        <Stack
+          direction="row"
+          alignItems="center"
+          spacing={1}
+          // The suggested card carries an extra chip beside a sentence-length
+          // label, which has nowhere to go on a 390px phone unless the row is
+          // allowed to wrap. Ordinary cards keep their single line.
+          sx={suggested ? { flexWrap: 'wrap', rowGap: 0.5 } : undefined}
+        >
           <Typography
-            sx={{
-              fontFamily: MC.font,
-              fontSize: '0.5rem',
-              color: enabled ? MC.white : MC.stone,
-            }}
+            sx={
+              suggested
+                ? // NEW child-facing text: plain and readable, not the legacy
+                  // pixel font at 0.5rem. Local to this variant on purpose.
+                  {
+                    fontSize: '16px',
+                    fontWeight: 700,
+                    lineHeight: 1.4,
+                    color: enabled ? MC.white : MC.stone,
+                    minWidth: 0,
+                    overflowWrap: 'anywhere',
+                  }
+                : {
+                    fontFamily: MC.font,
+                    fontSize: '0.5rem',
+                    color: enabled ? MC.white : MC.stone,
+                  }
+            }
           >
             {label}
           </Typography>
+          {suggested && (
+            <Chip
+              label="From your village"
+              size="small"
+              sx={{
+                fontSize: '14px',
+                lineHeight: 1.3,
+                height: 'auto',
+                maxWidth: '100%',
+                bgcolor: MC.diamond,
+                color: MC.bg,
+                fontWeight: 700,
+                '& .MuiChip-label': { px: 1, py: 0.25, whiteSpace: 'normal' },
+              }}
+            />
+          )}
           {recommended && (
             <Chip
               label="Recommended"
@@ -654,17 +970,31 @@ function QuestCard({ config, onSelect }: { config: QuestDomainConfig; onSelect: 
         </Stack>
         {description && (
           <Typography
-            sx={{
-              fontFamily: MC.font,
-              fontSize: '0.35rem',
-              color: MC.stone,
-              mt: 0.5,
-            }}
+            sx={
+              suggested
+                ? {
+                    fontSize: '14px',
+                    lineHeight: 1.45,
+                    color: MC.stone,
+                    mt: 0.5,
+                    overflowWrap: 'anywhere',
+                  }
+                : {
+                    fontFamily: MC.font,
+                    fontSize: '0.35rem',
+                    color: MC.stone,
+                    mt: 0.5,
+                  }
+            }
           >
             {description}
           </Typography>
         )}
-        {enabled && (
+        {/* The reward teaser belongs to the ordinary cards, which all still
+            carry it. The village's single offer stays about the MODE it opens:
+            the same line repeated here would be the loudest thing on a card
+            whose whole job is one invitation. No reward rule changes. */}
+        {enabled && !suggested && (
           <Typography
             sx={{
               fontFamily: MC.font,

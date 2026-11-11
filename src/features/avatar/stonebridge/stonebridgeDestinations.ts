@@ -60,6 +60,17 @@ export const STONEBRIDGE_TOWN_PATH = '/stonebridge'
  */
 export const STONEBRIDGE_TODAY_PATH = '/today'
 
+/**
+ * The Knowledge Mine hub — the route the town's Mine invitation opens (UX-493).
+ *
+ * The EXISTING `/quest` hub, with its own calibration guard, its Resume card and
+ * every calibrated mode it already offers. The invitation carries a temporary
+ * suggestion to it; it does not start, resume or unlock anything, and there is
+ * no second Mine. It is the whole away-set of a Mine trip — pinned to the app's
+ * route table by this module's test, like the other three.
+ */
+export const STONEBRIDGE_MINE_PATH = '/quest'
+
 /** The id `MyAvatarPage` puts on the real ArmorPieceGallery wrapper. */
 export const FORGE_GALLERY_ANCHOR_ID = 'armor-piece-gallery'
 
