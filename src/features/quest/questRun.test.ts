@@ -15,6 +15,7 @@ import {
   nextRunStamp,
   questAbandonRefusal,
   questRecoveryScopeKey,
+  questResumeCardRefusal,
   questResumeRefusal,
   questRunId,
   questRunInstanceId,
@@ -293,5 +294,66 @@ describe('questAbandonRefusal', () => {
       'finalized',
     )
     expect(questAbandonRefusal(closable as never, 'london')).toBe('wrong-child')
+  })
+
+  /**
+   * The intro reoffers a `resumed` row so a claim whose UI was retired stays
+   * recoverable — and that same row may be open in another tab. Resume
+   * converges on it; a discard would write `abandoned` over a live run's only
+   * saved point, so an older card attempting it is refused.
+   */
+  it('refuses a stored `resumed` row while still allowing the ordinary ones', () => {
+    expect(questAbandonRefusal({ ...closable, status: 'resumed' } as never, 'lincoln')).toBe(
+      'not-resumable',
+    )
+    for (const status of ['partial', 'in-progress']) {
+      expect(
+        questAbandonRefusal({ ...closable, status } as never, 'lincoln'),
+        status,
+      ).toBeNull()
+    }
+  })
+})
+
+/** Which rows the intro's Resume card may be DRAWN for (UX-494). */
+describe('questResumeCardRefusal', () => {
+  const row = {
+    sessionType: 'interactive' as const,
+    status: 'partial' as const,
+    childId: 'lincoln',
+    savedQuestState: questState(),
+    savedCurrentQuestion: { id: 'q9' },
+  }
+
+  it('offers the partial, the legacy in-progress AND the claimed `resumed` row', () => {
+    for (const status of ['partial', 'in-progress', 'resumed']) {
+      expect(questResumeCardRefusal({ ...row, status } as never, 'lincoln'), status).toBeNull()
+    }
+  })
+
+  it('offers a row whose saved question never landed, for its secondary action', () => {
+    expect(
+      questResumeCardRefusal({ ...row, savedCurrentQuestion: undefined } as never, 'lincoln'),
+    ).toBeNull()
+  })
+
+  it('keeps finalized, abandoned, invalid and another child’s rows out', () => {
+    expect(questResumeCardRefusal(null, 'lincoln')).toBe('missing')
+    expect(questResumeCardRefusal({ ...row, status: 'complete' } as never, 'lincoln')).toBe(
+      'finalized',
+    )
+    expect(questResumeCardRefusal({ ...row, sourceCommittedAt: NOW } as never, 'lincoln')).toBe(
+      'finalized',
+    )
+    expect(questResumeCardRefusal({ ...row, status: 'abandoned' } as never, 'lincoln')).toBe(
+      'abandoned',
+    )
+    expect(questResumeCardRefusal({ ...row, status: 'queued' } as never, 'lincoln')).toBe(
+      'not-resumable',
+    )
+    expect(questResumeCardRefusal({ ...row, sessionType: 'fluency' } as never, 'lincoln')).toBe(
+      'not-interactive',
+    )
+    expect(questResumeCardRefusal(row as never, 'london')).toBe('wrong-child')
   })
 })

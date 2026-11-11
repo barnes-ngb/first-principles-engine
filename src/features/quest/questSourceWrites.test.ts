@@ -367,6 +367,23 @@ describe('abandonQuestSource', () => {
     expect(writes).toHaveLength(0)
   })
 
+  /**
+   * A `resumed` row is reoffered on the intro now, so an older card can reach
+   * this write for a run that may still be open in another tab — where
+   * `abandoned` would land on that run's only saved point. Resume converges on
+   * it; discard is refused.
+   */
+  it('refuses a stored `resumed` record, which may still be live', async () => {
+    seed(PATH, { ...resumable, status: 'resumed' })
+    expect(await abandonQuestSource(ref(), { childId: CHILD })).toBe('refused')
+    expect(writes).toHaveLength(0)
+  })
+
+  it('still closes out a legacy in-progress row', async () => {
+    seed(PATH, { ...resumable, status: 'in-progress' })
+    expect(await abandonQuestSource(ref(), { childId: CHILD })).toBe('abandoned')
+  })
+
   it('never clobbers another child’s source', async () => {
     seed(PATH, { ...resumable, childId: 'other-child' })
     expect(await abandonQuestSource(ref(), { childId: CHILD })).toBe('refused')

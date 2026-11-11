@@ -292,6 +292,17 @@ export type QuestResumeRefusal =
   | 'stale-scope'
 
 /**
+ * Why a Resume TAP did nothing.
+ *
+ * Every refusal the document can give, plus the one answer the document never
+ * gave: `claim-failed` is the transport rejecting the claim transaction. The
+ * saved point is untouched and still eligible, so the card stays on screen and
+ * the copy asks for another tap — reporting it as `missing` told a child their
+ * intact quest was gone.
+ */
+export type QuestResumeFailure = QuestResumeRefusal | 'claim-failed'
+
+/**
  * The stored `status` values a partial may still be reopened from.
  *
  * `partial` is what this feature writes; `in-progress` is the legacy shape
@@ -326,17 +337,38 @@ export function questResumeRefusal(
 }
 
 /**
- * May a parent close this one out with *Start fresh instead*?
+ * May the intro's resume card be drawn for this row at all?
  *
  * The same question as {@link questResumeRefusal} minus the resume point: a
- * partial whose saved question never landed is not resumable but is still
- * abandonable, and that is the row the card's secondary action is offered for.
- * A completed or another child's source is refused either way.
+ * partial whose saved question never landed is not resumable but is still a row
+ * the card is offered for (its secondary action closes it out). A completed,
+ * abandoned or another child's source is refused either way.
  */
-export function questAbandonRefusal(
+export function questResumeCardRefusal(
   stored: Partial<EvaluationSession & InteractiveSessionData> | null | undefined,
   expectedChildId: string,
 ): QuestResumeRefusal | null {
   const refusal = questResumeRefusal(stored, expectedChildId)
   return refusal === 'no-resume-point' ? null : refusal
+}
+
+/**
+ * May a parent close this one out with *Start fresh instead*?
+ *
+ * Everything {@link questResumeCardRefusal} allows, EXCEPT a stored `resumed`
+ * row. Such a row is reoffered on the intro so an accepted claim whose UI was
+ * retired stays recoverable — but it may equally still be open in another tab,
+ * and discarding it there writes `abandoned` over a live run's only saved
+ * point. Resume converges on the same run; discard cannot, so it is refused and
+ * an ordinary fresh mode card is the way on. `partial` and legacy `in-progress`
+ * discard are unchanged.
+ */
+export function questAbandonRefusal(
+  stored: Partial<EvaluationSession & InteractiveSessionData> | null | undefined,
+  expectedChildId: string,
+): QuestResumeRefusal | null {
+  const refusal = questResumeCardRefusal(stored, expectedChildId)
+  if (refusal) return refusal
+  if (stored?.status === 'resumed') return 'not-resumable'
+  return null
 }

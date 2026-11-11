@@ -84,4 +84,10 @@ export const QUEST_RESUME_REFUSAL_COPY = {
   'not-resumable': 'That quest cannot go on.',
   'no-resume-point': 'That quest cannot go on.',
   'stale-scope': 'Tap it again to go on.',
+  /**
+   * The claim could not be sent — the quest is still here and still eligible,
+   * so the card stays and this asks for another tap. It must NOT say the quest
+   * is gone.
+   */
+  'claim-failed': 'Could not open it. Tap it again.',
 } as const

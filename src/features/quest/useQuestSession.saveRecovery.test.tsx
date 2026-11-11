@@ -302,11 +302,19 @@ function mountHook() {
 }
 type View = ReturnType<typeof mountHook>
 
-/** Answer `n` questions correctly. Five in a run closes the session. */
+/**
+ * Answer `n` questions correctly. Five in a run closes the session.
+ *
+ * The nominal correct answer is whatever the LIVE question expects, not a fixed
+ * `'cat'`: a locally generated spelling or build-sentence question expects its
+ * own target, and hard-coding one word made a warm run fail for a reason that
+ * had nothing to do with saves. Production question selection is untouched.
+ */
 async function answer(view: View, n: number) {
   for (let i = 0; i < n; i += 1) {
+    const expected = view.result.current.currentQuestion?.correctAnswer ?? 'cat'
     await act(async () => {
-      await view.result.current.submitAnswer('cat')
+      await view.result.current.submitAnswer(expected)
     })
   }
 }
@@ -947,6 +955,51 @@ describe('Resume claims what is stored now, atomically', () => {
 
     expect(chat).not.toHaveBeenCalled()
     expect(writes.filter((w) => w.path === path)).toHaveLength(0)
+  })
+
+  /**
+   * A rejected claim is NOT a missing quest: the document was never judged, so
+   * the saved point is intact and still eligible. The card must stay and ask
+   * for another tap rather than telling a child the quest is gone.
+   */
+  it('reports a rejected claim transport as a retry, not as missing', async () => {
+    seed(path, partialDoc)
+    const view = mountHook()
+    transactionError = new Error('offline')
+
+    expect(await resume(view)).toBe('claim-failed')
+    transactionError = null
+    expect(view.result.current.screen).toBe('intro')
+    expect(chat).not.toHaveBeenCalled()
+    // Untouched and still resumable — the second tap gets through.
+    expect(store.get(path)).toMatchObject({ status: 'partial' })
+    expect(await resume(view)).toBe(true)
+    expect(view.result.current.currentQuestion?.id).toBe('q-saved')
+  })
+
+  /**
+   * The row the released app hid: a claim was accepted and the UI retired
+   * before the child answered anything. The stored status is `resumed`, the
+   * saved question is intact, and reopening it must land on the ORIGINAL id,
+   * mode and plan.
+   */
+  it('reopens a stored `resumed` row on its original id and plan', async () => {
+    seed(path, { ...partialDoc, status: 'resumed', targetPlan: [] })
+    const view = mountHook()
+
+    expect(await resume(view)).toBe(true)
+    expect(view.result.current.screen).toBe('question')
+    expect(view.result.current.currentQuestion?.id).toBe('q-saved')
+
+    await answer(view, 4)
+    const saved = lastWriteTo(partialDoc.id)
+    expect(saved.data.status).toBe('complete')
+    expect(saved.data.questMode).toBe('phonics')
+    expect(saved.data.targetPlan).toEqual([])
+    // One document throughout: no second record was created for the reopen.
+    expect(
+      new Set(sourceWrites().map((w) => w.path)),
+    ).toEqual(new Set([path]))
   })
 
   it('refuses a retained Resume before it calls Firestore at all', async () => {

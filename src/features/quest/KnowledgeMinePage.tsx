@@ -48,7 +48,7 @@ import {
   QUEST_RESUME_REFUSAL_COPY,
   QUEST_UNSAVED_COPY,
 } from './questSaveCopy'
-import type { QuestResumeRefusal } from './questRun'
+import { questResumeCardRefusal, type QuestResumeFailure } from './questRun'
 import type { InteractiveSessionData, QuestDomainConfig } from './questTypes'
 import { QuestScreen } from './questTypes'
 import { useQuestSession } from './useQuestSession'
@@ -157,8 +157,22 @@ export default function KnowledgeMinePage() {
   // Load skill snapshot for recommendation badges (shared eligibility fetch)
   const { snapshot } = useChildSkillSnapshot(familyId, activeChildId || undefined)
 
-  // Load in-progress quest sessions (within 24h) for resume card
-  const [resumeSession, setResumeSession] = useState<(EvaluationSession & Partial<InteractiveSessionData>) | null>(null)
+  /**
+   * The saved quest offered on the intro (within 24h), WITH the recovery
+   * identity it was read under — the `graphRecovery` shape, for the same reason
+   * and checked the same way (UX-494).
+   *
+   * A bare session outlived its scope: the previous child's card stayed live
+   * over the new one until the next read landed, and `onResume` then updated
+   * state after its await with no guard at all, unlike *Start fresh*. Binding
+   * the row to the committed scope/epoch lets render retire a previous scope's
+   * card on the frame the identity moves, before any new read completes.
+   */
+  const [resumeRead, setResumeRead] = useState<{
+    scope: string
+    epoch: number
+    session: (EvaluationSession & Partial<InteractiveSessionData>) | null
+  } | null>(null)
   /**
    * UX-494 — why a Resume tap did nothing, when it did nothing.
    *
@@ -166,7 +180,7 @@ export default function KnowledgeMinePage() {
    * child never asked for, in a mode a parent never picked. A refusal now says
    * so and leaves every mode card exactly where it was.
    */
-  const [resumeRefusal, setResumeRefusal] = useState<QuestResumeRefusal | null>(null)
+  const [resumeRefusal, setResumeRefusal] = useState<QuestResumeFailure | null>(null)
 
   /**
    * UX-338 — the resume card belongs to the child whose session it is, and a
@@ -232,45 +246,11 @@ export default function KnowledgeMinePage() {
   const [resumeChildId, setResumeChildId] = useState(activeChildId)
   if (resumeChildId !== activeChildId) {
     setResumeChildId(activeChildId)
-    setResumeSession(null)
+    setResumeRead(null)
     setGraphRecovery(null)
     setResumeRefusal(null)
     setActiveDomain(null)
   }
-
-  useEffect(() => {
-    if (!activeChildId || !familyId) return
-    let cancelled = false
-    async function loadResume() {
-      try {
-        const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
-        // Resumable sessions are saved as 'partial' (new) — also accept legacy
-        // 'in-progress' docs saved before the partials-count change.
-        const q = query(
-          evaluationSessionsCollection(familyId),
-          where('childId', '==', activeChildId),
-          where('status', 'in', ['partial', 'in-progress']),
-          orderBy('evaluatedAt', 'desc'),
-          firestoreLimit(1),
-        )
-        const snap = await getDocs(q)
-        if (cancelled) return
-        const sessions = snap.docs
-          .map((d) => ({ ...d.data(), id: d.id }) as EvaluationSession & Partial<InteractiveSessionData>)
-          // Only offer to resume genuinely resumable docs: a 'partial' saved at
-          // endSession (e.g. AI failed before the mastery threshold) carries no
-          // savedQuestState, so it counts in Records but isn't resumable.
-          .filter((s) => s.sessionType === 'interactive' && s.evaluatedAt >= cutoff && !!s.savedQuestState)
-        setResumeSession(sessions[0] ?? null)
-      } catch {
-        // Non-blocking — resume card is optional
-      }
-    }
-    void loadResume()
-    return () => { cancelled = true }
-    // `resumeReloadNonce` re-reads after a partial has actually LANDED: this
-    // query can otherwise finish before the exit's own write does (UX-494).
-  }, [activeChildId, familyId, quest.screen, quest.resumeReloadNonce])
 
   const recoveryScope = quest.recoveryScope
   const recoveryEpoch = quest.recoveryEpoch
@@ -284,11 +264,87 @@ export default function KnowledgeMinePage() {
    * compare itself against. The previous version compared `scopeAtRead` to
    * `quest.recoveryScope` from the same closure — the same value, so the check
    * could never fail and the guard did nothing.
+   *
+   * Both recovery reads and all three of the cards' handlers — Resume included
+   * — check themselves against this one ref.
    */
   const liveRecovery = useRef({ scope: recoveryScope, epoch: recoveryEpoch })
   useLayoutEffect(() => {
     liveRecovery.current = { scope: recoveryScope, epoch: recoveryEpoch }
   }, [recoveryScope, recoveryEpoch])
+
+  useEffect(() => {
+    if (!activeChildId || !familyId) return
+    // Same gate as the graph card: an unsettled identity vouches for nobody, so
+    // it reads nothing and the render below draws nothing.
+    if (recoveryScope === 'unsettled') return
+    let cancelled = false
+    const scopeAtRead = recoveryScope
+    const epochAtRead = recoveryEpoch
+    const childAtRead = activeChildId
+    async function loadResume() {
+      try {
+        const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+        // Resumable sessions are saved as 'partial' (new) — also accept legacy
+        // 'in-progress' docs saved before the partials-count change, and
+        // 'resumed' docs (UX-494): an accepted claim whose UI was retired — a
+        // reload, a child switch, a route change before the child ever saw the
+        // question — left an intact saved point stored under a status nothing
+        // offered again. The claim helper already accepts `resumed` and
+        // converges on the same run, so reoffering it reopens the ORIGINAL id
+        // and plan rather than starting anything. Nothing reopens by itself.
+        const q = query(
+          evaluationSessionsCollection(familyId),
+          where('childId', '==', activeChildId),
+          where('status', 'in', ['partial', 'in-progress', 'resumed']),
+          orderBy('evaluatedAt', 'desc'),
+          // Three statuses can match now, so the newest row is not necessarily
+          // an eligible one: read a few and take the first that is. Same
+          // query and same index, bounded.
+          firestoreLimit(5),
+        )
+        const snap = await getDocs(q)
+        if (cancelled) return
+        // Scoped like the graph read: the effect is live, the committed
+        // identity is still the one that asked, and that epoch is still the
+        // store's own.
+        const live = liveRecovery.current
+        if (live.scope !== scopeAtRead || live.epoch !== epochAtRead) return
+        if (epochAtRead !== getLibraryIdentityEpoch()) return
+        const sessions = snap.docs
+          .map((d) => ({ ...d.data(), id: d.id }) as EvaluationSession & Partial<InteractiveSessionData>)
+          // The shared eligibility, against what is stored: finalized,
+          // abandoned, another child's and non-interactive rows stay out.
+          // `savedQuestState` is still required on top of it — a 'partial'
+          // saved at endSession (e.g. AI failed before the mastery threshold)
+          // counts in Records but is no saved point.
+          .filter(
+            (s) =>
+              s.evaluatedAt >= cutoff &&
+              !!s.savedQuestState &&
+              questResumeCardRefusal(s, childAtRead) === null,
+          )
+        setResumeRead({
+          scope: scopeAtRead,
+          epoch: epochAtRead,
+          session: sessions[0] ?? null,
+        })
+      } catch {
+        // Non-blocking — resume card is optional
+      }
+    }
+    void loadResume()
+    return () => { cancelled = true }
+    // `resumeReloadNonce` re-reads after a partial has actually LANDED: this
+    // query can otherwise finish before the exit's own write does (UX-494).
+  }, [
+    activeChildId,
+    familyId,
+    quest.screen,
+    quest.resumeReloadNonce,
+    recoveryScope,
+    recoveryEpoch,
+  ])
 
   useEffect(() => {
     // An unsettled identity vouches for nobody, so it reads nothing — and it
@@ -355,6 +411,16 @@ export default function KnowledgeMinePage() {
     graphRecovery.scope === recoveryScope &&
     graphRecovery.epoch === recoveryEpoch
       ? graphRecovery
+      : null
+
+  /** The Resume card, decided the same way and under the same identity. */
+  const resumeCard =
+    resumeRead &&
+    resumeRead.session &&
+    recoveryScope !== 'unsettled' &&
+    resumeRead.scope === recoveryScope &&
+    resumeRead.epoch === recoveryEpoch
+      ? { ...resumeRead, session: resumeRead.session }
       : null
 
   /**
@@ -577,21 +643,53 @@ export default function KnowledgeMinePage() {
           )}
 
           {/* ── Resume card ──────────────────────────────────── */}
-          {resumeSession && (
+          {resumeCard && (
             <ResumeCard
-              session={resumeSession}
+              /* Keyed by the identity it was read under, so a card from a
+                 previous scope cannot be reused for a new one. */
+              key={`${resumeCard.scope}|${resumeCard.epoch}|${resumeCard.session.id ?? 'row'}`}
+              session={resumeCard.session}
+              /* UX-494 — a reoffered `resumed` row may still be open in
+                 another tab, where discarding it would write `abandoned` over
+                 that run's only saved point. Resume converges; discard cannot,
+                 so it is not offered (and the write refuses it too). The
+                 ordinary fresh mode cards below are the way on. */
+              allowStartFresh={resumeCard.session.status !== 'resumed'}
               onResume={() => {
-                const domain = resumeSession.domain as EvaluationDomain
-                const mode = resumeSession.questMode
+                const session = resumeCard.session
+                const domain = session.domain as EvaluationDomain
+                const mode = session.questMode
+                const scopeAtTap = resumeCard.scope
+                const epochAtTap = resumeCard.epoch
                 setResumeRefusal(null)
                 void (async () => {
-                  const outcome = await quest.resumeSession(resumeSession)
+                  const outcome = await quest.resumeSession(session)
+                  // Scoped AFTER the await, like *Start fresh* and the graph
+                  // retry: a result arriving once the identity has moved
+                  // belongs to nobody's screen, and it must not write a
+                  // refusal or a domain onto the new child's intro.
+                  const live = liveRecovery.current
+                  if (live.scope !== scopeAtTap || live.epoch !== epochAtTap) return
                   if (outcome !== true) {
                     // UX-494 — say so, and start NOTHING. The old fallback ran a
                     // fresh paid quest nobody asked for, in whatever mode this
                     // card happened to name.
                     setResumeRefusal(outcome)
-                    setResumeSession(null)
+                    // Retire ONLY this exact row, and only when the SOURCE
+                    // refused it. A rejected claim transport and a busy intro
+                    // lane leave the saved point intact and still eligible, so
+                    // the card stays and the copy asks for another tap —
+                    // dropping it there told a child their quest was gone.
+                    if (outcome !== 'claim-failed' && outcome !== 'stale-scope') {
+                      setResumeRead((current) =>
+                        current &&
+                        current.scope === scopeAtTap &&
+                        current.epoch === epochAtTap &&
+                        current.session?.id === session.id
+                          ? { ...current, session: null }
+                          : current,
+                      )
+                    }
                     return
                   }
                   setActiveDomain(
@@ -609,11 +707,20 @@ export default function KnowledgeMinePage() {
                 // an `abandoned` stamp on the record that Resume is about to
                 // reopen. (It is still the guarded transition underneath, so a
                 // finalized or another child's record is refused as before.)
-                const session = resumeSession
-                const scopeAtTap = recoveryScope
-                const epochAtTap = recoveryEpoch
-                if (!session.id || !session.childId || scopeAtTap === 'unsettled') {
-                  setResumeSession(null)
+                const session = resumeCard.session
+                const scopeAtTap = resumeCard.scope
+                const epochAtTap = resumeCard.epoch
+                const retireThisCard = () =>
+                  setResumeRead((current) =>
+                    current &&
+                    current.scope === scopeAtTap &&
+                    current.epoch === epochAtTap &&
+                    current.session?.id === session.id
+                      ? { ...current, session: null }
+                      : current,
+                  )
+                if (!session.id || !session.childId) {
+                  retireThisCard()
                   return
                 }
                 setResumeRefusal(null)
@@ -627,7 +734,7 @@ export default function KnowledgeMinePage() {
                   const live = liveRecovery.current
                   if (live.scope !== scopeAtTap || live.epoch !== epochAtTap) return
                   if (outcome === 'abandoned' || outcome === 'already-abandoned') {
-                    setResumeSession(null)
+                    retireThisCard()
                     return
                   }
                   // The record was not closed out, so the card must not pretend
@@ -1385,10 +1492,13 @@ function ResumeCard({
   session,
   onResume,
   onStartFresh,
+  /** Off for a reoffered `resumed` row, which may still be live elsewhere. */
+  allowStartFresh = true,
 }: {
   session: EvaluationSession & Partial<InteractiveSessionData>
   onResume: () => void
   onStartFresh: () => void
+  allowStartFresh?: boolean
 }) {
   const [timeLabel] = useState(() => {
     const elapsed = Date.now() - new Date(session.evaluatedAt).getTime()
@@ -1446,35 +1556,37 @@ function ResumeCard({
           </Typography>
         </Box>
       </Stack>
-      <Typography
-        component="span"
-        role="button"
-        tabIndex={0}
-        onClick={(e) => {
-          e.stopPropagation()
-          onStartFresh()
-        }}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault()
+      {allowStartFresh && (
+        <Typography
+          component="span"
+          role="button"
+          tabIndex={0}
+          onClick={(e) => {
             e.stopPropagation()
             onStartFresh()
-          }
-        }}
-        sx={{
-          display: 'block',
-          fontFamily: MC.font,
-          fontSize: '0.3rem',
-          color: MC.stone,
-          mt: 1,
-          textAlign: 'center',
-          textDecoration: 'underline',
-          cursor: 'pointer',
-          '&:hover': { color: MC.gold },
-        }}
-      >
-        Start fresh instead
-      </Typography>
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              e.stopPropagation()
+              onStartFresh()
+            }
+          }}
+          sx={{
+            display: 'block',
+            fontFamily: MC.font,
+            fontSize: '0.3rem',
+            color: MC.stone,
+            mt: 1,
+            textAlign: 'center',
+            textDecoration: 'underline',
+            cursor: 'pointer',
+            '&:hover': { color: MC.gold },
+          }}
+        >
+          Start fresh instead
+        </Typography>
+      )}
     </Box>
   )
 }

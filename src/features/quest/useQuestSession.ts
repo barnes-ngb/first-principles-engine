@@ -45,7 +45,7 @@ import {
   questRunId as buildQuestRunId,
   questRunInstanceId,
   resumableQuestSourcePayload,
-  type QuestResumeRefusal,
+  type QuestResumeFailure,
   type QuestRun,
   type QuestStartOutcome,
 } from './questRun'
@@ -2753,7 +2753,7 @@ export function useQuestSession() {
   const resumeSession = useCallback(
     async (
       partialDoc: EvaluationSession & Partial<InteractiveSessionData> & { id?: string },
-    ): Promise<true | QuestResumeRefusal> => {
+    ): Promise<true | QuestResumeFailure> => {
       if (!familyId) return 'missing'
 
       // Restore session identity so endSession updates this doc, not creates a new one
@@ -2823,7 +2823,9 @@ export function useQuestSession() {
       } catch (err) {
         console.warn('[resumeSession] Could not claim the saved session — not resuming', err)
         releaseResumeClaim()
-        return 'missing'
+        // The transport rejected the claim; the document was never judged, so
+        // the saved point is intact and this is a retry, not a loss.
+        return 'claim-failed'
       }
       if (!claim.ok) {
         console.warn('[resumeSession] Refusing to resume this session:', claim.refusal)
