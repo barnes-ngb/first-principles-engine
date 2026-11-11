@@ -303,9 +303,19 @@ describe('questAbandonRefusal', () => {
    * saved point, so an older card attempting it is refused.
    */
   it('refuses a stored `resumed` row while still allowing the ordinary ones', () => {
-    expect(questAbandonRefusal({ ...closable, status: 'resumed' } as never, 'lincoln')).toBe(
-      'not-resumable',
-    )
+    // An otherwise valid `resumed` row — refused for being live, not for a
+    // missing point, which is its own refusal (see the card suite).
+    expect(
+      questAbandonRefusal(
+        {
+          ...closable,
+          status: 'resumed',
+          savedQuestState: questState(),
+          savedCurrentQuestion: { id: 'q9' },
+        } as never,
+        'lincoln',
+      ),
+    ).toBe('not-resumable')
     for (const status of ['partial', 'in-progress']) {
       expect(
         questAbandonRefusal({ ...closable, status } as never, 'lincoln'),
@@ -335,6 +345,25 @@ describe('questResumeCardRefusal', () => {
     expect(
       questResumeCardRefusal({ ...row, savedCurrentQuestion: undefined } as never, 'lincoln'),
     ).toBeNull()
+  })
+
+  /**
+   * A `resumed` row cannot be discarded, so one without an intact point has no
+   * action left — and offering it would hide an older row that does have one.
+   */
+  it('keeps a `resumed` row with no resume point out', () => {
+    expect(
+      questResumeCardRefusal(
+        { ...row, status: 'resumed', savedQuestState: undefined } as never,
+        'lincoln',
+      ),
+    ).toBe('no-resume-point')
+    expect(
+      questResumeCardRefusal(
+        { ...row, status: 'resumed', savedCurrentQuestion: undefined } as never,
+        'lincoln',
+      ),
+    ).toBe('no-resume-point')
   })
 
   it('keeps finalized, abandoned, invalid and another child’s rows out', () => {

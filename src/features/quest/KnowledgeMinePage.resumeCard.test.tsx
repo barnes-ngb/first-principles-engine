@@ -23,8 +23,10 @@ import KnowledgeMinePage from './KnowledgeMinePage'
 
 const fx = vi.hoisted(() => ({
   screen: 'intro' as string,
-  resumeSession: vi.fn(async (_doc: unknown) => true as unknown),
-  discardPartial: vi.fn(async (_doc: unknown, _expect: unknown) => 'missing' as unknown),
+  resumeSession: vi.fn<(doc: unknown) => Promise<unknown>>(async () => true),
+  discardPartial: vi.fn<(doc: unknown, expected: unknown) => Promise<unknown>>(
+    async () => 'missing',
+  ),
   recoveryScope: 'fam-1|lincoln|child|1',
   recoveryEpoch: 1,
   /** What the resume query finds, newest first (its `orderBy` is stubbed). */

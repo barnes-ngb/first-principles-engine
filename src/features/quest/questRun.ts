@@ -339,17 +339,23 @@ export function questResumeRefusal(
 /**
  * May the intro's resume card be drawn for this row at all?
  *
- * The same question as {@link questResumeRefusal} minus the resume point: a
- * partial whose saved question never landed is not resumable but is still a row
- * the card is offered for (its secondary action closes it out). A completed,
- * abandoned or another child's source is refused either way.
+ * The same question as {@link questResumeRefusal} minus the resume point —
+ * but only for a partial or legacy `in-progress` row: a saved question that
+ * never landed leaves a row that is not resumable yet is still offered (its
+ * secondary action closes it out). A `resumed` row has no such way on: its
+ * discard is refused, so a card for one without an intact saved question and
+ * state would be a tap that can do nothing. `no-resume-point` is propagated
+ * there instead, which also keeps a newer malformed `resumed` row from hiding
+ * an older valid point. A completed, abandoned or another child's source is
+ * refused either way.
  */
 export function questResumeCardRefusal(
   stored: Partial<EvaluationSession & InteractiveSessionData> | null | undefined,
   expectedChildId: string,
 ): QuestResumeRefusal | null {
   const refusal = questResumeRefusal(stored, expectedChildId)
-  return refusal === 'no-resume-point' ? null : refusal
+  if (refusal !== 'no-resume-point') return refusal
+  return stored?.status === 'resumed' ? 'no-resume-point' : null
 }
 
 /**
