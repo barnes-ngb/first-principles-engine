@@ -3374,7 +3374,6 @@ export function useQuestSession() {
      * running by the time it happened.
      */
     const introGeneration = (runGenerationRef.current += 1)
-    const introScope = committedScopeRef.current.scope
     // A Start mid-read no longer owns anything after a reset.
     startClaimRef.current = null
     if (
@@ -3403,10 +3402,19 @@ export function useQuestSession() {
       // be REJECTED offline; the payload is then held for the same scoped retry
       // the summary's failed close uses, offered on the intro this exit lands on.
       // The minutes below are recorded either way: they happened.
-      /** Still the intro this exit landed on, under the same settled scope? */
-      const ownsIntro = () =>
-        runGenerationRef.current === introGeneration &&
-        committedScopeRef.current.scope === introScope
+      /**
+       * Still the exact intro this exit landed on? (promotion)
+       *
+       * The GENERATION alone, deliberately: this attempt belongs to the intro
+       * it was started from, not to whoever is selected when the write lands.
+       * A parent switching the active child mid-write leaves that intro live,
+       * and the scope check used to make the outcome vanish — the payload was
+       * dropped and Saving was never replaced, so returning to the owner found
+       * a stuck notice and no Retry. Who may SEE the notice is a separate
+       * question, already answered at render against the current family and
+       * authorised viewer via the notice's original child/family metadata.
+       */
+      const ownsIntro = () => runGenerationRef.current === introGeneration
       /**
        * The exit intro's own identity rides on every partial notice it
        * publishes (promotion) — the payload's child and family, and the

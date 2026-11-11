@@ -1173,6 +1173,114 @@ describe('a manual partial exit whose save is rejected', () => {
   })
 
   /**
+   * Promotion finding: the parent changes the selected child while the FIRST
+   * partial write is still pending. The intro that owns the attempt is still
+   * live, so the outcome belongs to it — the old scope check dropped the
+   * payload and left Saving on screen for good, with no Retry to tap.
+   */
+  it('keeps a held initial partial for its owning intro across a child switch', async () => {
+    const view = mountHook()
+    await start(view)
+    await answer(view, 2)
+    const runId = runIdFromRewardKey()
+
+    transactionError = new Error('offline')
+    const release = holdNextTransaction()
+    await act(async () => {
+      view.result.current.resetToIntro()
+    })
+    const generation = view.result.current.sourceSave.viewGeneration
+    expect(view.result.current.sourceSave.state).toBe('saving')
+
+    // London is selected while the write is still in flight, and only then
+    // does it reject.
+    identityEpoch = 2
+    setActive(LONDON)
+    view.rerender()
+    release()
+    await settle()
+
+    // The notice settles for the owning child and stays hidden on the sibling's intro.
+    expect(view.result.current.sourceSave).toMatchObject({
+      state: 'failed',
+      kind: 'partial',
+      canRetry: true,
+      originalChildId: 'lincoln',
+      viewGeneration: generation,
+    })
+    expect(view.result.current.visibleSourceSave).toMatchObject({
+      state: 'idle',
+      canRetry: false,
+    })
+
+    // Back on Lincoln's intro: a fresh Retry, and the same source document.
+    identityEpoch = 3
+    setActive(LINCOLN)
+    view.rerender()
+    expect(view.result.current.visibleSourceSave).toMatchObject({
+      state: 'failed',
+      kind: 'partial',
+      canRetry: true,
+    })
+
+    transactionError = null
+    const nonceBefore = view.result.current.resumeReloadNonce
+    let retried: unknown
+    await act(async () => {
+      retried = await view.result.current.retrySourceSave({
+        runInstanceId: view.result.current.sourceSave.runInstanceId,
+        viewGeneration: view.result.current.sourceSave.viewGeneration,
+        scopeKey: view.result.current.recoveryScope,
+        epoch: view.result.current.recoveryEpoch,
+      })
+    })
+    expect(retried).toBe('saved')
+    expect(sourceWrites()).toHaveLength(1)
+    expect(sourceWrites()[0].path).toBe(`sessions-fam-1/${runId}`)
+    expect(sourceWrites()[0].data).toMatchObject({ status: 'partial', childId: 'lincoln' })
+    expect(view.result.current.resumeReloadNonce).toBe(nonceBefore + 1)
+    // The same time, reward and graph behaviour as an uninterrupted exit.
+    expect(hoursRows()).toHaveLength(1)
+    expect(projectQuestSourceToModel).not.toHaveBeenCalled()
+  })
+
+  /** The same intro, acknowledged after an `A → B → A`: it still re-reads. */
+  it('refreshes the owning intro when an initial partial lands after A → B → A', async () => {
+    const view = mountHook()
+    await start(view)
+    await answer(view, 2)
+    const nonceBefore = view.result.current.resumeReloadNonce
+
+    const release = holdNextTransaction()
+    await act(async () => {
+      view.result.current.resetToIntro()
+    })
+    const generation = view.result.current.sourceSave.viewGeneration
+
+    identityEpoch = 2
+    setActive(LONDON)
+    view.rerender()
+    identityEpoch = 3
+    setActive(LINCOLN)
+    view.rerender()
+    release()
+    await settle()
+
+    expect(view.result.current.viewGeneration).toBe(generation)
+    expect(view.result.current.visibleSourceSave).toMatchObject({
+      state: 'saved',
+      kind: 'partial',
+      originalChildId: 'lincoln',
+      viewGeneration: generation,
+    })
+    expect(view.result.current.resumeReloadNonce).toBe(nonceBefore + 1)
+    expect(sourceWrites()).toHaveLength(1)
+    expect(sourceWrites()[0].data).toMatchObject({ status: 'partial', childId: 'lincoln' })
+    expect(hoursRows()).toHaveLength(1)
+    expect(projectQuestSourceToModel).not.toHaveBeenCalled()
+  })
+
+  /**
    * Sol's first partial overlap: a later run that goes back to Intro WITHOUT a
    * counted answer does not replace the old partial's notice — nothing was
    * saved, so there is nothing to publish. Settling (and showing) on the
