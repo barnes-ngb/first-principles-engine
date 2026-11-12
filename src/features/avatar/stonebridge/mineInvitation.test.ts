@@ -49,13 +49,22 @@ function move(conceptId: string, vehicle: SynthesisVehicle = SynthesisVehicle.Qu
   return { conceptId, kidName: 'Lincoln', why: 'because', suggestedVehicle: vehicle }
 }
 
+/** The synthesis generation every fixture carries unless it says otherwise. */
+const GENERATION = '2026-11-01T00:00:00.000Z'
+
 function model(partial: {
   openQuestions?: OpenQuestion[]
   whatMattersNext?: SynthesisMove[]
   synthesisStaleAt?: string | null
   noSynthesis?: boolean
-}): Pick<LearnerModel, 'openQuestions' | 'synthesis' | 'synthesisStaleAt'> {
+  /** Explicitly settable, including to a blank or non-string value (UX-495). */
+  generatedAt?: unknown
+  /** The document's own stamp, when the fixture needs one. */
+  childId?: string
+}): Pick<LearnerModel, 'openQuestions' | 'synthesis' | 'synthesisStaleAt'> &
+  Partial<Pick<LearnerModel, 'childId'>> {
   return {
+    ...(partial.childId ? { childId: partial.childId } : {}),
     openQuestions: partial.openQuestions ?? [],
     synthesis: partial.noSynthesis
       ? undefined
@@ -63,7 +72,9 @@ function model(partial: {
           whatMattersNext: partial.whatMattersNext ?? [],
           narrative: 'a story',
           openQuestionsSummary: [],
-          generatedAt: '2026-11-01T00:00:00.000Z',
+          generatedAt: ('generatedAt' in partial
+            ? partial.generatedAt
+            : GENERATION) as unknown as string,
         },
     synthesisStaleAt: partial.synthesisStaleAt ?? null,
   }
@@ -222,6 +233,105 @@ describe('nothing to offer', () => {
 
   it('an empty model', () => {
     expect(selectMineInvitation({ model: model({}), ...BOTH })).toBeNull()
+  })
+})
+
+/**
+ * UX-495 — WHICH synthesis said so, carried on the offer.
+ *
+ * The defect this closes: the offer named a concept, a mode and a source, and
+ * all three are unchanged when a synthesis is REGENERATED. So a same-concept
+ * generation B that arrived while the child walked to the Mine was
+ * indistinguishable from the generation A they were offered. The generation is
+ * the only thing that can tell them apart, so the offer carries it — for a
+ * fresh synthesis only, and only when the stored value is usable.
+ *
+ * It is not part of the mode decision: every assertion above still holds.
+ */
+describe('the synthesis generation the offer carries', () => {
+  it('is the stored `generatedAt` on a synthesis offer', () => {
+    const invitation = selectMineInvitation({
+      model: model({ whatMattersNext: [move(ADD_WITHIN_20)] }),
+      ...BOTH,
+    })
+    expect(invitation).toMatchObject({
+      conceptId: ADD_WITHIN_20,
+      source: MineInvitationSource.Synthesis,
+      synthesisGeneratedAt: GENERATION,
+    })
+  })
+
+  it('is ABSENT on a queued ask — a queue entry is not advice and has no generation', () => {
+    const invitation = selectMineInvitation({
+      model: model({ openQuestions: [ask(CVC)], whatMattersNext: [move(CVC)] }),
+      ...BOTH,
+    })
+    expect(invitation?.source).toBe(MineInvitationSource.Ask)
+    expect(invitation?.synthesisGeneratedAt).toBeUndefined()
+  })
+
+  it('is absent when the stored generation is missing, blank or not a string', () => {
+    for (const generatedAt of [undefined, '', '   ', 42, null, {}]) {
+      const invitation = selectMineInvitation({
+        model: model({ whatMattersNext: [move(ADD_WITHIN_20)], generatedAt }),
+        ...BOTH,
+      })
+      // The offer itself is unchanged — only the generation is withheld.
+      expect(invitation).toMatchObject({ conceptId: ADD_WITHIN_20 })
+      expect(invitation?.synthesisGeneratedAt).toBeUndefined()
+    }
+  })
+
+  /**
+   * It is a TIMESTAMP field, so a non-blank value that is not one is a
+   * malformed record, not a different generation.
+   */
+  it('is withheld when the stored value is non-blank but not an ISO timestamp', () => {
+    for (const generatedAt of ['generation-2', '42', 'yesterday', '2026-13-45T99:99:99Z', 'T00:00']) {
+      const invitation = selectMineInvitation({
+        model: model({ whatMattersNext: [move(ADD_WITHIN_20)], generatedAt }),
+        ...BOTH,
+      })
+      // The ordinary same-mode suggestion is unchanged; only the generation goes.
+      expect(invitation).toMatchObject({ conceptId: ADD_WITHIN_20, questMode: 'math' })
+      expect(invitation?.synthesisGeneratedAt).toBeUndefined()
+    }
+    // Positive control: the real shape the synthesis beat writes.
+    expect(
+      selectMineInvitation({
+        model: model({ whatMattersNext: [move(ADD_WITHIN_20)], generatedAt: GENERATION }),
+        ...BOTH,
+      })?.synthesisGeneratedAt,
+    ).toBe(GENERATION)
+  })
+
+  it('is trimmed, so a padded stored value still compares equal', () => {
+    const invitation = selectMineInvitation({
+      model: model({ whatMattersNext: [move(ADD_WITHIN_20)], generatedAt: `  ${GENERATION} ` }),
+      ...BOTH,
+    })
+    expect(invitation?.synthesisGeneratedAt).toBe(GENERATION)
+  })
+
+  it('is withheld when the model document is stamped for ANOTHER child', () => {
+    const data = model({ whatMattersNext: [move(ADD_WITHIN_20)], childId: 'london' })
+    const invitation = selectMineInvitation({
+      model: data,
+      ...BOTH,
+      expectedChildId: 'lincoln',
+    })
+    // The mode is still offered (the ordinary behaviour); the generation is not.
+    expect(invitation).toMatchObject({ conceptId: ADD_WITHIN_20, questMode: 'math' })
+    expect(invitation?.synthesisGeneratedAt).toBeUndefined()
+  })
+
+  it('is carried when the stamp agrees, and when no caller says what to expect', () => {
+    const data = model({ whatMattersNext: [move(ADD_WITHIN_20)], childId: 'lincoln' })
+    expect(
+      selectMineInvitation({ model: data, ...BOTH, expectedChildId: 'lincoln' })
+        ?.synthesisGeneratedAt,
+    ).toBe(GENERATION)
+    expect(selectMineInvitation({ model: data, ...BOTH })?.synthesisGeneratedAt).toBe(GENERATION)
   })
 })
 

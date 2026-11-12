@@ -1,4 +1,11 @@
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getDocs, query, where, orderBy, limit as firestoreLimit } from 'firebase/firestore'
 import Alert from '@mui/material/Alert'
@@ -32,8 +39,14 @@ import {
 } from '../avatar/stonebridge/libraryReturnFlow'
 import {
   selectMineInvitation,
+  MineInvitationSource,
   type MineInvitation,
 } from '../avatar/stonebridge/mineInvitation'
+import { MINE_ADDITION_PROBE_CONCEPT } from './mineAdditionProbe'
+import type {
+  MineAdditionPilotOffer,
+  MineAdditionPilotRequest,
+} from './mineAdditionPilot'
 import { useXpLedger } from '../../core/xp/useXpLedger'
 import QuestQuestionScreen, { QuestFeedback, QuestLoading } from './ReadingQuest'
 import BuildWordQuestionScreen from './BuildWordQuestion'
@@ -477,7 +490,16 @@ export default function KnowledgeMinePage() {
    * with, and a live Mine journey of this generation for this scope. Refused
    * means nothing starts.
    */
-  const startSuggestedMode = (config: QuestDomainConfig, generation: number) => {
+  const startSuggestedMode = (
+    config: QuestDomainConfig,
+    generation: number,
+    /**
+     * UX-495 — the offer the card COMMITTED, when it is the one the addition
+     * pilot may run on. Absent for every other suggestion, and absent on every
+     * ordinary mode card, so those Starts are untouched.
+     */
+    pilotOffer?: MineAdditionPilotOffer | null,
+  ) => {
     if (!tripScopeTrusted) return
     if (identityEpoch !== getLibraryIdentityEpoch()) return
     const live = libraryReturnForDestination(
@@ -487,7 +509,35 @@ export default function KnowledgeMinePage() {
     )
     if (!live || live.generation !== generation) return
     setActiveDomain(config)
-    void quest.startQuest(config.domain, config.questMode)
+    /**
+     * The request, assembled where each half is actually known: the card owns
+     * the offer, this host owns the scope and the journey, and the Start owns
+     * the model, the level and the calibration. `tripStillLive` is read from
+     * the STORE when the Start asks — after its own awaited reads — so a
+     * journey that ended in that window takes the pilot with it and leaves the
+     * ordinary calibrated Math Start exactly as it is.
+     */
+    if (!pilotOffer) {
+      // The ordinary suggested Start, called exactly as it always has been.
+      void quest.startQuest(config.domain, config.questMode)
+      return
+    }
+    const pilot: MineAdditionPilotRequest = {
+      ...pilotOffer,
+      familyId,
+      childId: activeChildId,
+      tripGeneration: generation,
+      tripStillLive: () => {
+        if (identityEpoch !== getLibraryIdentityEpoch()) return false
+        const trip = libraryReturnForDestination(
+          getLibraryReturnFlow(),
+          { familyId, childId: activeChildId },
+          LibraryReturnDestination.Mine,
+        )
+        return trip !== null && trip.generation === generation
+      },
+    }
+    void quest.startQuest(config.domain, config.questMode, pilot)
   }
 
   const phonicsSecure = isPhonicsSecure(snapshot)
@@ -1178,7 +1228,11 @@ function MineTripSuggestion({
   suggestion: MineInvitation | null
   /** The journey this card was drawn for — re-checked at activation. */
   generation: number
-  onStart: (config: QuestDomainConfig, generation: number) => void
+  onStart: (
+    config: QuestDomainConfig,
+    generation: number,
+    pilotOffer?: MineAdditionPilotOffer | null,
+  ) => void
 }) {
   const { snapshot, loaded } = useChildSkillSnapshot(familyId, childId)
   const { model, loading } = useLearnerModel(familyId, childId)
@@ -1189,6 +1243,9 @@ function MineTripSuggestion({
         model,
         readingCalibrated: hasReadingCalibration(snapshot),
         mathCalibrated: hasMathCalibration(snapshot),
+        // UX-495 — a model document stamped for another child cannot lend this
+        // read a synthesis generation. The mode decision is unchanged.
+        expectedChildId: childId,
       })
     : null
 
@@ -1209,6 +1266,61 @@ function MineTripSuggestion({
     : undefined
 
   /**
+   * UX-495 — is this offer the one the addition pilot may run on?
+   *
+   * Stricter than the ordinary agreement above on purpose. The ordinary offer
+   * is a MODE, so a concept that moved inside the same mode still starts the
+   * mode; a probe is about one concept from one piece of advice, so all three
+   * generations have to be the same one:
+   *
+   *   • the TOWN's, carried on the trip (`suggestion.synthesisGeneratedAt`);
+   *   • this page's own COMMITTED read (`agreed.synthesisGeneratedAt`);
+   *   • and the Start's re-read, compared inside `resolveMineAdditionPilot`.
+   *
+   * Without the first of those, a same-concept synthesis **B** that replaced
+   * **A** while the child walked over still looked like the same offer, because
+   * the concept, the mode and the source were all unchanged. A missing or blank
+   * value on either side is not a usable generation, so there is no pilot and
+   * the suggestion behaves exactly as it does today.
+   *
+   * Derived as two plain strings and assembled in a `useMemo`, so the object
+   * below has a stable identity: the layout effect that commits it names it as
+   * a dependency, and an object literal rebuilt every render would make that
+   * effect re-run every render (the `exhaustive-deps` warning this answers —
+   * by deriving it cleanly, not by suppressing it).
+   */
+  const offeredGeneration =
+    typeof suggestion?.synthesisGeneratedAt === 'string'
+      ? suggestion.synthesisGeneratedAt.trim()
+      : ''
+  const pilotGeneration =
+    agreed &&
+    suggestion &&
+    agreed.questMode === 'math' &&
+    agreed.conceptId === MINE_ADDITION_PROBE_CONCEPT &&
+    agreed.conceptId === suggestion.conceptId &&
+    agreed.source === MineInvitationSource.Synthesis &&
+    suggestion.source === MineInvitationSource.Synthesis &&
+    offeredGeneration !== '' &&
+    agreed.synthesisGeneratedAt === offeredGeneration
+      ? offeredGeneration
+      : ''
+  const pilotConceptId = pilotGeneration ? MINE_ADDITION_PROBE_CONCEPT : ''
+  const pilotOffer: MineAdditionPilotOffer | null = useMemo(
+    () =>
+      pilotConceptId && pilotGeneration
+        ? {
+            conceptId: pilotConceptId,
+            domain: EvaluationDomain.Math,
+            questMode: 'math',
+            offerSource: MineInvitationSource.Synthesis,
+            synthesisGeneratedAt: pilotGeneration,
+          }
+        : null,
+    [pilotConceptId, pilotGeneration],
+  )
+
+  /**
    * The agreement this card most recently COMMITTED.
    *
    * Keying this component protects it from a change of IDENTITY; the host's own
@@ -1223,13 +1335,19 @@ function MineTripSuggestion({
    * not be able to authorise a start, and a commit that renders no card records
    * `null`, which refuses.
    */
-  const committed = useRef<{ settled: boolean; agreed: MineInvitation | null }>({
+  const committed = useRef<{
+    settled: boolean
+    agreed: MineInvitation | null
+    /** The pilot offer this commit made, if any — never a render's (UX-495). */
+    pilotOffer: MineAdditionPilotOffer | null
+  }>({
     settled: false,
     agreed: null,
+    pilotOffer: null,
   })
   useLayoutEffect(() => {
-    committed.current = { settled, agreed }
-  }, [settled, agreed])
+    committed.current = { settled, agreed, pilotOffer }
+  }, [settled, agreed, pilotOffer])
 
   if (!agreed || !config) return null
 
@@ -1252,7 +1370,23 @@ function MineTripSuggestion({
             live.agreed.domain !== agreed.domain
           )
             return
-          onStart(config, generation)
+          /**
+           * The pilot offer is taken from the COMMIT, and only when it is
+           * still the offer this handler was drawn for. A probe is an
+           * observation about one concept from one synthesis, so a concept,
+           * source or generation that moved since this render simply drops the
+           * pilot — the mode's ordinary Start, which this tap has always been,
+           * is unaffected.
+           */
+          const stillPilot =
+            live.pilotOffer &&
+            pilotOffer &&
+            live.pilotOffer.conceptId === pilotOffer.conceptId &&
+            live.pilotOffer.offerSource === pilotOffer.offerSource &&
+            live.pilotOffer.synthesisGeneratedAt === pilotOffer.synthesisGeneratedAt
+              ? live.pilotOffer
+              : null
+          onStart(config, generation, stillPilot)
         }}
       />
     </Box>
