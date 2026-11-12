@@ -166,6 +166,60 @@ export const WRITING_LEVEL_CAP = 6
  */
 export const SENTENCE_LEVEL_CAP = 6
 
+// ── The Mine addition pilot probe (UX-495) ────────────────────
+//
+// Additive and optional everywhere it appears, so every question, session
+// question and session document written before this pilot reads exactly as it
+// always did: an absent `localProbe` / `pilotProbe` means "not a probe", which
+// is what an ordinary question, a provider-tagged question and a legacy record
+// all are. The logic that builds and CHECKS these lives in
+// `mineAdditionProbe.ts`; only the shapes are here, beside the types they hang
+// off.
+
+/** The discriminator a pilot target and its item stamp both carry. */
+export const MINE_ADDITION_PROBE_KIND = 'mine-addition-pilot' as const
+
+/**
+ * The pilot target a Start ACCEPTED — carried on the frozen run and on the
+ * session's partial and final records, so the saved source can say what was
+ * authorised without anything in memory.
+ *
+ * It is an identity, never advice: no synthesis prose, no reasoning, no parent
+ * vocabulary — the concept, the checked template, where the offer came from and
+ * which synthesis GENERATION it came from.
+ */
+export interface MineAdditionPilotTarget {
+  kind: typeof MINE_ADDITION_PROBE_KIND
+  /** The local checked template the item is built from. */
+  templateId: string
+  /** The graph concept this one observation is attributed to. */
+  conceptId: string
+  /** Where the accepted offer came from. Only a fresh synthesis authorises it. */
+  offerSource: 'synthesis'
+  /** The accepted offer's synthesis generation — the synthesis's `generatedAt`. */
+  synthesisGeneratedAt: string
+  /** The level band the template was checked for. */
+  level: number
+}
+
+/**
+ * The item's own provenance, carried by the question and by the answered row.
+ *
+ * This is what makes the saved-source read able to refuse a provider tag, an
+ * ordinary question, invalid arithmetic, a malformed legacy record or a
+ * duplicate — none of which can produce a second pilot probe.
+ */
+export interface QuestLocalProbeStamp extends MineAdditionPilotTarget {
+  /** The two addends, in the order displayed. */
+  operands: number[]
+  /** The sum exactly as shown to the child, e.g. `"8 + 7"`. */
+  displayedSum: string
+  /** The single correct answer, as a string. */
+  expectedAnswer: string
+  /** The three distinct choices, in the order offered. */
+  choices: string[]
+}
+
 interface QuestQuestionBase {
   id: string
   level: number
@@ -199,6 +253,12 @@ interface QuestQuestionBase {
    * queued concept.
    */
   targetConceptId?: string
+  /**
+   * UX-495 — the local checked-template provenance of the Mine addition pilot's
+   * one item. Absent on every other question, including a provider question
+   * that echoed the same concept id.
+   */
+  localProbe?: QuestLocalProbeStamp
 }
 
 /** Tap-one-option recognition/decoding question (the original quest type). */
@@ -317,6 +377,14 @@ export interface SessionQuestion {
    * correct/total and write `quest` evidence back to the learner model.
    */
   targetConceptId?: string
+  /**
+   * UX-495 — the answered row's copy of the pilot item's provenance: the
+   * template, the operands, the displayed sum, the choices and the expected
+   * answer, beside the ordinary `childAnswer` / `correct` / `inputMethod` /
+   * `responseTimeMs` / `timestamp` this row already records. Validated on the
+   * saved-source read; absent on every other row.
+   */
+  localProbe?: QuestLocalProbeStamp
 }
 
 // ── Extra fields on EvaluationSession for interactive sessions ─
@@ -364,6 +432,19 @@ export interface InteractiveSessionData {
    * after a reload. Carries no parent ask prose.
    */
   targetPlan?: QuestAskPlanRow[]
+  /**
+   * UX-495 — the pilot target this run ACCEPTED, when it carried the Mine
+   * addition probe. Saved on the resumable partial AND on the final payload,
+   * for the same reason `targetPlan` is: the projection is re-derived from the
+   * saved source alone, and a Resume restores what the ORIGINAL run was
+   * authorised for rather than whatever a warm hook still held. Absent on every
+   * ordinary session, which is every session but this pilot's.
+   *
+   * It is kept distinct from `targetPlan` on purpose: synthesis advice and a
+   * queued request identity are two different things, and this pilot resolves
+   * no queued request at all.
+   */
+  pilotProbe?: MineAdditionPilotTarget
   /** When the immutable final payload landed. Absent ⇒ not finalized. */
   sourceCommittedAt?: string
   /**
