@@ -1,4 +1,5 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { StrictMode } from 'react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -40,6 +41,14 @@ import KnowledgeMinePage from './KnowledgeMinePage'
  * against the real hook in `useQuestSession.saveRecovery.test.tsx`.
  */
 
+/** What the summary and the door both hand to the source retry. */
+interface SourceRetryControl {
+  runInstanceId?: string
+  viewGeneration?: number
+  scopeKey: string
+  epoch: number
+}
+
 const fx = vi.hoisted(() => ({
   screen: 'summary' as string,
   sourceState: 'saved' as 'idle' | 'saving' | 'saved' | 'failed' | 'conflict',
@@ -52,7 +61,13 @@ const fx = vi.hoisted(() => ({
   viewGeneration: 7,
   strugglingWord: null as string | null,
   resetToIntro: vi.fn(),
-  retrySourceSave: vi.fn(async () => 'saved' as const),
+  // Typed with the control it is actually called with — the `addDiamondEvent`
+  // shape in `useQuestSession.saveRecovery.test.tsx`. A zero-argument mock
+  // signature makes both `mock.calls[0][0]` and a one-argument
+  // `toHaveBeenCalledWith` a type error.
+  retrySourceSave: vi.fn<(control: SourceRetryControl) => Promise<'saved'>>(
+    async () => 'saved' as const,
+  ),
   startQuest: vi.fn(),
   verdictAsked: vi.fn(),
 }))
@@ -251,7 +266,15 @@ function retainedOnClick(node: HTMLElement): () => void {
 
 const path = () => screen.getByTestId('path').textContent
 const dialog = () => screen.getByRole('dialog')
-const noDialog = () => expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+/**
+ * The door is gone — awaited, not asserted on the spot.
+ *
+ * It also has to be awaited BEFORE anything behind the door is queried: while
+ * a dialog is up, MUI marks the page behind it `aria-hidden`, so a role query
+ * for the summary's own Retry would find nothing even though it is there.
+ */
+const noDialog = () =>
+  waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
 const villageButton = () => screen.getByRole('button', { name: `🏰 ${MINE_RETURN_LABEL}` })
 const doneButton = () => screen.getByRole('button', { name: 'Done' })
 const tryAnotherButton = () => screen.getByRole('button', { name: 'Try another quest' })
@@ -293,48 +316,92 @@ afterEach(() => {
 })
 
 describe('an acknowledged quest leaves exactly as it always did', () => {
-  it('lets Done through without asking', () => {
+  it('lets Done through without asking', async () => {
     renderMine()
     fireEvent.click(doneButton())
-    noDialog()
+    await noDialog()
     expect(fx.resetToIntro).toHaveBeenCalledTimes(1)
     expect(path()).toBe('/today')
   })
 
-  it('lets Try another quest through without asking', () => {
+  it('lets Try another quest through without asking', async () => {
     renderMine()
     fireEvent.click(tryAnotherButton())
-    noDialog()
+    await noDialog()
     expect(fx.resetToIntro).toHaveBeenCalledTimes(1)
     expect(path()).toBe('/quest')
   })
 
-  it('lets Back to village through, and consumes the journey', () => {
+  it('lets Back to village through, and consumes the journey', async () => {
     beginTrip()
     renderMine()
     fireEvent.click(villageButton())
-    noDialog()
+    await noDialog()
     expect(path()).not.toBe('/quest')
     expect(getLibraryReturnFlow()?.phase).toBe(LibraryReturnPhase.Returning)
   })
 
-  it('keeps the practice-story handoff', () => {
+  it('keeps the practice-story handoff', async () => {
     fx.strugglingWord = 'cat'
     renderMine()
     fireEvent.click(screen.getByRole('button', { name: 'Generate a practice story' }))
-    noDialog()
+    await noDialog()
     expect(fx.resetToIntro).toHaveBeenCalledTimes(1)
     expect(path()).toBe('/books/create-story')
   })
 
-  it('leaves an ordinary intro return alone', () => {
+  it('leaves an ordinary intro return alone', async () => {
     fx.screen = QuestScreen.Intro
     fx.sourceState = 'idle'
     beginTrip()
     renderMine()
     fireEvent.click(villageButton())
-    noDialog()
+    await noDialog()
     expect(path()).not.toBe('/quest')
+  })
+
+  /**
+   * Correction 1 — the confirmed StrictMode dead exit. `main.tsx` renders the
+   * app inside `StrictMode`, so every mount is mount → cleanup → mount. A
+   * mounted-ref that is only ever CLEARED stays false after that second setup,
+   * and then every guarded exit on this page silently does nothing. This is
+   * the positive case: the real app's own render mode, and the exit works.
+   */
+  it('still leaves under StrictMode, which is how the app renders', async () => {
+    render(
+      <StrictMode>
+        <MemoryRouter initialEntries={['/quest']}>
+          <KnowledgeMinePage />
+          <PathProbe />
+        </MemoryRouter>
+      </StrictMode>,
+    )
+    fireEvent.click(doneButton())
+    await noDialog()
+    expect(fx.resetToIntro).toHaveBeenCalled()
+    expect(path()).toBe('/today')
+  })
+
+  it('still holds a denied close under StrictMode', async () => {
+    deniedSave()
+    render(
+      <StrictMode>
+        <MemoryRouter initialEntries={['/quest']}>
+          <KnowledgeMinePage />
+          <PathProbe />
+        </MemoryRouter>
+      </StrictMode>,
+    )
+    fireEvent.click(doneButton())
+
+    expect(within(dialog()).getByText(QUEST_EXIT_GUARD_COPY.failedTitle)).toBeInTheDocument()
+    expect(fx.resetToIntro).not.toHaveBeenCalled()
+
+    // And the deliberate departure still works from that door.
+    fireEvent.click(leaveButton())
+    await noDialog()
+    expect(fx.resetToIntro).toHaveBeenCalledTimes(1)
+    expect(path()).toBe('/today')
   })
 
   /**
@@ -342,17 +409,17 @@ describe('an acknowledged quest leaves exactly as it always did', () => {
    * unsaved quest: it is recoverable from the saved source after a village
    * return and re-entry, where the Mine's own recovery card offers it.
    */
-  it('never holds the door for a graph-only failure', () => {
+  it('never holds the door for a graph-only failure', async () => {
     fx.graphState = 'failed'
     renderMine()
     fireEvent.click(doneButton())
-    noDialog()
+    await noDialog()
     expect(path()).toBe('/today')
   })
 })
 
 describe('a denied close holds every Mine-owned completion exit', () => {
-  it('holds Back to village, leaves the journey unspent and keeps the way back', () => {
+  it('holds Back to village, leaves the journey unspent and keeps the way back', async () => {
     beginTrip()
     deniedSave()
     renderMine()
@@ -365,6 +432,7 @@ describe('a denied close holds every Mine-owned completion exit', () => {
     expect(fx.resetToIntro).not.toHaveBeenCalled()
 
     fireEvent.click(stayButton())
+    await noDialog()
     expect(villageButton()).toBeInTheDocument()
   })
 
@@ -417,25 +485,25 @@ describe('the door itself', () => {
     expect(stayButton()).toHaveFocus()
   })
 
-  it('offers a stay that keeps the original summary and its retry', () => {
+  it('offers a stay that keeps the original summary and its retry', async () => {
     deniedSave()
     renderMine()
     fireEvent.click(doneButton())
     fireEvent.click(stayButton())
 
-    noDialog()
+    await noDialog()
     expect(path()).toBe('/quest')
     expect(fx.resetToIntro).not.toHaveBeenCalled()
     expect(screenRetry()).toHaveLength(1)
   })
 
-  it('treats Escape as staying', () => {
+  it('treats Escape as staying', async () => {
     deniedSave()
     renderMine()
     fireEvent.click(doneButton())
     fireEvent.keyDown(dialog(), { key: 'Escape', code: 'Escape' })
 
-    noDialog()
+    await noDialog()
     expect(path()).toBe('/quest')
     expect(fx.resetToIntro).not.toHaveBeenCalled()
     expect(screenRetry()).toHaveLength(1)
@@ -448,11 +516,13 @@ describe('the door itself', () => {
     fireEvent.click(within(dialog()).getByRole('button', { name: QUEST_EXIT_GUARD_COPY.retry }))
 
     expect(fx.retrySourceSave).toHaveBeenCalledTimes(1)
-    expect(fx.retrySourceSave.mock.calls[0][0]).toMatchObject({
-      runInstanceId: 'run-1',
-      scopeKey: 'fam-1|lincoln|child|1',
-      epoch: 1,
-    })
+    expect(fx.retrySourceSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runInstanceId: 'run-1',
+        scopeKey: 'fam-1|lincoln|child|1',
+        epoch: 1,
+      }),
+    )
     // A retry neither departs nor resets, and the door waits for the outcome.
     expect(path()).toBe('/quest')
     expect(fx.resetToIntro).not.toHaveBeenCalled()
@@ -528,7 +598,7 @@ describe('a save that is still in flight', () => {
     expect(fx.resetToIntro).not.toHaveBeenCalled()
   })
 
-  it('closes its own door when the save lands, and waits for a fresh tap', () => {
+  it('closes its own door when the save lands, and waits for a fresh tap', async () => {
     fx.sourceState = 'saving'
     const view = renderMine()
     fireEvent.click(doneButton())
@@ -538,7 +608,7 @@ describe('a save that is still in flight', () => {
     view.rerender(mineElement())
 
     // No surprise navigation: the door closed, nothing departed.
-    noDialog()
+    await noDialog()
     expect(path()).toBe('/quest')
     expect(fx.resetToIntro).not.toHaveBeenCalled()
 
@@ -572,7 +642,7 @@ describe('a source conflict', () => {
  * departure, however healthy the current save looks.
  */
 describe('a handler retained from a view that is gone', () => {
-  it('does nothing when a new run owns the view, even with the source saved', () => {
+  it('does nothing when a new run owns the view, even with the source saved', async () => {
     const view = renderMine()
     const staleDone = retainedOnClick(doneButton())
 
@@ -580,7 +650,7 @@ describe('a handler retained from a view that is gone', () => {
     view.rerender(mineElement())
 
     staleDone()
-    noDialog()
+    await noDialog()
     expect(fx.resetToIntro).not.toHaveBeenCalled()
     expect(path()).toBe('/quest')
   })
@@ -665,7 +735,7 @@ describe('a retained deliberate departure', () => {
     expect(path()).toBe('/quest')
   })
 
-  it('cannot navigate after the save is acknowledged', () => {
+  it('cannot navigate after the save is acknowledged', async () => {
     deniedSave()
     const view = renderMine()
     fireEvent.click(doneButton())
@@ -674,7 +744,7 @@ describe('a retained deliberate departure', () => {
     fx.sourceState = 'saved'
     fx.canRetry = false
     view.rerender(mineElement())
-    noDialog()
+    await noDialog()
 
     leave()
     expect(fx.resetToIntro).not.toHaveBeenCalled()
@@ -726,6 +796,106 @@ describe('a retained deliberate departure', () => {
 })
 
 /**
+ * Correction 2 — one prompt's callbacks belong to that prompt.
+ *
+ * The door's Retry, Stay and Leave used to act on whatever the intent ref
+ * happened to hold, so a callback captured while prompt A was up could clear,
+ * retry or depart for prompt B. And a retired-but-hidden A must not block B
+ * from opening at all.
+ */
+describe('a second prompt, raised after the first was retired', () => {
+  it('opens for a fresh exit, and the old prompt cannot touch it', async () => {
+    deniedSave()
+    const view = renderMine()
+
+    // Prompt A, over the denial. Both of its callbacks are kept in hand.
+    fireEvent.click(doneButton())
+    const oldStay = retainedOnClick(stayButton())
+    const oldLeave = retainedOnClick(leaveButton())
+
+    // The save lands. The door closes, and A is retired — but still sitting in
+    // the ref behind it, which is exactly what used to block the next prompt.
+    fx.sourceState = 'saved'
+    fx.canRetry = false
+    view.rerender(mineElement())
+    await noDialog()
+
+    // A new run, a new denial, and a fresh exit tap.
+    fx.viewGeneration = 9
+    fx.runInstanceId = 'run-2'
+    deniedSave()
+    view.rerender(mineElement())
+    fireEvent.click(doneButton())
+
+    // Prompt B is up: the retired A did not stand in its way.
+    expect(within(dialog()).getByText(QUEST_EXIT_GUARD_COPY.failedTitle)).toBeInTheDocument()
+
+    // A's Stay must not dismiss B…
+    oldStay()
+    expect(dialog()).toBeInTheDocument()
+    // …and A's Leave must not depart for it.
+    oldLeave()
+    expect(fx.resetToIntro).not.toHaveBeenCalled()
+    expect(path()).toBe('/quest')
+
+    // B's own Stay still works, and leaves B's screen and retry alone.
+    fireEvent.click(stayButton())
+    await noDialog()
+    expect(fx.resetToIntro).not.toHaveBeenCalled()
+    expect(screenRetry()).toHaveLength(1)
+  })
+
+  it("does not let an old prompt's Retry re-send under a newer one", async () => {
+    deniedSave()
+    const view = renderMine()
+    fireEvent.click(doneButton())
+    const oldRetry = retainedOnClick(
+      within(dialog()).getByRole('button', { name: QUEST_EXIT_GUARD_COPY.retry }),
+    )
+
+    fx.sourceState = 'saved'
+    fx.canRetry = false
+    view.rerender(mineElement())
+    await noDialog()
+
+    fx.viewGeneration = 9
+    fx.runInstanceId = 'run-2'
+    deniedSave()
+    view.rerender(mineElement())
+    fireEvent.click(doneButton())
+
+    oldRetry()
+    expect(fx.retrySourceSave).not.toHaveBeenCalled()
+    // B's own Retry is the one that works, for B's own payload.
+    fireEvent.click(within(dialog()).getByRole('button', { name: QUEST_EXIT_GUARD_COPY.retry }))
+    expect(fx.retrySourceSave).toHaveBeenCalledTimes(1)
+    expect(fx.retrySourceSave).toHaveBeenCalledWith(
+      expect.objectContaining({ runInstanceId: 'run-2' }),
+    )
+  })
+
+  /** A prompt that is still real keeps the first tap, exactly as before. */
+  it('keeps a still-live prompt rather than replacing it', async () => {
+    deniedSave()
+    renderMine()
+    // Captured before the door goes up: an open dialog marks the page behind
+    // it aria-hidden, so a role query would not find this button.
+    const another = tryAnotherButton()
+    fireEvent.click(doneButton())
+    const firstStay = retainedOnClick(stayButton())
+
+    // A second guarded exit while the first prompt is up changes nothing.
+    fireEvent.click(another)
+    expect(screen.getAllByRole('dialog')).toHaveLength(1)
+
+    // And the first prompt's own Stay is still the live one.
+    firstStay()
+    await noDialog()
+    expect(fx.resetToIntro).not.toHaveBeenCalled()
+  })
+})
+
+/**
  * Correction 4 — the same loss from the intro, which Sol reproduced on phone
  * and tablet: *Back to mine* → intro → *Back to village* with the manual
  * exit's partial still unsaved.
@@ -747,19 +917,20 @@ describe("the owning intro's return, while its partial is unsaved", () => {
     expect(getLibraryReturnFlow()?.phase).toBe(LibraryReturnPhase.Away)
   })
 
-  it('is held when the partial was denied, and the card keeps its retry', () => {
+  it('is held when the partial was denied, and the card keeps its retry', async () => {
     deniedSave('partial')
     renderMine()
     fireEvent.click(villageButton())
 
     expect(within(dialog()).getByText(QUEST_EXIT_GUARD_COPY.failedTitle)).toBeInTheDocument()
     fireEvent.click(stayButton())
+    await noDialog()
     // The intro's own unsaved card, exactly where it was.
     expect(screenRetry().length).toBeGreaterThan(0)
     expect(path()).toBe('/quest')
   })
 
-  it('lets the child go once a retry has landed, on a fresh tap', () => {
+  it('lets the child go once a retry has landed, on a fresh tap', async () => {
     deniedSave('partial')
     const view = renderMine()
     fireEvent.click(villageButton())
@@ -770,18 +941,18 @@ describe("the owning intro's return, while its partial is unsaved", () => {
     fx.sourceState = 'saved'
     fx.canRetry = false
     view.rerender(mineElement())
-    noDialog()
+    await noDialog()
     expect(path()).toBe('/quest')
 
     fireEvent.click(villageButton())
     expect(path()).not.toBe('/quest')
   })
 
-  it('leaves other intro actions alone', () => {
+  it('leaves other intro actions alone', async () => {
     deniedSave('partial')
     renderMine()
     // A mode card is not a departure: it is unguarded and still starts.
     fireEvent.click(screen.getAllByText('Phonics Quest')[0])
-    noDialog()
+    await noDialog()
   })
 })

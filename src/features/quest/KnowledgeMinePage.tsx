@@ -547,9 +547,17 @@ export default function KnowledgeMinePage() {
    * A handler retained by a PRIOR route mount closes over that instance's refs
    * and would still reach the live history object, so the mount itself is part
    * of what authorises an exit.
+   *
+   * Set true in SETUP as well as false in cleanup — the `AudioRecorder.liveRef`
+   * shape, and not optional. StrictMode (which `main.tsx` uses, and which Sol's
+   * app therefore runs) mounts, cleans up and mounts again: a ref that is only
+   * ever cleared stays false after that second setup, and every guarded exit on
+   * the page is then silently dead. Initialising to `true` is not enough,
+   * because the initial value is not re-applied on the remount.
    */
   const exitMountedRef = useRef(true)
   useEffect(() => {
+    exitMountedRef.current = true
     return () => {
       exitMountedRef.current = false
     }
@@ -559,6 +567,36 @@ export default function KnowledgeMinePage() {
   const exitTripStillLive = (generation: number) => {
     const live = getLibraryReturnFlow()
     return live !== null && live.generation === generation && live.phase === LibraryReturnPhase.Away
+  }
+
+  /**
+   * Is a held intent still real — still held, and still able to act?
+   *
+   * Asked in the handler that is about to use it, never from an effect. An
+   * intent is retired by a source ACKNOWLEDGEMENT (the verdict goes `clear`),
+   * by a newer run or a new epoch (`stale`), and by its own journey ending.
+   */
+  const heldExitStillValid = (intent: HeldQuestExit) => {
+    if (intent.tripGeneration !== undefined && !exitTripStillLive(intent.tripGeneration)) {
+      return false
+    }
+    return quest.questExitVerdict(intent.binding).kind === 'hold'
+  }
+
+  /**
+   * Admit the intent a RENDERED door was drawn for — and only that one.
+   *
+   * The door's three callbacks used to take whatever `exitIntentRef` happened
+   * to hold, so a callback captured while prompt A was open could clear, retry
+   * or depart for prompt B. Each rendered door carries its own prompt's id and
+   * is admitted against the live one, which is the current-versus-retained
+   * distinction this guard is built on.
+   */
+  const admitPromptIntent = (promptId: number | null) => {
+    if (!exitMountedRef.current) return null
+    const intent = exitIntentRef.current
+    if (!intent || promptId === null || intent.id !== promptId) return null
+    return intent
   }
 
   /**
@@ -587,8 +625,15 @@ export default function KnowledgeMinePage() {
         depart()
         return
       }
-      // A second tap keeps the first valid intent rather than replacing it.
-      if (exitIntentRef.current) return
+      // A second tap keeps the first VALID intent rather than replacing it.
+      // A hidden one that has already been retired — by an acknowledgement, a
+      // newer run, a new epoch or an ended journey — must not block a fresh
+      // prompt, so it is dropped here, in the tap that found it.
+      const held = exitIntentRef.current
+      if (held) {
+        if (heldExitStillValid(held)) return
+        exitIntentRef.current = null
+      }
       const intent: HeldQuestExit = {
         id: (exitIntentSeq.current += 1),
         depart,
@@ -639,16 +684,23 @@ export default function KnowledgeMinePage() {
     return null
   })()
 
-  /** *Stay here*, a backdrop tap and Escape: keep the screen, drop the intent. */
-  const stayWithQuest = () => {
+  /**
+   * *Stay here*, a backdrop tap and Escape: keep the screen, drop the intent.
+   *
+   * Only its OWN prompt's intent. A Stay retained from an earlier prompt must
+   * not dismiss the one the child is looking at now.
+   */
+  const stayWithQuest = (promptId: number | null) => {
+    if (!admitPromptIntent(promptId)) return
     exitIntentRef.current = null
     setExitPrompt(null)
   }
 
   /** The same same-source Retry the screen behind the door offers. */
-  const retryHeldQuestSave = () => {
-    const intent = exitIntentRef.current
-    if (!intent || !exitMountedRef.current) return
+  const retryHeldQuestSave = (promptId: number | null) => {
+    const intent = admitPromptIntent(promptId)
+    if (!intent) return
+    if (intent.tripGeneration !== undefined && !exitTripStillLive(intent.tripGeneration)) return
     const verdict = quest.questExitVerdict(intent.binding)
     if (verdict.kind !== 'hold' || !verdict.canRetry) return
     void quest.retrySourceSave({
@@ -662,12 +714,13 @@ export default function KnowledgeMinePage() {
   }
 
   /** The deliberate departure — admitted once, re-checked, then taken. */
-  const leaveQuestAnyway = () => {
-    const intent = exitIntentRef.current
-    // Admitted and consumed in one synchronous step, so a retained handler
-    // cannot fire twice or fire at all after a Stay, an Escape, an
-    // acknowledgement or a newer prompt.
-    if (!intent || !exitMountedRef.current) return
+  const leaveQuestAnyway = (promptId: number | null) => {
+    // Admitted against the live intent and consumed in one synchronous step,
+    // so a retained handler cannot fire twice, cannot fire at all after a
+    // Stay, an Escape or an acknowledgement, and cannot depart for a prompt it
+    // was not drawn for.
+    const intent = admitPromptIntent(promptId)
+    if (!intent) return
     exitIntentRef.current = null
     setExitPrompt(null)
     if (intent.tripGeneration !== undefined && !exitTripStillLive(intent.tripGeneration)) return
@@ -690,9 +743,11 @@ export default function KnowledgeMinePage() {
     <QuestExitGuardDialog
       phase={exitPromptPhase}
       canRetry={quest.visibleSourceSave.canRetry}
-      onRetry={retryHeldQuestSave}
-      onStay={stayWithQuest}
-      onLeaveAnyway={leaveQuestAnyway}
+      // Each door's callbacks carry the id of the prompt THIS render drew, so
+      // a callback retained from an earlier prompt admits nothing.
+      onRetry={() => retryHeldQuestSave(exitPrompt?.id ?? null)}
+      onStay={() => stayWithQuest(exitPrompt?.id ?? null)}
+      onLeaveAnyway={() => leaveQuestAnyway(exitPrompt?.id ?? null)}
     />
   )
 
