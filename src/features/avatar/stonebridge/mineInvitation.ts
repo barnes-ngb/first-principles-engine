@@ -153,11 +153,26 @@ function offerFor(
 }
 
 /**
+ * Is this an ISO timestamp, and not merely a non-blank string?
+ *
+ * `generatedAt` IS a timestamp field, so a non-blank value that is not one
+ * ("generation-2", "42", a truncated write) is a malformed record rather than a
+ * different generation. Shape then parse: the date prefix rules out numeric
+ * junk the fallback date parser would otherwise accept. Nothing here asks how
+ * OLD the value is — staleness is still the stored MARK's job alone.
+ */
+function isIsoTimestamp(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}/.test(value)) return false
+  return Number.isFinite(Date.parse(value))
+}
+
+/**
  * The stored synthesis generation this read may carry, or `''` for none.
  *
  * Fails closed on every shape that is not an affirmative answer: no synthesis,
- * a missing or non-string or blank `generatedAt`, and a model document stamped
- * for another child than the one this read was made for.
+ * a missing or non-string or blank `generatedAt`, a non-blank value that is not
+ * an ISO timestamp, and a model document stamped for another child than the one
+ * this read was made for.
  */
 function usableSynthesisGeneration(input: MineInvitationInput): string {
   const model = input.model
@@ -166,7 +181,8 @@ function usableSynthesisGeneration(input: MineInvitationInput): string {
   if (input.expectedChildId && stamped && stamped !== input.expectedChildId) return ''
   const generatedAt = model.synthesis?.generatedAt
   if (typeof generatedAt !== 'string') return ''
-  return generatedAt.trim()
+  const trimmed = generatedAt.trim()
+  return isIsoTimestamp(trimmed) ? trimmed : ''
 }
 
 /**

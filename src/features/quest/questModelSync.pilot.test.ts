@@ -381,11 +381,22 @@ describe('what adds no probe evidence', () => {
     expect(refs[0].note).toContain('1/1')
   })
 
-  it('a malformed stored pilot target, or a legacy record with none', async () => {
+  it('a malformed stored pilot target', async () => {
     expect(
       await outcomeFor({ pilotProbe: { kind: 'mine-addition-pilot' } as unknown as MineAdditionPilotTarget }),
     ).toBe('no-results')
-    expect(await outcomeFor({ pilotProbe: undefined, questions: fiveWithProbe() })).toBe('no-targets')
+    expect(writtenModel()).toBeUndefined()
+  })
+
+  /**
+   * A stamped ROW with no pilot header is still read as a pilot record — but a
+   * row stamp alone authorises no observation, so it projects nothing.
+   */
+  it('a stamped row whose pilot header is missing', async () => {
+    expect(await outcomeFor({ pilotProbe: undefined, questions: fiveWithProbe() })).toBe(
+      'no-results',
+    )
+    expect(writtenModel()).toBeUndefined()
   })
 
   it('a malformed probe stamp on the row', async () => {
@@ -479,6 +490,50 @@ describe('what adds no probe evidence', () => {
     expect(await project()).toBe('identity-mismatch')
     // The queue, the concept state and the source are all left as found.
     expect(writes).toHaveLength(0)
+    expect((store.get(sessionPath) as { modelProjection: string }).modelProjection).toBe('pending')
+  })
+
+  /**
+   * The same corrupt shape with its pilot HEADER lost — the case a
+   * header-only check missed. Without this the source read as an ordinary
+   * queued one: the plan path tallies by concept id across every stored
+   * answer, so the four provider echoes beside the probe would have made
+   * 4/4 or 5/5 for the queued concept, promoted it and resolved the ask.
+   */
+  it('a mixed shape whose pilot header is missing, with a valid queued plan', async () => {
+    store.clear()
+    writes.length = 0
+    const row = ask(ADD)
+    seed(
+      modelPath,
+      model({
+        conceptStates: { [ADD]: { state: 'forming', evidence: [] } },
+        openQuestions: [row],
+      }),
+    )
+    seed(
+      sessionPath,
+      source({
+        pilotProbe: undefined,
+        targetPlan: [
+          { conceptId: ADD, rowIndex: 0, digest: questAskDigest(row), modelSeededAt: MODEL_SEEDED },
+        ],
+        questions: [
+          probe(),
+          answer(1, { targetConceptId: ADD }),
+          answer(2, { targetConceptId: ADD }),
+          answer(3, { targetConceptId: ADD }),
+          answer(4, { targetConceptId: ADD }),
+        ],
+      }),
+    )
+
+    expect(await project()).toBe('identity-mismatch')
+    expect(writes).toHaveLength(0)
+    // The ask is still waiting and the concept has not moved.
+    const storedModel = store.get(modelPath) as LearnerModel
+    expect(storedModel.openQuestions[0].resolvedAt).toBeUndefined()
+    expect(storedModel.conceptStates[ADD].state).toBe('forming')
     expect((store.get(sessionPath) as { modelProjection: string }).modelProjection).toBe('pending')
   })
 

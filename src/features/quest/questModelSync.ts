@@ -31,7 +31,11 @@ import {
   parseQuestTargetPlan,
 } from '../../core/foundations/questTargeting'
 import { hasSufficientCompletion } from './questBanking'
-import { mineAdditionProbeResult, sourceClaimsAskPlan } from './mineAdditionProbe'
+import {
+  mineAdditionProbeResult,
+  rowsClaimProbe,
+  sourceClaimsAskPlan,
+} from './mineAdditionProbe'
 import type { EvaluationSession } from '../../core/types'
 import type { InteractiveSessionData, SessionQuestion } from './questTypes'
 
@@ -163,7 +167,13 @@ export async function projectQuestSourceToModel(
      * before anything is counted, written or stamped — so the queue, the
      * concept states and the source are all left exactly as found.
      */
-    const claimsPilot = source.pilotProbe !== undefined && source.pilotProbe !== null
+    const claimsPilot =
+      (source.pilotProbe !== undefined && source.pilotProbe !== null) ||
+      // A record that lost its pilot header but kept a stamped question is
+      // still a pilot record: detecting the claim only from the header let such
+      // a source fall through to the queued tally, where provider echoes of the
+      // same concept could promote it and resolve a parent's request.
+      rowsClaimProbe(questions)
     if (claimsPilot && sourceClaimsAskPlan(source)) {
       return { result: 'identity-mismatch' }
     }

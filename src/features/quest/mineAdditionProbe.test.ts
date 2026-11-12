@@ -178,6 +178,14 @@ describe('the one checked item', () => {
     expect(readMineAdditionPilotTarget({ ...target, offerSource: 'ask' })).toBeNull()
     expect(readMineAdditionPilotTarget({ ...target, synthesisGeneratedAt: '  ' })).toBeNull()
     expect(readMineAdditionPilotTarget({ ...target, synthesisGeneratedAt: undefined })).toBeNull()
+    // A timestamp field: non-blank is not enough, it has to BE one.
+    for (const generatedAt of ['generation-2', '42', 'yesterday', '2026-13-45T99:99:99Z']) {
+      expect(readMineAdditionPilotTarget({ ...target, synthesisGeneratedAt: generatedAt })).toBeNull()
+    }
+    // Positive control: the real ISO shape, which is what is stored.
+    expect(
+      readMineAdditionPilotTarget({ ...target, synthesisGeneratedAt: GENERATION }),
+    ).toMatchObject({ synthesisGeneratedAt: GENERATION })
     expect(readMineAdditionPilotTarget({ ...target, level: 5 })).toBeNull()
     expect(readMineAdditionPilotTarget(target)).toMatchObject({
       conceptId: MINE_ADDITION_PROBE_CONCEPT,
@@ -429,6 +437,8 @@ describe('the saved pending probe, at the Resume boundary', () => {
   it('allows a valid pending probe, with its exact order and provenance', () => {
     expect(
       mineAdditionProbeResumeRefusal({
+        domain: 'math',
+        questMode: 'math',
         pilotProbe: target,
         targetPlan: [],
         questions: [],
@@ -437,12 +447,43 @@ describe('the saved pending probe, at the Resume boundary', () => {
     ).toBeNull()
   })
 
+  /**
+   * The browser blocker: a checked MATH item stored under a reading/phonics
+   * session was restored and shown, so `8 + 7` appeared on a phonics screen.
+   */
+  it('refuses a pending probe on a record that is not the Math quest', () => {
+    const refuse = (record: Record<string, unknown>) =>
+      mineAdditionProbeResumeRefusal({
+        pilotProbe: target,
+        questions: [],
+        savedCurrentQuestion: pendingProbe,
+        ...record,
+      })
+    expect(refuse({ domain: 'reading', questMode: 'phonics' })).toBe('no-resume-point')
+    expect(refuse({ domain: 'reading', questMode: 'math' })).toBe('no-resume-point')
+    expect(refuse({ domain: 'math', questMode: 'phonics' })).toBe('no-resume-point')
+    expect(refuse({ domain: 'math', questMode: 'comprehension' })).toBe('no-resume-point')
+    expect(refuse({ domain: undefined, questMode: undefined })).toBe('no-resume-point')
+    // Positive control: the Math quest it was checked for.
+    expect(refuse({ domain: 'math', questMode: 'math' })).toBeNull()
+  })
+
   it('says nothing about an ordinary or legacy pending question', () => {
     expect(
       mineAdditionProbeResumeRefusal({ questions: [], savedCurrentQuestion: ordinaryRow() }),
     ).toBeNull()
     expect(mineAdditionProbeResumeRefusal({ savedCurrentQuestion: undefined })).toBeNull()
     expect(mineAdditionProbeResumeRefusal(null)).toBeNull()
+    // An ordinary READING partial resumes exactly as it always did — the
+    // domain/mode check above is only reached by a pending probe claim.
+    expect(
+      mineAdditionProbeResumeRefusal({
+        domain: 'reading',
+        questMode: 'phonics',
+        questions: [],
+        savedCurrentQuestion: { ...ordinaryRow(), prompt: 'Which word says /kat/?' },
+      }),
+    ).toBeNull()
     // Including on a record that carries a malformed pilot claim but whose
     // pending item is an ordinary question — those answers are still resumable.
     expect(
@@ -455,10 +496,16 @@ describe('the saved pending probe, at the Resume boundary', () => {
 
   it('refuses a pending probe with no valid accepted target behind it', () => {
     expect(
-      mineAdditionProbeResumeRefusal({ savedCurrentQuestion: pendingProbe }),
+      mineAdditionProbeResumeRefusal({
+        domain: 'math',
+        questMode: 'math',
+        savedCurrentQuestion: pendingProbe,
+      }),
     ).toBe('no-resume-point')
     expect(
       mineAdditionProbeResumeRefusal({
+        domain: 'math',
+        questMode: 'math',
         pilotProbe: { kind: 'nonsense' },
         savedCurrentQuestion: pendingProbe,
       }),
@@ -468,6 +515,8 @@ describe('the saved pending probe, at the Resume boundary', () => {
   it('refuses a corrupt, mismatched or reordered pending probe', () => {
     const refuse = (pending: Record<string, unknown>) =>
       mineAdditionProbeResumeRefusal({
+        domain: 'math',
+        questMode: 'math',
         pilotProbe: target,
         questions: [],
         savedCurrentQuestion: pending,
@@ -487,6 +536,8 @@ describe('the saved pending probe, at the Resume boundary', () => {
   it('refuses a pending probe on a record whose probe was already answered', () => {
     expect(
       mineAdditionProbeResumeRefusal({
+        domain: 'math',
+        questMode: 'math',
         pilotProbe: target,
         questions: [probeRow()],
         savedCurrentQuestion: pendingProbe,
@@ -497,6 +548,8 @@ describe('the saved pending probe, at the Resume boundary', () => {
   it('refuses a pending probe on a record that also claims a queued ask plan', () => {
     expect(
       mineAdditionProbeResumeRefusal({
+        domain: 'math',
+        questMode: 'math',
         pilotProbe: target,
         targetPlan: [{ conceptId: MINE_ADDITION_PROBE_CONCEPT, rowIndex: 0, digest: 'd', modelSeededAt: 's' }],
         questions: [],

@@ -202,6 +202,21 @@ function usableString(value: unknown): value is string {
 }
 
 /**
+ * Is this an ISO timestamp, and not merely a non-blank string?
+ *
+ * `synthesisGeneratedAt` IS a timestamp field, so a non-blank value that is not
+ * one ("generation-2", "42", a truncated write) is a malformed record rather
+ * than a different generation — and it used to satisfy the generation checks.
+ * Shape then parse: the date prefix rules out numeric junk the fallback date
+ * parser would otherwise accept. No comparison policy is implied; nothing here
+ * asks how OLD the value is.
+ */
+function isIsoTimestamp(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}/.test(value)) return false
+  return Number.isFinite(Date.parse(value))
+}
+
+/**
  * Is this a well-formed pilot target — the exact template, concept and level,
  * with a usable synthesis generation?
  *
@@ -220,6 +235,7 @@ export function readMineAdditionPilotTarget(
   if (!FOUNDATION_NODE_MAP[t.conceptId]) return null
   if (t.offerSource !== 'synthesis') return null
   if (!usableString(t.synthesisGeneratedAt)) return null
+  if (!isIsoTimestamp(t.synthesisGeneratedAt)) return null
   if (t.level !== MINE_ADDITION_PROBE_LEVEL) return null
   return {
     kind: MINE_ADDITION_PROBE_KIND,
@@ -372,6 +388,19 @@ export function sourceClaimsAskPlan(source: { targetPlan?: unknown }): boolean {
   return Array.isArray(source.targetPlan) && source.targetPlan.length > 0
 }
 
+/**
+ * Does any stored row CLAIM to be a probe? (UX-495, mutual exclusion.)
+ *
+ * The pilot header is not the only way a source can claim one: a corrupted
+ * record that lost `pilotProbe` but kept a stamped question is still a pilot
+ * record, and reading it as an ordinary queued one is what let provider echoes
+ * be tallied beside it. A row stamp alone still authorises no observation —
+ * `mineAdditionProbeResult` requires the header too.
+ */
+export function rowsClaimProbe(questions: readonly SessionQuestion[]): boolean {
+  return questions.some(claimsProbe)
+}
+
 /** The stored-record fields these reads look at. Everything is optional. */
 export interface StoredProbeRecord {
   domain?: string
@@ -461,6 +490,11 @@ export function mineAdditionProbeResumeRefusal(
   const pending = stored.savedCurrentQuestion
   if (!claimsProbe(pending)) return null
   // From here the record claims a pending probe, so every doubt refuses.
+  //
+  // The record's own mode and domain first: a checked MATH item stored under a
+  // reading/phonics session is not an item that session may show or score, and
+  // without this the Resume flow put `8 + 7` on a phonics screen.
+  if (stored.domain !== 'math' || stored.questMode !== 'math') return 'no-resume-point'
   const target = readMineAdditionPilotTarget(stored.pilotProbe)
   if (!target) return 'no-resume-point'
   if (sourceClaimsAskPlan(stored)) return 'no-resume-point'

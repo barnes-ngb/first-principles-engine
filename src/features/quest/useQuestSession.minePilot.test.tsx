@@ -670,6 +670,22 @@ describe('Resume keeps the original run’s pilot and its exact pending item', (
     expect(chat).not.toHaveBeenCalled()
   })
 
+  /**
+   * The browser blocker Sol reproduced: a checked MATH item stored under a
+   * reading/phonics session was restored and shown, so `8 + 7` appeared on a
+   * phonics screen. The refusal is the ordinary `no-resume-point`.
+   */
+  it('refuses a pending probe stored under a reading/phonics session', async () => {
+    seedPartial([], pendingProbe)
+    amendPartial({ domain: 'reading', questMode: 'phonics' })
+    const view = mountHook()
+
+    expect(await resume(view)).toBe('no-resume-point')
+    expect(view.result.current.screen).toBe('intro')
+    expect(view.result.current.currentQuestion).toBeNull()
+    expect((store.get(`sessions-fam-1/${PARTIAL_ID}`) as { status: string }).status).toBe('partial')
+  })
+
   it('refuses a corrupt, mismatched or reordered pending probe', async () => {
     for (const patch of [
       { localProbe: { nonsense: true } },

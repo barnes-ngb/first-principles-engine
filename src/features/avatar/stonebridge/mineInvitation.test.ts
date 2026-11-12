@@ -282,6 +282,29 @@ describe('the synthesis generation the offer carries', () => {
     }
   })
 
+  /**
+   * It is a TIMESTAMP field, so a non-blank value that is not one is a
+   * malformed record, not a different generation.
+   */
+  it('is withheld when the stored value is non-blank but not an ISO timestamp', () => {
+    for (const generatedAt of ['generation-2', '42', 'yesterday', '2026-13-45T99:99:99Z', 'T00:00']) {
+      const invitation = selectMineInvitation({
+        model: model({ whatMattersNext: [move(ADD_WITHIN_20)], generatedAt }),
+        ...BOTH,
+      })
+      // The ordinary same-mode suggestion is unchanged; only the generation goes.
+      expect(invitation).toMatchObject({ conceptId: ADD_WITHIN_20, questMode: 'math' })
+      expect(invitation?.synthesisGeneratedAt).toBeUndefined()
+    }
+    // Positive control: the real shape the synthesis beat writes.
+    expect(
+      selectMineInvitation({
+        model: model({ whatMattersNext: [move(ADD_WITHIN_20)], generatedAt: GENERATION }),
+        ...BOTH,
+      })?.synthesisGeneratedAt,
+    ).toBe(GENERATION)
+  })
+
   it('is trimmed, so a padded stored value still compares equal', () => {
     const invitation = selectMineInvitation({
       model: model({ whatMattersNext: [move(ADD_WITHIN_20)], generatedAt: `  ${GENERATION} ` }),
