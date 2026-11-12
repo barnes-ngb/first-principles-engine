@@ -81,6 +81,17 @@ import {
   perAnswerXpKey,
 } from './questBanking'
 import { checkAnswer, extractPattern, extractTargetWord, generateFallbackQuestion, shouldFlagAsError, validateQuestion } from './questHelpers'
+import { hasMathCalibration, hasReadingCalibration } from './knowledgeMineAccess'
+import {
+  buildMineAdditionProbeQuestion,
+  mineAdditionProbeAssistantTurn,
+  readMineAdditionPilotTarget,
+} from './mineAdditionProbe'
+import { resolveMineAdditionPilot } from './mineAdditionPilot'
+import type {
+  MineAdditionPilotRequest,
+  ResolveMineAdditionPilotInput,
+} from './mineAdditionPilot'
 import type {
   AnswerInputMethod,
   FluencyPassage,
@@ -939,6 +950,16 @@ export function useQuestSession() {
     async (
       domain: EvaluationDomain,
       questMode?: QuestMode,
+      /**
+       * UX-495 — the Mine addition pilot request a SUGGESTED Start carries, or
+       * nothing at all.
+       *
+       * Every ordinary door — a mode card, *Try Again*, the error retry, a
+       * parent's start — passes nothing and is byte-for-byte the Start it has
+       * always been. A request is not an authorisation: it is revalidated
+       * below, after this Start's own reads, by `resolveMineAdditionPilot`.
+       */
+      pilotRequest?: MineAdditionPilotRequest | null,
     ): Promise<QuestStartOutcome> => {
       /**
        * UX-494 — everything this Start is allowed to trust is captured AT
@@ -1033,12 +1054,23 @@ export function useQuestSession() {
       // same read. Carried on the session document so close can resolve the
       // request it actually selected and nothing appended since.
       let targetPlan: QuestAskPlanRow[] = []
+      /**
+       * UX-495 — the owner model this Start actually read, kept for the pilot's
+       * own revalidation.
+       *
+       * The same read, not a second one: the pilot decision must be made
+       * against the model this run was established from, including the queue
+       * that read saw. A missing or failed read leaves this null, which refuses
+       * the pilot and changes nothing else.
+       */
+      let startModel: ResolveMineAdditionPilotInput['model'] = null
       try {
         const modelSnap = await getDoc(
           doc(learnerModelsCollection(startingFamilyId), startingChildId),
         )
         if (modelSnap.exists()) {
           const model = modelSnap.data()
+          startModel = model
           targetConcepts = selectQuestTargets(model, { domain })
           targetPlan = captureQuestTargetPlan(
             model,
@@ -1119,6 +1151,36 @@ export function useQuestSession() {
 
       const startLevel = computeStartLevel(snapshot, questMode, curriculumHint)
 
+      /**
+       * UX-495 — may this Start carry the one checked addition probe?
+       *
+       * Decided HERE, synchronously, between the last awaited read and the
+       * frozen run, from: the request the suggested Start carried, the scope
+       * this Start froze, the level it just computed, the owner model it read,
+       * and the existing calibration predicates applied to the owner snapshot
+       * it read. The trip is re-read from the store by the host's own verifier.
+       *
+       * The item is then built and CHECKED. A target with no checked item is
+       * dropped entirely — the run is an ordinary calibrated Math run, with no
+       * pilot target on its records — which is also what happens for every
+       * ordinary door, an uncalibrated or stale child, another mode, another
+       * level, a changed synthesis and a queue that arrived while this Start
+       * was reading.
+       */
+      const pilotTarget = resolveMineAdditionPilot({
+        request: pilotRequest,
+        familyId: startingFamilyId,
+        childId: startingChildId,
+        domain,
+        questMode,
+        startLevel,
+        model: startModel,
+        readingCalibrated: hasReadingCalibration(snapshot as SkillSnapshot | null),
+        mathCalibrated: hasMathCalibration(snapshot as SkillSnapshot | null),
+      })
+      const probeQuestion = pilotTarget ? buildMineAdditionProbeQuestion(pilotTarget) : null
+      const acceptedPilot = probeQuestion ? pilotTarget : null
+
       const now = new Date().toISOString()
       const initialState: QuestState = {
         currentLevel: startLevel,
@@ -1174,6 +1236,10 @@ export function useQuestSession() {
         domain,
         questMode,
         targetPlan,
+        // UX-495 — frozen with the rest of the run, or absent. `undefined`
+        // rather than `null` so the payload scrubber drops the field entirely
+        // for every ordinary run.
+        pilotProbe: acceptedPilot ?? undefined,
         startedAt: now,
       }
       // The FLUENCY close's own once-per-session hours flag. The interactive
@@ -1327,6 +1393,32 @@ export function useQuestSession() {
         }),
       }
       conversationRef.current = [userMessage]
+
+      /**
+       * UX-495 — the pilot's one checked item takes the opening slot.
+       *
+       * No provider call is made for it, exactly as the existing client-side
+       * spell-word and build-sentence injections make none for theirs. The
+       * conversation keeps this session's opening request and records the item
+       * that was actually asked as the assistant turn, so the next question's
+       * provider call has accurate context and alternating roles.
+       *
+       * Everything after this is the ordinary session: the normal question
+       * input and feedback, the normal scoring and adaptation, the normal
+       * timer, and the normal save and close.
+       */
+      if (probeQuestion) {
+        conversationRef.current = [
+          userMessage,
+          { role: 'assistant', content: mineAdditionProbeAssistantTurn(probeQuestion) },
+        ]
+        setCurrentQuestion(probeQuestion)
+        questionStartRef.current = Date.now()
+        setScreen(QuestScreen.Question)
+        // Established and running.
+        startClaimRef.current = null
+        return 'started'
+      }
 
       // Timeout: if AI takes >30s, bail out with a message
       let timedOut = false
@@ -2434,6 +2526,9 @@ export function useQuestSession() {
         inputMethod: inputMethod || (currentQuestion.type === 'build-word' || currentQuestion.type === 'spell-word' || currentQuestion.type === 'build-sentence' ? 'tile' : 'multiple-choice'),
         targetedBlockerId: currentQuestion.targetedBlockerId,
         targetConceptId: currentQuestion.targetConceptId,
+        // UX-495 — the item's own provenance travels with the answered row, so
+        // the saved source can say exactly which checked item produced it.
+        localProbe: currentQuestion.localProbe,
       }
 
       const updatedQuestions = [...answeredQuestions, sessionQ]
@@ -2740,6 +2835,11 @@ export function useQuestSession() {
         timestamp: new Date().toISOString(),
         targetedBlockerId: currentQuestion.targetedBlockerId,
         targetConceptId: currentQuestion.targetConceptId,
+        // UX-495 — a SKIPPED probe is recorded with its provenance like any
+        // other row. It adds no probe evidence (the projection excludes skips,
+        // as it always has), and it does not reappear: the item is generated
+        // once, in the opening slot of the Start that accepted the pilot.
+        localProbe: currentQuestion.localProbe,
       }
 
       const updatedQuestions = [...answeredQuestions, sessionQ]
@@ -3213,6 +3313,17 @@ export function useQuestSession() {
        * field and `parseQuestTargetPlan` answers `[]` for it either way.
        */
       const resumedPlan = parseQuestTargetPlan(source.targetPlan)
+      /**
+       * UX-495 — and so does the accepted pilot target, read back through the
+       * same validation the projection uses.
+       *
+       * Off THIS partial and only off it, for the same reason the plan is: a
+       * warm hook must not lend a previous run's pilot to this one, and a
+       * malformed or legacy stored value resumes as no pilot at all. Nothing
+       * generates a new probe on a Resume — the exact pending item comes back
+       * from `savedCurrentQuestion`, provenance intact.
+       */
+      const resumedPilot = readMineAdditionPilotTarget(source.pilotProbe)
       runRef.current = {
         runId: docId,
         // Resume reuses the saved id, so the LIVE identity must not: without a
@@ -3225,6 +3336,7 @@ export function useQuestSession() {
         domain: source.domain as EvaluationDomain,
         questMode: source.questMode,
         targetPlan: resumedPlan,
+        pilotProbe: resumedPilot ?? undefined,
         startedAt: source.evaluatedAt,
       }
       // A reopened run has not been closed, however many times it was resumed.

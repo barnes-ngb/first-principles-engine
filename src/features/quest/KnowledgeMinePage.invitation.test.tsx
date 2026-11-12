@@ -12,6 +12,7 @@ import {
   getLibraryReturnFlow,
 } from '../avatar/stonebridge/libraryReturnFlow'
 import {
+  MINE_MATH_DIG_LABEL,
   MINE_READING_DIG_LABEL,
   MINE_RETURN_LABEL,
 } from '../avatar/stonebridge/libraryReturnCopy'
@@ -460,6 +461,136 @@ describe('a retained Start inside the SAME identity and the SAME journey', () =>
     renderMine()
     fireEvent.click(screen.getByText('Comprehension Quest'))
     expect(fx.startQuest).toHaveBeenCalledWith('reading', 'comprehension')
+  })
+})
+
+/**
+ * UX-495 — WHAT the suggested Start hands the hook when the offer is the one
+ * the addition pilot may run on.
+ *
+ * The page's job is exactly two things: derive the offer's identity from the
+ * SAME settled read the agreement came from, and add the scope and the journey.
+ * Everything else — the level, the calibration, the queue, the model — is
+ * revalidated inside the Start, which has its own file. When the pilot falls
+ * away, the ordinary mode-only suggestion must be completely unchanged, which
+ * is what the two-argument calls below assert.
+ */
+describe('the suggested Start’s pilot request', () => {
+  const GENERATION = '2026-11-10T08:00:00.000Z'
+
+  /** A fresh synthesis whose next move is the supported math concept, by quest. */
+  const MATH_SYNTHESIS = {
+    childId: 'lincoln',
+    openQuestions: [],
+    synthesisStaleAt: null,
+    synthesis: {
+      whatMattersNext: [
+        {
+          conceptId: 'math.operations.addWithin20',
+          kidName: 'Adding to 20',
+          why: 'He is adding within 20.',
+          suggestedVehicle: 'quest',
+        },
+      ],
+      narrative: '',
+      openQuestionsSummary: [],
+      generatedAt: GENERATION,
+    },
+  }
+
+  const MATH_SUGGESTION = {
+    conceptId: 'math.operations.addWithin20',
+    domain: 'math' as const,
+    questMode: 'math' as const,
+    label: MINE_MATH_DIG_LABEL,
+    source: 'synthesis' as const,
+  }
+
+  function mathCard() {
+    return screen.getByRole('button', { name: new RegExp(MINE_MATH_DIG_LABEL) })
+  }
+
+  beforeEach(() => {
+    fx.snapshot = BOTH_CALIBRATED
+    fx.model = MATH_SYNTHESIS
+  })
+
+  it('carries the offer, the scope and the journey — and a live-journey verifier', () => {
+    beginTrip(MATH_SUGGESTION)
+    const generation = getLibraryReturnFlow()!.generation
+    renderMine()
+    fireEvent.click(mathCard())
+
+    expect(fx.startQuest).toHaveBeenCalledTimes(1)
+    const [domain, mode, pilot] = fx.startQuest.mock.calls[0] as [
+      string,
+      string,
+      { tripStillLive: () => boolean } & Record<string, unknown>,
+    ]
+    expect(domain).toBe('math')
+    expect(mode).toBe('math')
+    expect(pilot).toMatchObject({
+      familyId: 'fam-1',
+      childId: 'lincoln',
+      conceptId: 'math.operations.addWithin20',
+      domain: 'math',
+      questMode: 'math',
+      offerSource: 'synthesis',
+      synthesisGeneratedAt: GENERATION,
+      tripGeneration: generation,
+    })
+    // The verifier reads the STORE, so it answers for the journey as it is now.
+    expect(pilot.tripStillLive()).toBe(true)
+    act(() => {
+      endLibraryReturnFlow()
+    })
+    expect(pilot.tripStillLive()).toBe(false)
+  })
+
+  it('sends no request when the village’s offer came from the QUEUE', () => {
+    fx.model = MATH_QUEUED
+    beginTrip({ ...MATH_SUGGESTION, source: 'ask' })
+    renderMine()
+    fireEvent.click(mathCard())
+    // The ordinary suggested Start, byte-for-byte as before.
+    expect(fx.startQuest).toHaveBeenCalledWith('math', 'math')
+  })
+
+  it('sends no request when the synthesis has no usable generation', () => {
+    fx.model = {
+      ...MATH_SYNTHESIS,
+      synthesis: { ...MATH_SYNTHESIS.synthesis, generatedAt: '   ' },
+    }
+    beginTrip(MATH_SUGGESTION)
+    renderMine()
+    fireEvent.click(mathCard())
+    expect(fx.startQuest).toHaveBeenCalledWith('math', 'math')
+  })
+
+  it('sends no request when the village and this page name different concepts', () => {
+    beginTrip({ ...MATH_SUGGESTION, conceptId: 'math.something.else' })
+    renderMine()
+    fireEvent.click(mathCard())
+    expect(fx.startQuest).toHaveBeenCalledWith('math', 'math')
+  })
+
+  it('drops the pilot — and keeps the mode-only Start — when the synthesis moved under a retained tap', () => {
+    beginTrip(MATH_SUGGESTION)
+    const { rerender } = renderMine()
+    const retained = retainedOnClick(mathCard())
+
+    // A regenerated synthesis: the mode is still offered, the generation is not.
+    fx.model = {
+      ...MATH_SYNTHESIS,
+      synthesis: { ...MATH_SYNTHESIS.synthesis, generatedAt: '2026-11-11T07:00:00.000Z' },
+    }
+    act(() => {
+      rerender(mineElement())
+    })
+    retained()
+
+    expect(fx.startQuest).toHaveBeenCalledTimes(1)
+    expect(fx.startQuest).toHaveBeenCalledWith('math', 'math')
   })
 })
 

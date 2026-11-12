@@ -16,6 +16,7 @@ import type { QuestAskPlanRow } from '../../core/foundations/questTargeting'
 import type { EvaluationFinding, EvaluationSession } from '../../core/types'
 import type {
   InteractiveSessionData,
+  MineAdditionPilotTarget,
   QuestMode,
   QuestQuestion,
   QuestState,
@@ -45,6 +46,13 @@ export interface QuestRun {
   questMode?: QuestMode
   /** The exact queued requests this run selected. Empty when nothing was queued. */
   targetPlan: QuestAskPlanRow[]
+  /**
+   * UX-495 — the Mine addition pilot target this run ACCEPTED, frozen with
+   * everything else a close resolves through. Absent on every ordinary run, and
+   * never derived later: a run that did not accept one at its Start can never
+   * acquire one.
+   */
+  pilotProbe?: MineAdditionPilotTarget
   startedAt: string
 }
 
@@ -181,10 +189,13 @@ export function finalizedQuestSourcePayload(
   const { run, questions, finalState, timedOut, sufficient, nowIso } = input
   const skippedCount = questions.filter((q) => q.skipped).length
   const flaggedErrorCount = questions.filter((q) => q.flaggedAsError).length
-  // Only a sufficient close with a selected request has anything to project. An
-  // ordinary untagged quest is `skipped` from the moment it is written, so the
-  // close makes no model attempt and no surface ever offers it a retry.
-  const eligible = sufficient && run.targetPlan.length > 0
+  // Only a sufficient close with something to attribute has anything to
+  // project. An ordinary untagged quest is `skipped` from the moment it is
+  // written, so the close makes no model attempt and no surface ever offers it a
+  // retry. UX-495 — an accepted pilot target is the second such thing: it
+  // carries one observation of its own concept and no queued request at all,
+  // which is why it is an OR rather than a widening of the plan.
+  const eligible = sufficient && (run.targetPlan.length > 0 || Boolean(run.pilotProbe))
 
   return {
     childId: run.childId,
@@ -209,6 +220,7 @@ export function finalizedQuestSourcePayload(
     // ── The source record ────────────────────────────────────
     questRunId: run.runId,
     targetPlan: run.targetPlan,
+    pilotProbe: run.pilotProbe,
     sourceCommittedAt: nowIso,
     modelProjection: eligible ? 'pending' : 'skipped',
     modelProjectionOutcome: eligible
@@ -272,6 +284,11 @@ export function resumableQuestSourcePayload(
     bonusRoundUsed: input.bonusRoundUsed,
     questRunId: run.runId,
     targetPlan: run.targetPlan,
+    // UX-495 — the accepted pilot target rides the partial too, so a Resume
+    // reopens what the original run was authorised for. The pending item itself
+    // is already preserved exactly by `savedCurrentQuestion`, provenance and
+    // all.
+    pilotProbe: run.pilotProbe,
   }
 }
 
