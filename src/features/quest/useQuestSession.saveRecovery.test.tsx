@@ -2316,4 +2316,56 @@ describe('the exit verdict a Mine-owned departure asks for', () => {
       kind: 'clear',
     })
   })
+
+  /**
+   * The door and the hold answer from ONE source (UX-496 correction).
+   *
+   * A denied close, then a switch to the sibling's own profile: the bound
+   * summary is still mounted and the held payload is untouched, so a freshly
+   * rendered exit is still `hold` — but the notice is hidden from that viewer,
+   * and a door derived from `visibleSourceSave` drew nothing. The exit was
+   * swallowed. `questExitFace` is the face for the same binding, so a hold
+   * always HAS a door; hiding changes only what it may say.
+   */
+  it('still has a face for a hold whose notice is hidden, with no owner details', async () => {
+    const view = mountHook()
+    await start(view)
+    transactionError = new Error('offline')
+    await answer(view, 5)
+
+    // The owner's own screen: the real phase, and his retry.
+    expect(view.result.current.questExitFace(bindingFor(view, 'final'))).toEqual({
+      phase: 'failed',
+      generic: false,
+    })
+
+    // The sibling's profile, on the same mounted summary.
+    identityEpoch = 3
+    activeProfile = UserProfile.London
+    setActive(LONDON, true)
+    view.rerender()
+
+    expect(view.result.current.visibleSourceSave.state).toBe('idle')
+    // Still held — the payload still owes the original child something...
+    expect(view.result.current.questExitVerdict(bindingFor(view, 'final'))).toMatchObject({
+      kind: 'hold',
+      phase: 'failed',
+    })
+    // ...and now there is a door for it, wearing the ownerless face.
+    expect(view.result.current.questExitFace(bindingFor(view, 'final'))).toEqual({
+      phase: 'failed',
+      generic: true,
+    })
+  })
+
+  /** No hold, no door — the ordinary acknowledged exit is untouched. */
+  it('has no face for an acknowledged save, or for the other payload kind', async () => {
+    const view = mountHook()
+    await start(view)
+    await answer(view, 5)
+
+    expect(view.result.current.visibleSourceSave.state).toBe('saved')
+    expect(view.result.current.questExitFace(bindingFor(view, 'final'))).toBeNull()
+    expect(view.result.current.questExitFace(bindingFor(view, 'partial'))).toBeNull()
+  })
 })

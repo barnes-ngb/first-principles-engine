@@ -12,6 +12,7 @@ import Typography from '@mui/material/Typography'
 
 import {
   QUEST_EXIT_GUARD_COPY,
+  questExitGenericNotice,
   questExitNotice,
   type QuestExitPhase,
 } from './questSaveCopy'
@@ -38,6 +39,7 @@ import {
  */
 export default function QuestExitGuardDialog({
   phase,
+  generic = false,
   canRetry,
   onRetry,
   onStay,
@@ -45,6 +47,13 @@ export default function QuestExitGuardDialog({
 }: {
   /** The save phase holding the departure, or null for no open door. */
   phase: QuestExitPhase | null
+  /**
+   * The held notice is hidden from whoever is looking — a sibling profile, a
+   * foreign family. The door still opens, because a held exit that showed
+   * nothing was an exit swallowed; it just says nothing about the owner, the
+   * phase or his Retry. Passed, never inferred: the page knows who is looking.
+   */
+  generic?: boolean
   /** Whether the held payload itself can still be re-sent. */
   canRetry: boolean
   onRetry: () => void
@@ -70,7 +79,9 @@ export default function QuestExitGuardDialog({
 
   // Closed is the ordinary state, and then this renders nothing at all.
   if (!phase) return null
-  const notice = questExitNotice(phase)
+  const notice = generic ? questExitGenericNotice() : questExitNotice(phase)
+  // `questExitGenericNotice` is not retryable, so the `generic` door offers no
+  // Retry whatever `canRetry` says — the held payload is not this viewer's.
   const showRetry = notice.retryable && canRetry
 
   return (

@@ -99,6 +99,18 @@ export const QUEST_EXIT_GUARD_COPY = {
   conflictBody: 'This quest will not save.',
   /** The plain explanation on the deliberate-departure tap. */
   leaveWarning: 'If you go now, they may be lost.',
+  /**
+   * The OWNERLESS face of the door, for a current exit whose bound notice is
+   * hidden from whoever is looking — a sibling profile, or a view the notice's
+   * family does not reach. The hold is real (the payload still owes the child
+   * who made it), so the exit must not be swallowed in silence; but nothing
+   * about the owner, his answers or his Retry belongs on a screen that is not
+   * his. So: one true sentence, and the same stay-or-leave choice.
+   */
+  genericTitle: 'One quest is not saved.',
+  genericBody: 'Stay here or leave it now.',
+  /** The same no-promise warning, about the quest rather than *your* answers. */
+  genericWarning: 'If you go now, it may be lost.',
   stay: 'Stay here',
   leave: 'Leave without saving',
   retry: QUEST_SOURCE_COPY.retry,
@@ -163,6 +175,27 @@ export function questExitNotice(phase: QuestExitPhase): QuestExitNotice {
     busy: false,
     retryable: true,
     failed: true,
+  }
+}
+
+/**
+ * The door's copy when the held notice is HIDDEN from this viewer (UX-496).
+ *
+ * The phase is still read live — this face exists only while the bound save is
+ * genuinely `saving`, `failed` or `conflict`, and the door closes the moment it
+ * is acknowledged. What is dropped is everything the viewer is not entitled to:
+ * which phase it is in, whose quest it is, and the Retry, which belongs to the
+ * owning child on his own screen. Not retryable and not dressed as an error,
+ * because neither claim is this viewer's to act on.
+ */
+export function questExitGenericNotice(): QuestExitNotice {
+  return {
+    title: QUEST_EXIT_GUARD_COPY.genericTitle,
+    body: QUEST_EXIT_GUARD_COPY.genericBody,
+    warning: QUEST_EXIT_GUARD_COPY.genericWarning,
+    busy: false,
+    retryable: false,
+    failed: false,
   }
 }
 

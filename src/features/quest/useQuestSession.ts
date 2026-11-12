@@ -559,6 +559,25 @@ export type QuestExitVerdict =
       runInstanceId?: string
     }
 
+/**
+ * The face a RENDERED exit door should wear, for the payload it is bound to
+ * (UX-496).
+ *
+ * The same phase the synchronous verdict holds on, derived from render state so
+ * the door and the hold can never disagree: a `hold` with no face was an exit
+ * swallowed behind an invisible prompt, which is the defect this answers.
+ *
+ * `generic` is the one difference between them. The hold is about the SOURCE
+ * save, which exists whoever is looking; the notice's details are not. When the
+ * bound notice is hidden from this viewer — a sibling profile, a foreign family
+ * — the door still opens, with no owner details, no phase and no Retry.
+ */
+export interface QuestExitFace {
+  phase: QuestExitPhase
+  /** The bound notice is hidden here: show the ownerless face, and no Retry. */
+  generic: boolean
+}
+
 function mayViewerRetryQuestPayload(
   viewer: { profile: UserProfile | null | undefined; liveChildId: string | null | undefined },
   run: { childId: string },
@@ -953,6 +972,48 @@ export function useQuestSession() {
   const visibleSourceSave: QuestSourceSaveNotice = noticeIsVisible
     ? sourceSave
     : { state: 'idle', canRetry: false }
+
+  /**
+   * The face the door should wear for a bound payload — see {@link QuestExitFace}.
+   *
+   * Render-derived, by design: the page draws the door from its own render
+   * state, so this takes `sourceSave` and the visibility decision above rather
+   * than the synchronous mirror. It asks the SAME payload questions the verdict
+   * asks — kind, owning generation, run instance, phase — against the UNFILTERED
+   * notice, so a hidden notice still produces a face. Hiding then changes only
+   * what the face is allowed to say.
+   *
+   * The caller still owns the identity half (its own epoch, scope and view
+   * generation): a door is only ever drawn for a prompt that is still the live
+   * screen's, and this does not second-guess that.
+   */
+  const questExitFace = useCallback(
+    (binding: QuestExitBinding): QuestExitFace | null => {
+      if (sourceSave.kind !== binding.kind) return null
+      if (
+        sourceSave.viewGeneration !== undefined &&
+        sourceSave.viewGeneration !== binding.viewGeneration
+      ) {
+        return null
+      }
+      if (
+        binding.runInstanceId &&
+        sourceSave.runInstanceId &&
+        binding.runInstanceId !== sourceSave.runInstanceId
+      ) {
+        return null
+      }
+      if (
+        sourceSave.state !== 'saving' &&
+        sourceSave.state !== 'failed' &&
+        sourceSave.state !== 'conflict'
+      ) {
+        return null
+      }
+      return { phase: sourceSave.state, generic: !noticeIsVisible }
+    },
+    [sourceSave, noticeIsVisible],
+  )
 
   /**
    * May this exit control act, and does its own save still owe something?
@@ -3853,6 +3914,11 @@ export function useQuestSession() {
      * return state, resets or navigates. See `questExitVerdict`.
      */
     questExitVerdict,
+    /**
+     * UX-496 — the face a rendered door should wear for the same binding, so a
+     * held exit always HAS a visible prompt. See `questExitFace`.
+     */
+    questExitFace,
     graphSync,
     retrySourceSave,
     retryGraphProjection,

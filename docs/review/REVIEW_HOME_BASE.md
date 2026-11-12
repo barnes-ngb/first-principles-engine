@@ -809,7 +809,7 @@ Band = priority band from §2. The audit prompt updates this table; the fix prom
 | **UX-493** | 1 | **MERGED** (PR #1960, 2026-11-10) | **Offer one model-informed Mine invitation from Stonebridge (G7/G3).** A scoped next-move or queued-ask invitation selects an existing calibrated Mine mode, preserves the child choice to Start or Resume, and reuses a guarded village return. | StonebridgePage, Mine invitation selector, KnowledgeMinePage and shared trip guards |
 | **UX-494** | 1 | **MERGED** (PR #1962, 2026-11-11) | **Save and retry the original Mine quest (G1/G3/G7).** Bind finalization to the original run, apply eligible evidence once from the saved session and retain the selected targets through Resume. | Mine quest finalization, resume and learner-model evidence |
 | **UX-495** | 1 | **MERGED** (PR #1966, 2026-11-12) | **Ask a checked addition question from a Mine suggestion (G3/G7).** An eligible Math level 2 synthesis invitation can open with one checked addition item. Record its observed result from the original saved quest. | Stonebridge suggestion, Mine and learner-model evidence |
-| **UX-496** | 1 | **BUILT LOCALLY** | **Protect the original Mine save before leaving (G1/G3/G7).** Keep the owning source Retry available when leaving a quest with unsaved answers. Keep the map retry independent after source acknowledgement. | Knowledge Mine completion exits and save recovery |
+| **UX-496** | 1 | **MERGED** (PR #1968, 2026-11-12) | **Protect the original Mine save before leaving (G1/G3/G7).** Keep the owning source Retry available when leaving a quest with unsaved answers. Keep the map retry independent after source acknowledgement. | Knowledge Mine completion exits and save recovery |
 
 ## 7. Triggers (phone-first cheat-sheet)
 

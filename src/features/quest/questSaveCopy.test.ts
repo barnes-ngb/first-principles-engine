@@ -21,6 +21,7 @@ import {
   QUEST_RESUME_REFUSAL_COPY,
   QUEST_SOURCE_COPY,
   QUEST_UNSAVED_COPY,
+  questExitGenericNotice,
   questExitNotice,
 } from './questSaveCopy'
 
@@ -69,6 +70,9 @@ describe('quest save copy is readable by the boy it is for', () => {
       'conflictTitle',
       'conflictBody',
       'leaveWarning',
+      'genericTitle',
+      'genericBody',
+      'genericWarning',
     ] as const) {
       expectKidLine(QUEST_EXIT_GUARD_COPY[key], `QUEST_EXIT_GUARD_COPY.${key}`)
     }
@@ -124,6 +128,24 @@ describe('the exit guard says what is true about the answers', () => {
       failed: true,
       busy: false,
     })
+  })
+
+  /**
+   * The ownerless face, for a held exit whose notice this viewer may not see.
+   * It must still be a real door — a hold with no prompt was the defect — and
+   * it must say nothing that belongs to the owning child: not which phase his
+   * save is in, and not his Retry.
+   */
+  it('keeps the hidden-notice door honest and ownerless', () => {
+    const generic = questExitGenericNotice()
+    expect(generic).toMatchObject({ retryable: false, failed: false, busy: false })
+    expect(generic.warning).toContain('may')
+    expect(generic.warning.toLowerCase()).not.toContain('will')
+    for (const phase of ['saving', 'failed', 'conflict'] as const) {
+      const owned = questExitNotice(phase)
+      expect(generic.title).not.toBe(owned.title)
+      expect(generic.body).not.toBe(owned.body)
+    }
   })
 
   it('carries the leaving warning on every face of the door', () => {

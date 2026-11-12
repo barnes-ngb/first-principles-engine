@@ -656,8 +656,22 @@ export default function KnowledgeMinePage() {
    * make this null, which closes the door and leaves the ordinary actions
    * available on the next tap. The intent itself is left where it is: the
    * handlers below refuse it on their own, which is the invariant that matters.
+   *
+   * ── A hold always has a door ────────────────────────────────────────────
+   *
+   * The phase itself comes from `quest.questExitFace`, which reads the SAME
+   * unfiltered notice the hook's verdict holds on. Deriving it here from
+   * `visibleSourceSave` was the gap: a final save denied and then a switch to a
+   * sibling's profile leaves the bound summary mounted while the notice is
+   * hidden, so a freshly rendered *Done* was still held — the verdict reads the
+   * real notice — and drew nothing at all. The tap vanished and every repeat
+   * vanished with it. Hold and door now answer from one source, and the only
+   * thing visibility changes is WHAT the door may say: where the notice is
+   * hidden, `face.generic` drops the owner, the phase and the Retry and leaves
+   * the plain stay-or-leave choice. It is still re-derived every render, so an
+   * acknowledgement closes it and the deliberate leave re-checks live.
    */
-  const exitPromptPhase: QuestExitPhase | null = (() => {
+  const exitPromptFace = (() => {
     if (!exitPrompt) return null
     const bound = exitPrompt.binding
     // The same test the hook applies, on this render's values: the epoch and
@@ -673,16 +687,11 @@ export default function KnowledgeMinePage() {
     ) {
       return null
     }
-    const save = quest.visibleSourceSave
-    if (save.kind !== bound.kind) return null
-    if (bound.runInstanceId && save.runInstanceId && bound.runInstanceId !== save.runInstanceId) {
-      return null
-    }
-    if (save.state === 'saving' || save.state === 'failed' || save.state === 'conflict') {
-      return save.state
-    }
-    return null
+    // The payload half — kind, run instance, owning generation, phase — asked
+    // of the real notice, so a hidden one cannot close a door a hold is behind.
+    return quest.questExitFace(bound)
   })()
+  const exitPromptPhase: QuestExitPhase | null = exitPromptFace?.phase ?? null
 
   /**
    * *Stay here*, a backdrop tap and Escape: keep the screen, drop the intent.
@@ -701,6 +710,10 @@ export default function KnowledgeMinePage() {
     const intent = admitPromptIntent(promptId)
     if (!intent) return
     if (intent.tripGeneration !== undefined && !exitTripStillLive(intent.tripGeneration)) return
+    // A hidden notice's payload is not this viewer's to re-send: the generic
+    // door draws no Retry, and a retained one from before the switch is refused
+    // here too. Only the owner's own screen may retry it.
+    if (quest.questExitFace(intent.binding)?.generic) return
     const verdict = quest.questExitVerdict(intent.binding)
     if (verdict.kind !== 'hold' || !verdict.canRetry) return
     void quest.retrySourceSave({
@@ -742,7 +755,10 @@ export default function KnowledgeMinePage() {
   const exitDoor = (
     <QuestExitGuardDialog
       phase={exitPromptPhase}
-      canRetry={quest.visibleSourceSave.canRetry}
+      generic={exitPromptFace?.generic ?? false}
+      // The Retry is the visible notice's own, so a hidden one offers none —
+      // the door itself refuses it under `generic`, and this says so too.
+      canRetry={!exitPromptFace?.generic && quest.visibleSourceSave.canRetry}
       // Each door's callbacks carry the id of the prompt THIS render drew, so
       // a callback retained from an earlier prompt admits nothing.
       onRetry={() => retryHeldQuestSave(exitPrompt?.id ?? null)}

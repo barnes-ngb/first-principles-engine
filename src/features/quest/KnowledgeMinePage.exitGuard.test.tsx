@@ -54,6 +54,13 @@ const fx = vi.hoisted(() => ({
   sourceState: 'saved' as 'idle' | 'saving' | 'saved' | 'failed' | 'conflict',
   saveKind: 'final' as 'final' | 'partial',
   canRetry: false,
+  /**
+   * Is the held notice HIDDEN from whoever is looking? The released case is a
+   * denied final save followed by a switch to a sibling's profile: the bound
+   * summary stays mounted, the real notice (and so the hold) is unchanged, and
+   * `visibleSourceSave` goes idle. See `useQuestSession`'s `noticeIsVisible`.
+   */
+  noticeHidden: false,
   graphState: 'reached' as 'idle' | 'pending' | 'running' | 'reached' | 'skipped' | 'failed',
   runInstanceId: 'run-1' as string | undefined,
   recoveryScope: 'fam-1|lincoln|child|1',
@@ -128,15 +135,18 @@ vi.mock('./useQuestSession', () => ({
     sessionLeftItsChild: false,
     sessionOwnerName: 'Lincoln',
     sourceSave: { state: fx.sourceState, canRetry: fx.canRetry },
-    visibleSourceSave: {
-      state: fx.sourceState,
-      canRetry: fx.canRetry,
-      kind: fx.saveKind,
-      runInstanceId: fx.runInstanceId,
-      viewGeneration: fx.viewGeneration,
-      originalChildId: 'lincoln',
-      originalFamilyId: 'fam-1',
-    },
+    visibleSourceSave: fx.noticeHidden
+      ? // Exactly what the hook publishes for a notice this viewer may not see.
+        { state: 'idle' as const, canRetry: false }
+      : {
+          state: fx.sourceState,
+          canRetry: fx.canRetry,
+          kind: fx.saveKind,
+          runInstanceId: fx.runInstanceId,
+          viewGeneration: fx.viewGeneration,
+          originalChildId: 'lincoln',
+          originalFamilyId: 'fam-1',
+        },
     graphSync: { state: fx.graphState, sessionId: 'sess-1', childId: 'lincoln' },
     recoveryScope: fx.recoveryScope,
     recoveryEpoch: fx.recoveryEpoch,
@@ -173,6 +183,26 @@ vi.mock('./useQuestSession', () => ({
         }
       }
       return { kind: 'clear' as const }
+    },
+    /**
+     * The real face's contract, mirrored: the payload half asked of the
+     * UNFILTERED notice — so a hidden one still has a face — and visibility
+     * deciding only whether that face is the ownerless `generic` one.
+     */
+    questExitFace: (binding: QuestExitBinding) => {
+      if (binding.viewGeneration !== fx.viewGeneration) return null
+      if (binding.kind !== fx.saveKind) return null
+      if (binding.runInstanceId && fx.runInstanceId && binding.runInstanceId !== fx.runInstanceId) {
+        return null
+      }
+      if (
+        fx.sourceState !== 'saving' &&
+        fx.sourceState !== 'failed' &&
+        fx.sourceState !== 'conflict'
+      ) {
+        return null
+      }
+      return { phase: fx.sourceState, generic: fx.noticeHidden }
     },
     retrySourceSave: fx.retrySourceSave,
     retryGraphProjection: async () => 'identity-mismatch' as const,
@@ -298,6 +328,7 @@ beforeEach(() => {
   fx.sourceState = 'saved'
   fx.saveKind = 'final'
   fx.canRetry = false
+  fx.noticeHidden = false
   fx.graphState = 'reached'
   fx.runInstanceId = 'run-1'
   fx.recoveryScope = 'fam-1|lincoln|child|1'
@@ -633,6 +664,177 @@ describe('a source conflict', () => {
     fireEvent.click(leaveButton())
     expect(fx.resetToIntro).toHaveBeenCalledTimes(1)
     expect(path()).toBe('/today')
+  })
+})
+
+/**
+ * Correction 2 — a hold must never be invisible.
+ *
+ * The released sequence: a final save is denied, the summary keeps its *Try
+ * saving again*, and the family switches to a SIBLING's profile. The bound
+ * summary stays mounted and the held notice is untouched, so a freshly rendered
+ * *Done* is still `hold` — the verdict reads the real notice — but the notice
+ * is hidden from this viewer, so the door drawn from `visibleSourceSave` was
+ * null. The tap did nothing, visibly, and so did every repeat.
+ *
+ * What the door may SAY there is the other half: the payload is the original
+ * child's, so the sibling's screen gets the ownerless face — no phase, no owner
+ * and no Retry — and the same stay-or-leave choice.
+ */
+describe('a held exit whose notice is hidden from this viewer', () => {
+  /** Hidden, and still held: the sibling is active on the original's summary. */
+  function siblingLooking() {
+    deniedSave()
+    fx.noticeHidden = true
+    fx.recoveryScope = 'fam-1|london|child|1'
+  }
+
+  it('still opens a door for Done instead of swallowing the tap', () => {
+    siblingLooking()
+    renderMine()
+    fireEvent.click(doneButton())
+
+    const d = dialog()
+    expect(within(d).getByText(QUEST_EXIT_GUARD_COPY.genericTitle)).toBeInTheDocument()
+    expect(within(d).getByText(QUEST_EXIT_GUARD_COPY.genericBody)).toBeInTheDocument()
+    expect(fx.resetToIntro).not.toHaveBeenCalled()
+    expect(path()).toBe('/quest')
+  })
+
+  it('still opens a door for Try another quest', () => {
+    siblingLooking()
+    renderMine()
+    fireEvent.click(tryAnotherButton())
+    expect(within(dialog()).getByText(QUEST_EXIT_GUARD_COPY.genericTitle)).toBeInTheDocument()
+    expect(fx.resetToIntro).not.toHaveBeenCalled()
+  })
+
+  it('still opens a door for Back to village, and leaves the journey alone', () => {
+    siblingLooking()
+    beginTrip()
+    renderMine()
+    fireEvent.click(villageButton())
+    expect(within(dialog()).getByText(QUEST_EXIT_GUARD_COPY.genericTitle)).toBeInTheDocument()
+    expect(getLibraryReturnFlow()?.phase).toBe(LibraryReturnPhase.Away)
+    expect(path()).toBe('/quest')
+  })
+
+  /** Nothing of the owner's: not his phase, not his answers, not his Retry. */
+  it('tells the sibling nothing about the original child or his retry', () => {
+    siblingLooking()
+    renderMine()
+    fireEvent.click(doneButton())
+
+    const d = dialog()
+    expect(within(d).queryByRole('button', { name: QUEST_EXIT_GUARD_COPY.retry })).toBeNull()
+    expect(within(d).queryByText(QUEST_EXIT_GUARD_COPY.failedTitle)).toBeNull()
+    expect(within(d).queryByText(QUEST_EXIT_GUARD_COPY.failedBody)).toBeNull()
+    expect(d.textContent).not.toContain('Lincoln')
+    // And a retained Retry callback cannot re-send the original's payload.
+    fireEvent.click(stayButton())
+    expect(fx.retrySourceSave).not.toHaveBeenCalled()
+  })
+
+  it('says nothing of the owner while his save is merely in flight', () => {
+    siblingLooking()
+    fx.sourceState = 'saving'
+    fx.canRetry = false
+    renderMine()
+    fireEvent.click(doneButton())
+
+    const d = dialog()
+    expect(within(d).getByText(QUEST_EXIT_GUARD_COPY.genericTitle)).toBeInTheDocument()
+    expect(within(d).queryByText(QUEST_EXIT_GUARD_COPY.savingTitle)).toBeNull()
+  })
+
+  it('closes on Stay, and the exit is a fresh tap again', async () => {
+    siblingLooking()
+    renderMine()
+    fireEvent.click(doneButton())
+    fireEvent.click(stayButton())
+    await noDialog()
+    expect(fx.resetToIntro).not.toHaveBeenCalled()
+    expect(path()).toBe('/quest')
+
+    fireEvent.click(doneButton())
+    expect(within(dialog()).getByText(QUEST_EXIT_GUARD_COPY.genericTitle)).toBeInTheDocument()
+  })
+
+  it('takes the deliberate departure', async () => {
+    siblingLooking()
+    renderMine()
+    fireEvent.click(doneButton())
+    fireEvent.click(leaveButton())
+    await noDialog()
+    expect(fx.resetToIntro).toHaveBeenCalledTimes(1)
+    expect(path()).toBe('/today')
+  })
+
+  /**
+   * The phase is read LIVE, not captured at the tap: an acknowledgement while
+   * the generic door is open closes it, and nothing departs on its own.
+   */
+  it('closes itself when the hidden save lands', async () => {
+    siblingLooking()
+    const view = renderMine()
+    fireEvent.click(doneButton())
+    expect(dialog()).toBeInTheDocument()
+
+    fx.sourceState = 'saved'
+    fx.canRetry = false
+    view.rerender(mineElement())
+
+    await noDialog()
+    expect(fx.resetToIntro).not.toHaveBeenCalled()
+    expect(path()).toBe('/quest')
+  })
+
+  /** A retained *Leave anyway* must not depart once the save is acknowledged. */
+  it('refuses a retained departure after the hidden save lands', async () => {
+    siblingLooking()
+    const view = renderMine()
+    fireEvent.click(doneButton())
+    const leave = retainedOnClick(leaveButton())
+
+    fx.sourceState = 'saved'
+    fx.canRetry = false
+    view.rerender(mineElement())
+
+    leave()
+    await noDialog()
+    expect(fx.resetToIntro).not.toHaveBeenCalled()
+    expect(path()).toBe('/quest')
+  })
+
+  /** And a stale control is still stale: a retired view speaks for nobody. */
+  it('does nothing for a handler from a view that is gone', async () => {
+    siblingLooking()
+    const view = renderMine()
+    const staleDone = retainedOnClick(doneButton())
+
+    fx.viewGeneration = 8
+    view.rerender(mineElement())
+
+    staleDone()
+    await noDialog()
+    expect(fx.resetToIntro).not.toHaveBeenCalled()
+    expect(path()).toBe('/quest')
+  })
+
+  /**
+   * Back on the ORIGINAL child's own screen the notice is visible again, and
+   * everything his door owes him — the real phase and his Retry — is there.
+   */
+  it('gives the original child his own phase and Retry back', () => {
+    deniedSave()
+    renderMine()
+    fireEvent.click(doneButton())
+
+    const d = dialog()
+    expect(within(d).getByText(QUEST_EXIT_GUARD_COPY.failedTitle)).toBeInTheDocument()
+    expect(within(d).queryByText(QUEST_EXIT_GUARD_COPY.genericTitle)).toBeNull()
+    fireEvent.click(within(d).getByRole('button', { name: QUEST_EXIT_GUARD_COPY.retry }))
+    expect(fx.retrySourceSave).toHaveBeenCalledTimes(1)
   })
 })
 
