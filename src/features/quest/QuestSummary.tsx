@@ -192,6 +192,17 @@ interface QuestSummaryProps {
   onRetryGraphSync?: () => void
   onDone: () => void
   onTryAgain: () => void
+  /**
+   * UX-496 — the one gate every departure from this summary passes through.
+   *
+   * The summary owns the DESTINATIONS (they are unchanged, and each exit still
+   * hands its own closure in); the page owns the decision, because only it can
+   * see the live source save and hold a prompt. When nothing is held the page
+   * calls the closure straight through, so an ordinary exit is byte-for-byte
+   * the exit it has always been. Absent — in a test or any other mount — every
+   * action behaves exactly as before.
+   */
+  requestExit?: (depart: () => void) => void
 }
 
 export default function QuestSummary({
@@ -210,8 +221,25 @@ export default function QuestSummary({
   onRetryGraphSync,
   onDone,
   onTryAgain,
+  requestExit,
 }: QuestSummaryProps) {
   const navigate = useNavigate()
+
+  /**
+   * Every way out of this summary, through one gate (UX-496).
+   *
+   * Checked BEFORE `onDone` — which resets the session — and before any
+   * navigation, because a reset that has already happened cannot be held: the
+   * baseline defect was exactly a departure that tore the run down and took
+   * the retry with it.
+   */
+  const departThrough = (depart: () => void) => {
+    if (requestExit) {
+      requestExit(depart)
+      return
+    }
+    depart()
+  }
 
   // XP calculations
   const questXp = totalCorrect * XP_PER_DIAMOND
@@ -561,15 +589,19 @@ export default function QuestSummary({
           <Button
             size="small"
             fullWidth
-            onClick={() => {
-              onDone()
-              navigate('/books/create-story', {
-                state: {
-                  prefillWords: strugglingWords,
-                  source: 'quest-summary',
-                },
+            // Also a departure — it resets and navigates away — so it takes
+            // the same gate rather than bypassing it (UX-496).
+            onClick={() =>
+              departThrough(() => {
+                onDone()
+                navigate('/books/create-story', {
+                  state: {
+                    prefillWords: strugglingWords,
+                    source: 'quest-summary',
+                  },
+                })
               })
-            }}
+            }
             sx={{
               fontFamily: MC.font,
               fontSize: '0.4rem',
@@ -590,10 +622,12 @@ export default function QuestSummary({
         <Button
           variant="contained"
           fullWidth
-          onClick={() => {
-            onDone()
-            navigate('/today')
-          }}
+          onClick={() =>
+            departThrough(() => {
+              onDone()
+              navigate('/today')
+            })
+          }
           sx={{
             fontFamily: MC.font,
             fontSize: '0.5rem',
@@ -608,7 +642,7 @@ export default function QuestSummary({
         <Button
           variant="outlined"
           fullWidth
-          onClick={onTryAgain}
+          onClick={() => departThrough(onTryAgain)}
           sx={{
             fontFamily: MC.font,
             fontSize: '0.5rem',

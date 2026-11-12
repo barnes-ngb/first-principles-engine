@@ -15,11 +15,14 @@ import { describe, expect, it } from 'vitest'
 
 import { expectKidLine, expectKidWording } from '../../test/kidReadability'
 import {
+  QUEST_EXIT_GUARD_COPY,
   QUEST_GRAPH_COPY,
   QUEST_RECOVERY_COPY,
   QUEST_RESUME_REFUSAL_COPY,
   QUEST_SOURCE_COPY,
   QUEST_UNSAVED_COPY,
+  questExitGenericNotice,
+  questExitNotice,
 } from './questSaveCopy'
 
 describe('quest save copy is readable by the boy it is for', () => {
@@ -52,6 +55,103 @@ describe('quest save copy is readable by the boy it is for', () => {
     expectKidLine(QUEST_UNSAVED_COPY.saving, 'QUEST_UNSAVED_COPY.saving')
     expectKidLine(QUEST_UNSAVED_COPY.refused, 'QUEST_UNSAVED_COPY.refused')
     expectKidWording(QUEST_UNSAVED_COPY.action, 'QUEST_UNSAVED_COPY.action')
+  })
+
+  /**
+   * UX-496 — the exit guard's own copy. The three lines and the warning are
+   * sentences; the two button labels take the wording bar only.
+   */
+  it('holds the exit-guard copy to the kid bar', () => {
+    for (const key of [
+      'savingTitle',
+      'savingBody',
+      'failedTitle',
+      'failedBody',
+      'conflictTitle',
+      'conflictBody',
+      'leaveWarning',
+      'genericTitle',
+      'genericBody',
+      'genericWarning',
+    ] as const) {
+      expectKidLine(QUEST_EXIT_GUARD_COPY[key], `QUEST_EXIT_GUARD_COPY.${key}`)
+    }
+    expectKidWording(QUEST_EXIT_GUARD_COPY.stay, 'QUEST_EXIT_GUARD_COPY.stay')
+    expectKidWording(QUEST_EXIT_GUARD_COPY.leave, 'QUEST_EXIT_GUARD_COPY.leave')
+    expectKidWording(QUEST_EXIT_GUARD_COPY.retry, 'QUEST_EXIT_GUARD_COPY.retry')
+  })
+})
+
+describe('the exit guard says what is true about the answers', () => {
+  /**
+   * The one thing this door must never do: a held departure exists BECAUSE the
+   * source has not landed, so borrowing the saved-source reassurance would tell
+   * a child his answers are safe at the exact moment they are not.
+   */
+  it('never calls an unsaved quest safe', () => {
+    for (const line of Object.values(QUEST_EXIT_GUARD_COPY)) {
+      expect(line.toLowerCase()).not.toContain('safe')
+    }
+    expect(QUEST_EXIT_GUARD_COPY.failedBody).not.toBe(QUEST_RECOVERY_COPY.body)
+  })
+
+  /** No promise in either direction — a dispatched write may still land. */
+  it('says the answers MAY be lost, not that they will be', () => {
+    expect(QUEST_EXIT_GUARD_COPY.leaveWarning).toContain('may')
+    expect(QUEST_EXIT_GUARD_COPY.leaveWarning.toLowerCase()).not.toContain('will')
+  })
+
+  /** A wait must not borrow the vocabulary of a failure. */
+  it('keeps the saving door apart from the failed one', () => {
+    expect(QUEST_EXIT_GUARD_COPY.savingTitle).not.toBe(QUEST_EXIT_GUARD_COPY.failedTitle)
+    expect(QUEST_EXIT_GUARD_COPY.savingBody).not.toBe(QUEST_EXIT_GUARD_COPY.failedBody)
+    // And the failed/conflict doors say the two different facts they report.
+    expect(QUEST_EXIT_GUARD_COPY.conflictTitle).not.toBe(QUEST_EXIT_GUARD_COPY.failedTitle)
+  })
+
+  /** The deliberate departure is labelled as one, and is not the stay. */
+  it('labels the departure deliberately', () => {
+    expect(QUEST_EXIT_GUARD_COPY.leave).not.toBe(QUEST_EXIT_GUARD_COPY.stay)
+    expect(QUEST_EXIT_GUARD_COPY.leave.toLowerCase()).toContain('saving')
+  })
+
+  /**
+   * The selector, which is the whole of the door's logic: a wait offers no
+   * retry and wears no error, and a conflict is a failure that cannot be
+   * retried — re-sending a payload another run already owns can never land.
+   */
+  it('offers a retry only where retrying is a real move', () => {
+    expect(questExitNotice('saving')).toMatchObject({ retryable: false, failed: false, busy: true })
+    expect(questExitNotice('failed')).toMatchObject({ retryable: true, failed: true, busy: false })
+    expect(questExitNotice('conflict')).toMatchObject({
+      retryable: false,
+      failed: true,
+      busy: false,
+    })
+  })
+
+  /**
+   * The ownerless face, for a held exit whose notice this viewer may not see.
+   * It must still be a real door — a hold with no prompt was the defect — and
+   * it must say nothing that belongs to the owning child: not which phase his
+   * save is in, and not his Retry.
+   */
+  it('keeps the hidden-notice door honest and ownerless', () => {
+    const generic = questExitGenericNotice()
+    expect(generic).toMatchObject({ retryable: false, failed: false, busy: false })
+    expect(generic.warning).toContain('may')
+    expect(generic.warning.toLowerCase()).not.toContain('will')
+    for (const phase of ['saving', 'failed', 'conflict'] as const) {
+      const owned = questExitNotice(phase)
+      expect(generic.title).not.toBe(owned.title)
+      expect(generic.body).not.toBe(owned.body)
+    }
+  })
+
+  it('carries the leaving warning on every face of the door', () => {
+    for (const phase of ['saving', 'failed', 'conflict'] as const) {
+      expect(questExitNotice(phase).warning).toBe(QUEST_EXIT_GUARD_COPY.leaveWarning)
+    }
   })
 })
 

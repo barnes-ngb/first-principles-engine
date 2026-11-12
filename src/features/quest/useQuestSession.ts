@@ -88,6 +88,8 @@ import {
   readMineAdditionPilotTarget,
 } from './mineAdditionProbe'
 import { resolveMineAdditionPilot } from './mineAdditionPilot'
+/** UX-496 — the exit door's phases live with its copy, in a module with no component in it. */
+import type { QuestExitPhase } from './questSaveCopy'
 import type {
   MineAdditionPilotRequest,
   ResolveMineAdditionPilotInput,
@@ -509,6 +511,73 @@ export interface QuestSourceSaveNotice {
   attemptId?: string
 }
 
+/**
+ * What a Mine-owned exit control was RENDERED under (UX-496).
+ *
+ * The control hands back the identity of its own render — not of the tap — and
+ * the hook compares it against the live one. Everything here is needed: a
+ * scope and epoch that moved mean a different child (including a same-tick
+ * `A → B → A`), a generation that moved means a different view, and the run
+ * names the payload the control was drawn for.
+ */
+export interface QuestExitBinding {
+  /** Which payload this control owns: a summary's close, or an intro's exit. */
+  kind: 'final' | 'partial'
+  /** The committed scope string the control was rendered under. */
+  scope: string
+  /** The identity epoch it was rendered under. */
+  epoch: number
+  /** The view generation it was rendered in. */
+  viewGeneration: number
+  /** The run whose payload its screen was showing, where there was one. */
+  runInstanceId?: string
+}
+
+/**
+ * What a Mine-owned exit may do, decided against the live session.
+ *
+ * Three outcomes, and the distinction between the first two is the correction
+ * this type exists for. `stale` is a control that no longer speaks for the live
+ * session — an old closure from a retired run, a prior route mount, an
+ * identity that moved and came back — and it must do NOTHING: no trip
+ * mutation, no reset, no navigation, *even when the current source is
+ * acknowledged*, because an acknowledged save says nothing about whether this
+ * handler is still the live screen's. `clear` is the ordinary case and means
+ * the exit proceeds exactly as it always has. `hold` is the source save's own
+ * phase, kept apart because the child's next move differs: `saving` is a wait,
+ * `failed` has a retry, and `conflict` has neither and needs an honest way out.
+ */
+export type QuestExitVerdict =
+  | { kind: 'stale' }
+  | { kind: 'clear' }
+  | {
+      kind: 'hold'
+      phase: QuestExitPhase
+      /** Whether the held payload itself can still be re-sent. */
+      canRetry: boolean
+      /** The payload the hold is about — what a Retry must name. */
+      runInstanceId?: string
+    }
+
+/**
+ * The face a RENDERED exit door should wear, for the payload it is bound to
+ * (UX-496).
+ *
+ * The same phase the synchronous verdict holds on, derived from render state so
+ * the door and the hold can never disagree: a `hold` with no face was an exit
+ * swallowed behind an invisible prompt, which is the defect this answers.
+ *
+ * `generic` is the one difference between them. The hold is about the SOURCE
+ * save, which exists whoever is looking; the notice's details are not. When the
+ * bound notice is hidden from this viewer — a sibling profile, a foreign family
+ * — the door still opens, with no owner details, no phase and no Retry.
+ */
+export interface QuestExitFace {
+  phase: QuestExitPhase
+  /** The bound notice is hidden here: show the ownerless face, and no Retry. */
+  generic: boolean
+}
+
 function mayViewerRetryQuestPayload(
   viewer: { profile: UserProfile | null | undefined; liveChildId: string | null | undefined },
   run: { childId: string },
@@ -692,9 +761,22 @@ export function useQuestSession() {
    * rather than inside a state updater.
    */
   const sourceNoticeAttemptRef = useRef<string | undefined>(undefined)
+  /**
+   * The whole notice CURRENTLY published, readable synchronously (UX-496).
+   *
+   * The exit guard asks its question inside a tap handler, and `sourceSave`
+   * state is this render's copy: the initial close publishes `saving` from
+   * `endSession` before the summary's first paint and a tap can arrive before
+   * the render that would have told the handler about it. This mirror is the
+   * same object the surfaces draw from, one tick earlier, and it exists before
+   * any held-payload ref does — a save that is merely in flight has no
+   * `pendingSourceRef` entry at all.
+   */
+  const sourceNoticeRef = useRef<QuestSourceSaveNotice>({ state: 'idle', canRetry: false })
   /** Publish a notice and keep the attempt mirror with it. */
   const publishSourceSave = useCallback((next: QuestSourceSaveNotice) => {
     sourceNoticeAttemptRef.current = next.attemptId
+    sourceNoticeRef.current = next
     setSourceSave(next)
   }, [])
 
@@ -890,6 +972,136 @@ export function useQuestSession() {
   const visibleSourceSave: QuestSourceSaveNotice = noticeIsVisible
     ? sourceSave
     : { state: 'idle', canRetry: false }
+
+  /**
+   * The face the door should wear for a bound payload — see {@link QuestExitFace}.
+   *
+   * Render-derived, by design: the page draws the door from its own render
+   * state, so this takes `sourceSave` and the visibility decision above rather
+   * than the synchronous mirror. It asks the SAME payload questions the verdict
+   * asks — kind, owning generation, run instance, phase — against the UNFILTERED
+   * notice, so a hidden notice still produces a face. Hiding then changes only
+   * what the face is allowed to say.
+   *
+   * The caller still owns the identity half (its own epoch, scope and view
+   * generation): a door is only ever drawn for a prompt that is still the live
+   * screen's, and this does not second-guess that.
+   */
+  const questExitFace = useCallback(
+    (binding: QuestExitBinding): QuestExitFace | null => {
+      if (sourceSave.kind !== binding.kind) return null
+      if (
+        sourceSave.viewGeneration !== undefined &&
+        sourceSave.viewGeneration !== binding.viewGeneration
+      ) {
+        return null
+      }
+      if (
+        binding.runInstanceId &&
+        sourceSave.runInstanceId &&
+        binding.runInstanceId !== sourceSave.runInstanceId
+      ) {
+        return null
+      }
+      if (
+        sourceSave.state !== 'saving' &&
+        sourceSave.state !== 'failed' &&
+        sourceSave.state !== 'conflict'
+      ) {
+        return null
+      }
+      return { phase: sourceSave.state, generic: !noticeIsVisible }
+    },
+    [sourceSave, noticeIsVisible],
+  )
+
+  /**
+   * May this exit control act, and does its own save still owe something?
+   * (UX-496)
+   *
+   * One synchronous reader, for use inside an actual event handler — the
+   * initial close publishes `saving` from `endSession` before the summary's
+   * first paint, and a tap can arrive before the render that would have told a
+   * handler about it. It exists before any held-payload ref does: a save
+   * merely in flight has no `pendingSourceRef` entry at all.
+   *
+   * ── Stale first, and separately ────────────────────────────────────────
+   *
+   * Sol reproduced an OLD *Done* navigating after the same child had re-entered
+   * the Mine following a saved return. Treating that as `clear` is the defect:
+   * the handler was authorised by a view that no longer exists, and an
+   * acknowledged save is not permission for it to fire. So the identity is
+   * judged before the phase, and a mismatch is `stale` — the caller then
+   * touches nothing at all.
+   *
+   *   • `viewGeneration`, so a retired view's control speaks for nobody. This
+   *     is what Sol's old *Done* failed: a re-entry resets, and a reset bumps.
+   *   • the epoch, read from the STORE as well as from the committed ref — the
+   *     same-tick `A → B → A`, which leaves every other value equal to itself.
+   *   • the scope, when BOTH are settled and they differ.
+   *   • `runInstanceId`, so a control drawn for one payload cannot act on
+   *     another.
+   *
+   * Staleness needs POSITIVE evidence of a move, which is why this does not
+   * reuse `scopeStillLive`. That rail authorises starts and writes and so
+   * fail-closes on an unsettled identity — right there, wrong here: an exit
+   * refused for an identity that merely has not settled (a children read still
+   * loading, or one that FAILED) is a dead *Done* and a child with no way off
+   * his own summary. Unsettled is not evidence of a move, and an exit that owes
+   * nothing still leaves.
+   *
+   * ── Then the phase, for this control's OWN payload ─────────────────────
+   *
+   * `kind` is what makes the summary's close and the intro's partial two
+   * different questions rather than one: a summary is never held by an intro's
+   * partial, and an intro is never held by a summary's close.
+   *
+   * `graphSync` is deliberately absent. A pending or failed MAP update is not
+   * an unsaved quest: the answers committed, the projection is recoverable from
+   * them after a village return and re-entry, and holding the door for it would
+   * be the two successes confused again — the exact defect UX-494 repaired.
+   */
+  const questExitVerdict = useCallback(
+    (binding: QuestExitBinding): QuestExitVerdict => {
+      // ── Is the control that asked still the live session's own? ──
+      const committed = committedScopeRef.current
+      const identityMoved =
+        binding.viewGeneration !== runGenerationRef.current ||
+        binding.epoch !== getLibraryIdentityEpoch() ||
+        binding.epoch !== committed.epoch ||
+        (binding.scope !== 'unsettled' &&
+          committed.scope !== 'unsettled' &&
+          binding.scope !== committed.scope)
+      if (identityMoved) return { kind: 'stale' }
+      const notice = sourceNoticeRef.current
+      if (
+        binding.runInstanceId &&
+        notice.runInstanceId &&
+        binding.runInstanceId !== notice.runInstanceId
+      ) {
+        return { kind: 'stale' }
+      }
+
+      // ── Does this control's own payload still owe the child something? ──
+      if (notice.kind !== binding.kind) return { kind: 'clear' }
+      if (
+        notice.viewGeneration !== undefined &&
+        notice.viewGeneration !== runGenerationRef.current
+      ) {
+        return { kind: 'clear' }
+      }
+      if (notice.state === 'saving' || notice.state === 'failed' || notice.state === 'conflict') {
+        return {
+          kind: 'hold',
+          phase: notice.state,
+          canRetry: notice.canRetry,
+          runInstanceId: notice.runInstanceId,
+        }
+      }
+      return { kind: 'clear' }
+    },
+    [],
+  )
 
   /**
    * Retire a run that failed before it had a single COUNTED answer (UX-494).
@@ -3697,6 +3909,16 @@ export function useQuestSession() {
      * produced it even when the header has moved on.
      */
     visibleSourceSave,
+    /**
+     * UX-496 — what an exit control may do, read live, before it mutates
+     * return state, resets or navigates. See `questExitVerdict`.
+     */
+    questExitVerdict,
+    /**
+     * UX-496 — the face a rendered door should wear for the same binding, so a
+     * held exit always HAS a visible prompt. See `questExitFace`.
+     */
+    questExitFace,
     graphSync,
     retrySourceSave,
     retryGraphProjection,
