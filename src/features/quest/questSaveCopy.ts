@@ -68,6 +68,39 @@ export const QUEST_UNSAVED_COPY = {
 } as const
 
 /**
+ * ── Leaving the summary before the SOURCE save landed (UX-496) ─────────────
+ *
+ * The baseline this repairs: a denied close left *Try saving again* on the
+ * summary, and the tappable *Back to village* beside it threw the retry away —
+ * the source, the evidence and the Resume were all absent on re-entry. So the
+ * three Mine-owned completion exits (*Back to village*, *Done*, *Try another
+ * quest*, and the conditional practice-story button that also leaves) ask
+ * first, and the safe default is to stay.
+ *
+ * What it must never say: that the answers are *safe*, which is true only of a
+ * saved source whose map is waiting ({@link QUEST_RECOVERY_COPY}). Here they
+ * are not. It also makes no promise in the other direction — a write already
+ * dispatched may still land — so the leave line says *may*, not *will*.
+ *
+ * `conflict` is not a success and gets its own honest line: a different run
+ * already owns that id, so this payload will never land and no retry can help.
+ * The deliberate exit is the only move left, and it stays reachable.
+ */
+export const QUEST_EXIT_GUARD_COPY = {
+  savingTitle: 'Still saving your quest.',
+  savingBody: 'Wait here while it saves.',
+  failedTitle: QUEST_SOURCE_COPY.failed,
+  failedBody: 'Your answers are not saved yet.',
+  conflictTitle: QUEST_SOURCE_COPY.conflict,
+  conflictBody: 'This quest will not save.',
+  /** The plain explanation on the deliberate-departure tap. */
+  leaveWarning: 'If you go now, they may be lost.',
+  stay: 'Stay here',
+  leave: 'Leave without saving',
+  retry: QUEST_SOURCE_COPY.retry,
+} as const
+
+/**
  * Why a Resume did nothing — one line per refusal.
  *
  * It says so instead of quietly starting a fresh quest, which is what the old

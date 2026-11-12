@@ -509,6 +509,17 @@ export interface QuestSourceSaveNotice {
   attemptId?: string
 }
 
+/**
+ * What a Mine-owned completion exit is held by, if anything (UX-496).
+ *
+ * `clear` is the ordinary case and means the exit proceeds exactly as it always
+ * has — same destination, same reset, nothing asked. The other three are the
+ * source save's own phases, kept apart because the child's next move differs:
+ * `saving` is a wait, `failed` has a retry, and `conflict` has neither and
+ * needs an honest way out.
+ */
+export type QuestExitHold = 'clear' | 'saving' | 'failed' | 'conflict'
+
 function mayViewerRetryQuestPayload(
   viewer: { profile: UserProfile | null | undefined; liveChildId: string | null | undefined },
   run: { childId: string },
@@ -692,9 +703,22 @@ export function useQuestSession() {
    * rather than inside a state updater.
    */
   const sourceNoticeAttemptRef = useRef<string | undefined>(undefined)
+  /**
+   * The whole notice CURRENTLY published, readable synchronously (UX-496).
+   *
+   * The exit guard asks its question inside a tap handler, and `sourceSave`
+   * state is this render's copy: the initial close publishes `saving` from
+   * `endSession` before the summary's first paint and a tap can arrive before
+   * the render that would have told the handler about it. This mirror is the
+   * same object the surfaces draw from, one tick earlier, and it exists before
+   * any held-payload ref does — a save that is merely in flight has no
+   * `pendingSourceRef` entry at all.
+   */
+  const sourceNoticeRef = useRef<QuestSourceSaveNotice>({ state: 'idle', canRetry: false })
   /** Publish a notice and keep the attempt mirror with it. */
   const publishSourceSave = useCallback((next: QuestSourceSaveNotice) => {
     sourceNoticeAttemptRef.current = next.attemptId
+    sourceNoticeRef.current = next
     setSourceSave(next)
   }, [])
 
@@ -890,6 +914,53 @@ export function useQuestSession() {
   const visibleSourceSave: QuestSourceSaveNotice = noticeIsVisible
     ? sourceSave
     : { state: 'idle', canRetry: false }
+
+  /**
+   * Does THIS view's source save still owe the child something? (UX-496)
+   *
+   * The one question a completion exit has to ask, answered synchronously from
+   * the published notice rather than from a render's copy of it. Three things
+   * make the answer this view's own:
+   *
+   *   • `kind`. A `partial` notice belongs to a Mine *intro* an earlier exit
+   *     landed on, not to the summary asking; it is never this exit's hold.
+   *   • `runInstanceId`. A control retained from an older render names the run
+   *     it was drawn for, so it cannot be held by a different payload.
+   *   • `viewGeneration`. A notice whose view has retired holds nothing — the
+   *     same test `visibleSourceSave` uses to decide who may see it.
+   *
+   * `graphSync` is deliberately absent. A pending or failed MAP update is not
+   * an unsaved quest: the answers committed, the projection is recoverable from
+   * them after a village return and re-entry, and holding the door for it would
+   * be the two successes confused again — the exact defect UX-494 repaired.
+   */
+  const sourceSaveExitHold = useCallback(
+    (expect?: { runInstanceId?: string }): QuestExitHold => {
+      const notice = sourceNoticeRef.current
+      if (notice.kind === 'partial') return 'clear'
+      if (
+        expect?.runInstanceId &&
+        notice.runInstanceId &&
+        expect.runInstanceId !== notice.runInstanceId
+      ) {
+        return 'clear'
+      }
+      if (notice.viewGeneration !== undefined && notice.viewGeneration !== runGenerationRef.current) {
+        return 'clear'
+      }
+      switch (notice.state) {
+        case 'saving':
+          return 'saving'
+        case 'failed':
+          return 'failed'
+        case 'conflict':
+          return 'conflict'
+        default:
+          return 'clear'
+      }
+    },
+    [],
+  )
 
   /**
    * Retire a run that failed before it had a single COUNTED answer (UX-494).
@@ -3697,6 +3768,11 @@ export function useQuestSession() {
      * produced it even when the header has moved on.
      */
     visibleSourceSave,
+    /**
+     * UX-496 — the live hold a completion exit must consult before it mutates
+     * return state, resets or navigates. See `sourceSaveExitHold`.
+     */
+    sourceSaveExitHold,
     graphSync,
     retrySourceSave,
     retryGraphProjection,

@@ -15,6 +15,7 @@ import { describe, expect, it } from 'vitest'
 
 import { expectKidLine, expectKidWording } from '../../test/kidReadability'
 import {
+  QUEST_EXIT_GUARD_COPY,
   QUEST_GRAPH_COPY,
   QUEST_RECOVERY_COPY,
   QUEST_RESUME_REFUSAL_COPY,
@@ -52,6 +53,61 @@ describe('quest save copy is readable by the boy it is for', () => {
     expectKidLine(QUEST_UNSAVED_COPY.saving, 'QUEST_UNSAVED_COPY.saving')
     expectKidLine(QUEST_UNSAVED_COPY.refused, 'QUEST_UNSAVED_COPY.refused')
     expectKidWording(QUEST_UNSAVED_COPY.action, 'QUEST_UNSAVED_COPY.action')
+  })
+
+  /**
+   * UX-496 — the exit guard's own copy. The three lines and the warning are
+   * sentences; the two button labels take the wording bar only.
+   */
+  it('holds the exit-guard copy to the kid bar', () => {
+    for (const key of [
+      'savingTitle',
+      'savingBody',
+      'failedTitle',
+      'failedBody',
+      'conflictTitle',
+      'conflictBody',
+      'leaveWarning',
+    ] as const) {
+      expectKidLine(QUEST_EXIT_GUARD_COPY[key], `QUEST_EXIT_GUARD_COPY.${key}`)
+    }
+    expectKidWording(QUEST_EXIT_GUARD_COPY.stay, 'QUEST_EXIT_GUARD_COPY.stay')
+    expectKidWording(QUEST_EXIT_GUARD_COPY.leave, 'QUEST_EXIT_GUARD_COPY.leave')
+    expectKidWording(QUEST_EXIT_GUARD_COPY.retry, 'QUEST_EXIT_GUARD_COPY.retry')
+  })
+})
+
+describe('the exit guard says what is true about the answers', () => {
+  /**
+   * The one thing this door must never do: a held departure exists BECAUSE the
+   * source has not landed, so borrowing the saved-source reassurance would tell
+   * a child his answers are safe at the exact moment they are not.
+   */
+  it('never calls an unsaved quest safe', () => {
+    for (const line of Object.values(QUEST_EXIT_GUARD_COPY)) {
+      expect(line.toLowerCase()).not.toContain('safe')
+    }
+    expect(QUEST_EXIT_GUARD_COPY.failedBody).not.toBe(QUEST_RECOVERY_COPY.body)
+  })
+
+  /** No promise in either direction — a dispatched write may still land. */
+  it('says the answers MAY be lost, not that they will be', () => {
+    expect(QUEST_EXIT_GUARD_COPY.leaveWarning).toContain('may')
+    expect(QUEST_EXIT_GUARD_COPY.leaveWarning.toLowerCase()).not.toContain('will')
+  })
+
+  /** A wait must not borrow the vocabulary of a failure. */
+  it('keeps the saving door apart from the failed one', () => {
+    expect(QUEST_EXIT_GUARD_COPY.savingTitle).not.toBe(QUEST_EXIT_GUARD_COPY.failedTitle)
+    expect(QUEST_EXIT_GUARD_COPY.savingBody).not.toBe(QUEST_EXIT_GUARD_COPY.failedBody)
+    // And the failed/conflict doors say the two different facts they report.
+    expect(QUEST_EXIT_GUARD_COPY.conflictTitle).not.toBe(QUEST_EXIT_GUARD_COPY.failedTitle)
+  })
+
+  /** The deliberate departure is labelled as one, and is not the stay. */
+  it('labels the departure deliberately', () => {
+    expect(QUEST_EXIT_GUARD_COPY.leave).not.toBe(QUEST_EXIT_GUARD_COPY.stay)
+    expect(QUEST_EXIT_GUARD_COPY.leave.toLowerCase()).toContain('saving')
   })
 })
 
