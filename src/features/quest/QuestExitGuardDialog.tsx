@@ -1,3 +1,5 @@
+import { useCallback, useRef } from 'react'
+
 import Alert from '@mui/material/Alert'
 import Button from '@mui/material/Button'
 import CircularProgress from '@mui/material/CircularProgress'
@@ -49,13 +51,36 @@ export default function QuestExitGuardDialog({
   onStay: () => void
   onLeaveAnyway: () => void
 }) {
+  const stayRef = useRef<HTMLButtonElement | null>(null)
+
+  /**
+   * `autoFocus` alone is not enough in a real browser: MUI's focus trap takes
+   * focus for the dialog container as it mounts and the open transition can
+   * land after that, leaving the container focused instead of the safe action.
+   * So once the transition has ENTERED — the trap and the transition both
+   * settled — the stay button is focused outright. Guarded because the door can
+   * already be closed by then: a save that acknowledged mid-transition unmounts
+   * this, and a stale transition's callback would hold a detached button.
+   */
+  const focusStay = useCallback(() => {
+    const stay = stayRef.current
+    if (!stay?.isConnected) return
+    stay.focus()
+  }, [])
+
   // Closed is the ordinary state, and then this renders nothing at all.
   if (!phase) return null
   const notice = questExitNotice(phase)
   const showRetry = notice.retryable && canRetry
 
   return (
-    <Dialog open onClose={onStay} maxWidth="xs" fullWidth>
+    <Dialog
+      open
+      onClose={onStay}
+      maxWidth="xs"
+      fullWidth
+      TransitionProps={{ onEntered: focusStay }}
+    >
       <DialogTitle sx={{ fontSize: '18px', lineHeight: 1.4 }}>{notice.title}</DialogTitle>
       <DialogContent>
         {notice.failed ? (
@@ -80,6 +105,7 @@ export default function QuestExitGuardDialog({
               what Escape and a backdrop tap mean. */}
           <Button
             autoFocus
+            ref={stayRef}
             onClick={onStay}
             variant="contained"
             fullWidth

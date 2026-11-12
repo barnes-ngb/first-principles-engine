@@ -956,3 +956,31 @@ describe("the owning intro's return, while its partial is unsaved", () => {
     await noDialog()
   })
 })
+
+/**
+ * On a real phone MUI's focus trap claims focus for the dialog CONTAINER as it
+ * mounts, and the open transition settles after that, so `autoFocus` alone left
+ * the safe action unfocused. The door now re-focuses *Stay here* once the
+ * transition has entered, which is what this pins: focus taken away mid-open —
+ * standing in for the trap — is back on the safe action afterwards.
+ */
+describe("the door's focus, after the trap and the transition settle", () => {
+  it('lands on the safe action once the open transition has entered', () => {
+    deniedSave()
+    renderMine()
+    fireEvent.click(doneButton())
+
+    const paper = dialog()
+    // The trap's claim: focus on the container, not the button.
+    act(() => {
+      paper.focus()
+    })
+    expect(stayButton()).not.toHaveFocus()
+
+    // The open transition finishing is what puts it right.
+    act(() => {
+      fireEvent.transitionEnd(paper)
+    })
+    expect(stayButton()).toHaveFocus()
+  })
+})
