@@ -2124,3 +2124,248 @@ describe('Resume claims what is stored now, atomically', () => {
     expect(save.data.modelProjection).toBe('pending')
   })
 })
+
+/**
+ * UX-496 — what an exit control may do, at the hook level.
+ *
+ * The three verdicts, against the real notice path rather than a stub. `stale`
+ * is the one this block exists for: Sol reproduced an OLD *Done* navigating
+ * after the same child had re-entered the Mine following a SAVED return, so an
+ * acknowledged save must not be read as permission for a handler whose view is
+ * gone.
+ */
+describe('the exit verdict a Mine-owned departure asks for', () => {
+  /** The binding a control renders with — exactly what the page assembles. */
+  function bindingFor(view: View, kind: 'final' | 'partial') {
+    return {
+      kind,
+      scope: view.result.current.recoveryScope,
+      epoch: view.result.current.recoveryEpoch,
+      viewGeneration: view.result.current.viewGeneration,
+      runInstanceId: view.result.current.visibleSourceSave.runInstanceId,
+    }
+  }
+
+  it('holds a denied close, with its payload and its retry', async () => {
+    const view = mountHook()
+    await start(view)
+    transactionError = new Error('offline')
+    await answer(view, 5)
+
+    const verdict = view.result.current.questExitVerdict(bindingFor(view, 'final'))
+    expect(verdict).toMatchObject({ kind: 'hold', phase: 'failed', canRetry: true })
+  })
+
+  /**
+   * The pre-transaction pending *Done*, which Sol's Chrome run confirmed and
+   * which this must preserve: `endSession` publishes `saving` before its first
+   * await, so the hold is answerable before any failed-payload ref exists.
+   *
+   * ── What is held, and why this driver ──────────────────────────────────
+   *
+   * The AI SUMMARY call, which is the stage this fixture can hold cleanly and
+   * the one the held-summary test above (*Try another quest and Start Phonics*)
+   * already proves. `endSession` sets the Summary screen, publishes
+   * `{ saving, final }` and marks the graph pending, and only THEN awaits
+   * `chat`. So parking it there leaves the close exactly where the baseline
+   * leaves it — notice `saving`, no transaction attempted, no held payload in
+   * `pendingSourceRef` — which is the state the guard has to answer for.
+   *
+   * The first draft held the next TRANSACTION and submitted the fifth answer
+   * through the `answer` helper. That cannot work: the helper awaits
+   * `submitAnswer` inside `act`, and that promise cannot settle until the gate
+   * is released, so the assertions ran against a state that had not advanced
+   * yet (`clear`), threw, and left `transactionGate` set — which is what then
+   * broke the tests after it. So this one submits directly, waits out the real
+   * feedback pause in a COMPLETED act, and always releases in a `finally`.
+   */
+  it('holds a close whose write is still in flight', async () => {
+    const view = mountHook()
+    await start(view)
+    await answer(view, 4)
+
+    // Writes from here on belong to the close alone.
+    writes.length = 0
+
+    // The fifth answer closes the run — and its summary call hangs.
+    let releaseSummary: (v: unknown) => void = () => {}
+    chat.mockImplementationOnce(() => new Promise((resolve) => { releaseSummary = resolve }))
+    // Deliberately NOT awaited inside `act`: the close must still be in flight
+    // while the verdict is asked, which is the whole point.
+    const expected = view.result.current.currentQuestion?.correctAnswer ?? 'cat'
+    const closing = view.result.current.submitAnswer(expected)
+    try {
+      // Let the feedback pause clear and the summary call start.
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 1500))
+      })
+
+      // The close is parked: the summary is on screen and the source save is
+      // reported as in flight, with nothing yet written.
+      expect(view.result.current.screen).toBe('summary')
+      expect(view.result.current.sourceSave).toMatchObject({
+        state: 'saving',
+        kind: 'final',
+        canRetry: false,
+      })
+      expect(sourceWrites()).toHaveLength(0)
+
+      expect(view.result.current.questExitVerdict(bindingFor(view, 'final'))).toMatchObject({
+        kind: 'hold',
+        phase: 'saving',
+      })
+    } finally {
+      // Always let the close finish, whatever the assertions did: a close left
+      // in flight is what poisons every test after this one.
+      releaseSummary({ message: 'no summary block' })
+      await act(async () => {
+        await closing
+      })
+    }
+
+    // And once it lands, the same control is clear — the ordinary exit.
+    expect(view.result.current.sourceSave.state).toBe('saved')
+    expect(view.result.current.questExitVerdict(bindingFor(view, 'final'))).toEqual({
+      kind: 'clear',
+    })
+  })
+
+  it('clears an acknowledged close, so the ordinary exit is untouched', async () => {
+    const view = mountHook()
+    await start(view)
+    await answer(view, 5)
+
+    expect(view.result.current.visibleSourceSave.state).toBe('saved')
+    expect(view.result.current.questExitVerdict(bindingFor(view, 'final'))).toEqual({
+      kind: 'clear',
+    })
+  })
+
+  it('calls an old view stale after a re-entry, even with the source saved', async () => {
+    const view = mountHook()
+    await start(view)
+    await answer(view, 5)
+    // The summary's own Done, captured while that summary was on screen.
+    const stale = bindingFor(view, 'final')
+
+    // The child leaves and re-enters: the reset retires that view.
+    await act(async () => {
+      view.result.current.resetToIntro()
+    })
+
+    expect(view.result.current.questExitVerdict(stale)).toEqual({ kind: 'stale' })
+  })
+
+  it('calls a same-tick A → B → A stale under an equal scope', async () => {
+    const view = mountHook()
+    await start(view)
+    transactionError = new Error('offline')
+    await answer(view, 5)
+    const bound = bindingFor(view, 'final')
+    expect(view.result.current.questExitVerdict(bound)).toMatchObject({ kind: 'hold' })
+
+    // Away and back: family, child and profile are exactly as they were, so
+    // only the epoch can tell, which is why the binding carries it.
+    identityEpoch = 3
+    setActive(LINCOLN)
+    view.rerender()
+
+    expect(view.result.current.questExitVerdict(bound)).toEqual({ kind: 'stale' })
+  })
+
+  it('never lets a summary be held by an intro partial, or the reverse', async () => {
+    const view = mountHook()
+    await start(view)
+    await answer(view, 2)
+    transactionError = new Error('offline')
+    await act(async () => {
+      view.result.current.resetToIntro()
+    })
+    await settle()
+
+    expect(view.result.current.visibleSourceSave).toMatchObject({
+      state: 'failed',
+      kind: 'partial',
+    })
+    // The intro that the exit landed on owns this payload and is held.
+    expect(view.result.current.questExitVerdict(bindingFor(view, 'partial'))).toMatchObject({
+      kind: 'hold',
+      phase: 'failed',
+    })
+    // A close-shaped control is not: a partial is not its payload.
+    expect(view.result.current.questExitVerdict(bindingFor(view, 'final'))).toEqual({
+      kind: 'clear',
+    })
+  })
+
+  /**
+   * The two successes stay apart (UX-494): the verdict is the SOURCE's, and the
+   * map's own state — pending, reached or failed — is not part of the question.
+   * Holding the door for a map update would be the exact confusion UX-494
+   * repaired, and the map retry is recoverable from the saved source anyway.
+   */
+  it('clears a saved source whatever its map projection is doing', async () => {
+    seedTargetedModel()
+    selectedPlan = PLAN
+    const view = mountHook()
+    await start(view)
+    await answer(view, 5)
+
+    expect(view.result.current.visibleSourceSave.state).toBe('saved')
+    expect(view.result.current.questExitVerdict(bindingFor(view, 'final'))).toEqual({
+      kind: 'clear',
+    })
+  })
+
+  /**
+   * The door and the hold answer from ONE source (UX-496 correction).
+   *
+   * A denied close, then a switch to the sibling's own profile: the bound
+   * summary is still mounted and the held payload is untouched, so a freshly
+   * rendered exit is still `hold` — but the notice is hidden from that viewer,
+   * and a door derived from `visibleSourceSave` drew nothing. The exit was
+   * swallowed. `questExitFace` is the face for the same binding, so a hold
+   * always HAS a door; hiding changes only what it may say.
+   */
+  it('still has a face for a hold whose notice is hidden, with no owner details', async () => {
+    const view = mountHook()
+    await start(view)
+    transactionError = new Error('offline')
+    await answer(view, 5)
+
+    // The owner's own screen: the real phase, and his retry.
+    expect(view.result.current.questExitFace(bindingFor(view, 'final'))).toEqual({
+      phase: 'failed',
+      generic: false,
+    })
+
+    // The sibling's profile, on the same mounted summary.
+    identityEpoch = 3
+    activeProfile = UserProfile.London
+    setActive(LONDON, true)
+    view.rerender()
+
+    expect(view.result.current.visibleSourceSave.state).toBe('idle')
+    // Still held — the payload still owes the original child something...
+    expect(view.result.current.questExitVerdict(bindingFor(view, 'final'))).toMatchObject({
+      kind: 'hold',
+      phase: 'failed',
+    })
+    // ...and now there is a door for it, wearing the ownerless face.
+    expect(view.result.current.questExitFace(bindingFor(view, 'final'))).toEqual({
+      phase: 'failed',
+      generic: true,
+    })
+  })
+
+  /** No hold, no door — the ordinary acknowledged exit is untouched. */
+  it('has no face for an acknowledged save, or for the other payload kind', async () => {
+    const view = mountHook()
+    await start(view)
+    await answer(view, 5)
+
+    expect(view.result.current.visibleSourceSave.state).toBe('saved')
+    expect(view.result.current.questExitFace(bindingFor(view, 'final'))).toBeNull()
+    expect(view.result.current.questExitFace(bindingFor(view, 'partial'))).toBeNull()
+  })
+})

@@ -95,6 +95,9 @@ vi.mock('./useQuestSession', () => ({
     // nothing at all.
     sourceSave: { state: 'idle', canRetry: false },
     visibleSourceSave: { state: 'idle', canRetry: false },
+    // UX-496 — what an exit control may do. Nothing is owed here, so every
+    // exit in this file behaves exactly as it did before the guard.
+    questExitVerdict: () => ({ kind: 'clear' as const }),
     graphSync: { state: 'idle' },
     recoveryScope: 'fam-1|lincoln|child|1',
     recoveryEpoch: 1,
