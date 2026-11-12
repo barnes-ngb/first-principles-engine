@@ -2158,23 +2158,76 @@ describe('the exit verdict a Mine-owned departure asks for', () => {
 
   /**
    * The pre-transaction pending *Done*, which Sol's Chrome run confirmed and
-   * which this must preserve: the close publishes `saving` before its first
+   * which this must preserve: `endSession` publishes `saving` before its first
    * await, so the hold is answerable before any failed-payload ref exists.
+   *
+   * ── What is held, and why this driver ──────────────────────────────────
+   *
+   * The AI SUMMARY call, which is the stage this fixture can hold cleanly and
+   * the one the held-summary test above (*Try another quest and Start Phonics*)
+   * already proves. `endSession` sets the Summary screen, publishes
+   * `{ saving, final }` and marks the graph pending, and only THEN awaits
+   * `chat`. So parking it there leaves the close exactly where the baseline
+   * leaves it — notice `saving`, no transaction attempted, no held payload in
+   * `pendingSourceRef` — which is the state the guard has to answer for.
+   *
+   * The first draft held the next TRANSACTION and submitted the fifth answer
+   * through the `answer` helper. That cannot work: the helper awaits
+   * `submitAnswer` inside `act`, and that promise cannot settle until the gate
+   * is released, so the assertions ran against a state that had not advanced
+   * yet (`clear`), threw, and left `transactionGate` set — which is what then
+   * broke the tests after it. So this one submits directly, waits out the real
+   * feedback pause in a COMPLETED act, and always releases in a `finally`.
    */
   it('holds a close whose write is still in flight', async () => {
     const view = mountHook()
     await start(view)
     await answer(view, 4)
-    // The close's own source transaction is the next one, and it is HELD.
-    const release = holdNextTransaction()
-    const closing = answer(view, 1)
-    await settle()
 
-    const verdict = view.result.current.questExitVerdict(bindingFor(view, 'final'))
-    expect(verdict).toMatchObject({ kind: 'hold', phase: 'saving' })
+    // Writes from here on belong to the close alone.
+    writes.length = 0
 
-    release()
-    await closing
+    // The fifth answer closes the run — and its summary call hangs.
+    let releaseSummary: (v: unknown) => void = () => {}
+    chat.mockImplementationOnce(() => new Promise((resolve) => { releaseSummary = resolve }))
+    // Deliberately NOT awaited inside `act`: the close must still be in flight
+    // while the verdict is asked, which is the whole point.
+    const expected = view.result.current.currentQuestion?.correctAnswer ?? 'cat'
+    const closing = view.result.current.submitAnswer(expected)
+    try {
+      // Let the feedback pause clear and the summary call start.
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 1500))
+      })
+
+      // The close is parked: the summary is on screen and the source save is
+      // reported as in flight, with nothing yet written.
+      expect(view.result.current.screen).toBe('summary')
+      expect(view.result.current.sourceSave).toMatchObject({
+        state: 'saving',
+        kind: 'final',
+        canRetry: false,
+      })
+      expect(sourceWrites()).toHaveLength(0)
+
+      expect(view.result.current.questExitVerdict(bindingFor(view, 'final'))).toMatchObject({
+        kind: 'hold',
+        phase: 'saving',
+      })
+    } finally {
+      // Always let the close finish, whatever the assertions did: a close left
+      // in flight is what poisons every test after this one.
+      releaseSummary({ message: 'no summary block' })
+      await act(async () => {
+        await closing
+      })
+    }
+
+    // And once it lands, the same control is clear — the ordinary exit.
+    expect(view.result.current.sourceSave.state).toBe('saved')
+    expect(view.result.current.questExitVerdict(bindingFor(view, 'final'))).toEqual({
+      kind: 'clear',
+    })
   })
 
   it('clears an acknowledged close, so the ordinary exit is untouched', async () => {
