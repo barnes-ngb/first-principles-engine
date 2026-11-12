@@ -1,4 +1,11 @@
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getDocs, query, where, orderBy, limit as firestoreLimit } from 'firebase/firestore'
 import Alert from '@mui/material/Alert'
@@ -1236,6 +1243,9 @@ function MineTripSuggestion({
         model,
         readingCalibrated: hasReadingCalibration(snapshot),
         mathCalibrated: hasMathCalibration(snapshot),
+        // UX-495 — a model document stamped for another child cannot lend this
+        // read a synthesis generation. The mode decision is unchanged.
+        expectedChildId: childId,
       })
     : null
 
@@ -1260,18 +1270,30 @@ function MineTripSuggestion({
    *
    * Stricter than the ordinary agreement above on purpose. The ordinary offer
    * is a MODE, so a concept that moved inside the same mode still starts the
-   * mode; a probe is about one concept, so the village's offer and this page's
-   * own read have to name the SAME concept and the SAME source, and that source
-   * has to be a fresh synthesis. The generation is the synthesis's existing
-   * `generatedAt`, read from the same settled model this agreement came from,
-   * and a missing or blank value is not a usable generation — so there is no
-   * pilot, and the suggestion behaves exactly as it does today.
+   * mode; a probe is about one concept from one piece of advice, so all three
+   * generations have to be the same one:
+   *
+   *   • the TOWN's, carried on the trip (`suggestion.synthesisGeneratedAt`);
+   *   • this page's own COMMITTED read (`agreed.synthesisGeneratedAt`);
+   *   • and the Start's re-read, compared inside `resolveMineAdditionPilot`.
+   *
+   * Without the first of those, a same-concept synthesis **B** that replaced
+   * **A** while the child walked over still looked like the same offer, because
+   * the concept, the mode and the source were all unchanged. A missing or blank
+   * value on either side is not a usable generation, so there is no pilot and
+   * the suggestion behaves exactly as it does today.
+   *
+   * Derived as two plain strings and assembled in a `useMemo`, so the object
+   * below has a stable identity: the layout effect that commits it names it as
+   * a dependency, and an object literal rebuilt every render would make that
+   * effect re-run every render (the `exhaustive-deps` warning this answers —
+   * by deriving it cleanly, not by suppressing it).
    */
-  const synthesisGeneratedAt =
-    settled && typeof model?.synthesis?.generatedAt === 'string'
-      ? model.synthesis.generatedAt.trim()
+  const offeredGeneration =
+    typeof suggestion?.synthesisGeneratedAt === 'string'
+      ? suggestion.synthesisGeneratedAt.trim()
       : ''
-  const pilotOffer: MineAdditionPilotOffer | null =
+  const pilotGeneration =
     agreed &&
     suggestion &&
     agreed.questMode === 'math' &&
@@ -1279,15 +1301,24 @@ function MineTripSuggestion({
     agreed.conceptId === suggestion.conceptId &&
     agreed.source === MineInvitationSource.Synthesis &&
     suggestion.source === MineInvitationSource.Synthesis &&
-    synthesisGeneratedAt !== ''
-      ? {
-          conceptId: agreed.conceptId,
-          domain: agreed.domain,
-          questMode: 'math',
-          offerSource: MineInvitationSource.Synthesis,
-          synthesisGeneratedAt,
-        }
-      : null
+    offeredGeneration !== '' &&
+    agreed.synthesisGeneratedAt === offeredGeneration
+      ? offeredGeneration
+      : ''
+  const pilotConceptId = pilotGeneration ? MINE_ADDITION_PROBE_CONCEPT : ''
+  const pilotOffer: MineAdditionPilotOffer | null = useMemo(
+    () =>
+      pilotConceptId && pilotGeneration
+        ? {
+            conceptId: pilotConceptId,
+            domain: EvaluationDomain.Math,
+            questMode: 'math',
+            offerSource: MineInvitationSource.Synthesis,
+            synthesisGeneratedAt: pilotGeneration,
+          }
+        : null,
+    [pilotConceptId, pilotGeneration],
+  )
 
   /**
    * The agreement this card most recently COMMITTED.

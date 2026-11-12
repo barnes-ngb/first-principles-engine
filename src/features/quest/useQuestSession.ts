@@ -1175,6 +1175,9 @@ export function useQuestSession() {
         questMode,
         startLevel,
         model: startModel,
+        // The owner snapshot's own stamp, when it carries one: a read that
+        // answered for another child cannot calibrate this child's probe.
+        snapshotChildId: typeof snapshot?.childId === 'string' ? snapshot.childId : undefined,
         readingCalibrated: hasReadingCalibration(snapshot as SkillSnapshot | null),
         mathCalibrated: hasMathCalibration(snapshot as SkillSnapshot | null),
       })

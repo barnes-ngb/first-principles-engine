@@ -13,6 +13,7 @@
 
 import type { EvaluationDomain } from '../../core/types/enums'
 import type { QuestAskPlanRow } from '../../core/foundations/questTargeting'
+import { mineAdditionProbeResumeRefusal } from './mineAdditionProbe'
 import type { EvaluationFinding, EvaluationSession } from '../../core/types'
 import type {
   InteractiveSessionData,
@@ -350,6 +351,20 @@ export function questResumeRefusal(
   if (!stored.status || !RESUMABLE_STATUSES.has(stored.status)) return 'not-resumable'
   if (!stored.childId || stored.childId !== expectedChildId) return 'wrong-child'
   if (!stored.savedQuestState || !stored.savedCurrentQuestion) return 'no-resume-point'
+  /**
+   * UX-495 — a saved pending item that CLAIMS to be the pilot's probe is
+   * checked HERE, at the one boundary that already decides whether a stored
+   * point may be reopened.
+   *
+   * Before this, a corrupt or target-mismatched probe was restored and then
+   * displayed and scored. Judging it at the boundary means the refusal is the
+   * ordinary `no-resume-point` the card and the claim already handle, and the
+   * decision is made once rather than at each surface. An ordinary or legacy
+   * saved question is not touched by it, and a valid point keeps its exact
+   * choices, order and provenance.
+   */
+  const probeRefusal = mineAdditionProbeResumeRefusal(stored)
+  if (probeRefusal) return probeRefusal
   return null
 }
 

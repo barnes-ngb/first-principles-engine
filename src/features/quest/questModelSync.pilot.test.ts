@@ -72,6 +72,7 @@ import {
 } from './mineAdditionProbe'
 import { MINE_ADDITION_PROBE_KIND } from './questTypes'
 import type { MineAdditionPilotTarget, QuestLocalProbeStamp } from './questTypes'
+import { questAskDigest } from '../../core/foundations/questTargeting'
 import type { LearnerModel, OpenQuestion } from '../../core/types/learnerModel'
 
 const FAM = 'fam-1'
@@ -401,6 +402,121 @@ describe('what adds no probe evidence', () => {
     expect(await outcomeFor({ questMode: 'phonics' })).toBe('identity-mismatch')
     // A level-5 probe row is not the checked item.
     expect(await outcomeFor({ questions: fiveWithProbe({ level: 5 }) })).toBe('no-results')
+  })
+
+  /**
+   * The response is validated, not just the item: a stored row claiming a
+   * correct answer it did not give, or an answer that was never on screen, must
+   * not reach the graph.
+   */
+  it('a recorded response that disagrees with the existing scoring', async () => {
+    expect(
+      await outcomeFor({ questions: fiveWithProbe({ childAnswer: '14', correct: true }) }),
+    ).toBe('no-results')
+    expect(writtenModel()).toBeUndefined()
+    expect(
+      await outcomeFor({ questions: fiveWithProbe({ childAnswer: '15', correct: false }) }),
+    ).toBe('no-results')
+  })
+
+  it('a recorded answer that was never one of the offered choices', async () => {
+    expect(await outcomeFor({ questions: fiveWithProbe({ childAnswer: '21' }) })).toBe('no-results')
+  })
+
+  it('a saved option order that is not the one the stamp recorded', async () => {
+    expect(
+      await outcomeFor({ questions: fiveWithProbe({ options: ['16', '15', '14'] }) }),
+    ).toBe('no-results')
+    expect(writtenModel()).toBeUndefined()
+  })
+
+  it('a saved prompt, stimulus or answer key that is not the checked item’s', async () => {
+    expect(await outcomeFor({ questions: fiveWithProbe({ prompt: 'What is 9 + 7?' }) })).toBe(
+      'no-results',
+    )
+    expect(await outcomeFor({ questions: fiveWithProbe({ stimulus: '9 + 7' }) })).toBe('no-results')
+    expect(await outcomeFor({ questions: fiveWithProbe({ correctAnswer: '16' }) })).toBe(
+      'no-results',
+    )
+  })
+
+  /**
+   * Mutual exclusion, at the projection. A corrupt source carrying both a
+   * pilot claim and a queued ask plan is refused BEFORE anything is counted:
+   * the plan path tallies by concept id across every stored answer, so
+   * reconciling the two could have counted provider-echoed tags as queued
+   * probes, promoted a concept and resolved a parent's ask.
+   */
+  it('a mixed shape — a pilot claim AND a queued ask plan — writes nothing at all', async () => {
+    store.clear()
+    writes.length = 0
+    const row = ask(ADD)
+    seed(
+      modelPath,
+      model({
+        conceptStates: { [ADD]: { state: 'forming', evidence: [] } },
+        openQuestions: [row],
+      }),
+    )
+    seed(
+      sessionPath,
+      source({
+        targetPlan: [
+          { conceptId: ADD, rowIndex: 0, digest: questAskDigest(row), modelSeededAt: MODEL_SEEDED },
+        ],
+        // Five provider-echoed rows beside the one real probe: exactly what a
+        // reconciling reader would have tallied as a queued probe set.
+        questions: [
+          probe(),
+          answer(1, { targetConceptId: ADD }),
+          answer(2, { targetConceptId: ADD }),
+          answer(3, { targetConceptId: ADD }),
+          answer(4, { targetConceptId: ADD }),
+        ],
+      }),
+    )
+
+    expect(await project()).toBe('identity-mismatch')
+    // The queue, the concept state and the source are all left as found.
+    expect(writes).toHaveLength(0)
+    expect((store.get(sessionPath) as { modelProjection: string }).modelProjection).toBe('pending')
+  })
+
+  /** Positive control for the gate above: the ordinary queued path is intact. */
+  it('but an ordinary queued source with NO pilot claim still projects as before', async () => {
+    store.clear()
+    writes.length = 0
+    const row = ask(ADD)
+    seed(
+      modelPath,
+      model({
+        conceptStates: { [ADD]: { state: 'forming', evidence: [] } },
+        openQuestions: [row],
+      }),
+    )
+    seed(
+      sessionPath,
+      source({
+        pilotProbe: undefined,
+        targetPlan: [
+          { conceptId: ADD, rowIndex: 0, digest: questAskDigest(row), modelSeededAt: MODEL_SEEDED },
+        ],
+        questions: [
+          answer(1, { targetConceptId: ADD }),
+          answer(2, { targetConceptId: ADD }),
+          answer(3),
+          answer(4),
+          answer(5),
+        ],
+      }),
+    )
+
+    expect(await project()).toBe('projected')
+    const next = writtenModel()!
+    // Two all-correct queued probes: the existing upgrade and the existing ask
+    // resolution, both untouched by this run.
+    expect(next.conceptStates![ADD].state).toBe('solid')
+    expect(next.openQuestions![0].resolvedAt).toBe(APPLIED_AT)
   })
 
   it('an insufficient close — the probe is preserved on a partial and projects nothing', async () => {

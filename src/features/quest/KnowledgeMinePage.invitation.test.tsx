@@ -498,12 +498,24 @@ describe('the suggested Start’s pilot request', () => {
     },
   }
 
+  /**
+   * The village's offer, as the journey carries it — WITH the generation the
+   * town's own read attached to it (UX-495).
+   */
   const MATH_SUGGESTION = {
     conceptId: 'math.operations.addWithin20',
     domain: 'math' as const,
     questMode: 'math' as const,
     label: MINE_MATH_DIG_LABEL,
     source: 'synthesis' as const,
+    synthesisGeneratedAt: GENERATION,
+  }
+
+  /** The same model, re-generated: same concept, same mode, new generation. */
+  const GENERATION_B = '2026-11-11T07:00:00.000Z'
+  const MATH_SYNTHESIS_B = {
+    ...MATH_SYNTHESIS,
+    synthesis: { ...MATH_SYNTHESIS.synthesis, generatedAt: GENERATION_B },
   }
 
   function mathCard() {
@@ -545,6 +557,28 @@ describe('the suggested Start’s pilot request', () => {
       endLibraryReturnFlow()
     })
     expect(pilot.tripStillLive()).toBe(false)
+  })
+
+  /**
+   * The defect this round fixes. A same-concept synthesis **B** arrived while
+   * the child walked to the Mine: the concept, the mode and the source are all
+   * unchanged, so the offer still agrees — and the pilot used to run on B's
+   * advice under A's offer. The generations are compared instead.
+   */
+  it('sends no request when a NEW synthesis generation arrived on the way here', () => {
+    fx.model = MATH_SYNTHESIS_B
+    beginTrip(MATH_SUGGESTION)
+    renderMine()
+    // The mode is still offered, and its ordinary Start still runs.
+    fireEvent.click(mathCard())
+    expect(fx.startQuest).toHaveBeenCalledWith('math', 'math')
+  })
+
+  it('sends no request when the trip carries no generation at all', () => {
+    beginTrip({ ...MATH_SUGGESTION, synthesisGeneratedAt: undefined })
+    renderMine()
+    fireEvent.click(mathCard())
+    expect(fx.startQuest).toHaveBeenCalledWith('math', 'math')
   })
 
   it('sends no request when the village’s offer came from the QUEUE', () => {

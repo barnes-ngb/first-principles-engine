@@ -23,10 +23,15 @@
 //     well as on the card;
 //   • the staleness MARK is respected, because the selector respects it — a
 //     stale synthesis offers nothing;
-//   • the synthesis GENERATION is captured from the synthesis's own
-//     `generatedAt` and must be a usable value and the same one the card
-//     committed. A synthesis regenerated while the child walked over is a
-//     different piece of advice.
+//   • the synthesis GENERATION agrees THREE ways — the town's, carried on the
+//     trip; the Mine card's own committed read; and this Start's re-read, which
+//     is the comparison made here. A same-concept synthesis B that replaced A
+//     while the child walked over leaves the concept, the mode and the source
+//     unchanged, so the generation is the only thing that can tell them apart.
+//     It is the synthesis's existing `generatedAt`, and a missing, blank or
+//     non-string value is not a usable generation;
+//   • the loaded model and snapshot are stamped for THIS child — both reads
+//     keep their previous answer while the next one is in flight.
 //
 // Anything short of all of that returns `null`, which is the ordinary
 // calibrated Math Start the suggestion has always been.
@@ -90,11 +95,20 @@ export interface ResolveMineAdditionPilotInput {
   domain: EvaluationDomain
   questMode: QuestMode | undefined
   startLevel: number
-  /** The owner model this Start re-read. Missing or failed reads refuse. */
+  /**
+   * The owner model this Start re-read. Missing or failed reads refuse, and so
+   * does a document stamped for another child (UX-495 correction): both reads
+   * behind this decision keep their previous answer while the next one is in
+   * flight, so the stamp is the one thing that can say the document is this
+   * child's own.
+   */
   model:
-    | Pick<LearnerModel, 'openQuestions' | 'synthesis' | 'synthesisStaleAt'>
+    | (Pick<LearnerModel, 'openQuestions' | 'synthesis' | 'synthesisStaleAt'> &
+        Partial<Pick<LearnerModel, 'childId'>>)
     | null
     | undefined
+  /** The owner snapshot's own `childId`, when the document carries one. */
+  snapshotChildId?: string
   /** `hasReadingCalibration(snapshot)` — the existing predicate. */
   readingCalibrated: boolean
   /** `hasMathCalibration(snapshot)` — likewise. */
@@ -133,13 +147,14 @@ export function resolveMineAdditionPilot(
   // ── The offer, re-derived from this Start's own read ───────
   const model = input.model
   if (!model) return null
-  const generation =
-    typeof model.synthesis?.generatedAt === 'string' ? model.synthesis.generatedAt.trim() : ''
-  if (generation === '' || generation !== requestedGeneration) return null
+  // A document stamped for someone else cannot authorise this child's probe.
+  if (model.childId && model.childId !== input.childId) return null
+  if (input.snapshotChildId && input.snapshotChildId !== input.childId) return null
   const live = selectMineInvitation({
     model,
     readingCalibrated: input.readingCalibrated,
     mathCalibrated: input.mathCalibrated,
+    expectedChildId: input.childId,
   })
   if (!live) return null
   // The queue takes precedence: a selector answering `ask` means the model is
@@ -148,6 +163,15 @@ export function resolveMineAdditionPilot(
   if (live.conceptId !== request.conceptId) return null
   if (live.domain !== input.domain) return null
   if (live.questMode !== 'math') return null
+  /**
+   * The THIRD generation: the one the selector just read off this Start's own
+   * model document. It must be a usable value and it must be the one the card
+   * committed and the trip carried — otherwise the synthesis moved between the
+   * tap and this read, and this is no longer the same piece of advice.
+   */
+  const generation =
+    typeof live.synthesisGeneratedAt === 'string' ? live.synthesisGeneratedAt.trim() : ''
+  if (generation === '' || generation !== requestedGeneration) return null
 
   return {
     kind: MINE_ADDITION_PROBE_KIND,

@@ -322,12 +322,18 @@ describe('the accepted suggested Start', () => {
 
     expect(view.result.current.screen).toBe('question')
     const q = view.result.current.currentQuestion!
+    // Narrowed before the multiple-choice fields are read: `currentQuestion` is
+    // the whole question union, and the tile types carry `tiles`, not `options`.
     expect(q.type).toBe('multiple-choice')
+    if (q.type !== 'multiple-choice') throw new Error('expected a multiple-choice probe')
     expect(q.level).toBe(2)
     expect(q.prompt).toContain('8 + 7')
-    expect(q.options).toEqual(['14', '15', '16'])
+    // The display ORDER is chosen per item, so the set is what is fixed.
+    expect([...q.options].sort()).toEqual(['14', '15', '16'])
     expect(q.correctAnswer).toBe('15')
     expect(q.localProbe).toMatchObject({ conceptId: MINE_ADDITION_PROBE_CONCEPT })
+    // And what was shown is what was stamped.
+    expect(q.localProbe!.choices).toEqual(q.options)
     // Nothing was asked of the provider for this slot.
     expect(chat).not.toHaveBeenCalled()
     // And the ordinary session is running: mode, state and timer.
@@ -338,6 +344,11 @@ describe('the accepted suggested Start', () => {
   it('carries the target and the item’s provenance into the immutable final record', async () => {
     const view = mountHook()
     await startPilot(view)
+    // What the child was actually shown, captured before it is answered.
+    const shown = view.result.current.currentQuestion!
+    const shownOptions =
+      shown.type === 'multiple-choice' ? shown.options : []
+    const shownStamp = shown.localProbe!
     await answer(view, 5)
 
     expect(view.result.current.screen).toBe('summary')
@@ -356,14 +367,17 @@ describe('the accepted suggested Start', () => {
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({
       level: 2,
-      options: ['14', '15', '16'],
+      // The exact displayed order, preserved — not a re-derived one.
+      options: shownOptions,
       correctAnswer: '15',
       childAnswer: '15',
       correct: true,
       inputMethod: 'multiple-choice',
       targetConceptId: MINE_ADDITION_PROBE_CONCEPT,
-      localProbe: mineAdditionProbeStamp(PILOT),
+      localProbe: shownStamp,
     })
+    expect(rows[0].localProbe!.choices).toEqual(shownOptions)
+    expect(rows[0].localProbe!.synthesisGeneratedAt).toBe(GENERATION)
     expect(rows[0].responseTimeMs).toBeGreaterThanOrEqual(0)
     expect(rows[0].timestamp).toBeTruthy()
     // The projection is attempted for the saved source, under this run.
@@ -631,15 +645,88 @@ describe('Resume keeps the original run’s pilot and its exact pending item', (
     expect(probeRows()).toHaveLength(1)
   })
 
-  it('resumes with NO pilot when the stored target is malformed', async () => {
-    seedPartial([], pendingProbe)
+  /** Overwrite one field of the seeded partial. */
+  function amendPartial(patch: Record<string, unknown>) {
     const stored = store.get(`sessions-fam-1/${PARTIAL_ID}`) as Record<string, unknown>
-    store.set(`sessions-fam-1/${PARTIAL_ID}`, { ...stored, pilotProbe: { kind: 'nonsense' } })
-    const view = mountHook()
-    expect(await resume(view)).toBe(true)
+    store.set(`sessions-fam-1/${PARTIAL_ID}`, { ...stored, ...patch })
+  }
 
+  /**
+   * UX-495 correction — a pending probe is judged at the existing Resume
+   * eligibility boundary, so an invalid one is refused there rather than
+   * restored and then displayed and scored. The refusal is the ordinary
+   * `no-resume-point`, and nothing is claimed, restored or asked.
+   */
+  it('refuses a pending probe whose accepted target is malformed', async () => {
+    seedPartial([], pendingProbe)
+    amendPartial({ pilotProbe: { kind: 'nonsense' } })
+    const view = mountHook()
+
+    expect(await resume(view)).toBe('no-resume-point')
+    expect(view.result.current.screen).toBe('intro')
+    expect(view.result.current.currentQuestion).toBeNull()
+    // Not even claimed: the stored row is left exactly as found.
+    expect((store.get(`sessions-fam-1/${PARTIAL_ID}`) as { status: string }).status).toBe('partial')
+    expect(chat).not.toHaveBeenCalled()
+  })
+
+  it('refuses a corrupt, mismatched or reordered pending probe', async () => {
+    for (const patch of [
+      { localProbe: { nonsense: true } },
+      { correctAnswer: '16' },
+      { prompt: 'What is 9 + 7?' },
+      { options: ['16', '15', '14'] },
+      {
+        localProbe: mineAdditionProbeStamp({
+          ...PILOT,
+          synthesisGeneratedAt: '2026-01-01T00:00:00.000Z',
+        }),
+      },
+    ]) {
+      store.clear()
+      seedSnapshot()
+      seedModel()
+      seedPartial([], { ...pendingProbe, ...patch })
+      const view = mountHook()
+      expect(await resume(view)).toBe('no-resume-point')
+      expect(view.result.current.currentQuestion).toBeNull()
+      view.unmount()
+    }
+  })
+
+  it('refuses a pending probe on a record whose probe was already answered', async () => {
+    const answeredProbe = {
+      ...pendingProbe,
+      childAnswer: '15',
+      correct: true,
+      responseTimeMs: 3000,
+      timestamp: '2026-11-10T08:36:00.000Z',
+    } as unknown as SessionQuestion
+    seedPartial([answeredProbe], pendingProbe)
+    const view = mountHook()
+    expect(await resume(view)).toBe('no-resume-point')
+    expect(view.result.current.currentQuestion).toBeNull()
+  })
+
+  /** Positive control: an ordinary/legacy saved question is still resumable. */
+  it('still resumes an ordinary saved question on a record with no pilot at all', async () => {
+    seedPartial([], {
+      id: 'q2',
+      type: 'multiple-choice',
+      level: 2,
+      skill: 'math.addition',
+      prompt: 'What is 3 + 4?',
+      options: ['6', '7', '8'],
+      correctAnswer: '7',
+    })
+    amendPartial({ pilotProbe: undefined })
+    const view = mountHook()
+
+    expect(await resume(view)).toBe(true)
+    expect(view.result.current.currentQuestion?.id).toBe('q2')
     await answer(view, 5)
     expect(lastSource().pilotProbe).toBeUndefined()
+    expect(probeRows()).toHaveLength(0)
   })
 })
 

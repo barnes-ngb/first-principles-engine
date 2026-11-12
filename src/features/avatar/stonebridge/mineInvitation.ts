@@ -89,18 +89,44 @@ export type MineInvitationSource =
 export interface MineInvitation extends MineInvitationTarget {
   conceptId: string
   source: MineInvitationSource
+  /**
+   * WHICH synthesis said so — the stored `synthesis.generatedAt` (UX-495).
+   *
+   * Present only on a `synthesis` offer, and only when the stored value is a
+   * usable, non-blank string whose model document is this child's. Absent on
+   * every queued (`ask`) offer, because a queued ask is not advice and has no
+   * generation of its own.
+   *
+   * The offer itself is still only ever a MODE. This field exists so a surface
+   * that needs to know the offer is the SAME piece of advice — rather than the
+   * same mode — can compare generations end to end instead of re-deriving one.
+   * Nothing in the ordinary mode decision reads it.
+   */
+  synthesisGeneratedAt?: string
 }
 
 export interface MineInvitationInput {
   /** The child's own model, as read inside the asking scope. */
   model:
     | Pick<LearnerModel, 'openQuestions' | 'synthesis' | 'synthesisStaleAt'>
+    | (Pick<LearnerModel, 'openQuestions' | 'synthesis' | 'synthesisStaleAt'> &
+        Partial<Pick<LearnerModel, 'childId'>>)
     | null
     | undefined
   /** `hasReadingCalibration(snapshot)` — the existing predicate, not a guess. */
   readingCalibrated: boolean
   /** `hasMathCalibration(snapshot)` — likewise. */
   mathCalibrated: boolean
+  /**
+   * The child this read was made FOR, when the caller knows it (UX-495).
+   *
+   * Used for one thing only: a model document whose own `childId` disagrees
+   * with it cannot contribute a synthesis GENERATION, because both hooks behind
+   * these surfaces keep their previous answer while the next read is in flight.
+   * The mode decision is deliberately unchanged — it was already mount-scoped —
+   * so an omitted value behaves exactly as before.
+   */
+  expectedChildId?: string
 }
 
 /** Is the domain this concept belongs to one the child is calibrated for? */
@@ -111,9 +137,36 @@ function domainCalibrated(conceptId: string, input: MineInvitationInput): boolea
   return false
 }
 
-function offerFor(conceptId: string, source: MineInvitationSource): MineInvitation | null {
+function offerFor(
+  conceptId: string,
+  source: MineInvitationSource,
+  synthesisGeneratedAt?: string,
+): MineInvitation | null {
   const target = MINE_INVITATION_TARGETS[conceptId]
-  return target ? { conceptId, source, ...target } : null
+  if (!target) return null
+  return {
+    conceptId,
+    source,
+    ...target,
+    ...(synthesisGeneratedAt ? { synthesisGeneratedAt } : {}),
+  }
+}
+
+/**
+ * The stored synthesis generation this read may carry, or `''` for none.
+ *
+ * Fails closed on every shape that is not an affirmative answer: no synthesis,
+ * a missing or non-string or blank `generatedAt`, and a model document stamped
+ * for another child than the one this read was made for.
+ */
+function usableSynthesisGeneration(input: MineInvitationInput): string {
+  const model = input.model
+  if (!model) return ''
+  const stamped = (model as Partial<Pick<LearnerModel, 'childId'>>).childId
+  if (input.expectedChildId && stamped && stamped !== input.expectedChildId) return ''
+  const generatedAt = model.synthesis?.generatedAt
+  if (typeof generatedAt !== 'string') return ''
+  return generatedAt.trim()
 }
 
 /**
@@ -144,11 +197,14 @@ export function selectMineInvitation(input: MineInvitationInput): MineInvitation
 
   const synthesis = input.model.synthesis
   if (!synthesis || input.model.synthesisStaleAt) return null
+  // WHICH synthesis this is, decided once for the whole branch: a generation
+  // is a property of the stored synthesis, not of the move that was picked.
+  const generation = usableSynthesisGeneration(input)
   for (const move of synthesis.whatMattersNext ?? []) {
     if (move.suggestedVehicle !== SynthesisVehicle.Quest) continue
     if (!FOUNDATION_NODE_MAP[move.conceptId]) continue
     if (!domainCalibrated(move.conceptId, input)) continue
-    const offer = offerFor(move.conceptId, MineInvitationSource.Synthesis)
+    const offer = offerFor(move.conceptId, MineInvitationSource.Synthesis, generation)
     if (offer) return offer
   }
   return null

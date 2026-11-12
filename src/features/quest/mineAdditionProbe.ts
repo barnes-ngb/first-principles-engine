@@ -9,20 +9,30 @@
 // item produced the one observation it records. A provider question cannot say
 // that — its `targetConceptId` is an echo of something we asked for, so a tag
 // alone is never evidence that a checked item was asked (and never authorises
-// this pilot). So the item is built from a named template, re-derived and
-// re-checked, and the item's own identity travels with it as PROVENANCE: the
-// template id, the operands, the displayed sum, the choices, the expected
-// answer, the concept, and the synthesis generation the accepted offer came
-// from.
+// this pilot).
 //
-// Pure: no Firestore, no clock of its own beyond the question id every
-// generator here builds, no React, no writes. The activation decision lives in
-// `mineAdditionPilot.ts`; the projection's own read of the saved source uses
-// `mineAdditionProbeResult` below.
+// ── One validation path, run three times ────────────────────────────────────
+//
+// `checkedMineAdditionProbeItem` is the ONLY place an item is judged, and it is
+// run at generation, on the saved-source read, and at the Resume boundary. It
+// does not ask whether the stored fields agree with each other — a corrupt
+// record agrees with itself. It RECONSTRUCTS the template from the module's own
+// canonical operands and rejects anything that is not it: the type, the skill,
+// the level, the exact prompt and stimulus, the answer key, the concept, and
+// the option set.
+//
+// The one thing that is NOT fixed is the display ORDER. A fixed ascending order
+// would make the correct answer the middle tap every time, so the live item
+// shuffles once, at generation, and that order travels with the item as its
+// provenance — so the saved source and a Resume show and check the same thing
+// the child actually saw.
+//
+// Pure: no Firestore, no React, no writes. The activation decision lives in
+// `mineAdditionPilot.ts`.
 
 import { FOUNDATION_NODE_MAP } from '../../core/foundations'
 import type { QuestConceptResult } from '../../core/foundations/questTargeting'
-import { validateQuestion, shouldFlagAsError } from './questHelpers'
+import { checkAnswer, validateQuestion, shouldFlagAsError } from './questHelpers'
 import {
   MINE_ADDITION_PROBE_KIND,
   type MineAdditionPilotTarget,
@@ -39,7 +49,7 @@ export const MINE_ADDITION_PROBE_TEMPLATE_ID = 'mine.addition.within20.v1'
 /** The level band the template was checked for — a level-2 Math opening slot. */
 export const MINE_ADDITION_PROBE_LEVEL = 2
 /** The template's operands: an ordinary opening sum inside the level-2 band. */
-export const MINE_ADDITION_PROBE_OPERANDS = [8, 7] as const
+export const MINE_ADDITION_PROBE_OPERANDS: readonly [number, number] = [8, 7]
 /**
  * The skill tag the item carries — the same `math.addition` tag the existing
  * client-side Math item uses, so findings, blockers and working levels read it
@@ -47,65 +57,119 @@ export const MINE_ADDITION_PROBE_OPERANDS = [8, 7] as const
  */
 export const MINE_ADDITION_PROBE_SKILL = 'math.addition'
 
-/** The displayed sum, from the operands — never typed out twice. */
-function displayedSum(operands: readonly number[]): string {
-  return operands.join(' + ')
+// ── The canonical template, reconstructed rather than trusted ───────────────
+
+/** The sum, from the operands. Never typed out as a literal. */
+function canonicalSum(): number {
+  return MINE_ADDITION_PROBE_OPERANDS[0] + MINE_ADDITION_PROBE_OPERANDS[1]
+}
+
+/** The displayed sum, from the operands. */
+function canonicalDisplayedSum(): string {
+  return MINE_ADDITION_PROBE_OPERANDS.join(' + ')
+}
+
+/** The one correct answer, as the string the child taps. */
+function canonicalExpectedAnswer(): string {
+  return String(canonicalSum())
+}
+
+/** The item's exact words. */
+function canonicalPrompt(): string {
+  return `What is ${canonicalDisplayedSum()}?`
 }
 
 /**
- * The three choices: the sum and its two nearest neighbours, ascending.
+ * The valid option SET: the sum and its two nearest neighbours.
  *
- * Deterministic on purpose. A shuffled set is a different item every time and
- * so cannot be checked against the template that produced it — and the thing
- * being observed here is one addition fact, not a memory of option order.
+ * A set, not a sequence — the order is the live item's own choice. Three
+ * distinct values, exactly one of which is the answer.
  */
-function probeChoices(sum: number): string[] {
+function canonicalChoiceSet(): string[] {
+  const sum = canonicalSum()
   return [sum - 1, sum, sum + 1].map(String)
 }
 
-/** The pilot target a Start accepted, as a stamp the item and the row carry. */
+/** Is `choices` exactly the canonical set, in some order, with no repeats? */
+function isCanonicalChoiceOrder(choices: readonly unknown[]): choices is string[] {
+  const canonical = canonicalChoiceSet()
+  if (choices.length !== canonical.length) return false
+  if (!choices.every((c) => typeof c === 'string' && c.trim() !== '')) return false
+  const seen = new Set(choices as string[])
+  if (seen.size !== canonical.length) return false
+  return canonical.every((c) => seen.has(c))
+}
+
+/**
+ * One display order of the canonical set, chosen once (Fisher-Yates).
+ *
+ * A fixed ascending order would put the correct answer in the middle every
+ * time, which rewards a positional guess rather than the addition fact. The
+ * order is chosen at generation and then travels with the item.
+ */
+function shuffledChoices(rng: () => number): string[] {
+  const out = canonicalChoiceSet()
+  for (let i = out.length - 1; i > 0; i -= 1) {
+    const drawn = Math.floor(rng() * (i + 1))
+    // A caller's rng is not trusted to stay in range; an out-of-range draw
+    // becomes a no-op swap rather than an undefined slot.
+    const j = Number.isFinite(drawn) && drawn >= 0 && drawn <= i ? drawn : i
+    const held = out[i]
+    out[i] = out[j]
+    out[j] = held
+  }
+  return out
+}
+
+/**
+ * The provenance stamp for an accepted target and a chosen display order.
+ *
+ * `choices` is the order the child will SEE, and it is what the saved row and a
+ * Resume are later checked against. An omitted order is the canonical
+ * ascending one, which is what fixtures want.
+ */
 export function mineAdditionProbeStamp(
   target: MineAdditionPilotTarget,
+  choices: readonly string[] = canonicalChoiceSet(),
 ): QuestLocalProbeStamp {
-  const operands = [...MINE_ADDITION_PROBE_OPERANDS]
-  const sum = operands[0] + operands[1]
   return {
     ...target,
-    operands,
-    displayedSum: displayedSum(operands),
-    expectedAnswer: String(sum),
-    choices: probeChoices(sum),
+    operands: [...MINE_ADDITION_PROBE_OPERANDS],
+    displayedSum: canonicalDisplayedSum(),
+    expectedAnswer: canonicalExpectedAnswer(),
+    choices: [...choices],
   }
 }
 
 /**
  * Build the pilot's item — and return it only if it passes its own check.
  *
- * `null` means "the checked item is unavailable", which the caller answers with
- * an ordinary Math question. It is deliberately not a thrown error and not a
- * silently unchecked item.
+ * The display order is chosen HERE, once, and then validated through the same
+ * path everything else goes through. `null` means "the checked item is
+ * unavailable", which the caller answers with an ordinary Math question.
  */
 export function buildMineAdditionProbeQuestion(
   target: MineAdditionPilotTarget,
+  rng: () => number = Math.random,
 ): MultipleChoiceQuestion | null {
-  const stamp = mineAdditionProbeStamp(target)
+  const stamp = mineAdditionProbeStamp(target, shuffledChoices(rng))
   const question: MultipleChoiceQuestion = {
     id: `q_pilot_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
     type: 'multiple-choice',
     level: MINE_ADDITION_PROBE_LEVEL,
     skill: MINE_ADDITION_PROBE_SKILL,
-    prompt: `What is ${stamp.displayedSum}?`,
+    prompt: canonicalPrompt(),
     stimulus: stamp.displayedSum,
     options: [...stamp.choices],
     correctAnswer: stamp.expectedAnswer,
     // The existing per-concept attribution field. It is what lets the ordinary
-    // `computeQuestConceptResults` count this answer under the pilot's concept;
-    // on its own it is an echo and proves nothing, which is why the provenance
-    // below is what the saved-source read actually validates.
+    // per-concept machinery read this answer under the pilot's concept; on its
+    // own it is an echo and proves nothing, which is why the provenance is what
+    // every read below actually validates.
     targetConceptId: target.conceptId,
     localProbe: stamp,
   }
-  return checkedMineAdditionProbeQuestion(question)
+  return checkedMineAdditionProbeQuestion(question, target)
 }
 
 /**
@@ -168,11 +232,13 @@ export function readMineAdditionPilotTarget(
 }
 
 /**
- * Is this a well-formed stamp whose ARITHMETIC and CHOICES are the template's?
+ * Is this a well-formed stamp whose arithmetic and option set are the
+ * TEMPLATE's — reconstructed here, not read off the record?
  *
- * Checked, not trusted: two operands that really sum to the expected answer,
- * the displayed sum derived from those operands, three distinct choices, and
- * exactly one of them the expected answer.
+ * So a record that is internally consistent but is not this item (other
+ * operands, another sum, a rewritten displayed sum, a different option set, a
+ * repeated or missing choice) fails, and the order it carries is kept as given
+ * because that order is what the child saw.
  */
 export function readMineAdditionProbeStamp(
   raw: unknown,
@@ -181,59 +247,139 @@ export function readMineAdditionProbeStamp(
   if (!target) return null
   const s = raw as Partial<QuestLocalProbeStamp>
   const operands = s.operands
-  if (!Array.isArray(operands) || operands.length !== 2) return null
-  if (!operands.every((n) => typeof n === 'number' && Number.isInteger(n) && n >= 0)) return null
-  const sum = operands[0] + operands[1]
-  // Within 20 — the concept's own band, and what makes "invalid math" a refusal
-  // rather than a guess.
-  if (sum > 20) return null
-  if (s.displayedSum !== displayedSum(operands)) return null
-  if (s.expectedAnswer !== String(sum)) return null
-  const choices = s.choices
-  if (!Array.isArray(choices) || choices.length !== 3) return null
-  if (!choices.every(usableString)) return null
-  if (new Set(choices).size !== 3) return null
-  if (choices.filter((c) => c === s.expectedAnswer).length !== 1) return null
+  if (!Array.isArray(operands) || operands.length !== MINE_ADDITION_PROBE_OPERANDS.length) {
+    return null
+  }
+  if (operands.some((n, i) => n !== MINE_ADDITION_PROBE_OPERANDS[i])) return null
+  if (s.displayedSum !== canonicalDisplayedSum()) return null
+  if (s.expectedAnswer !== canonicalExpectedAnswer()) return null
+  if (!Array.isArray(s.choices) || !isCanonicalChoiceOrder(s.choices)) return null
   return {
     ...target,
-    operands: [...operands],
-    displayedSum: s.displayedSum,
-    expectedAnswer: s.expectedAnswer,
-    choices: [...choices],
+    operands: [...MINE_ADDITION_PROBE_OPERANDS],
+    displayedSum: canonicalDisplayedSum(),
+    expectedAnswer: canonicalExpectedAnswer(),
+    // The DISPLAYED order, preserved exactly as stored.
+    choices: [...s.choices],
   }
 }
 
 /**
- * The live item, checked: its stamp, its own template fields, and the existing
- * question validator and error-flag heuristic every other question goes
- * through. Anything else is `null` — an unavailable checked item.
+ * The shape every reader of a probe item has in common: the live question, the
+ * answered row, and the saved pending question.
+ *
+ * Deliberately the item's own fields only — nothing about the response — so one
+ * path can judge "is this the checked item?" wherever the item turns up.
+ */
+export interface MineAdditionProbeItemFields {
+  type?: string
+  level?: number
+  skill?: string
+  prompt?: string
+  stimulus?: string
+  options?: readonly string[]
+  correctAnswer?: string
+  targetConceptId?: string
+  localProbe?: unknown
+}
+
+/**
+ * THE validation path: is this the exact checked item, and (when a target is
+ * supplied) the one that target authorised?
+ *
+ * Returns the item's validated stamp — the displayed order included — or
+ * `null`. Every field is compared against the reconstructed template, and the
+ * options are compared IN ORDER against the stamp's own order, so a record
+ * whose stored prompt, stimulus, choices or answer key disagree with what it
+ * claims to be is refused rather than projected.
+ */
+export function checkedMineAdditionProbeItem(
+  item: MineAdditionProbeItemFields | null | undefined,
+  target?: MineAdditionPilotTarget | null,
+): QuestLocalProbeStamp | null {
+  if (!item) return null
+  const stamp = readMineAdditionProbeStamp(item.localProbe)
+  if (!stamp) return null
+  // Tied to the accepted claim: the same template, concept and — the point of
+  // this run — the same synthesis GENERATION.
+  if (target) {
+    if (stamp.templateId !== target.templateId) return null
+    if (stamp.conceptId !== target.conceptId) return null
+    if (stamp.synthesisGeneratedAt !== target.synthesisGeneratedAt) return null
+    if (stamp.level !== target.level) return null
+  }
+  if (item.type !== 'multiple-choice') return null
+  if (item.level !== stamp.level) return null
+  if (item.skill !== MINE_ADDITION_PROBE_SKILL) return null
+  if (item.prompt !== canonicalPrompt()) return null
+  if (item.stimulus !== stamp.displayedSum) return null
+  if (item.correctAnswer !== stamp.expectedAnswer) return null
+  if (item.targetConceptId !== stamp.conceptId) return null
+  const options = item.options
+  if (!Array.isArray(options)) return null
+  if (options.length !== stamp.choices.length) return null
+  // In order: the child saw this sequence, and the stored row has to be it.
+  if (options.some((option, i) => option !== stamp.choices[i])) return null
+  return stamp
+}
+
+/**
+ * The live item, checked through the one path plus the existing question rails
+ * (`validateQuestion`, `shouldFlagAsError`) every other question goes through.
  */
 export function checkedMineAdditionProbeQuestion(
   question: QuestQuestion | null | undefined,
+  target?: MineAdditionPilotTarget | null,
 ): MultipleChoiceQuestion | null {
   if (!question) return null
   if (question.type !== 'multiple-choice') return null
-  const stamp = readMineAdditionProbeStamp(question.localProbe)
-  if (!stamp) return null
-  if (question.level !== stamp.level) return null
-  if (question.skill !== MINE_ADDITION_PROBE_SKILL) return null
-  if (question.targetConceptId !== stamp.conceptId) return null
-  if (question.stimulus !== stamp.displayedSum) return null
-  if (!question.prompt.includes(stamp.displayedSum)) return null
-  if (question.correctAnswer !== stamp.expectedAnswer) return null
-  if (question.options.length !== stamp.choices.length) return null
-  if (question.options.some((option, i) => option !== stamp.choices[i])) return null
-  // The existing rails, reused rather than re-implemented.
+  if (!checkedMineAdditionProbeItem(question, target)) return null
   if (!validateQuestion(question)) return null
   if (shouldFlagAsError(question)) return null
   return question
 }
 
-/** Does this stored row claim to BE a probe at all? Malformed claims included. */
+/** Does this row or saved question CLAIM to be a probe at all? */
 function claimsProbe(row: unknown): boolean {
   if (!row || typeof row !== 'object') return false
   const value = (row as { localProbe?: unknown }).localProbe
   return value !== undefined && value !== null
+}
+
+/** The canonical question the recorded response is re-scored against. */
+function scoringQuestion(stamp: QuestLocalProbeStamp): MultipleChoiceQuestion {
+  return {
+    id: 'probe-scoring',
+    type: 'multiple-choice',
+    level: stamp.level,
+    skill: MINE_ADDITION_PROBE_SKILL,
+    prompt: canonicalPrompt(),
+    stimulus: stamp.displayedSum,
+    options: [...stamp.choices],
+    correctAnswer: stamp.expectedAnswer,
+  }
+}
+
+/**
+ * Does a source CLAIM a queued ask plan? (UX-495, mutual exclusion.)
+ *
+ * The pilot passes no queued request identity, so a source carrying both is a
+ * corrupt shape — not a pilot with extra context. Checked on the claim rather
+ * than on the parsed plan, because a malformed row that parses away must not
+ * launder a mixed record into a clean one.
+ */
+export function sourceClaimsAskPlan(source: { targetPlan?: unknown }): boolean {
+  return Array.isArray(source.targetPlan) && source.targetPlan.length > 0
+}
+
+/** The stored-record fields these reads look at. Everything is optional. */
+export interface StoredProbeRecord {
+  domain?: string
+  questMode?: string
+  pilotProbe?: unknown
+  targetPlan?: unknown
+  questions?: unknown
+  savedCurrentQuestion?: unknown
 }
 
 /**
@@ -241,26 +387,33 @@ function claimsProbe(row: unknown): boolean {
  *
  * Deliberately strict, because the only thing this can do is write evidence:
  *
- *   • the source's own accepted target must be well-formed, and its domain and
- *     mode must be the Math quest the pilot is authorised for;
+ *   • the source's own accepted target must be well-formed, its domain and mode
+ *     must be the Math quest the pilot is authorised for, and it must carry NO
+ *     queued ask plan — a mixed shape is refused, not reconciled;
  *   • exactly ONE stored row may CLAIM to be a probe — zero is an ordinary
  *     session, and two (a duplicate, a replay, a malformed legacy row beside a
- *     real one) is refused rather than resolved, so a second probe can never
- *     become a second observation;
- *   • that row's provenance must check out and must be the source's own target;
+ *     real one) is refused rather than resolved;
+ *   • that row must pass the one validation path against the accepted target,
+ *     so its prompt, stimulus, answer key, concept and displayed option order
+ *     are the checked item's and its generation is the accepted one;
+ *   • the recorded ANSWER must be one of the choices the child was shown, and
+ *     the recorded correctness must agree with the existing `checkAnswer`
+ *     scoring — a row claiming a correct answer it did not give adds nothing;
  *   • a skipped or flagged row is no more evidence about the child than any
- *     other skip, so it adds nothing.
+ *     other skip, so it adds nothing either.
  *
  * One answered row counts once — `total: 1` — for a correct answer and for a
  * wrong one alike, which is below the existing two-probe upgrade threshold and
  * therefore leaves concept state (and so the change feed and synthesis
- * freshness) exactly as it was.
+ * freshness) exactly as it was. Nothing about strategy or help is inferred:
+ * neither is measured, so neither is recorded.
  */
 export function mineAdditionProbeResult(
   source: {
     domain?: string
     questMode?: string
     pilotProbe?: unknown
+    targetPlan?: unknown
   },
   questions: readonly SessionQuestion[],
 ): QuestConceptResult | null {
@@ -271,19 +424,52 @@ export function mineAdditionProbeResult(
   if (source.domain !== 'math') return null
   if (source.questMode !== 'math') return null
   if (FOUNDATION_NODE_MAP[target.conceptId]?.domain !== source.domain) return null
+  // A pilot projects one checked row with an EMPTY ask plan, or nothing.
+  if (sourceClaimsAskPlan(source)) return null
 
   const claimed = questions.filter(claimsProbe)
   if (claimed.length !== 1) return null
   const row = claimed[0]
-  const stamp = readMineAdditionProbeStamp(row.localProbe)
+  const stamp = checkedMineAdditionProbeItem(row, target)
   if (!stamp) return null
-  if (stamp.templateId !== target.templateId) return null
-  if (stamp.conceptId !== target.conceptId) return null
-  if (stamp.synthesisGeneratedAt !== target.synthesisGeneratedAt) return null
-  if (row.targetConceptId !== target.conceptId) return null
-  if (row.level !== stamp.level) return null
-  if (row.correctAnswer !== stamp.expectedAnswer) return null
   if (typeof row.correct !== 'boolean') return null
   if (row.skipped || row.flaggedAsError) return null
+  // The response, judged by the existing scoring rather than by the record's
+  // own claim about itself.
+  if (typeof row.childAnswer !== 'string') return null
+  if (!stamp.choices.includes(row.childAnswer)) return null
+  if (checkAnswer(row.childAnswer, scoringQuestion(stamp)) !== row.correct) return null
   return { conceptId: target.conceptId, correct: row.correct ? 1 : 0, total: 1 }
+}
+
+/**
+ * May a stored partial's saved PENDING item be restored and played? (UX-495.)
+ *
+ * Asked at the existing Resume eligibility boundary, so an invalid point is
+ * refused once, in the one place that already decides this, and surfaces
+ * through the normal `no-resume-point` handling — rather than being restored
+ * and then shown or scored.
+ *
+ * Only a pending item that CLAIMS to be a probe is judged: an ordinary or
+ * legacy saved question is none of this function's business and reads exactly
+ * as it always did.
+ */
+export function mineAdditionProbeResumeRefusal(
+  stored: StoredProbeRecord | null | undefined,
+): 'no-resume-point' | null {
+  if (!stored) return null
+  const pending = stored.savedCurrentQuestion
+  if (!claimsProbe(pending)) return null
+  // From here the record claims a pending probe, so every doubt refuses.
+  const target = readMineAdditionPilotTarget(stored.pilotProbe)
+  if (!target) return 'no-resume-point'
+  if (sourceClaimsAskPlan(stored)) return 'no-resume-point'
+  if (!checkedMineAdditionProbeItem(pending as MineAdditionProbeItemFields, target)) {
+    return 'no-resume-point'
+  }
+  // A probe already answered is consumed: it is not re-inserted as a pending
+  // item, and two claiming rows could never be one observation anyway.
+  const answered = Array.isArray(stored.questions) ? stored.questions : []
+  if (answered.some(claimsProbe)) return 'no-resume-point'
+  return null
 }

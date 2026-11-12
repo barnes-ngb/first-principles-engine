@@ -27,7 +27,8 @@ const CHILD = 'lincoln'
 const GENERATION = '2026-11-10T08:00:00.000Z'
 const CVC = 'reading.phonics.cvc'
 
-type PilotModel = Pick<LearnerModel, 'openQuestions' | 'synthesis' | 'synthesisStaleAt'>
+type PilotModel = Pick<LearnerModel, 'openQuestions' | 'synthesis' | 'synthesisStaleAt'> &
+  Partial<Pick<LearnerModel, 'childId'>>
 
 function model(partial: Partial<PilotModel> = {}): PilotModel {
   return {
@@ -85,6 +86,7 @@ function resolve(
     mathCalibrated?: boolean
     familyId?: string
     childId?: string
+    snapshotChildId?: string
   } = {},
 ) {
   return resolveMineAdditionPilot({
@@ -95,6 +97,7 @@ function resolve(
     questMode: 'questMode' in overrides ? overrides.questMode : 'math',
     startLevel: overrides.startLevel ?? 2,
     model: 'model' in overrides ? overrides.model : model(),
+    snapshotChildId: overrides.snapshotChildId,
     readingCalibrated: overrides.readingCalibrated ?? false,
     mathCalibrated: overrides.mathCalibrated ?? true,
   })
@@ -175,6 +178,20 @@ describe('resolveMineAdditionPilot — the accepted target', () => {
 
   it('refuses an uncalibrated child', () => {
     expect(resolve({ mathCalibrated: false })).toBeNull()
+  })
+
+  /**
+   * UX-495 correction — both reads behind this decision keep their previous
+   * answer while the next one is in flight, so a document stamped for another
+   * child is the one thing that can prove the read is not this child's.
+   */
+  it('refuses a model or snapshot document stamped for another child', () => {
+    expect(resolve({ model: model({ childId: 'london' }) })).toBeNull()
+    expect(resolve({ snapshotChildId: 'london' })).toBeNull()
+    // Positive control: the stamps agreeing is the ordinary case.
+    expect(resolve({ model: model({ childId: CHILD }), snapshotChildId: CHILD })).toBeTruthy()
+    // An unstamped document (a legacy or partial write) is not a disagreement.
+    expect(resolve({ snapshotChildId: undefined })).toBeTruthy()
   })
 
   it('refuses an advice move that is not a quest-vehicle move for this concept', () => {

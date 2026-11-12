@@ -31,7 +31,7 @@ import {
   parseQuestTargetPlan,
 } from '../../core/foundations/questTargeting'
 import { hasSufficientCompletion } from './questBanking'
-import { mineAdditionProbeResult } from './mineAdditionProbe'
+import { mineAdditionProbeResult, sourceClaimsAskPlan } from './mineAdditionProbe'
 import type { EvaluationSession } from '../../core/types'
 import type { InteractiveSessionData, SessionQuestion } from './questTypes'
 
@@ -152,40 +152,51 @@ export async function projectQuestSourceToModel(
     // rather than trusting the `complete` label a writer put on it.
     if (!hasSufficientCompletion(questions)) return { result: 'not-finalized' }
 
+    /**
+     * UX-495 — a queued ask plan and a pilot claim are MUTUALLY EXCLUSIVE.
+     *
+     * The pilot passes no queued request identity, so a source carrying both is
+     * a corrupt shape rather than a richer one. Reconciling it was the hole: the
+     * plan path tallies by concept id across every stored answer, so a corrupt
+     * mixed record could have counted provider-echoed tags as queued probes,
+     * promoted a concept and resolved a parent's ask. It is refused here —
+     * before anything is counted, written or stamped — so the queue, the
+     * concept states and the source are all left exactly as found.
+     */
+    const claimsPilot = source.pilotProbe !== undefined && source.pilotProbe !== null
+    if (claimsPilot && sourceClaimsAskPlan(source)) {
+      return { result: 'identity-mismatch' }
+    }
+
     // ── The plan and the results, both from the SOURCE ──────
     // Domain-scoped: a reading session may not resolve a math request, which is
     // the same rule `selectQuestTargets` applies when it hands targets out.
     const plan = parseQuestTargetPlan(source.targetPlan).filter(
       (row) => FOUNDATION_NODE_MAP[row.conceptId]?.domain === source.domain,
     )
-    /**
-     * UX-495 — the Mine addition pilot's ONE observation, read and validated
-     * from this same saved source.
-     *
-     * Kept separate from the plan on both sides. It is not a queued request, so
-     * it resolves none (the `plan` below is still the only thing
-     * `applyQuestResultsToModel` may resolve, and for this pilot it is empty —
-     * a same-concept ask queued while the run was in progress stays waiting).
-     * And it is not counted by concept id across the stored answers: only the
-     * single validated probe row counts, so a provider question that echoed the
-     * same concept can never add a second observation.
-     */
-    const probe = mineAdditionProbeResult(source, questions)
-    if (plan.length === 0 && !source.pilotProbe) {
+    if (plan.length === 0 && !claimsPilot) {
       tx.set(sessionRef, projectionStamp('skipped', 'no-targets', nowIso), { merge: true })
       return { result: 'no-targets' }
     }
-    const planResults =
-      plan.length > 0
-        ? computeQuestConceptResults(
-            questions,
-            plan.map((row) => row.conceptId),
-          )
-        : []
-    const results =
-      probe && !planResults.some((r) => r.conceptId === probe.conceptId)
-        ? [...planResults, probe]
-        : planResults
+    /**
+     * The pilot's ONE observation, read and validated from this same saved
+     * source — or the ordinary queued tally. Never both, by the gate above.
+     *
+     * The pilot's own result is not a tally by concept id across the stored
+     * answers: only the single validated probe row counts, so a provider
+     * question that echoed the same concept can never add a second
+     * observation. And `plan` stays empty, which is the only thing
+     * `applyQuestResultsToModel` may resolve — so a same-concept ask queued
+     * while the run was in progress is still waiting afterwards.
+     */
+    const results = claimsPilot
+      ? [mineAdditionProbeResult(source, questions)].filter(
+          (r): r is NonNullable<typeof r> => r !== null,
+        )
+      : computeQuestConceptResults(
+          questions,
+          plan.map((row) => row.conceptId),
+        )
     if (results.length === 0) {
       tx.set(sessionRef, projectionStamp('skipped', 'no-results', nowIso), { merge: true })
       return { result: 'no-results' }
