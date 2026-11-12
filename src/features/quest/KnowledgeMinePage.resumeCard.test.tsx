@@ -89,7 +89,7 @@ vi.mock('./useQuestSession', () => ({
     sourceSave: { state: 'idle', canRetry: false },
     visibleSourceSave: { state: 'idle', canRetry: false },
     /** UX-496 — nothing owed, so no exit in this file is held. */
-    sourceSaveExitHold: () => 'clear' as const,
+    questExitVerdict: () => ({ kind: 'clear' as const }),
     graphSync: { state: 'idle' },
     recoveryScope: fx.recoveryScope,
     recoveryEpoch: fx.recoveryEpoch,

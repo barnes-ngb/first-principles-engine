@@ -21,6 +21,7 @@ import {
   QUEST_RESUME_REFUSAL_COPY,
   QUEST_SOURCE_COPY,
   QUEST_UNSAVED_COPY,
+  questExitNotice,
 } from './questSaveCopy'
 
 describe('quest save copy is readable by the boy it is for', () => {
@@ -108,6 +109,27 @@ describe('the exit guard says what is true about the answers', () => {
   it('labels the departure deliberately', () => {
     expect(QUEST_EXIT_GUARD_COPY.leave).not.toBe(QUEST_EXIT_GUARD_COPY.stay)
     expect(QUEST_EXIT_GUARD_COPY.leave.toLowerCase()).toContain('saving')
+  })
+
+  /**
+   * The selector, which is the whole of the door's logic: a wait offers no
+   * retry and wears no error, and a conflict is a failure that cannot be
+   * retried — re-sending a payload another run already owns can never land.
+   */
+  it('offers a retry only where retrying is a real move', () => {
+    expect(questExitNotice('saving')).toMatchObject({ retryable: false, failed: false, busy: true })
+    expect(questExitNotice('failed')).toMatchObject({ retryable: true, failed: true, busy: false })
+    expect(questExitNotice('conflict')).toMatchObject({
+      retryable: false,
+      failed: true,
+      busy: false,
+    })
+  })
+
+  it('carries the leaving warning on every face of the door', () => {
+    for (const phase of ['saving', 'failed', 'conflict'] as const) {
+      expect(questExitNotice(phase).warning).toBe(QUEST_EXIT_GUARD_COPY.leaveWarning)
+    }
   })
 })
 

@@ -29,6 +29,7 @@ import MinecraftAvatar from '../avatar/MinecraftAvatar'
 import { MINE_RETURN_LABEL } from '../avatar/stonebridge/libraryReturnCopy'
 import {
   LibraryReturnDestination,
+  LibraryReturnPhase,
   getLibraryIdentityEpoch,
   getLibraryReturnFlow,
   libraryReturnForDestination,
@@ -64,8 +65,24 @@ import {
 import { questResumeCardRefusal, type QuestResumeFailure } from './questRun'
 import type { InteractiveSessionData, QuestDomainConfig } from './questTypes'
 import { QuestScreen } from './questTypes'
-import { useQuestSession, type QuestExitHold } from './useQuestSession'
+import { useQuestSession, type QuestExitBinding } from './useQuestSession'
 import QuestExitGuardDialog from './QuestExitGuardDialog'
+import type { QuestExitPhase } from './questSaveCopy'
+
+/**
+ * A departure the Mine is holding, and everything that authorises it (UX-496).
+ *
+ * One at a time, identified by `id` so the deliberate tap can admit the exact
+ * intent it was raised for rather than "whatever is held now".
+ */
+interface HeldQuestExit {
+  id: number
+  /** The action's own work — its reset and its own destination, unchanged. */
+  depart: () => void
+  binding: QuestExitBinding
+  /** The journey the departure would consume, where it has one. */
+  tripGeneration?: number
+}
 import { kidPalette } from '../../app/tokens'
 
 const MC = {
@@ -488,79 +505,196 @@ export default function KnowledgeMinePage() {
   // evidence, no Retry and no Resume. Staying and retrying kept everything. So
   // the departure asks first, and the default is to stay.
   //
-  // What is held, and what is NOT. The question is the SOURCE save alone, read
-  // live (see `sourceSaveExitHold`). A pending or failed MAP update is not an
-  // unsaved quest: it is recoverable from the saved source after a village
-  // return and re-entry, and the Mine's own recovery card offers it there.
+  // The SAME loss, from the other screen: Sol reproduced it on phone and tablet
+  // as *Back to mine* → intro → *Back to village* with the manual exit's
+  // partial source still saving or waiting on its Retry. So the intro's own
+  // approved return takes this gate too, bound to the PARTIAL payload and the
+  // intro view that owns it, and a successful Retry there leaves the child free
+  // to go and to Resume later under the original id. No other intro action and
+  // no global navigation is touched.
   //
-  // The intent carries the identity it was AUTHORISED under — the scope, the
-  // epoch, the view generation and the run whose payload is held — and the
-  // deliberate departure re-checks all four against the live ones. A prompt
-  // raised for one run, one child or one view never departs for another: it is
-  // dropped, and dropping navigates nowhere. Nothing times out, nothing
-  // escapes on its own, and a save that finishes while the door is open simply
-  // closes it — the next exit is a fresh tap, never a surprise navigation.
-  const [heldExit, setHeldExit] = useState<{
-    depart: () => void
-    scope: string
-    epoch: number
-    viewGeneration: number
-    runInstanceId?: string
-  } | null>(null)
-
-  /** The hold the open prompt is showing right now, re-read every render. */
-  const heldExitHold: QuestExitHold = heldExit
-    ? quest.sourceSaveExitHold({ runInstanceId: heldExit.runInstanceId })
-    : 'clear'
-
+  // What is held, and what is NOT. The question is the SOURCE save alone (see
+  // `questExitVerdict`). A pending or failed MAP update is not an unsaved
+  // quest: it is recoverable from the saved source after a village return and
+  // re-entry, and the Mine's own recovery card offers it there.
+  //
+  // ── Stale is not clear ──────────────────────────────────────────────────
+  //
+  // Sol reproduced an OLD *Done* navigating after the same child had re-entered
+  // the Mine following a saved return. A handler authorised by a view that no
+  // longer exists must do NOTHING — not depart, not reset, not consume the
+  // trip — however healthy the current save looks. So every control hands back
+  // the identity of its OWN render (committed scope, epoch, view generation,
+  // payload, trip) plus this mount, and the hook judges staleness before phase.
+  //
+  // ── One intent, consumed synchronously ──────────────────────────────────
+  //
+  // The prompt's intent lives in a ref as well as in state, because a retained
+  // *Leave anyway* handler must not be able to navigate after a Stay, an
+  // Escape, an acknowledgement or a newer prompt. The deliberate tap ADMITS
+  // whatever the ref holds and clears it in the same step, then re-checks the
+  // live phase and identity before it departs. A second tap keeps the first
+  // valid intent. Nothing times out and nothing escapes on its own: an
+  // acknowledged save closes the door and the next exit is a fresh tap.
+  const exitIntentSeq = useRef(0)
+  /** The one intent that may act, readable and clearable synchronously. */
+  const exitIntentRef = useRef<HeldQuestExit | null>(null)
+  /** The same intent, for rendering only. */
+  const [exitPrompt, setExitPrompt] = useState<HeldQuestExit | null>(null)
   /**
-   * Is a held intent still the one its own identity authorised?
+   * Is this component instance still mounted?
    *
-   * Compared against THIS render's identity, not the committed ref: the ref is
-   * written in a layout effect and so still holds the previous commit while the
-   * render that changed the scope is being drawn. Reading the render values is
-   * what makes the drop immediate and fail-closed — an intent must never
-   * survive into the frame that belongs to someone else.
+   * A handler retained by a PRIOR route mount closes over that instance's refs
+   * and would still reach the live history object, so the mount itself is part
+   * of what authorises an exit.
    */
-  const heldExitIsLive =
-    heldExit !== null &&
-    heldExit.scope !== 'unsettled' &&
-    heldExit.scope === recoveryScope &&
-    heldExit.epoch === recoveryEpoch &&
-    heldExit.viewGeneration === quest.viewGeneration
-
-  // A stale intent — a scope switch, an `A → B → A`, a new run — is dropped,
-  // not revived, and a save that landed closes its own door. Either way the
-  // summary's ordinary actions are available again on the next tap.
+  const exitMountedRef = useRef(true)
   useEffect(() => {
-    if (!heldExit) return
-    if (!heldExitIsLive || heldExitHold === 'clear') setHeldExit(null)
-  }, [heldExit, heldExitIsLive, heldExitHold])
+    return () => {
+      exitMountedRef.current = false
+    }
+  }, [])
+
+  /** Is the journey a departure would consume still the one it was drawn for? */
+  const exitTripStillLive = (generation: number) => {
+    const live = getLibraryReturnFlow()
+    return live !== null && live.generation === generation && live.phase === LibraryReturnPhase.Away
+  }
 
   /**
-   * The gate every departure from the completion summary passes through.
+   * The gate every guarded Mine exit passes through, for one payload kind.
    *
-   * Called BEFORE the action mutates return state, resets or navigates. With
-   * nothing held it calls the action straight through, so an ordinary exit is
-   * the exit it has always been. A second tap while a prompt is open keeps the
-   * FIRST intent rather than replacing it.
+   * Called BEFORE the action mutates the trip, resets or navigates. `clear`
+   * calls the action straight through, so an ordinary acknowledged exit is the
+   * exit it has always been; `stale` does nothing at all.
    */
-  const requestSummaryExit = (depart: () => void) => {
-    const runInstanceId = quest.visibleSourceSave.runInstanceId
-    const hold = quest.sourceSaveExitHold({ runInstanceId })
-    if (hold === 'clear') {
-      depart()
-      return
+  const requestQuestExit =
+    (kind: 'final' | 'partial') =>
+    (depart: () => void, extra?: { tripGeneration?: number }) => {
+      if (!exitMountedRef.current) return
+      if (extra?.tripGeneration !== undefined && !exitTripStillLive(extra.tripGeneration)) return
+      // The render's own identity, not the tap's.
+      const binding: QuestExitBinding = {
+        kind,
+        scope: recoveryScope,
+        epoch: recoveryEpoch,
+        viewGeneration: quest.viewGeneration,
+        runInstanceId: quest.visibleSourceSave.runInstanceId,
+      }
+      const verdict = quest.questExitVerdict(binding)
+      if (verdict.kind === 'stale') return
+      if (verdict.kind === 'clear') {
+        depart()
+        return
+      }
+      // A second tap keeps the first valid intent rather than replacing it.
+      if (exitIntentRef.current) return
+      const intent: HeldQuestExit = {
+        id: (exitIntentSeq.current += 1),
+        depart,
+        binding,
+        tripGeneration: extra?.tripGeneration,
+      }
+      exitIntentRef.current = intent
+      setExitPrompt(intent)
     }
-    const authorised = {
-      depart,
-      scope: liveRecovery.current.scope,
-      epoch: liveRecovery.current.epoch,
-      viewGeneration: quest.viewGeneration,
-      runInstanceId,
+
+  const requestSummaryExit = requestQuestExit('final')
+  const requestIntroExit = requestQuestExit('partial')
+
+  /**
+   * Which face the door is showing, derived from THIS render's state.
+   *
+   * Render state alone — no ref reads — so there is no effect, no cascading
+   * setState and nothing to go stale between the render and the paint. A moved
+   * identity, a retired view, a different payload or an ACKNOWLEDGED save all
+   * make this null, which closes the door and leaves the ordinary actions
+   * available on the next tap. The intent itself is left where it is: the
+   * handlers below refuse it on their own, which is the invariant that matters.
+   */
+  const exitPromptPhase: QuestExitPhase | null = (() => {
+    if (!exitPrompt) return null
+    const bound = exitPrompt.binding
+    // The same test the hook applies, on this render's values: the epoch and
+    // the view generation always, the scope only when both are settled — a read
+    // that merely has not settled is not evidence that anything moved, and must
+    // not shut a door the child is standing at.
+    if (bound.epoch !== recoveryEpoch) return null
+    if (bound.viewGeneration !== quest.viewGeneration) return null
+    if (
+      bound.scope !== 'unsettled' &&
+      recoveryScope !== 'unsettled' &&
+      bound.scope !== recoveryScope
+    ) {
+      return null
     }
-    setHeldExit((prev) => prev ?? authorised)
+    const save = quest.visibleSourceSave
+    if (save.kind !== bound.kind) return null
+    if (bound.runInstanceId && save.runInstanceId && bound.runInstanceId !== save.runInstanceId) {
+      return null
+    }
+    if (save.state === 'saving' || save.state === 'failed' || save.state === 'conflict') {
+      return save.state
+    }
+    return null
+  })()
+
+  /** *Stay here*, a backdrop tap and Escape: keep the screen, drop the intent. */
+  const stayWithQuest = () => {
+    exitIntentRef.current = null
+    setExitPrompt(null)
   }
+
+  /** The same same-source Retry the screen behind the door offers. */
+  const retryHeldQuestSave = () => {
+    const intent = exitIntentRef.current
+    if (!intent || !exitMountedRef.current) return
+    const verdict = quest.questExitVerdict(intent.binding)
+    if (verdict.kind !== 'hold' || !verdict.canRetry) return
+    void quest.retrySourceSave({
+      runInstanceId: verdict.runInstanceId ?? intent.binding.runInstanceId,
+      viewGeneration: quest.visibleSourceSave.viewGeneration,
+      scopeKey: intent.binding.scope,
+      epoch: intent.binding.epoch,
+    })
+    // The intent stays: the door waits for the outcome, and a denial comes back
+    // to this same door with its Retry intact.
+  }
+
+  /** The deliberate departure — admitted once, re-checked, then taken. */
+  const leaveQuestAnyway = () => {
+    const intent = exitIntentRef.current
+    // Admitted and consumed in one synchronous step, so a retained handler
+    // cannot fire twice or fire at all after a Stay, an Escape, an
+    // acknowledgement or a newer prompt.
+    if (!intent || !exitMountedRef.current) return
+    exitIntentRef.current = null
+    setExitPrompt(null)
+    if (intent.tripGeneration !== undefined && !exitTripStillLive(intent.tripGeneration)) return
+    // Still held, and still this view's? An acknowledged save is NOT a licence
+    // to depart from a door the child never saw resolve — it closes the door
+    // and asks for a fresh tap.
+    if (quest.questExitVerdict(intent.binding).kind !== 'hold') return
+    intent.depart()
+  }
+
+  /**
+   * The one door, rendered in BOTH branches that own a guarded exit.
+   *
+   * The intro returns its own `<Page>` before the quest screens do, so a door
+   * placed only in the second would hold an intro's departure and show the
+   * child nothing. It renders null unless `exitPromptPhase` says otherwise, so
+   * putting it in both costs nothing on either.
+   */
+  const exitDoor = (
+    <QuestExitGuardDialog
+      phase={exitPromptPhase}
+      canRetry={quest.visibleSourceSave.canRetry}
+      onRetry={retryHeldQuestSave}
+      onStay={stayWithQuest}
+      onLeaveAnyway={leaveQuestAnyway}
+    />
+  )
 
   /**
    * The ordinary Start, taken by the suggested mode's own card — and only by a
@@ -714,7 +848,14 @@ export default function KnowledgeMinePage() {
       <Page>
         {/* The way back to the village, for THIS trip only. Nothing starts,
             finishes or saves here: it is the journey's own one-use request. */}
-        {mineTrip && <MineTripExit generation={mineTrip.generation} />}
+        {/* UX-496 — the same approved return, guarded by the PARTIAL payload
+            this intro owns: a manual exit whose write is still saving, or
+            waiting on the Retry on the card below, must not lose it to a
+            village return. Ordinary intros are unaffected — nothing is owed,
+            so the tap goes straight through. */}
+        {mineTrip && (
+          <MineTripExit generation={mineTrip.generation} requestExit={requestIntroExit} />
+        )}
         <Box
           sx={{
             bgcolor: MC.bg,
@@ -1099,6 +1240,9 @@ export default function KnowledgeMinePage() {
             </Typography>
           </Box>
         </Box>
+        {/* UX-496 — the door for this intro's own return, while the partial
+            source a manual exit left behind is still saving or unsaved. */}
+        {exitDoor}
       </Page>
     )
   }
@@ -1241,43 +1385,11 @@ export default function KnowledgeMinePage() {
         />
       )}
 
-      {/* UX-496 — the door a held departure waits at. Rendered only on the
-          summary that owns the held payload: `heldExitHold` is 'clear' for
-          every other screen and for a dropped intent, and the dialog is then
-          not open at all. */}
-      {quest.screen === QuestScreen.Summary && (
-        <QuestExitGuardDialog
-          hold={heldExitIsLive ? heldExitHold : 'clear'}
-          canRetry={quest.visibleSourceSave.canRetry}
-          onRetry={() => {
-            if (!heldExitIsLive) return
-            // The SAME same-source retry the summary offers, with the same
-            // identity. The door stays open and shows *Still saving*; a retry
-            // that denies again comes back here with its Retry intact.
-            void quest.retrySourceSave({
-              runInstanceId: quest.visibleSourceSave.runInstanceId,
-              viewGeneration: quest.visibleSourceSave.viewGeneration,
-              scopeKey: recoveryScope,
-              epoch: recoveryEpoch,
-            })
-          }}
-          // The safe default — and what Escape and a backdrop tap mean. It
-          // keeps the original summary, its status line and its Retry.
-          onStay={() => setHeldExit(null)}
-          onLeaveAnyway={() => {
-            const intent = heldExit
-            // Re-checked at the deliberate tap, against the live identity: a
-            // stale intent is dropped and navigates nowhere.
-            if (!intent || !heldExitIsLive) {
-              setHeldExit(null)
-              return
-            }
-            // Cleared FIRST, so a double tap cannot depart twice.
-            setHeldExit(null)
-            intent.depart()
-          }}
-        />
-      )}
+      {/* UX-496 — the same door, for the completion summary's close.
+          `exitPromptPhase` is null unless THIS render's state still owes the
+          held payload something, so a moved identity, a retired view and an
+          acknowledged save all close it. */}
+      {exitDoor}
 
       {/* Error display */}
       {quest.aiError && (
@@ -1305,15 +1417,17 @@ function MineTripExit({
 }: {
   generation: number
   /**
-   * UX-496 — the completion summary's departure gate, when this return is
-   * rendered there. Absent on the intro and the fluency summary, and then this
-   * button is byte-for-byte the one it has always been.
+   * UX-496 — the departure gate, on the two screens that own a payload: the
+   * completion summary and the intro a manual exit landed on. Absent on the
+   * fluency summary, and then this button is byte-for-byte the one it has
+   * always been.
    *
-   * The journey is consumed INSIDE the departure, never before it: asking the
-   * guard first means a held or dropped exit leaves the one-use return intact,
-   * so *Stay here* keeps a working way back.
+   * The journey is consumed INSIDE the departure, never before it, and the
+   * generation this render was given is handed to the gate so a held or
+   * refused exit leaves the one-use return intact — *Stay here* keeps a
+   * working way back.
    */
-  requestExit?: (depart: () => void) => void
+  requestExit?: (depart: () => void, extra?: { tripGeneration?: number }) => void
 }) {
   const navigate = useNavigate()
   const depart = () => {
@@ -1323,7 +1437,9 @@ function MineTripExit({
   }
   return (
     <Button
-      onClick={() => (requestExit ? requestExit(depart) : depart())}
+      onClick={() =>
+        requestExit ? requestExit(depart, { tripGeneration: generation }) : depart()
+      }
       sx={{
         // NEW child-facing text, so this feature's readability rule applies and
         // the legacy Mine's 0.4rem pixel font around it does not: plain, at

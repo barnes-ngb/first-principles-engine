@@ -2124,3 +2124,143 @@ describe('Resume claims what is stored now, atomically', () => {
     expect(save.data.modelProjection).toBe('pending')
   })
 })
+
+/**
+ * UX-496 — what an exit control may do, at the hook level.
+ *
+ * The three verdicts, against the real notice path rather than a stub. `stale`
+ * is the one this block exists for: Sol reproduced an OLD *Done* navigating
+ * after the same child had re-entered the Mine following a SAVED return, so an
+ * acknowledged save must not be read as permission for a handler whose view is
+ * gone.
+ */
+describe('the exit verdict a Mine-owned departure asks for', () => {
+  /** The binding a control renders with — exactly what the page assembles. */
+  function bindingFor(view: View, kind: 'final' | 'partial') {
+    return {
+      kind,
+      scope: view.result.current.recoveryScope,
+      epoch: view.result.current.recoveryEpoch,
+      viewGeneration: view.result.current.viewGeneration,
+      runInstanceId: view.result.current.visibleSourceSave.runInstanceId,
+    }
+  }
+
+  it('holds a denied close, with its payload and its retry', async () => {
+    const view = mountHook()
+    await start(view)
+    transactionError = new Error('offline')
+    await answer(view, 5)
+
+    const verdict = view.result.current.questExitVerdict(bindingFor(view, 'final'))
+    expect(verdict).toMatchObject({ kind: 'hold', phase: 'failed', canRetry: true })
+  })
+
+  /**
+   * The pre-transaction pending *Done*, which Sol's Chrome run confirmed and
+   * which this must preserve: the close publishes `saving` before its first
+   * await, so the hold is answerable before any failed-payload ref exists.
+   */
+  it('holds a close whose write is still in flight', async () => {
+    const view = mountHook()
+    await start(view)
+    await answer(view, 4)
+    // The close's own source transaction is the next one, and it is HELD.
+    const release = holdNextTransaction()
+    const closing = answer(view, 1)
+    await settle()
+
+    const verdict = view.result.current.questExitVerdict(bindingFor(view, 'final'))
+    expect(verdict).toMatchObject({ kind: 'hold', phase: 'saving' })
+
+    release()
+    await closing
+  })
+
+  it('clears an acknowledged close, so the ordinary exit is untouched', async () => {
+    const view = mountHook()
+    await start(view)
+    await answer(view, 5)
+
+    expect(view.result.current.visibleSourceSave.state).toBe('saved')
+    expect(view.result.current.questExitVerdict(bindingFor(view, 'final'))).toEqual({
+      kind: 'clear',
+    })
+  })
+
+  it('calls an old view stale after a re-entry, even with the source saved', async () => {
+    const view = mountHook()
+    await start(view)
+    await answer(view, 5)
+    // The summary's own Done, captured while that summary was on screen.
+    const stale = bindingFor(view, 'final')
+
+    // The child leaves and re-enters: the reset retires that view.
+    await act(async () => {
+      view.result.current.resetToIntro()
+    })
+
+    expect(view.result.current.questExitVerdict(stale)).toEqual({ kind: 'stale' })
+  })
+
+  it('calls a same-tick A → B → A stale under an equal scope', async () => {
+    const view = mountHook()
+    await start(view)
+    transactionError = new Error('offline')
+    await answer(view, 5)
+    const bound = bindingFor(view, 'final')
+    expect(view.result.current.questExitVerdict(bound)).toMatchObject({ kind: 'hold' })
+
+    // Away and back: family, child and profile are exactly as they were, so
+    // only the epoch can tell, which is why the binding carries it.
+    identityEpoch = 3
+    setActive(LINCOLN)
+    view.rerender()
+
+    expect(view.result.current.questExitVerdict(bound)).toEqual({ kind: 'stale' })
+  })
+
+  it('never lets a summary be held by an intro partial, or the reverse', async () => {
+    const view = mountHook()
+    await start(view)
+    await answer(view, 2)
+    transactionError = new Error('offline')
+    await act(async () => {
+      view.result.current.resetToIntro()
+    })
+    await settle()
+
+    expect(view.result.current.visibleSourceSave).toMatchObject({
+      state: 'failed',
+      kind: 'partial',
+    })
+    // The intro that the exit landed on owns this payload and is held.
+    expect(view.result.current.questExitVerdict(bindingFor(view, 'partial'))).toMatchObject({
+      kind: 'hold',
+      phase: 'failed',
+    })
+    // A close-shaped control is not: a partial is not its payload.
+    expect(view.result.current.questExitVerdict(bindingFor(view, 'final'))).toEqual({
+      kind: 'clear',
+    })
+  })
+
+  /**
+   * The two successes stay apart (UX-494): the verdict is the SOURCE's, and the
+   * map's own state — pending, reached or failed — is not part of the question.
+   * Holding the door for a map update would be the exact confusion UX-494
+   * repaired, and the map retry is recoverable from the saved source anyway.
+   */
+  it('clears a saved source whatever its map projection is doing', async () => {
+    seedTargetedModel()
+    selectedPlan = PLAN
+    const view = mountHook()
+    await start(view)
+    await answer(view, 5)
+
+    expect(view.result.current.visibleSourceSave.state).toBe('saved')
+    expect(view.result.current.questExitVerdict(bindingFor(view, 'final'))).toEqual({
+      kind: 'clear',
+    })
+  })
+})

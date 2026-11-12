@@ -85,6 +85,10 @@ export const QUEST_UNSAVED_COPY = {
  * `conflict` is not a success and gets its own honest line: a different run
  * already owns that id, so this payload will never land and no retry can help.
  * The deliberate exit is the only move left, and it stays reachable.
+ *
+ * The same door serves the owning INTRO's *Back to village* while a manual
+ * exit's partial source is saving or waiting on its Retry — the same loss, from
+ * the other screen, and the same three sentences are true of it.
  */
 export const QUEST_EXIT_GUARD_COPY = {
   savingTitle: 'Still saving your quest.',
@@ -99,6 +103,68 @@ export const QUEST_EXIT_GUARD_COPY = {
   leave: 'Leave without saving',
   retry: QUEST_SOURCE_COPY.retry,
 } as const
+
+/**
+ * Which face the exit door is wearing — the source save's own phase.
+ *
+ * Declared here, with the copy, so the only module that needs both the phases
+ * and the sentences has no component in it: the session hook and the dialog
+ * both import this and neither imports the other.
+ */
+export type QuestExitPhase = 'saving' | 'failed' | 'conflict'
+
+export interface QuestExitNotice {
+  title: string
+  body: string
+  /** What leaving does and does not promise. */
+  warning: string
+  /** A write is in flight right now, so there is nothing to re-ask for. */
+  busy: boolean
+  /** Whether a Retry door belongs on this dialog at all. */
+  retryable: boolean
+  /** A failure, as opposed to an ordinary wait — colour and tone follow. */
+  failed: boolean
+}
+
+/**
+ * The door's copy for the phase it is actually in.
+ *
+ * A hold that is merely `saving` is a WAIT and must not borrow the vocabulary
+ * of a problem: no error colour, no retry, no claim that anything was lost. A
+ * `conflict` is a failure but not a retryable one — offering *Try saving again*
+ * there would ask the child to re-send a payload that can never land.
+ */
+export function questExitNotice(phase: QuestExitPhase): QuestExitNotice {
+  if (phase === 'saving') {
+    return {
+      title: QUEST_EXIT_GUARD_COPY.savingTitle,
+      body: QUEST_EXIT_GUARD_COPY.savingBody,
+      warning: QUEST_EXIT_GUARD_COPY.leaveWarning,
+      busy: true,
+      retryable: false,
+      failed: false,
+    }
+  }
+  if (phase === 'conflict') {
+    return {
+      title: QUEST_EXIT_GUARD_COPY.conflictTitle,
+      body: QUEST_EXIT_GUARD_COPY.conflictBody,
+      warning: QUEST_EXIT_GUARD_COPY.leaveWarning,
+      busy: false,
+      // Nothing to retry: another run owns this id. The escape is the move.
+      retryable: false,
+      failed: true,
+    }
+  }
+  return {
+    title: QUEST_EXIT_GUARD_COPY.failedTitle,
+    body: QUEST_EXIT_GUARD_COPY.failedBody,
+    warning: QUEST_EXIT_GUARD_COPY.leaveWarning,
+    busy: false,
+    retryable: true,
+    failed: true,
+  }
+}
 
 /**
  * Why a Resume did nothing — one line per refusal.
