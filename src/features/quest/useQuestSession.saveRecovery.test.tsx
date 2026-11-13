@@ -1306,7 +1306,9 @@ describe('a manual partial exit whose save is rejected', () => {
       viewGeneration: view.result.current.sourceSave.viewGeneration,
     }
 
-    // A later quest starts and is retired back to Intro with no counted answer.
+    // A later quest starts — on the Mine this is the replacement the child
+    // confirms at the UX-497 door — and is then retired back to Intro with no
+    // counted answer.
     transactionError = null
     expect(await start(view)).toBe('started')
     chat.mockRejectedValueOnce(new Error('provider down'))
@@ -1321,18 +1323,17 @@ describe('a manual partial exit whose save is rejected', () => {
       state: 'idle',
       canRetry: false,
     })
-    // And nothing is discarded — the status and the held answers are as found.
-    expect(view.result.current.sourceSave).toMatchObject({
-      state: 'failed',
-      kind: 'partial',
-      canRetry: true,
-      runInstanceId: retiredControl.runInstanceId,
-    })
+    /**
+     * UX-497 — and because that replacement became PLAYABLE, the exact payload
+     * went with the intro that held it: a retained control finds nothing to
+     * send rather than a dead Retry it can never land. Nothing is written
+     * either way — no stored record is discarded by any of this.
+     */
     let refused: unknown
     await act(async () => {
       refused = await view.result.current.retrySourceSave(retiredControl)
     })
-    expect(refused).toBe('identity-mismatch')
+    expect(refused).toBe('nothing-pending')
     expect(sourceWrites()).toHaveLength(0)
   })
 
@@ -2251,38 +2252,6 @@ describe('Resume claims what is stored now, atomically', () => {
     expect(store.get(path)).toMatchObject({ status: 'resumed' })
   })
 
-  /**
-   * And the same cleanup on the other replacement: a Start the child confirmed
-   * over a held partial. The notice used to stay `failed` for ever — the new
-   * run keeps the last one's notice *unless a payload is still held*, and that
-   * payload's only Retry had just been retired with its intro.
-   */
-  it('retires a deliberately replaced partial when a Start establishes', async () => {
-    const view = mountHook()
-    await start(view)
-    await answer(view, 2)
-
-    transactionError = new Error('offline')
-    await act(async () => {
-      view.result.current.resetToIntro()
-    })
-    transactionError = null
-    const held = view.result.current.sourceSave
-    expect(held).toMatchObject({ state: 'failed', kind: 'partial' })
-
-    expect(await start(view)).toBe('started')
-
-    // The new run's own screen says nothing about the quest it replaced.
-    expect(view.result.current.sourceSave.state).toBe('idle')
-    let retried: unknown
-    await act(async () => {
-      retried = await view.result.current.retrySourceSave({
-        runInstanceId: held.runInstanceId,
-        viewGeneration: held.viewGeneration,
-      })
-    })
-    expect(retried).toBe('nothing-pending')
-  })
 })
 
 /**
@@ -2571,5 +2540,188 @@ describe('the exit verdict a Mine-owned departure asks for', () => {
     expect(view.result.current.questExitVerdict(bindingFor(view, 'partial')).kind).not.toBe(
       'stale',
     )
+  })
+})
+
+/**
+ * UX-497 — a confirmed Start that cannot OPEN must replace nothing.
+ *
+ * Sol's last Chrome repro: a denied partial, *Start the new quest* confirmed at
+ * the door, the calibration read still in flight when the identity went
+ * `A → B → A`, then released. The Start refuses its own scope and opens
+ * nothing — and the Retry the door had just promised was gone anyway, because
+ * the generation was advanced before the first read. So the Start now PINS the
+ * guarded intro and advances only when the new dig is playable.
+ *
+ * The three states this block pins are the three the child can actually reach:
+ * refused before establishment, failed after it but before a first question,
+ * and cancelled by hand on Loading. Plus the positive case, where the
+ * replacement really does happen.
+ */
+describe('a confirmed Start that never opens keeps the guarded partial', () => {
+  /** The denied partial a confirmed Start is about to replace. */
+  async function withDeniedPartial(view: View) {
+    await start(view)
+    await answer(view, 2)
+    transactionError = new Error('offline')
+    await act(async () => {
+      view.result.current.resetToIntro()
+    })
+    transactionError = null
+    const held = view.result.current.sourceSave
+    expect(held).toMatchObject({ state: 'failed', kind: 'partial', canRetry: true })
+    return { held, generation: view.result.current.viewGeneration }
+  }
+
+  /** The held payload is still the live intro's, and still lands its OWN source. */
+  async function expectRetryStillWorks(
+    view: View,
+    held: { runInstanceId?: string; viewGeneration?: number },
+  ) {
+    expect(view.result.current.visibleSourceSave).toMatchObject({
+      state: 'failed',
+      kind: 'partial',
+      canRetry: true,
+      runInstanceId: held.runInstanceId,
+    })
+    const writesBefore = sourceWrites().length
+    await act(async () => {
+      expect(
+        await view.result.current.retrySourceSave({
+          runInstanceId: held.runInstanceId,
+          viewGeneration: held.viewGeneration,
+        }),
+      ).toBe('saved')
+    })
+    expect(view.result.current.sourceSave.state).toBe('saved')
+    expect(sourceWrites()).toHaveLength(writesBefore + 1)
+    expect(sourceWrites().at(-1)!.data).toMatchObject({ status: 'partial', childId: 'lincoln' })
+  }
+
+  /** Sol's repro: refused during the preliminary reads, before any provider call. */
+  it('keeps it when the Start is refused during its calibration reads', async () => {
+    const view = mountHook()
+    const { held, generation } = await withDeniedPartial(view)
+    const chatCalls = chat.mock.calls.length
+
+    // The reads are in flight when the identity moves and comes back.
+    const starting = view.result.current.startQuest('reading', 'phonics')
+    identityEpoch = 2
+    identityEpoch = 3
+    let outcome: unknown
+    await act(async () => {
+      outcome = await starting
+    })
+
+    expect(outcome).toBe('stale-scope')
+    // Nothing opened and nothing was spent.
+    expect(chat.mock.calls).toHaveLength(chatCalls)
+    expect(view.result.current.screen).toBe('intro')
+    expect(view.result.current.questState).toBeNull()
+    // The guarded intro is still the live view, so the door's promise holds.
+    expect(view.result.current.viewGeneration).toBe(generation)
+    view.rerender()
+    await expectRetryStillWorks(view, held)
+  })
+
+  /** Established, then the first question never arrives. */
+  it('keeps it when the first question fails after the run was established', async () => {
+    const view = mountHook()
+    const { held, generation } = await withDeniedPartial(view)
+
+    chat.mockResolvedValueOnce(null)
+    expect(await start(view)).toBe('failed')
+    expect(view.result.current.screen).toBe('intro')
+    expect(view.result.current.startQuestError).toBeTruthy()
+    expect(view.result.current.viewGeneration).toBe(generation)
+    await expectRetryStillWorks(view, held)
+  })
+
+  /** The child taps *Back to mine* on Loading before a question exists. */
+  it('keeps it when the child cancels on Loading, and the late question is inert', async () => {
+    const view = mountHook()
+    const { held, generation } = await withDeniedPartial(view)
+
+    let releaseQuestion: (value: unknown) => void = () => {}
+    chat.mockImplementationOnce(() => new Promise((resolve) => { releaseQuestion = resolve }))
+    const starting = view.result.current.startQuest('reading', 'phonics')
+    await settle()
+    expect(view.result.current.screen).toBe('loading')
+
+    await act(async () => {
+      view.result.current.resetToIntro()
+    })
+    expect(view.result.current.screen).toBe('intro')
+    // The cancel neither saved a partial of its own (nothing was answered) nor
+    // retired the intro the held one belongs to.
+    expect(view.result.current.viewGeneration).toBe(generation)
+
+    // The abandoned attempt's question lands afterwards and does nothing.
+    releaseQuestion({ message: `<quest>${QUESTION}</quest>` })
+    await act(async () => {
+      expect(await starting).toBe('stale-scope')
+    })
+    expect(view.result.current.screen).toBe('intro')
+    expect(view.result.current.currentQuestion).toBeNull()
+
+    await expectRetryStillWorks(view, held)
+  })
+
+  /**
+   * The positive case the whole guard exists to allow: the child confirms, the
+   * dig opens, and THAT is when the partial he was warned about is retired.
+   */
+  it('retires it once the confirmed replacement is playable', async () => {
+    const view = mountHook()
+    const { held, generation } = await withDeniedPartial(view)
+
+    expect(await start(view)).toBe('started')
+    expect(view.result.current.screen).toBe('question')
+    expect(view.result.current.currentQuestion).not.toBeNull()
+    expect(view.result.current.viewGeneration).not.toBe(generation)
+
+    // The replaced intro's notice and payload are both gone — nothing dead is
+    // left on screen, and nothing obsolete is left in the held-payload slot.
+    expect(view.result.current.sourceSave.state).toBe('idle')
+    let retried: unknown
+    await act(async () => {
+      retried = await view.result.current.retrySourceSave({
+        runInstanceId: held.runInstanceId,
+        viewGeneration: held.viewGeneration,
+      })
+    })
+    expect(retried).toBe('nothing-pending')
+    // And the new dig is an ordinary run: it closes and saves as it always did.
+    await answer(view, 5)
+    expect(view.result.current.screen).toBe('summary')
+    expect(sourceWrites().at(-1)!.data).toMatchObject({ status: 'complete', childId: 'lincoln' })
+  })
+
+  /**
+   * A held write that settles on the far side of a refused replacement is still
+   * reportable: the pin keeps the intro that owns it live, so the outcome lands
+   * on the screen the child is looking at rather than nowhere.
+   */
+  it('still reports an in-flight partial after a refused Start', async () => {
+    const view = mountHook()
+    await start(view)
+    await answer(view, 2)
+
+    const releasePartial = holdNextTransaction()
+    await act(async () => {
+      view.result.current.resetToIntro()
+    })
+    expect(view.result.current.sourceSave).toMatchObject({ state: 'saving', kind: 'partial' })
+
+    chat.mockResolvedValueOnce(null)
+    expect(await start(view)).toBe('failed')
+
+    releasePartial()
+    await settle()
+    expect(view.result.current.visibleSourceSave).toMatchObject({
+      state: 'saved',
+      kind: 'partial',
+    })
+    expect(view.result.current.screen).toBe('intro')
   })
 })
