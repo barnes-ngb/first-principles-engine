@@ -1565,13 +1565,36 @@ export function useQuestSession() {
       setCurrentPassageText('')
       conversationRef.current = []
       bonusRoundUsedRef.current = false
-      // A new run clears the last one's save notice — unless a payload is still
-      // held unsaved, whose retry is the only thing that can still land it.
-      // (UX-497 — the guarded intro's own partial is NOT discarded here: this
-      // run is established but not yet playable, and a first question that
-      // never arrives must leave that Retry recoverable. `commitStartedRun`
-      // retires it at the moment the dig is actually on screen.)
-      if (!pendingSourceRef.current) publishSourceSave({ state: 'idle', canRetry: false })
+      /**
+       * A new run clears the last one's save notice — unless the guarded intro
+       * still owes the child something.
+       *
+       * UX-497: this run is established but NOT yet playable, so neither the
+       * payload nor the notice may be discarded here; `commitStartedRun`
+       * retires both at the moment the dig is actually on screen.
+       *
+       * The held PAYLOAD is not the whole question, which is the last bug Sol
+       * found. A partial write that is still in flight has no `pendingSourceRef`
+       * entry at all — the ref is only filled when the transaction rejects — so
+       * a provisional Start over a `saving` partial published `idle` and threw
+       * the guard away: the first question then failed, *Back to village* went
+       * straight through with nothing to ask about, and the denial that arrived
+       * afterwards had no screen left to recover on. The real notice is what the
+       * verdict reads, so the real notice is what is kept: this generation's own
+       * live `partial`, in any of its three phases, with or without a payload.
+       *
+       * Every other notice is cleared exactly as before — a `final` close, an
+       * acknowledged or idle save, and a partial belonging to any other view.
+       */
+      const guardedNotice = sourceNoticeRef.current
+      const introStillOwesSomething =
+        Boolean(pendingSourceRef.current) ||
+        (guardedNotice.kind === 'partial' &&
+          guardedNotice.viewGeneration === pinnedGeneration &&
+          (guardedNotice.state === 'saving' ||
+            guardedNotice.state === 'failed' ||
+            guardedNotice.state === 'conflict'))
+      if (!introStillOwesSomething) publishSourceSave({ state: 'idle', canRetry: false })
       setGraphSync({ state: 'idle' })
       // UX-339 — capture the owner in the same breath as the session identity.
       // From here every write in this session resolves through it, including

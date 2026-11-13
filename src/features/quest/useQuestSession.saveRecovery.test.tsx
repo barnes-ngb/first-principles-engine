@@ -2698,6 +2698,80 @@ describe('a confirmed Start that never opens keeps the guarded partial', () => {
   })
 
   /**
+   * The notice is kept too, not just the payload — Sol's last exact-Chrome
+   * finding.
+   *
+   * A partial write that is still IN FLIGHT has no held-payload ref (that is
+   * only filled when the transaction rejects), and the provisional Start cleared
+   * the notice on the strength of that absent ref alone. So after the first
+   * question failed, the intro showed nothing, *Back to village* went straight
+   * through with no guard, and the denial that landed afterwards had no screen
+   * left to recover on.
+   */
+  it('keeps a SAVING partial holding the door through a provisional Start', async () => {
+    const view = mountHook()
+    await start(view)
+    await answer(view, 2)
+
+    // The partial write is dispatched, held open, and will be refused.
+    transactionError = new Error('offline')
+    const releasePartial = holdNextTransaction()
+    await act(async () => {
+      view.result.current.resetToIntro()
+    })
+    transactionError = null
+    const held = view.result.current.sourceSave
+    expect(held).toMatchObject({ state: 'saving', kind: 'partial' })
+    const generation = view.result.current.viewGeneration
+
+    // The confirmed replacement establishes, then its first question fails.
+    chat.mockResolvedValueOnce(null)
+    expect(await start(view)).toBe('failed')
+    expect(view.result.current.screen).toBe('intro')
+
+    // Same intro, and it still owes the child this quest — so the exits on it
+    // are still held rather than silently through.
+    expect(view.result.current.viewGeneration).toBe(generation)
+    expect(view.result.current.visibleSourceSave).toMatchObject({
+      state: 'saving',
+      kind: 'partial',
+      runInstanceId: held.runInstanceId,
+    })
+    expect(
+      view.result.current.questExitVerdict({
+        kind: 'partial',
+        scope: view.result.current.recoveryScope,
+        epoch: view.result.current.recoveryEpoch,
+        viewGeneration: view.result.current.viewGeneration,
+        runInstanceId: view.result.current.visibleSourceSave.runInstanceId,
+      }),
+    ).toMatchObject({ kind: 'hold', phase: 'saving' })
+
+    // The original write is then refused, on the intro that still owns it.
+    releasePartial()
+    await settle()
+    expect(view.result.current.visibleSourceSave).toMatchObject({
+      state: 'failed',
+      kind: 'partial',
+      canRetry: true,
+      runInstanceId: held.runInstanceId,
+    })
+    expect(sourceWrites()).toHaveLength(0)
+
+    // And the retry still lands that exact source.
+    await act(async () => {
+      expect(
+        await view.result.current.retrySourceSave({
+          runInstanceId: held.runInstanceId,
+          viewGeneration: held.viewGeneration,
+        }),
+      ).toBe('saved')
+    })
+    expect(sourceWrites()).toHaveLength(1)
+    expect(sourceWrites()[0].data).toMatchObject({ status: 'partial', childId: 'lincoln' })
+  })
+
+  /**
    * A held write that settles on the far side of a refused replacement is still
    * reportable: the pin keeps the intro that owns it live, so the outcome lands
    * on the screen the child is looking at rather than nowhere.
