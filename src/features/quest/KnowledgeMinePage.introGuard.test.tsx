@@ -629,6 +629,85 @@ describe('what the held door does', () => {
   })
 })
 
+describe('a Start retained from the PREVIOUS intro is inert', () => {
+  /**
+   * Sol's first blocker on the candidate repair. The callback was captured on
+   * an intro, a different dig then ran and failed its partial save, and the
+   * retained tap fired on the new intro: same family, same child, same scope,
+   * so neither `startQuest`'s scope rail nor the claim could see anything
+   * wrong. Only the view generation knows, and the first candidate let a
+   * `stale` verdict through for Start/Resume — which started a real quest and
+   * retired the held Retry.
+   *
+   * Nothing may run on `stale`, and nothing may be lost either.
+   */
+  it('starts nothing and keeps the held Retry', async () => {
+    const view = renderMine()
+    await flush()
+    const retainedStart = retainedOnClick(phonicsCard())
+
+    // A different dig ran and came back: a new view, and its partial denied.
+    fx.viewGeneration = 8
+    fx.runInstanceId = 'run-2'
+    deniedPartial()
+    view.rerender(mineElement())
+    await flush()
+
+    retainedStart()
+    expect(fx.startQuest).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screenRetry()).toHaveLength(1)
+
+    // And the FRESHLY rendered card for the same mode still works — held, then
+    // confirmed. (The hook publishes its generation on every bump, so a current
+    // control is never bound to a retired one.)
+    fireEvent.click(phonicsCard())
+    expect(dialog()).toBeInTheDocument()
+    fireEvent.click(startAnywayButton())
+    await noDialog()
+    expect(fx.startQuest).toHaveBeenCalledTimes(1)
+  })
+
+  /** The same for a retained Resume: no claim, no refusal copy, no loss. */
+  it('claims nothing from a retained Resume', async () => {
+    fx.resumeRows = [OLDER_PARTIAL]
+    const view = renderMine()
+    await flush()
+    const retainedResume = retainedOnClick(resumeCard()!)
+
+    fx.viewGeneration = 8
+    fx.runInstanceId = 'run-2'
+    deniedPartial()
+    view.rerender(mineElement())
+    await flush()
+
+    retainedResume()
+    await flush()
+    expect(fx.resumeSession).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screenRetry()).toHaveLength(1)
+  })
+
+  /**
+   * A raw A → B → A leaves the scope string equal to itself, so the epoch is
+   * the only evidence. A retained control carrying the old one is inert too.
+   */
+  it('is inert across a same-tick identity A → B → A', async () => {
+    const view = renderMine()
+    await flush()
+    const retainedStart = retainedOnClick(phonicsCard())
+
+    fx.recoveryEpoch = fx.recoveryEpoch + 1
+    deniedPartial()
+    view.rerender(mineElement())
+    await flush()
+
+    retainedStart()
+    expect(fx.startQuest).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+})
+
 describe('a confirmation whose own control has moved does nothing', () => {
   /**
    * The journey can end while the door is open — a role change, a switch, a

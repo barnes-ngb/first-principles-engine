@@ -655,17 +655,25 @@ export default function KnowledgeMinePage() {
    * Resume. `clear` calls the action straight through, so an ordinary
    * acknowledged tap is the tap it has always been.
    *
-   * ── What a `stale` verdict means, which differs by action (UX-497) ───────
+   * ── `stale` means NOTHING happens — for every action (UX-497) ────────────
    *
-   * For a DEPARTURE it means do nothing at all: the handler was authorised by a
-   * view that no longer exists, and it must not navigate or consume a journey.
+   * A stale control was authorised by a view that no longer exists: it must not
+   * navigate, consume a journey, reset, claim the intro lane or start a dig.
    *
-   * For a Start or a Resume it means *not held by this binding* and nothing
-   * more, so the action runs and is judged by its own rails — `startQuest` and
-   * `resumeSession` each refuse an unsettled or moved scope, a busy intro lane
-   * and an established run, synchronously, before they write anything. Dropping
-   * those taps here instead would make a freshly rendered mode card silently
-   * dead, which is the defect shape this guard exists to avoid, not to add.
+   * The first candidate repair let a Start or a Resume through on `stale`, on
+   * the reasoning that the hook's own rails would judge it. They cannot see
+   * this: `startQuest` and `resumeSession` check the SCOPE, and a Start
+   * callback retained from the previous intro carries the same scope while the
+   * same child is still active — so a retained tap, fired after a different dig
+   * had answered and failed its partial save, established a run and took the
+   * held Retry with it. The verdict is the only thing that knows the view
+   * moved, so nothing may bypass it.
+   *
+   * What made that bypass tempting was a real bug, fixed where it belongs: a
+   * generation bump that rendered nothing left even a FRESH control bound to an
+   * old number. `useQuestSession` now publishes the generation on every bump
+   * (`bumpViewGeneration`), so a rendered control always carries the live one
+   * and `stale` means only what it says.
    */
   const requestGuardedQuestAction =
     (kind: 'final' | 'partial', action: QuestExitAction) =>
@@ -685,11 +693,8 @@ export default function KnowledgeMinePage() {
         runInstanceId: quest.visibleSourceSave.runInstanceId,
       }
       const verdict = quest.questExitVerdict(binding)
-      if (verdict.kind === 'stale') {
-        if (action === 'leave') return
-        perform()
-        return
-      }
+      // Inert, and the held payload is left exactly as found.
+      if (verdict.kind === 'stale') return
       if (verdict.kind === 'clear') {
         perform()
         return

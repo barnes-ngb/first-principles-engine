@@ -2123,6 +2123,166 @@ describe('Resume claims what is stored now, atomically', () => {
     expect(save.data.targetPlan).toEqual(PLAN)
     expect(save.data.modelProjection).toBe('pending')
   })
+
+  /**
+   * ── UX-497: a REFUSED Resume replaces nothing ───────────────────────────
+   *
+   * Sol's second blocker. The generation was bumped before the claim, so the
+   * view that owned the newer dig's unsaved partial was retired the moment the
+   * card was tapped — and the claim can refuse: the stored row may have been
+   * abandoned, claimed or finished since the card was drawn. The older question
+   * never opened, and the newer dig's *Try saving again* was gone anyway.
+   *
+   * The claim is PINNED now and only an accepted transition advances it, so a
+   * refusal leaves the held payload, its notice and its exact-source Retry
+   * exactly as they were.
+   */
+  it('keeps the newer unsaved partial’s Retry when the older Resume is refused', async () => {
+    const view = mountHook()
+    await start(view)
+    await answer(view, 2)
+
+    // The newer dig's own partial write is denied: notice failed, payload held.
+    transactionError = new Error('offline')
+    await act(async () => {
+      view.result.current.resetToIntro()
+    })
+    transactionError = null
+    const held = view.result.current.sourceSave
+    expect(held).toMatchObject({ state: 'failed', kind: 'partial', canRetry: true })
+    const generationBefore = view.result.current.viewGeneration
+
+    // The older row the card is offering has since been closed out elsewhere.
+    seed(path, { ...partialDoc, status: 'abandoned' })
+    expect(await resume(view)).toBe('abandoned')
+
+    // Nothing opened, so nothing was replaced — and the lane is free again.
+    expect(view.result.current.screen).toBe('intro')
+    expect(view.result.current.viewGeneration).toBe(generationBefore)
+    expect(view.result.current.visibleSourceSave).toMatchObject({
+      state: 'failed',
+      kind: 'partial',
+      canRetry: true,
+      runInstanceId: held.runInstanceId,
+    })
+
+    // And the Retry still lands the ORIGINAL source, under its own id — never
+    // the row the refused Resume named.
+    await act(async () => {
+      await view.result.current.retrySourceSave({
+        runInstanceId: held.runInstanceId,
+        viewGeneration: held.viewGeneration,
+      })
+    })
+    expect(view.result.current.sourceSave.state).toBe('saved')
+    const landed = sourceWrites().at(-1)!
+    expect(landed.path).not.toBe(path)
+    expect(landed.data).toMatchObject({ status: 'partial', childId: 'lincoln' })
+    // The refused row was never written to at all.
+    expect(store.get(path)).toMatchObject({ status: 'abandoned' })
+  })
+
+  /**
+   * And an in-flight partial can still REPORT itself while the older claim is
+   * outstanding: the pre-transaction bump used to retire the intro that owned
+   * it, so the write landed in Firestore and the child was left looking at
+   * *Saving…* for ever on a Resume that was refused.
+   */
+  it('still reports an in-flight partial after a refused older Resume', async () => {
+    const view = mountHook()
+    await start(view)
+    await answer(view, 2)
+
+    // The partial write is dispatched and held open — notice `saving`.
+    const releasePartial = holdNextTransaction()
+    await act(async () => {
+      view.result.current.resetToIntro()
+    })
+    expect(view.result.current.sourceSave).toMatchObject({ state: 'saving', kind: 'partial' })
+
+    // The older row is tapped and refused while that write is still going.
+    seed(path, { ...partialDoc, status: 'complete', sourceCommittedAt: 'earlier' })
+    expect(await resume(view)).toBe('finalized')
+
+    releasePartial()
+    await settle()
+    // The intro that owns it is still the live one, so its outcome arrives.
+    expect(view.result.current.sourceSave).toMatchObject({ state: 'saved', kind: 'partial' })
+    expect(view.result.current.screen).toBe('intro')
+  })
+
+  /**
+   * The other half of the same rule: an ACCEPTED claim is the deliberate
+   * replacement the child confirmed, and it retires that intro's partial —
+   * payload included, so nothing obsolete stays in the one held-payload slot to
+   * shadow a later save or answer a later retry.
+   */
+  it('retires the newer partial only once the older Resume is accepted', async () => {
+    const view = mountHook()
+    await start(view)
+    await answer(view, 2)
+
+    transactionError = new Error('offline')
+    await act(async () => {
+      view.result.current.resetToIntro()
+    })
+    transactionError = null
+    const held = view.result.current.sourceSave
+    const generationBefore = view.result.current.viewGeneration
+
+    seed(path, partialDoc)
+    expect(await resume(view)).toBe(true)
+
+    // The older saved question is open, on its own id and under a new view.
+    expect(view.result.current.currentQuestion?.id).toBe('q-saved')
+    expect(view.result.current.viewGeneration).not.toBe(generationBefore)
+    expect(view.result.current.sourceSave.state).toBe('idle')
+    // The replaced payload is gone rather than unreachable, so a stale retry
+    // finds nothing to send and no later save is shadowed by it.
+    let retried: unknown
+    await act(async () => {
+      retried = await view.result.current.retrySourceSave({
+        runInstanceId: held.runInstanceId,
+        viewGeneration: held.viewGeneration,
+      })
+    })
+    expect(retried).toBe('nothing-pending')
+    // One stamp on the older row, from the claim itself.
+    expect(store.get(path)).toMatchObject({ status: 'resumed' })
+  })
+
+  /**
+   * And the same cleanup on the other replacement: a Start the child confirmed
+   * over a held partial. The notice used to stay `failed` for ever — the new
+   * run keeps the last one's notice *unless a payload is still held*, and that
+   * payload's only Retry had just been retired with its intro.
+   */
+  it('retires a deliberately replaced partial when a Start establishes', async () => {
+    const view = mountHook()
+    await start(view)
+    await answer(view, 2)
+
+    transactionError = new Error('offline')
+    await act(async () => {
+      view.result.current.resetToIntro()
+    })
+    transactionError = null
+    const held = view.result.current.sourceSave
+    expect(held).toMatchObject({ state: 'failed', kind: 'partial' })
+
+    expect(await start(view)).toBe('started')
+
+    // The new run's own screen says nothing about the quest it replaced.
+    expect(view.result.current.sourceSave.state).toBe('idle')
+    let retried: unknown
+    await act(async () => {
+      retried = await view.result.current.retrySourceSave({
+        runInstanceId: held.runInstanceId,
+        viewGeneration: held.viewGeneration,
+      })
+    })
+    expect(retried).toBe('nothing-pending')
+  })
 })
 
 /**
@@ -2367,5 +2527,49 @@ describe('the exit verdict a Mine-owned departure asks for', () => {
     expect(view.result.current.visibleSourceSave.state).toBe('saved')
     expect(view.result.current.questExitFace(bindingFor(view, 'final'))).toBeNull()
     expect(view.result.current.questExitFace(bindingFor(view, 'partial'))).toBeNull()
+  })
+
+  /**
+   * UX-497 — the generation a control BINDS to is published, so `stale` means
+   * only *this handler is not the live view's*.
+   *
+   * This is the half the page cannot test and the reason the first candidate
+   * repair bypassed the verdict for Start/Resume: a bump that rendered nothing
+   * left even a freshly rendered control bound to a retired number, so refusing
+   * `stale` outright would have killed working controls. Published bumps make
+   * the two cases distinguishable — a current binding is never stale, and a
+   * binding from the previous view always is — which is what lets the Mine
+   * refuse a retained Start without refusing a real one.
+   */
+  it('publishes each bump, so a current binding is live and a retired one is stale', async () => {
+    const view = mountHook()
+    const atFirstIntro = view.result.current.viewGeneration
+
+    await start(view)
+    const inRun = view.result.current.viewGeneration
+    expect(inRun).not.toBe(atFirstIntro)
+
+    // A control rendered NOW carries the live generation.
+    expect(view.result.current.questExitVerdict(bindingFor(view, 'partial')).kind).not.toBe(
+      'stale',
+    )
+    // One rendered on the intro this Start replaced does not — the same scope,
+    // the same child, the same epoch, and still inert.
+    expect(
+      view.result.current.questExitVerdict({
+        ...bindingFor(view, 'partial'),
+        viewGeneration: atFirstIntro,
+      }),
+    ).toEqual({ kind: 'stale' })
+
+    // And the same holds for the intro a reset lands on: published again, so
+    // the mode cards drawn there are current.
+    await act(async () => {
+      view.result.current.resetToIntro()
+    })
+    expect(view.result.current.viewGeneration).not.toBe(inRun)
+    expect(view.result.current.questExitVerdict(bindingFor(view, 'partial')).kind).not.toBe(
+      'stale',
+    )
   })
 })
