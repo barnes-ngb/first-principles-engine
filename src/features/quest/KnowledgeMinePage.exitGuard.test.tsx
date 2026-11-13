@@ -1150,11 +1150,24 @@ describe("the owning intro's return, while its partial is unsaved", () => {
     expect(path()).not.toBe('/quest')
   })
 
-  it('leaves other intro actions alone', async () => {
+  /**
+   * UX-497 — a mode card is not a departure, but it IS a replacement, and this
+   * assertion used to say it went through unguarded. That is the defect Sol
+   * reproduced next: the new run retires the view that owns the held partial,
+   * so the Retry was gone before the child could reach it. The same door holds
+   * it now, and the deliberate button says what the tap actually does. The
+   * intro's own full coverage is in `KnowledgeMinePage.introGuard.test.tsx`.
+   */
+  it('holds the intro’s own mode card until the child confirms it', async () => {
     deniedSave('partial')
     renderMine()
-    // A mode card is not a departure: it is unguarded and still starts.
     fireEvent.click(screen.getAllByText('Phonics Quest')[0])
+
+    expect(within(dialog()).getByText(QUEST_EXIT_GUARD_COPY.failedTitle)).toBeInTheDocument()
+    expect(fx.startQuest).not.toHaveBeenCalled()
+
+    fireEvent.click(within(dialog()).getByRole('button', { name: QUEST_EXIT_GUARD_COPY.start }))
     await noDialog()
+    expect(fx.startQuest).toHaveBeenCalledTimes(1)
   })
 })

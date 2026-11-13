@@ -12,8 +12,10 @@ import Typography from '@mui/material/Typography'
 
 import {
   QUEST_EXIT_GUARD_COPY,
+  questExitActionLabel,
   questExitGenericNotice,
   questExitNotice,
+  type QuestExitAction,
   type QuestExitPhase,
 } from './questSaveCopy'
 
@@ -28,6 +30,12 @@ import {
  * where a different run already owns this id, so there is nothing to retry and
  * the honest escape is the only move left.
  *
+ * UX-497 extends it to the Mine INTRO's own replacements — an ordinary or
+ * suggested Start, the error *Try Again*, and a confirmed Resume — which lose
+ * the same payload from the same screen without going anywhere. One door, one
+ * set of sentences about the save, and `deliberate` names what the third button
+ * actually does, because *Leave without saving* is not what a Start does.
+ *
  * It holds and reads NOTHING. `phase` is derived by the page from its own
  * render state, so an acknowledged save closes this door by making `phase`
  * null — the child's next exit is a fresh tap — and the page's handlers do
@@ -40,13 +48,21 @@ import {
 export default function QuestExitGuardDialog({
   phase,
   generic = false,
+  deliberate = 'leave',
   canRetry,
   onRetry,
   onStay,
-  onLeaveAnyway,
+  onDeliberate,
 }: {
   /** The save phase holding the departure, or null for no open door. */
   phase: QuestExitPhase | null
+  /**
+   * What the held action IS — a departure, a Start or a Resume (UX-497). It
+   * picks the third button's label and its one warning sentence, and nothing
+   * else: the save's own three sentences belong to `phase`. Defaults to the
+   * departure, so a UX-496 caller passes nothing and renders as before.
+   */
+  deliberate?: QuestExitAction
   /**
    * The held notice is hidden from whoever is looking — a sibling profile, a
    * foreign family. The door still opens, because a held exit that showed
@@ -58,7 +74,8 @@ export default function QuestExitGuardDialog({
   canRetry: boolean
   onRetry: () => void
   onStay: () => void
-  onLeaveAnyway: () => void
+  /** The deliberate tap — depart, start or resume, knowing the risk. */
+  onDeliberate: () => void
 }) {
   const stayRef = useRef<HTMLButtonElement | null>(null)
 
@@ -79,7 +96,9 @@ export default function QuestExitGuardDialog({
 
   // Closed is the ordinary state, and then this renders nothing at all.
   if (!phase) return null
-  const notice = generic ? questExitGenericNotice() : questExitNotice(phase)
+  const notice = generic
+    ? questExitGenericNotice(deliberate)
+    : questExitNotice(phase, deliberate)
   // `questExitGenericNotice` is not retryable, so the `generic` door offers no
   // Retry whatever `canRetry` says — the held payload is not this viewer's.
   const showRetry = notice.retryable && canRetry
@@ -135,12 +154,12 @@ export default function QuestExitGuardDialog({
             </Button>
           )}
           <Button
-            onClick={onLeaveAnyway}
+            onClick={onDeliberate}
             color="error"
             fullWidth
             sx={{ minHeight: 48, fontSize: '14px', textTransform: 'none' }}
           >
-            {QUEST_EXIT_GUARD_COPY.leave}
+            {questExitActionLabel(deliberate)}
           </Button>
         </Stack>
       </DialogActions>

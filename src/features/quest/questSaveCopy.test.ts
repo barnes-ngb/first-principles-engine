@@ -21,6 +21,7 @@ import {
   QUEST_RESUME_REFUSAL_COPY,
   QUEST_SOURCE_COPY,
   QUEST_UNSAVED_COPY,
+  questExitActionLabel,
   questExitGenericNotice,
   questExitNotice,
 } from './questSaveCopy'
@@ -73,11 +74,16 @@ describe('quest save copy is readable by the boy it is for', () => {
       'genericTitle',
       'genericBody',
       'genericWarning',
+      // UX-497 — the same door, holding a replacement rather than a departure.
+      'replaceWarning',
+      'genericReplaceWarning',
     ] as const) {
       expectKidLine(QUEST_EXIT_GUARD_COPY[key], `QUEST_EXIT_GUARD_COPY.${key}`)
     }
     expectKidWording(QUEST_EXIT_GUARD_COPY.stay, 'QUEST_EXIT_GUARD_COPY.stay')
     expectKidWording(QUEST_EXIT_GUARD_COPY.leave, 'QUEST_EXIT_GUARD_COPY.leave')
+    expectKidWording(QUEST_EXIT_GUARD_COPY.start, 'QUEST_EXIT_GUARD_COPY.start')
+    expectKidWording(QUEST_EXIT_GUARD_COPY.resume, 'QUEST_EXIT_GUARD_COPY.resume')
     expectKidWording(QUEST_EXIT_GUARD_COPY.retry, 'QUEST_EXIT_GUARD_COPY.retry')
   })
 })
@@ -113,6 +119,47 @@ describe('the exit guard says what is true about the answers', () => {
   it('labels the departure deliberately', () => {
     expect(QUEST_EXIT_GUARD_COPY.leave).not.toBe(QUEST_EXIT_GUARD_COPY.stay)
     expect(QUEST_EXIT_GUARD_COPY.leave.toLowerCase()).toContain('saving')
+  })
+
+  /**
+   * UX-497 — and a REPLACEMENT is labelled as what it does. A Start is not a
+   * departure, so *Leave without saving* on a door held open by a mode card
+   * would describe the wrong tap; each label names its own action, and the safe
+   * default is still the only thing that keeps the answers.
+   */
+  it('labels the deliberate Start and Resume as themselves', () => {
+    expect(questExitActionLabel('leave')).toBe(QUEST_EXIT_GUARD_COPY.leave)
+    expect(questExitActionLabel('start')).toBe(QUEST_EXIT_GUARD_COPY.start)
+    expect(questExitActionLabel('resume')).toBe(QUEST_EXIT_GUARD_COPY.resume)
+    for (const label of [QUEST_EXIT_GUARD_COPY.start, QUEST_EXIT_GUARD_COPY.resume]) {
+      expect(label).not.toBe(QUEST_EXIT_GUARD_COPY.stay)
+      expect(label).not.toBe(QUEST_EXIT_GUARD_COPY.leave)
+    }
+  })
+
+  /**
+   * The replacement warns about the same possible loss, and says *may* for the
+   * same reason: a write already dispatched may still land. It must not claim
+   * the child is going anywhere, because he is not.
+   */
+  it('warns about a replacement without promising either outcome', () => {
+    for (const phase of ['saving', 'failed', 'conflict'] as const) {
+      expect(questExitNotice(phase, 'start').warning).toBe(QUEST_EXIT_GUARD_COPY.replaceWarning)
+      expect(questExitNotice(phase, 'resume').warning).toBe(QUEST_EXIT_GUARD_COPY.replaceWarning)
+      // The default is the departure, so every UX-496 caller is unchanged.
+      expect(questExitNotice(phase).warning).toBe(QUEST_EXIT_GUARD_COPY.leaveWarning)
+    }
+    expect(questExitGenericNotice('start').warning).toBe(
+      QUEST_EXIT_GUARD_COPY.genericReplaceWarning,
+    )
+    expect(questExitGenericNotice().warning).toBe(QUEST_EXIT_GUARD_COPY.genericWarning)
+    for (const line of [
+      QUEST_EXIT_GUARD_COPY.replaceWarning,
+      QUEST_EXIT_GUARD_COPY.genericReplaceWarning,
+    ]) {
+      expect(line).toContain('may')
+      expect(line.toLowerCase()).not.toContain('will')
+    }
   })
 
   /**

@@ -67,21 +67,37 @@ import type { InteractiveSessionData, QuestDomainConfig } from './questTypes'
 import { QuestScreen } from './questTypes'
 import { useQuestSession, type QuestExitBinding } from './useQuestSession'
 import QuestExitGuardDialog from './QuestExitGuardDialog'
-import type { QuestExitPhase } from './questSaveCopy'
+import type { QuestExitAction, QuestExitPhase } from './questSaveCopy'
 
 /**
- * A departure the Mine is holding, and everything that authorises it (UX-496).
+ * An action the Mine is holding, and everything that authorises it (UX-496,
+ * widened by UX-497).
  *
  * One at a time, identified by `id` so the deliberate tap can admit the exact
  * intent it was raised for rather than "whatever is held now".
  */
-interface HeldQuestExit {
+interface HeldQuestIntent {
   id: number
-  /** The action's own work — its reset and its own destination, unchanged. */
-  depart: () => void
+  /**
+   * What the held action does when it is finally admitted — its own reset,
+   * destination, Start or Resume, unchanged and with all of its own guards.
+   */
+  perform: () => void
+  /** Which face the door's deliberate button wears (UX-497). */
+  action: QuestExitAction
   binding: QuestExitBinding
-  /** The journey the departure would consume, where it has one. */
+  /** The journey the action would consume, where it has one. */
   tripGeneration?: number
+  /**
+   * UX-497 — the action's OWN liveness, re-asked at the deliberate tap.
+   *
+   * The binding answers for the session's identity; this answers for the thing
+   * the control was drawn from, which a prompt can outlive: the exact stored
+   * Resume row, or the mode an error retry was offered for. False means the
+   * control no longer stands for what the child was shown, so nothing runs —
+   * and the held payload, its notice and its Retry are all left where they are.
+   */
+  preflight?: () => boolean
 }
 import { kidPalette } from '../../app/tokens'
 
@@ -497,6 +513,27 @@ export default function KnowledgeMinePage() {
       )
     : null
 
+  /**
+   * UX-497 — the identity of the two intro controls a held prompt can OUTLIVE.
+   *
+   * A Start on a mode card names a fixed config, and the suggested Start
+   * re-reads its own journey from the store, so neither can drift. These two
+   * can: the Resume card is one exact stored row, which a newly landed partial
+   * or a fresh read can replace underneath an open door, and the error retry's
+   * mode is state. Written in a LAYOUT effect, the `liveRecovery` shape and for
+   * the same reason — a render React abandons must not authorise anything, and
+   * a callback captured by an older render needs something CURRENT to compare
+   * itself against.
+   */
+  const resumeCardKey = resumeCard
+    ? `${resumeCard.scope}|${resumeCard.epoch}|${resumeCard.session.id ?? 'row'}`
+    : null
+  const activeModeKey = activeDomain ? `${activeDomain.domain}-${activeDomain.questMode}` : null
+  const liveIntroControls = useRef({ resumeCardKey, activeModeKey })
+  useLayoutEffect(() => {
+    liveIntroControls.current = { resumeCardKey, activeModeKey }
+  }, [resumeCardKey, activeModeKey])
+
   // ── UX-496: leaving a finished quest whose answers have not landed ────────
   //
   // The baseline: a denied close left *Try saving again* on the summary, and
@@ -510,8 +547,16 @@ export default function KnowledgeMinePage() {
   // partial source still saving or waiting on its Retry. So the intro's own
   // approved return takes this gate too, bound to the PARTIAL payload and the
   // intro view that owns it, and a successful Retry there leaves the child free
-  // to go and to Resume later under the original id. No other intro action and
-  // no global navigation is touched.
+  // to go and to Resume later under the original id.
+  //
+  // UX-497 — the SAME payload, lost without going anywhere. The intro's own
+  // replacements — an ordinary Start, the village's suggested Start, the error
+  // *Try Again* and a confirmed older *Resume* — each establish a new run,
+  // which retires the view that owns the held partial and takes its Retry with
+  // it. They take this gate too, with a deliberate button that names the dig
+  // rather than a departure. *Start fresh instead* is deliberately NOT here: it
+  // abandons one exact stored row on purpose, and is its own decision. No
+  // global navigation is touched.
   //
   // What is held, and what is NOT. The question is the SOURCE save alone (see
   // `questExitVerdict`). A pending or failed MAP update is not an unsaved
@@ -538,9 +583,9 @@ export default function KnowledgeMinePage() {
   // acknowledged save closes the door and the next exit is a fresh tap.
   const exitIntentSeq = useRef(0)
   /** The one intent that may act, readable and clearable synchronously. */
-  const exitIntentRef = useRef<HeldQuestExit | null>(null)
+  const exitIntentRef = useRef<HeldQuestIntent | null>(null)
   /** The same intent, for rendering only. */
-  const [exitPrompt, setExitPrompt] = useState<HeldQuestExit | null>(null)
+  const [exitPrompt, setExitPrompt] = useState<HeldQuestIntent | null>(null)
   /**
    * Is this component instance still mounted?
    *
@@ -576,10 +621,13 @@ export default function KnowledgeMinePage() {
    * intent is retired by a source ACKNOWLEDGEMENT (the verdict goes `clear`),
    * by a newer run or a new epoch (`stale`), and by its own journey ending.
    */
-  const heldExitStillValid = (intent: HeldQuestExit) => {
+  const heldExitStillValid = (intent: HeldQuestIntent) => {
     if (intent.tripGeneration !== undefined && !exitTripStillLive(intent.tripGeneration)) {
       return false
     }
+    // UX-497 — and still standing for the control it was raised from, so a
+    // held Resume whose row has been replaced cannot block a fresh prompt.
+    if (intent.preflight && !intent.preflight()) return false
     return quest.questExitVerdict(intent.binding).kind === 'hold'
   }
 
@@ -600,17 +648,34 @@ export default function KnowledgeMinePage() {
   }
 
   /**
-   * The gate every guarded Mine exit passes through, for one payload kind.
+   * The gate every guarded Mine action passes through, for one payload kind.
    *
-   * Called BEFORE the action mutates the trip, resets or navigates. `clear`
-   * calls the action straight through, so an ordinary acknowledged exit is the
-   * exit it has always been; `stale` does nothing at all.
+   * Called BEFORE the action mutates the trip, resets, navigates, calls a
+   * provider, claims the intro lane, bumps a generation or claims a saved
+   * Resume. `clear` calls the action straight through, so an ordinary
+   * acknowledged tap is the tap it has always been.
+   *
+   * ── What a `stale` verdict means, which differs by action (UX-497) ───────
+   *
+   * For a DEPARTURE it means do nothing at all: the handler was authorised by a
+   * view that no longer exists, and it must not navigate or consume a journey.
+   *
+   * For a Start or a Resume it means *not held by this binding* and nothing
+   * more, so the action runs and is judged by its own rails — `startQuest` and
+   * `resumeSession` each refuse an unsettled or moved scope, a busy intro lane
+   * and an established run, synchronously, before they write anything. Dropping
+   * those taps here instead would make a freshly rendered mode card silently
+   * dead, which is the defect shape this guard exists to avoid, not to add.
    */
-  const requestQuestExit =
-    (kind: 'final' | 'partial') =>
-    (depart: () => void, extra?: { tripGeneration?: number }) => {
+  const requestGuardedQuestAction =
+    (kind: 'final' | 'partial', action: QuestExitAction) =>
+    (
+      perform: () => void,
+      extra?: { tripGeneration?: number; preflight?: () => boolean },
+    ) => {
       if (!exitMountedRef.current) return
       if (extra?.tripGeneration !== undefined && !exitTripStillLive(extra.tripGeneration)) return
+      if (extra?.preflight && !extra.preflight()) return
       // The render's own identity, not the tap's.
       const binding: QuestExitBinding = {
         kind,
@@ -620,9 +685,13 @@ export default function KnowledgeMinePage() {
         runInstanceId: quest.visibleSourceSave.runInstanceId,
       }
       const verdict = quest.questExitVerdict(binding)
-      if (verdict.kind === 'stale') return
+      if (verdict.kind === 'stale') {
+        if (action === 'leave') return
+        perform()
+        return
+      }
       if (verdict.kind === 'clear') {
-        depart()
+        perform()
         return
       }
       // A second tap keeps the first VALID intent rather than replacing it.
@@ -634,18 +703,33 @@ export default function KnowledgeMinePage() {
         if (heldExitStillValid(held)) return
         exitIntentRef.current = null
       }
-      const intent: HeldQuestExit = {
+      const intent: HeldQuestIntent = {
         id: (exitIntentSeq.current += 1),
-        depart,
+        perform,
+        action,
         binding,
         tripGeneration: extra?.tripGeneration,
+        preflight: extra?.preflight,
       }
       exitIntentRef.current = intent
       setExitPrompt(intent)
     }
 
-  const requestSummaryExit = requestQuestExit('final')
-  const requestIntroExit = requestQuestExit('partial')
+  const requestSummaryExit = requestGuardedQuestAction('final', 'leave')
+  const requestIntroExit = requestGuardedQuestAction('partial', 'leave')
+  /**
+   * UX-497 — the intro's own replacements, bound to the SAME partial payload
+   * the intro's return is bound to.
+   *
+   * Sol's repro: answer one Math question, *Back to mine*, deny the partial
+   * write, then tap Math Quest (or the village's *Try a math dig*). The new
+   * run bumps the view that owns the held payload, so the Retry the child was
+   * looking at was gone before he could reach it — and returning to the intro
+   * before answering the new question showed nothing at all. The dig is still
+   * his to start; he is asked first, and the default is to keep the answers.
+   */
+  const requestIntroStart = requestGuardedQuestAction('partial', 'start')
+  const requestIntroResume = requestGuardedQuestAction('partial', 'resume')
 
   /**
    * Which face the door is showing, derived from THIS render's state.
@@ -726,22 +810,32 @@ export default function KnowledgeMinePage() {
     // to this same door with its Retry intact.
   }
 
-  /** The deliberate departure — admitted once, re-checked, then taken. */
-  const leaveQuestAnyway = (promptId: number | null) => {
+  /**
+   * The deliberate action — admitted once, re-checked, then taken.
+   *
+   * A departure, or (UX-497) the Start or Resume the child confirmed. Every
+   * refusal below leaves the held payload, its notice and its Retry exactly as
+   * found: the only thing a refused confirmation costs is the tap.
+   */
+  const takeHeldQuestAction = (promptId: number | null) => {
     // Admitted against the live intent and consumed in one synchronous step,
     // so a retained handler cannot fire twice, cannot fire at all after a
-    // Stay, an Escape or an acknowledgement, and cannot depart for a prompt it
+    // Stay, an Escape or an acknowledgement, and cannot act for a prompt it
     // was not drawn for.
     const intent = admitPromptIntent(promptId)
     if (!intent) return
     exitIntentRef.current = null
     setExitPrompt(null)
     if (intent.tripGeneration !== undefined && !exitTripStillLive(intent.tripGeneration)) return
+    // UX-497 — and the action's own control: the exact stored Resume row, or
+    // the mode the retry was offered for, read LIVE rather than from the
+    // closure the prompt has been sitting behind.
+    if (intent.preflight && !intent.preflight()) return
     // Still held, and still this view's? An acknowledged save is NOT a licence
-    // to depart from a door the child never saw resolve — it closes the door
+    // to act from a door the child never saw resolve — it closes the door
     // and asks for a fresh tap.
     if (quest.questExitVerdict(intent.binding).kind !== 'hold') return
-    intent.depart()
+    intent.perform()
   }
 
   /**
@@ -756,6 +850,9 @@ export default function KnowledgeMinePage() {
     <QuestExitGuardDialog
       phase={exitPromptPhase}
       generic={exitPromptFace?.generic ?? false}
+      // UX-497 — what the third button DOES for this prompt: leave, start the
+      // new dig, or open the saved one.
+      deliberate={exitPrompt?.action ?? 'leave'}
       // The Retry is the visible notice's own, so a hidden one offers none —
       // the door itself refuses it under `generic`, and this says so too.
       canRetry={!exitPromptFace?.generic && quest.visibleSourceSave.canRetry}
@@ -763,7 +860,7 @@ export default function KnowledgeMinePage() {
       // a callback retained from an earlier prompt admits nothing.
       onRetry={() => retryHeldQuestSave(exitPrompt?.id ?? null)}
       onStay={() => stayWithQuest(exitPrompt?.id ?? null)}
-      onLeaveAnyway={() => leaveQuestAnyway(exitPrompt?.id ?? null)}
+      onDeliberate={() => takeHeldQuestAction(exitPrompt?.id ?? null)}
     />
   )
 
@@ -778,7 +875,7 @@ export default function KnowledgeMinePage() {
    * with, and a live Mine journey of this generation for this scope. Refused
    * means nothing starts.
    */
-  const startSuggestedMode = (
+  const performSuggestedStart = (
     config: QuestDomainConfig,
     generation: number,
     /**
@@ -826,6 +923,26 @@ export default function KnowledgeMinePage() {
       },
     }
     void quest.startQuest(config.domain, config.questMode, pilot)
+  }
+
+  /**
+   * The suggested Start, held first (UX-497).
+   *
+   * The whole activation — the identity epoch, the live journey of this
+   * generation, the pilot's own `tripStillLive` — stays inside
+   * `performSuggestedStart`, so a Start admitted from behind a prompt revalidates
+   * against the STORE at the moment it actually runs rather than against the
+   * closure the door was opened with. A journey that ended while the door was
+   * open takes its Start with it and leaves the held partial untouched.
+   */
+  const startSuggestedMode = (
+    config: QuestDomainConfig,
+    generation: number,
+    pilotOffer?: MineAdditionPilotOffer | null,
+  ) => {
+    requestIntroStart(() => performSuggestedStart(config, generation, pilotOffer), {
+      tripGeneration: generation,
+    })
   }
 
   const phonicsSecure = isPhonicsSecure(snapshot)
@@ -991,8 +1108,9 @@ export default function KnowledgeMinePage() {
           {resumeCard && (
             <ResumeCard
               /* Keyed by the identity it was read under, so a card from a
-                 previous scope cannot be reused for a new one. */
-              key={`${resumeCard.scope}|${resumeCard.epoch}|${resumeCard.session.id ?? 'row'}`}
+                 previous scope cannot be reused for a new one. The same string
+                 is what a held Resume re-checks itself against (UX-497). */
+              key={resumeCardKey ?? 'resume'}
               session={resumeCard.session}
               /* UX-494 — a reoffered `resumed` row may still be open in
                  another tab, where discarding it would write `abandoned` over
@@ -1006,43 +1124,60 @@ export default function KnowledgeMinePage() {
                 const mode = session.questMode
                 const scopeAtTap = resumeCard.scope
                 const epochAtTap = resumeCard.epoch
-                setResumeRefusal(null)
-                void (async () => {
-                  const outcome = await quest.resumeSession(session)
-                  // Scoped AFTER the await, like *Start fresh* and the graph
-                  // retry: a result arriving once the identity has moved
-                  // belongs to nobody's screen, and it must not write a
-                  // refusal or a domain onto the new child's intro.
-                  const live = liveRecovery.current
-                  if (live.scope !== scopeAtTap || live.epoch !== epochAtTap) return
-                  if (outcome !== true) {
-                    // UX-494 — say so, and start NOTHING. The old fallback ran a
-                    // fresh paid quest nobody asked for, in whatever mode this
-                    // card happened to name.
-                    setResumeRefusal(outcome)
-                    // Retire ONLY this exact row, and only when the SOURCE
-                    // refused it. A rejected claim transport and a busy intro
-                    // lane leave the saved point intact and still eligible, so
-                    // the card stays and the copy asks for another tap —
-                    // dropping it there told a child their quest was gone.
-                    if (outcome !== 'claim-failed' && outcome !== 'stale-scope') {
-                      setResumeRead((current) =>
-                        current &&
-                        current.scope === scopeAtTap &&
-                        current.epoch === epochAtTap &&
-                        current.session?.id === session.id
-                          ? { ...current, session: null }
-                          : current,
-                      )
+                /**
+                 * UX-497 — a Resume claims a stored row and bumps the view that
+                 * owns the held partial, so it is held FIRST, before the
+                 * refusal is cleared and before `resumeSession` is called.
+                 *
+                 * The confirmation re-checks the exact row this card was drawn
+                 * from: an open door can be outlived by a newly landed partial
+                 * or a fresh read, and opening a row the child was never shown
+                 * is not what he confirmed. Refused means the stored row, the
+                 * held payload and its Retry are all left where they are.
+                 */
+                const cardAtTap = resumeCardKey
+                const resumeNow = () => {
+                  setResumeRefusal(null)
+                  void (async () => {
+                    const outcome = await quest.resumeSession(session)
+                    // Scoped AFTER the await, like *Start fresh* and the graph
+                    // retry: a result arriving once the identity has moved
+                    // belongs to nobody's screen, and it must not write a
+                    // refusal or a domain onto the new child's intro.
+                    const live = liveRecovery.current
+                    if (live.scope !== scopeAtTap || live.epoch !== epochAtTap) return
+                    if (outcome !== true) {
+                      // UX-494 — say so, and start NOTHING. The old fallback ran a
+                      // fresh paid quest nobody asked for, in whatever mode this
+                      // card happened to name.
+                      setResumeRefusal(outcome)
+                      // Retire ONLY this exact row, and only when the SOURCE
+                      // refused it. A rejected claim transport and a busy intro
+                      // lane leave the saved point intact and still eligible, so
+                      // the card stays and the copy asks for another tap —
+                      // dropping it there told a child their quest was gone.
+                      if (outcome !== 'claim-failed' && outcome !== 'stale-scope') {
+                        setResumeRead((current) =>
+                          current &&
+                          current.scope === scopeAtTap &&
+                          current.epoch === epochAtTap &&
+                          current.session?.id === session.id
+                            ? { ...current, session: null }
+                            : current,
+                        )
+                      }
+                      return
                     }
-                    return
-                  }
-                  setActiveDomain(
-                    [...READING_MODES, ...MATH_MODES].find(
-                      (m) => m.domain === domain && m.questMode === mode,
-                    ) ?? READING_MODES[0],
-                  )
-                })()
+                    setActiveDomain(
+                      [...READING_MODES, ...MATH_MODES].find(
+                        (m) => m.domain === domain && m.questMode === mode,
+                      ) ?? READING_MODES[0],
+                    )
+                  })()
+                }
+                requestIntroResume(resumeNow, {
+                  preflight: () => liveIntroControls.current.resumeCardKey === cardAtTap,
+                })
               }}
               onStartFresh={() => {
                 // UX-494 — the hook's discard, which holds the SAME intro
@@ -1221,17 +1356,22 @@ export default function KnowledgeMinePage() {
             />
           )}
 
-          {/* ── READING section (only if reading-calibrated) ─── */}
+          {/* ── READING section (only if reading-calibrated) ───
+              UX-497 — the ordinary Start, held first: the mode is this card's
+              own fixed config, so nothing about it can drift behind the door,
+              and `startQuest` keeps every one of its own refusals. */}
           {showReadingQuests && (
             <DomainSection label="READING" icon="📖">
               {orderedReadingModes.map((qd) => (
                 <QuestCard
                   key={`${qd.domain}-${qd.questMode}`}
                   config={qd}
-                  onSelect={() => {
-                    setActiveDomain(qd)
-                    void quest.startQuest(qd.domain, qd.questMode)
-                  }}
+                  onSelect={() =>
+                    requestIntroStart(() => {
+                      setActiveDomain(qd)
+                      void quest.startQuest(qd.domain, qd.questMode)
+                    })
+                  }
                 />
               ))}
             </DomainSection>
@@ -1244,10 +1384,12 @@ export default function KnowledgeMinePage() {
                 <QuestCard
                   key={`${qd.domain}-${qd.questMode}`}
                   config={qd}
-                  onSelect={() => {
-                    setActiveDomain(qd)
-                    void quest.startQuest(qd.domain, qd.questMode)
-                  }}
+                  onSelect={() =>
+                    requestIntroStart(() => {
+                      setActiveDomain(qd)
+                      void quest.startQuest(qd.domain, qd.questMode)
+                    })
+                  }
                 />
               ))}
             </DomainSection>
@@ -1275,7 +1417,19 @@ export default function KnowledgeMinePage() {
                     color="inherit"
                     size="small"
                     sx={{ fontFamily: MC.font, fontSize: '0.35rem' }}
-                    onClick={() => void quest.startQuest(activeDomain.domain, activeDomain.questMode)}
+                    /* UX-497 — the error retry is a Start too, and it is the
+                       one intro Start whose mode is STATE: a child change
+                       clears it and a Resume rewrites it, so the admitted tap
+                       re-checks that this is still the mode the button was
+                       offered for rather than starting a different quest. */
+                    onClick={() => {
+                      const mode = activeDomain
+                      const modeAtTap = activeModeKey
+                      requestIntroStart(
+                        () => void quest.startQuest(mode.domain, mode.questMode),
+                        { preflight: () => liveIntroControls.current.activeModeKey === modeAtTap },
+                      )
+                    }}
                   >
                     Try Again
                   </Button>
