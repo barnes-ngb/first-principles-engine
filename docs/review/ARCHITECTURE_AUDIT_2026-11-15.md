@@ -173,14 +173,22 @@ which reads `synthesis.whatMattersNext` **only when `synthesisStaleAt` is falsy*
 (`mineInvitation.ts:215`, `if (!synthesis || input.model.synthesisStaleAt) return null`). The queued-ask
 branch (step 1 of its order) is unaffected.
 
-The break: synthesis is regenerated only by the Sunday 00:15 `weeklyReview` beat (`evaluate.ts:2050`,
-`synthesizeIfStale` :1813) or the `?diag=1` panel (`generateLearnerSynthesisNow` has exactly one client
-caller, `FoundationsDiagPanel.tsx`; `useLearnerModel.ts:23` — *"surfaces read it and never regenerate on
-load (D6)"*). And the staleness mark is set not only by a quest but by every evidence writer —
-`evalModelWriteback.ts:81`, `writeReviewAction.ts:59`, `workbookPositionSync.ts:143`,
-`stuckRetestQueue.ts:136`. So **the first quest, scan, Today struggle signal or review confirm of a week
-silences the synthesis-driven invitation — and the UX-495 addition pilot that depends on it
-(`mineAdditionPilot.ts`, "a stale synthesis offers nothing") — until the following Sunday.** The more the
+The break: synthesis is regenerated in three places, and only one of them is routine. (i) The Sunday
+00:15 `weeklyReview` beat (`evaluate.ts:2050`; `deps.synthesizeIfStale` at :1899 inside
+`runWeeklyReviewCycleForChild`). (ii) The manual `generateWeeklyReviewNow` callable, which also runs
+`synthesizeIfStale` before generating (`evaluate.ts:1813`). Its one client caller is the Review page's
+parent-only *Try again* (`retryWeeklyReview.ts:43`, rendered by `WeekRetryControl` from
+`WeekPaceSection.tsx:288`), and that button renders only when the week's review **recorded a failure and
+has no narrative** (`weekRetryOffer`; the comment at `WeekPaceSection.tsx:281`). So it is a real midweek
+refresh, but only on a failed week, and only when a parent taps it. (iii) The `?diag=1` panel
+(`generateLearnerSynthesisNow`'s one client caller is `FoundationsDiagPanel.tsx`; `useLearnerModel.ts:23`
+says *"surfaces read it and never regenerate on load (D6)"*). Meanwhile every evidence writer sets the
+staleness mark, not only a quest: `evalModelWriteback.ts:81`, `writeReviewAction.ts:59`,
+`workbookPositionSync.ts:143`, `stuckRetestQueue.ts:136`. So **on an ordinary week (one with no failed
+review for a parent to retry), the first quest, scan, Today struggle signal or review confirm silences
+the synthesis-driven invitation until the following Sunday. That includes the UX-495 addition pilot that
+depends on it (`mineAdditionPilot.ts`: "a stale synthesis offers nothing").** (Codex round 1 on PR #1971
+caught that an earlier draft cited :1813 as the scheduled beat and missed path (ii).) The more the
 family uses the app, the sooner in the week the door closes. That is the exact weak link
 `PROCESS_OVERVIEW.md` names (Lincoln doing Knowledge Mine ~weekly), reproduced by the door built to fix it.
 Nothing is lost or mis-recorded — the refusal is correct under D6 — so this is a design gap, not a defect.
