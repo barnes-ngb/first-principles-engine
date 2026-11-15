@@ -115,10 +115,10 @@ describe('completionDraftIsEmpty', () => {
     expect(completionDraftIsEmpty(draft, '2026-10-15')).toBe(false)
   })
 
-  it('treats whitespace-only note as empty', () => {
+  it('treats whitespace-only note as empty (trim matches empty string)', () => {
     const draft = emptyCompletionDraft('2026-10-15')
     draft.note = '   '
-    expect(completionDraftIsEmpty(draft, '2026-10-15')).toBe(false)
+    expect(completionDraftIsEmpty(draft, '2026-10-15')).toBe(true)
   })
 })
 
