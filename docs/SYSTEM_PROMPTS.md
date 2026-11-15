@@ -46,6 +46,7 @@ src/core/ai/useAI.ts              functions/src/ai/
                                       conundrum  → handleConundrum
                                       weeklyFocus → handleWeeklyFocus
                                       scan       → handleScan
+                                      pageCheck  → handlePageCheck
                                       shellyChat → handleShellyChat
                                       foundationsReview → handleFoundationsReview
                                       chapterQuestions → handleChapterQuestions
