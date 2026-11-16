@@ -46,6 +46,7 @@ src/core/ai/useAI.ts              functions/src/ai/
                                       conundrum  → handleConundrum
                                       weeklyFocus → handleWeeklyFocus
                                       scan       → handleScan
+                                      pageCheck  → handlePageCheck
                                       shellyChat → handleShellyChat
                                       foundationsReview → handleFoundationsReview
                                       chapterQuestions → handleChapterQuestions
@@ -117,6 +118,7 @@ Since FEAT-58 the model strings live in one table — `functions/src/ai/models.t
 | `conundrum` | `claude-sonnet-5` | Weekly conundrum generation |
 | `weeklyFocus` | `claude-sonnet-5` | Unified weekly focus + conundrum |
 | `scan` | `claude-sonnet-5` | Curriculum photo analysis (vision) |
+| `pageCheck` | `claude-sonnet-5` | Before-work (prospective) page check — vision; calls `modelForTask("plan")` |
 | `shellyChat` | `claude-sonnet-5` | Parent AI assistant (family context) |
 | `foundationsReview` | `claude-sonnet-5` | Foundations Review Chat — subject-scoped concept-state review (FEAT-51) |
 | `chapterQuestions` | `claude-sonnet-5` | Chapter book discussion question generation |
@@ -191,6 +193,7 @@ Since FEAT-58 the model strings live in one table — `functions/src/ai/models.t
 | `analyzeWorkbook` | charter, childProfile |
 | `analyzePatterns` | childProfile |
 | `scan` | charter, childProfile, recentEval, recentHistoryByDomain, skillSnapshot, activityConfigs |
+| `pageCheck` | same slices as `scan` (`buildContextForTask("scan", …)`, deliberately reused unchanged — no `learnerModel`) |
 | `chapterQuestions` | _(self-loading)_ chapter book content + child profile |
 | `bookLookup` | _(self-loading)_ CHARTER_PREAMBLE + raw title + optional child name/age |
 | `lessonVideo` | _(self-loading)_ CHARTER_PREAMBLE + child profile (age + motivators + interests) |
@@ -419,6 +422,19 @@ page at a time, in response to TTS-read-aloud listener feedback.
 - Compares against child's skill snapshot for level alignment
 - Outputs JSON with `pageType`, `subject`, `specificTopic`, `skillsTargeted[]`, `estimatedDifficulty`, `recommendation` (do/skip/quick-review/modify), `estimatedMinutes`, `teacherNotes`
 - Notes neurodivergent-friendly concerns (dense text, too many problems)
+
+### `pageCheck` (tasks/pageCheck.ts)
+
+The before-work page check — **prospective**, a distinct task rather than a `scan` payload flag so an older dispatcher rejects it (`invalid-argument`, writing nothing) instead of running it as an ordinary retrospective scan.
+
+**System prompt assembly:**
+1. Context slices for "scan" (`buildContextForTask("scan", …)`) — reused unchanged
+2. `buildProspectiveCheckPrompt` (exported from `tasks/scan.ts`)
+
+**Key behaviors:**
+- Uses `callClaudeWithVision`; reads no purpose field — arriving at this handler is the intent
+- `chat.ts` excludes it by name from the workbook `activityConfigs` backfill
+- Writes only the `aiUsage` row; no learning or progress record
 
 ### `shellyChat` (tasks/shellyChat.ts)
 
