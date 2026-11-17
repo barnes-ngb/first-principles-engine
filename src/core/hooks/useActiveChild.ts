@@ -33,6 +33,31 @@ export interface UseActiveChildResult {
   loadFailed?: boolean
   /** Run the children read again, clearing the failure while it runs. */
   retryLoad?: () => void
+  /**
+   * Did `activeChildId` come from the PROFILE's own identity mapping, rather
+   * than from the fallback?
+   *
+   * Additive and optional, and it changes nothing for any existing consumer:
+   * the fallback below is unchanged, so a child profile whose document is
+   * missing still resolves to `selectedChildId` exactly as before.
+   *
+   * It exists because `activeChild.id === activeChildId` does **not** prove the
+   * logged-in profile is that child — on a missing profile match the hook falls
+   * back to whatever was selected, which for a child profile can be a SIBLING.
+   * A surface that gates on *"is this the signed-in child's own record"* needs
+   * an affirmative answer, and this is it:
+   *
+   *   • `true`  — a child profile matched its own `children` document through
+   *     `PROFILE_CHILDREN`, or the viewer is the parents profile (whose
+   *     identity question is a different one — a parent legitimately selects
+   *     whichever child, and that is an explicit act, not a fallback).
+   *   • `false` — a child profile did NOT match a document, so the id in hand
+   *     is the fallback and proves nothing about who is signed in.
+   *
+   * `undefined` means the answer has not been reported (an older mock, a
+   * consumer's stub), and every caller must treat that as "not proven".
+   */
+  profileChildResolved?: boolean
 }
 
 /**
@@ -58,19 +83,40 @@ export function useActiveChild(): UseActiveChildResult {
   const isChildProfile =
     profile === UserProfile.Lincoln || profile === UserProfile.London
 
-  // For child profiles, always resolve to their own child regardless of selectedChildId
-  const activeChildId = useMemo(() => {
-    if (isChildProfile && children.length > 0) {
-      const entry = PROFILE_CHILDREN.find((p) => p.profile === profile)
-      if (entry) {
-        const match = children.find(
-          (c) => c.name.toLowerCase() === entry.name.toLowerCase(),
-        )
-        if (match) return match.id
-      }
-    }
-    return selectedChildId
-  }, [isChildProfile, children, profile, selectedChildId])
+  /**
+   * The child this PROFILE is, when the profile is a child's and the family
+   * really holds that document. `null` for the parents profile, and `null` for
+   * a child profile with no matching document — which is the case the fallback
+   * below hides and `profileChildResolved` exposes.
+   *
+   * Extracted from the resolution below rather than added beside it, so the two
+   * answers cannot disagree about what matched.
+   */
+  const profileOwnChildId = useMemo(() => {
+    if (!isChildProfile || children.length === 0) return null
+    const entry = PROFILE_CHILDREN.find((p) => p.profile === profile)
+    if (!entry) return null
+    const match = children.find(
+      (c) => c.name.toLowerCase() === entry.name.toLowerCase(),
+    )
+    return match ? match.id : null
+  }, [isChildProfile, children, profile])
+
+  // For child profiles, always resolve to their own child regardless of
+  // selectedChildId. The fallback is UNCHANGED and deliberately so — every
+  // other consumer depends on it.
+  const activeChildId = useMemo(
+    () => profileOwnChildId ?? selectedChildId,
+    [profileOwnChildId, selectedChildId],
+  )
+
+  /**
+   * Affirmative identity, for the surfaces that need it. See the field's own
+   * docstring for why `activeChild.id === activeChildId` is not this answer.
+   */
+  const profileChildResolved = isChildProfile
+    ? profileOwnChildId !== null && profileOwnChildId === activeChildId
+    : profile === UserProfile.Parents
 
   const activeChild = useMemo(
     () => children.find((c) => c.id === activeChildId),
@@ -93,5 +139,6 @@ export function useActiveChild(): UseActiveChildResult {
     addChild,
     loadFailed,
     retryLoad,
+    profileChildResolved,
   }
 }

@@ -92,6 +92,77 @@ export const newBridgeId = (now: number, random: number): string =>
   pathSafeId('f', now, random)
 
 /**
+ * The id for ONE confirmed note.
+ *
+ * Minted when the child taps *Save my words*, held for that tap's retry. It is
+ * what stops a second, different note being reported as already saved — see
+ * `buildStudioNoteWrites`.
+ */
+export const newNoteActionId = (now: number, random: number): string =>
+  pathSafeId('n', now, random)
+
+/**
+ * Everything a reflection is about, frozen when the words are accepted.
+ *
+ * The defect this type exists to prevent: `VoiceInput`'s callback recorded only
+ * text, and the eventual Save read whatever `lastSaved` happened to hold — so
+ * words accepted about V1, with V2 saved in between, were filed against V2. The
+ * target is captured at accepted-draft creation and the write is refused unless
+ * the live scope still matches it.
+ */
+export interface BuildStudioNoteTarget {
+  familyId: string
+  childId: string
+  projectId: string
+  /** The acknowledged version the words are about. */
+  versionId: string
+  /** That version's stored document id. */
+  versionDocId: string
+  /** The visit the words were given in. */
+  visitId: string
+  /** ONE id per confirmed tap, minted with the draft and reused by its retry. */
+  noteActionId: string
+  /** How much authored help had been OFFERED when he spoke. Frozen with it. */
+  help: 'none-offered' | 'hints-offered' | 'unknown'
+  hintsOffered?: number
+}
+
+/** Do these two targets name the same acknowledged save, in the same visit? */
+export function sameNoteTarget(
+  a: BuildStudioNoteTarget | null,
+  b: BuildStudioNoteTarget | null,
+): boolean {
+  if (!a || !b) return false
+  return (
+    a.familyId === b.familyId &&
+    a.childId === b.childId &&
+    a.projectId === b.projectId &&
+    a.versionId === b.versionId &&
+    a.versionDocId === b.versionDocId &&
+    a.visitId === b.visitId
+  )
+}
+
+/**
+ * The key a `VoiceInput` instance is mounted under.
+ *
+ * Changing it REMOUNTS the component, which is how a recorder that was started
+ * about one version is retired rather than carried into the next. Built from
+ * the target, so there is no state in which the mic belongs to one save and the
+ * draft to another.
+ */
+export const noteTargetKey = (target: BuildStudioNoteTarget | null): string =>
+  target
+    ? [
+        target.familyId,
+        target.childId,
+        target.projectId,
+        target.versionId,
+        target.visitId,
+      ].join('\u0000')
+    : 'no-target'
+
+/**
  * The exact payload one Save action will keep retrying.
  *
  * Held by the page so that a retry preserves **the bytes and the identity**
@@ -109,4 +180,16 @@ export interface PendingSave {
   goalId?: string
   /** How many times this exact payload has been sent. The auto-retry is one. */
   attempts: number
+  /**
+   * The editor's source revision these bytes were captured at.
+   *
+   * The editor bumps a counter on every `workspacesave`, so this is a cheap
+   * fingerprint of "which state of the program is in this payload". When the
+   * durable write acknowledges, the editor compares the live counter to this
+   * one: equal means the acknowledged bytes ARE what is on screen, so the dirty
+   * mark clears; different means a newer edit arrived during the write, so it
+   * stays dirty. Without it a slow save cleared a mark that newer work had just
+   * earned.
+   */
+  capturedRevision: number
 }

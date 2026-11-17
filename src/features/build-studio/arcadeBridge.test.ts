@@ -29,10 +29,20 @@ function fakeFrame() {
     postMessage: (message: Record<string, unknown>, origin: string) =>
       posted.push({ message, origin }),
   }
+  // `style` and `ownerDocument` are real enough for the capture's input freeze;
+  // without them it falls into its own `catch`, which would make the freeze
+  // untested rather than tested.
+  const style: Record<string, string> = {}
   return {
     posted,
     contentWindow,
-    element: { contentWindow } as unknown as HTMLIFrameElement,
+    style,
+    element: {
+      contentWindow,
+      style,
+      blur: () => {},
+      ownerDocument: { activeElement: null },
+    } as unknown as HTMLIFrameElement,
   }
 }
 
@@ -448,8 +458,23 @@ describe('a reply is matched to a request, once', () => {
   })
 })
 
-describe('an explicit snapshot takes a save made AFTER the request', () => {
-  function readyBridge(now: () => number) {
+/**
+ * The capture fence (LOCAL-BUILD-001 repair #2).
+ *
+ * The verified stock order for one `saveproject` is: several full
+ * `workspacesave` events for the current header, then the matching
+ * `success: true` reply carrying NO project body. The first draft resolved on
+ * the first broadly-accepted event received after a `Date.now()` reading, which
+ * can accept an older delayed autosave and whose single waiter could be
+ * overwritten by an interleaved request.
+ *
+ * So: collect every valid payload, resolve on the MATCHING ACK with the last
+ * one collected, and serialize captures.
+ *
+ * POSITIVE CONTROLS are named per case.
+ */
+describe('a capture resolves on its own acknowledgment, not on an event', () => {
+  function readyBridge(now: () => number = () => 100) {
     const frame = fakeFrame()
     const rejected: RejectedMessage[] = []
     const bridge = new ArcadeBridge({
@@ -472,28 +497,26 @@ describe('an explicit snapshot takes a save made AFTER the request', () => {
     return { bridge, frame, rejected }
   }
 
-  it('resolves from a workspacesave provoked by saveproject', async () => {
-    let clock = 100
-    const { bridge, frame } = readyBridge(() => clock)
-    const pending = bridge.requestSnapshot()
-    expect(frame.posted.at(-1)!.message).toMatchObject({ action: 'saveproject' })
-    clock = 200
+  const save = (
+    bridge: ArcadeBridge,
+    frame: ReturnType<typeof fakeFrame>,
+    mainTs: string,
+  ) =>
     bridge.handleMessage(
       event(frame, {
         type: 'pxthost',
         action: 'workspacesave',
         frameId: bridge.frameId,
-        project: ourProject({ text: { 'main.ts': 'info.setLife(4)' } }),
+        project: ourProject({ text: { 'main.ts': mainTs } }),
       }),
     )
-    const result = await pending
-    expect(result.files['main.ts']).toBe('info.setLife(4)')
-  })
 
-  it('resolves from the reply itself when the reply carries the project', async () => {
-    const { bridge, frame } = readyBridge(() => 100)
-    const pending = bridge.requestSnapshot()
-    const id = frame.posted.at(-1)!.message.id
+  const ack = (
+    bridge: ArcadeBridge,
+    frame: ReturnType<typeof fakeFrame>,
+    id: unknown,
+    extra: Record<string, unknown> = {},
+  ) =>
     bridge.handleMessage(
       event(frame, {
         type: 'pxteditor',
@@ -501,11 +524,249 @@ describe('an explicit snapshot takes a save made AFTER the request', () => {
         id,
         frameId: bridge.frameId,
         success: true,
-        project: ourProject({ text: { 'main.ts': 'info.setLife(5)' } }),
+        ...extra,
       }),
     )
+
+  it('does NOT resolve on the first event — it waits for the reply', async () => {
+    // POSITIVE CONTROL: resolve the capture from `handleHostAction` and this
+    // case passes early, which is the defect.
+    const { bridge, frame } = readyBridge()
+    const pending = bridge.requestSnapshot()
+    expect(frame.posted.at(-1)!.message).toMatchObject({ action: 'saveproject' })
+    save(bridge, frame, 'info.setLife(3)')
+    let settled = false
+    void pending.then(() => {
+      settled = true
+    })
+    await Promise.resolve()
+    expect(settled).toBe(false)
+    ack(bridge, frame, frame.posted.at(-1)!.message.id)
+    await expect(pending).resolves.toMatchObject({
+      files: { 'main.ts': 'info.setLife(3)' },
+    })
+  })
+
+  it('takes the LAST payload before the acknowledgment, not the first', async () => {
+    // Three full events then the ACK is the exact observed stock sequence.
+    const { bridge, frame } = readyBridge()
+    const pending = bridge.requestSnapshot()
+    const id = frame.posted.at(-1)!.message.id
+    save(bridge, frame, 'info.setLife(1)')
+    save(bridge, frame, 'info.setLife(2)')
+    save(bridge, frame, 'info.setLife(4)')
+    ack(bridge, frame, id)
+    const result = await pending
+    expect(result.files['main.ts']).toBe('info.setLife(4)')
+  })
+
+  it('reads the reply’s own project when a version ever sends one', async () => {
+    const { bridge, frame } = readyBridge()
+    const pending = bridge.requestSnapshot()
+    const id = frame.posted.at(-1)!.message.id
+    ack(bridge, frame, id, {
+      project: ourProject({ text: { 'main.ts': 'info.setLife(5)' } }),
+    })
     const result = await pending
     expect(result.files['main.ts']).toBe('info.setLife(5)')
+  })
+
+  it('REFUSES an acknowledgment with no payload collected at all', async () => {
+    // Never a fallback to whatever the frame last volunteered — that is the
+    // stale-source failure in another costume.
+    const { bridge, frame } = readyBridge()
+    const pending = bridge.requestSnapshot()
+    ack(bridge, frame, frame.posted.at(-1)!.message.id)
+    await expect(pending).rejects.toMatchObject({
+      kind: ArcadeBridgeFailure.BadProject,
+    })
+  })
+
+  it('ignores a payload that arrives AFTER the acknowledgment', async () => {
+    const { bridge, frame } = readyBridge()
+    const first = bridge.requestSnapshot()
+    const id = frame.posted.at(-1)!.message.id
+    save(bridge, frame, 'info.setLife(3)')
+    ack(bridge, frame, id)
+    await expect(first).resolves.toMatchObject({
+      files: { 'main.ts': 'info.setLife(3)' },
+    })
+    // A later autosave is recorded as an editor save and belongs to no capture.
+    save(bridge, frame, 'info.setLife(9)')
+    expect(bridge.isCapturing()).toBe(false)
+    expect(bridge.editorSaveSeen()?.files['main.ts']).toBe('info.setLife(9)')
+  })
+
+  it('refuses a SECOND capture while one is in flight', async () => {
+    // Serialized, never queued — one waiter cannot be overwritten by another.
+    const { bridge, frame } = readyBridge()
+    const first = bridge.requestSnapshot()
+    expect(bridge.isCapturing()).toBe(true)
+    await expect(bridge.requestSnapshot()).rejects.toMatchObject({
+      kind: ArcadeBridgeFailure.Busy,
+    })
+    const id = frame.posted.at(-1)!.message.id
+    save(bridge, frame, 'info.setLife(3)')
+    ack(bridge, frame, id)
+    await first
+    // ...and the lane is free again.
+    expect(bridge.isCapturing()).toBe(false)
+  })
+
+  it('refuses an acknowledgment for a DIFFERENT action', async () => {
+    const { bridge, frame } = readyBridge()
+    const pending = bridge.requestSnapshot()
+    const id = frame.posted.at(-1)!.message.id
+    save(bridge, frame, 'info.setLife(3)')
+    // A reply whose id is not this request's resolves nothing.
+    ack(bridge, frame, 'some-other-id')
+    let settled = false
+    void pending.then(
+      () => {
+        settled = true
+      },
+      () => {
+        settled = true
+      },
+    )
+    await Promise.resolve()
+    expect(settled).toBe(false)
+    ack(bridge, frame, id)
+    await expect(pending).resolves.toBeTruthy()
+  })
+
+  it('collects no payload from a FOREIGN project during a capture', async () => {
+    const { bridge, frame } = readyBridge()
+    const pending = bridge.requestSnapshot()
+    const id = frame.posted.at(-1)!.message.id
+    // An auto-created Untitled project saving mid-capture.
+    bridge.handleMessage(
+      event(frame, {
+        type: 'pxthost',
+        action: 'workspacesave',
+        frameId: bridge.frameId,
+        project: ourProject({ header: { name: 'Untitled' } }),
+      }),
+    )
+    ack(bridge, frame, id)
+    await expect(pending).rejects.toMatchObject({
+      kind: ArcadeBridgeFailure.BadProject,
+    })
+  })
+
+  it('refuses when the scope retired before the acknowledgment', async () => {
+    let live = true
+    const frame = fakeFrame()
+    const bridge = new ArcadeBridge({
+      projectName: BUILD_STUDIO_PROJECT_NAME,
+      isScopeLive: () => live,
+      newId: nextId,
+      now: () => 1,
+    })
+    bridge.attach(frame.element)
+    bridge.handleMessage(
+      event(frame, {
+        type: 'pxthost',
+        action: 'workspaceloaded',
+        id: 'l',
+        frameId: bridge.frameId,
+      }),
+    )
+    frame.posted.length = 0
+    const pending = bridge.requestSnapshot()
+    const id = frame.posted.at(-1)!.message.id
+    save(bridge, frame, 'info.setLife(3)')
+    live = false
+    ack(bridge, frame, id)
+    await expect(pending).rejects.toMatchObject({ kind: ArcadeBridgeFailure.Stale })
+  })
+
+  it('refuses the editor’s own failure reply', async () => {
+    const { bridge, frame } = readyBridge()
+    const pending = bridge.requestSnapshot()
+    const id = frame.posted.at(-1)!.message.id
+    save(bridge, frame, 'info.setLife(3)')
+    bridge.handleMessage(
+      event(frame, {
+        type: 'pxteditor',
+        action: 'saveproject',
+        id,
+        frameId: bridge.frameId,
+        success: false,
+      }),
+    )
+    await expect(pending).rejects.toMatchObject({ kind: ArcadeBridgeFailure.Refused })
+    expect(bridge.isCapturing()).toBe(false)
+  })
+
+  it('frees the capture lane when disposed mid-flight', async () => {
+    const { bridge } = readyBridge()
+    const pending = bridge.requestSnapshot()
+    bridge.dispose()
+    await expect(pending).rejects.toBeInstanceOf(ArcadeBridgeError)
+    expect(bridge.isCapturing()).toBe(false)
+  })
+})
+
+describe('the frame is frozen while a capture runs', () => {
+  it('turns pointer events off and back on', async () => {
+    const style: Record<string, string> = {}
+    const posted: Array<Record<string, unknown>> = []
+    const contentWindow = {
+      postMessage: (m: Record<string, unknown>) => posted.push(m),
+    }
+    let blurred = 0
+    const element = {
+      contentWindow,
+      style,
+      blur: () => {
+        blurred += 1
+      },
+      ownerDocument: { get activeElement() { return element } },
+    } as unknown as HTMLIFrameElement
+    const frameLike = { contentWindow, posted, element }
+
+    const bridge = new ArcadeBridge({
+      projectName: BUILD_STUDIO_PROJECT_NAME,
+      isScopeLive: () => true,
+      newId: nextId,
+      now: () => 1,
+    })
+    bridge.attach(element)
+    bridge.handleMessage(
+      event(frameLike as never, {
+        type: 'pxthost',
+        action: 'workspaceloaded',
+        id: 'l',
+        frameId: bridge.frameId,
+      }),
+    )
+    const pending = bridge.requestSnapshot()
+    // A keystroke reaches a FOCUSED iframe with no pointer event, so focus is
+    // moved out as well as pointer events disabled.
+    expect(style.pointerEvents).toBe('none')
+    expect(blurred).toBe(1)
+
+    const id = posted.at(-1)!.id
+    bridge.handleMessage(
+      event(frameLike as never, {
+        type: 'pxthost',
+        action: 'workspacesave',
+        frameId: bridge.frameId,
+        project: ourProject(),
+      }),
+    )
+    bridge.handleMessage(
+      event(frameLike as never, {
+        type: 'pxteditor',
+        action: 'saveproject',
+        id,
+        frameId: bridge.frameId,
+        success: true,
+      }),
+    )
+    await pending
+    expect(style.pointerEvents).toBe('')
   })
 })
 
@@ -612,6 +873,7 @@ describe('the failure kinds the page branches on are all named', () => {
   it('declares every one it throws', () => {
     expect(Object.values(ArcadeBridgeFailure).sort()).toEqual([
       'bad-project',
+      'busy',
       'not-ready',
       'refused',
       'stale',

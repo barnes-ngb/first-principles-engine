@@ -36,40 +36,73 @@ export interface BuildStudioHint {
 }
 
 /**
- * The ladder, for the one authored goal.
- *
- * Written to be read aloud by `useTTS` at its kid rate, so each line is one
- * sentence or two short ones, with no parentheses, no numbers spelled as
- * digits-in-words, and no words a seven-year-old would stop on. The block is
- * named exactly as the editor labels it — *set life to 3* — because a hint that
- * describes a block in different words than the screen uses is a hint that
- * sends him looking for something that is not there.
+ * The number currently in the life block, when the app has read the open
+ * source. `null` when it has not, which is a real state — before the import
+ * round trip comes back, and for any project whose source could not be read.
  */
-export const BUILD_STUDIO_HINTS: readonly BuildStudioHint[] = [
-  {
-    rung: 1,
-    text: 'Your goal is to give your hero one more life. Look in the on start blocks.',
-  },
-  {
-    rung: 2,
-    text: 'Find the block that says set life to 3. It is the one with the heart word in it.',
-  },
-  {
-    rung: 3,
-    text: 'The 3 in set life to 3 is how many tries your hero gets. Tap the 3.',
-  },
-  {
-    rung: 4,
-    text: 'Now type a bigger number instead of the 3. Before you press play, tell me what you think will happen.',
-  },
-  {
-    rung: 5,
-    text: 'Press play and count the hearts at the top. Did you get what you expected?',
-  },
-]
+export type OpenLifeValue = number | null
 
-/** How many rungs there are. Derived, never typed twice. */
-export const BUILD_STUDIO_HINT_COUNT = BUILD_STUDIO_HINTS.length
+/**
+ * How to name the life block right now.
+ *
+ * **The reason this is a function and not a constant.** The first draft hard
+ * coded *set life to 3*, so after reopening a version he had already changed to
+ * 4 the helper kept telling him to find a block that is not on his screen —
+ * which is the one thing the wording rule exists to prevent. The label is now
+ * read from the source the editor actually has.
+ */
+export function lifeBlockLabel(lives: OpenLifeValue): string {
+  return lives === null
+    ? 'set life to'
+    : `${BUILD_STUDIO_GOAL.blockLabelPrefix} ${lives}`
+}
+
+/**
+ * The ladder, for the one authored goal, said about the project that is open.
+ *
+ * Written to be read aloud by `useTTS` at its kid rate: one sentence or two
+ * short ones per rung, no parentheses, and no words a seven-year-old would stop
+ * on. The block is named exactly as the editor labels it, with the number the
+ * editor is showing — a hint that describes a block in different words than the
+ * screen uses sends him looking for something that is not there.
+ *
+ * Pure, and derived per call rather than stored, so a reopened version cannot
+ * be described by a stale ladder.
+ */
+export function buildStudioHints(lives: OpenLifeValue): readonly BuildStudioHint[] {
+  const label = lifeBlockLabel(lives)
+  // "one more" needs a number to be one more THAN. Without one, the instruction
+  // stays relative rather than inventing a target.
+  const bigger = lives === null ? 'a bigger number' : `${lives + 1}`
+  return [
+    {
+      rung: 1,
+      text: 'Your goal is to give your hero one more life. Look in the on start blocks.',
+    },
+    {
+      rung: 2,
+      text: `Find the block that says ${label}. It is the one with the heart word in it.`,
+    },
+    {
+      rung: 3,
+      text:
+        lives === null
+          ? `The number in ${label} is how many tries your hero gets. Tap that number.`
+          : `The ${lives} in ${label} is how many tries your hero gets. Tap the ${lives}.`,
+    },
+    {
+      rung: 4,
+      text: `Now type ${bigger} instead. Before you press play, tell me what you think will happen.`,
+    },
+    {
+      rung: 5,
+      text: 'Press play and count the hearts at the top. Did you get what you expected?',
+    },
+  ]
+}
+
+/** How many rungs there are. Derived from the ladder, never typed twice. */
+export const BUILD_STUDIO_HINT_COUNT = buildStudioHints(null).length
 
 /**
  * What the goal line says on screen. The goal's own title, so the heading, the
@@ -82,24 +115,44 @@ export const BUILD_STUDIO_HINTS_DONE =
   'That is all the hints I have. Try it and see what happens — you can always change it back.'
 
 /**
- * The hint for a rung count already given.
+ * The hint for a rung count already offered, about the project that is open.
  *
- * `given` is how many have been heard so far, so `nextHint(0)` is rung 1.
- * Returns `null` past the last rung rather than repeating the last one, which
- * is what lets the caller say {@link BUILD_STUDIO_HINTS_DONE} instead of
- * looping a line he has already heard.
+ * `given` is how many have been offered so far, so `nextHint(0, lives)` is rung
+ * 1. Returns `null` past the last rung rather than repeating the last one,
+ * which is what lets the caller say {@link BUILD_STUDIO_HINTS_DONE} instead of
+ * looping a line he has already had.
  */
-export function nextHint(given: number): BuildStudioHint | null {
-  if (!Number.isInteger(given) || given < 0) return BUILD_STUDIO_HINTS[0]
-  return BUILD_STUDIO_HINTS[given] ?? null
+export function nextHint(given: number, lives: OpenLifeValue): BuildStudioHint | null {
+  const ladder = buildStudioHints(lives)
+  if (!Number.isInteger(given) || given < 0) return ladder[0]
+  return ladder[given] ?? null
 }
 
 /**
- * What *Hear it* reads out: the goal, then the numbers worth knowing about.
+ * Read the life number out of a project's `main.ts`.
+ *
+ * The TypeScript rather than the Blocks, because it is the half that is one
+ * canonical line, and both halves of a matched project carry the same number.
+ * `null` for anything it cannot read — never a guess, and never the starter's
+ * 3 as a default, which is exactly the stale answer this replaces.
+ */
+export function readOpenLifeValue(mainTs: string | undefined): OpenLifeValue {
+  if (!mainTs) return null
+  const match = mainTs.match(/info\.setLife\((\d+)\)/)
+  if (!match) return null
+  const value = Number(match[1])
+  return Number.isSafeInteger(value) ? value : null
+}
+
+/**
+ * What *Hear it* reads out: the goal, and the block to look for.
  *
  * Separate from the hint ladder on purpose — "read me the goal again" is not a
  * hint, and tapping it should not move the ladder on.
  */
-export function goalSpeech(): string[] {
-  return [BUILD_STUDIO_GOAL_LINE, `Look for the block that says ${BUILD_STUDIO_GOAL.blockLabel}.`]
+export function goalSpeech(lives: OpenLifeValue): string[] {
+  return [
+    BUILD_STUDIO_GOAL_LINE,
+    `Look for the block that says ${lifeBlockLabel(lives)}.`,
+  ]
 }

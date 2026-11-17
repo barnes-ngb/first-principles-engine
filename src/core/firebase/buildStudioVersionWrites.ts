@@ -47,13 +47,14 @@
 import { doc, runTransaction } from 'firebase/firestore'
 
 import {
-  BUILD_STUDIO_MAX_ARCHIVE_CHARS,
+  BUILD_STUDIO_MAX_ARCHIVE_BYTES,
   BUILD_STUDIO_MAX_FILES,
-  BUILD_STUDIO_MAX_FILE_CHARS,
+  BUILD_STUDIO_MAX_FILE_BYTES,
   buildStudioSourceDigest,
   buildStudioSourceKeys,
   buildStudioVersionDocId,
   serializeBuildStudioSource,
+  utf8ByteLength,
   type BuildStudioSourceFiles,
   type BuildStudioVersion,
 } from '../types/buildStudio'
@@ -184,14 +185,22 @@ export async function saveBuildStudioVersion(
       )
     }
   }
+  // BYTES, not characters, and both caps are checked BEFORE the transaction
+  // opens, so an oversized game is refused with a recovery route rather than
+  // failing inside a write Firestore would reject at 1 MiB.
   for (const key of keys) {
-    if (files[key].length > BUILD_STUDIO_MAX_FILE_CHARS) {
-      throw new BuildStudioRefused(`"${key}" is too big to store.`)
+    if (utf8ByteLength(files[key]) > BUILD_STUDIO_MAX_FILE_BYTES) {
+      throw new BuildStudioRefused(
+        `"${key}" is too big to store here. Use Download a copy so nothing is lost.`,
+      )
     }
   }
 
   const sourceArchive = serializeBuildStudioSource(files)
-  if (sourceArchive.length > BUILD_STUDIO_MAX_ARCHIVE_CHARS) {
+  // The canonical final string's own byte length — the number Firestore
+  // charges for the field, and the number stored as `byteSize`.
+  const byteSize = utf8ByteLength(sourceArchive)
+  if (byteSize > BUILD_STUDIO_MAX_ARCHIVE_BYTES) {
     throw new BuildStudioRefused(
       'This game got too big to save here. Use Download a copy so nothing is lost.',
     )
@@ -206,7 +215,7 @@ export async function saveBuildStudioVersion(
     label,
     createdAt,
     sourceArchive,
-    byteSize: sourceArchive.length,
+    byteSize,
     fileCount: keys.length,
     sourceDigest: buildStudioSourceDigest(sourceArchive),
     editorTarget: args.editorTarget,

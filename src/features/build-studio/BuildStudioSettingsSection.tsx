@@ -35,24 +35,49 @@ import type { Child } from '../../core/types'
 import { OptInStatus } from './buildStudioAccess'
 import { useBuildStudioOptInControl } from './useBuildStudioOptIn'
 
-export default function BuildStudioSettingsSection() {
+export interface BuildStudioSettingsSectionProps {
+  /**
+   * Show the row for ONE child only.
+   *
+   * The parent's Build Studio view reuses this component for the child she has
+   * selected, so there is exactly one propose→confirm control in the product
+   * and the two surfaces cannot drift. Absent in Settings, where she is looking
+   * at the whole family.
+   */
+  onlyChildId?: string
+  /** Settings draws its own heading; the in-page host already has one. */
+  hideHeading?: boolean
+}
+
+export default function BuildStudioSettingsSection({
+  onlyChildId,
+  hideHeading = false,
+}: BuildStudioSettingsSectionProps = {}) {
   const familyId = useFamilyId()
   const { children, isLoading } = useChildren()
 
   if (isLoading) return null
 
+  const rows = onlyChildId ? children.filter((c) => c.id === onlyChildId) : children
+
   return (
     <Stack spacing={1.5}>
-      <Typography variant="h6">Build Studio</Typography>
+      {!hideHeading && <Typography variant="h6">Build Studio</Typography>}
       <Typography variant="body2" color="text.secondary">
-        A private page where one child can change a small game Dad wrote, in
-        Microsoft&apos;s MakeCode Arcade editor, and keep his own saved versions
-        here. Saved games are never published or shared. Off for every child until
-        you turn it on.
+        A private page where one child can change a prepared starter game in
+        Microsoft&apos;s MakeCode Arcade editor and keep his own saved versions
+        here. Saved versions are not published from here; the editor itself
+        receives the game&apos;s files. Off for every child until you turn it on.
       </Typography>
-      {children.map((child) => (
+      {rows.map((child) => (
         <BuildStudioChildRow key={child.id} familyId={familyId} child={child} />
       ))}
+      {onlyChildId && rows.length === 0 && (
+        <Typography variant="body2" color="text.secondary">
+          That child is not in the family list yet, so this cannot be turned on
+          from here.
+        </Typography>
+      )}
     </Stack>
   )
 }
@@ -120,8 +145,8 @@ function BuildStudioChildRow({
           }
         >
           {proposed
-            ? `This gives ${child.name} a Build Studio page that loads Microsoft’s MakeCode Arcade editor. His saved games stay in this family’s records.`
-            : `${child.name} will not be able to open the Build Studio. His saved games are kept, not deleted.`}
+            ? `This gives ${child.name} a Build Studio page that loads Microsoft’s MakeCode Arcade editor, which receives the game’s files. His saved versions stay in this family’s records and are not published from here.`
+            : `${child.name} will not be able to open the Build Studio. His saved versions are kept, not deleted, and you can still see them.`}
         </Alert>
       )}
 

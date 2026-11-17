@@ -95,17 +95,25 @@ export const ArcadeBridgeFailure = {
   BadProject: 'bad-project',
   /** The scope moved on; this answer belongs to nobody. */
   Stale: 'stale',
+  /** A capture is already in flight. Captures are serialized, never queued. */
+  Busy: 'busy',
 } as const
 export type ArcadeBridgeFailure =
   (typeof ArcadeBridgeFailure)[keyof typeof ArcadeBridgeFailure]
 
+/**
+ * Explicit fields and assignments rather than constructor parameter properties:
+ * `erasableSyntaxOnly` is on (`tsconfig.app.json`), and a parameter property
+ * emits runtime code.
+ */
 export class ArcadeBridgeError extends Error {
-  constructor(
-    readonly kind: ArcadeBridgeFailure,
-    readonly action: string,
-    message: string,
-  ) {
+  readonly kind: ArcadeBridgeFailure
+  readonly action: string
+
+  constructor(kind: ArcadeBridgeFailure, action: string, message: string) {
     super(message)
+    this.kind = kind
+    this.action = action
   }
 }
 
@@ -158,12 +166,31 @@ interface PendingRequest {
   timer: ReturnType<typeof setTimeout>
 }
 
-interface SnapshotWaiter {
-  requestedAt: number
-  resolve: (project: AcceptedProject) => void
-  reject: (err: Error) => void
-  timer: ReturnType<typeof setTimeout>
-  settled: boolean
+/**
+ * One in-flight capture.
+ *
+ * `requestId` is the `saveproject` request this capture owns, so a payload is
+ * only collected for THIS capture and the ACK that ends it has to be the
+ * matching one. `latest` is the most recent valid payload seen since dispatch —
+ * the stock runtime emits several `workspacesave` events for one `saveproject`
+ * and the matching `success: true` reply arrives after all of them, so the
+ * fence is "the last payload before my own ACK", not "the first event after a
+ * clock reading".
+ */
+interface CaptureState {
+  requestId: string
+  /** When the capture was dispatched. Diagnostic; the ACK is the fence. */
+  startedAt: number
+  latest: AcceptedProject | null
+  /** Set once the matching ACK has arrived, so a later event cannot overwrite. */
+  acked: boolean
+}
+
+/** The project body on a reply, whichever key this editor version used. */
+function msgProject(msg: Record<string, unknown>): ArcadeProject | undefined {
+  const direct = msg.project as ArcadeProject | undefined
+  if (direct) return direct
+  return (msg.resp as ArcadeProject | undefined) ?? undefined
 }
 
 /**
@@ -197,7 +224,8 @@ export class ArcadeBridge {
   private readonly now: () => number
   private iframe: HTMLIFrameElement | null = null
   private pending = new Map<string, PendingRequest>()
-  private snapshotWaiter: SnapshotWaiter | null = null
+  /** The ONE active capture. A second `requestSnapshot` is refused, not queued. */
+  private capture: CaptureState | null = null
   /** The header id of the project we imported, once the editor has told us. */
   private ourHeaderId: string | null = null
   private loaded = false
@@ -339,18 +367,18 @@ export class ArcadeBridge {
 
     // `workspacesave` — the editor's own save. It is NOT a durable app save and
     // this bridge never persists from here; it records it so the page can show
-    // "not saved yet", and it is what an explicit Save waits for.
+    // "not saved yet", and during a capture it is COLLECTED rather than raced.
     const accepted = this.acceptProject(msg.project as ArcadeProject | undefined)
     if (!accepted) return
     this.lastEditorSave = accepted
     this.options.onEditorSave?.(accepted)
-    const waiter = this.snapshotWaiter
-    if (waiter && !waiter.settled && this.now() >= waiter.requestedAt) {
-      waiter.settled = true
-      clearTimeout(waiter.timer)
-      this.snapshotWaiter = null
-      waiter.resolve(accepted)
-    }
+    // Collected, never resolved from here. The stock controller awaits
+    // `saveFileAsync` → `buildAssetsAsync` → `workspace.saveAsync`, and the
+    // iframe provider posts `workspacesave` BEFORE the controller posts the
+    // matching reply — so postMessage ordering is the fence, and the capture
+    // ends on its own ACK. Resolving on an event would accept whichever
+    // autosave happened to land first, including an older delayed one.
+    if (this.capture && !this.capture.acked) this.capture.latest = accepted
   }
 
   /**
@@ -423,12 +451,26 @@ export class ArcadeBridge {
     args: Record<string, unknown>,
     timeoutMs: number,
   ): Promise<Record<string, unknown>> {
+    return this.requestWithId(this.options.newId(), action, args, timeoutMs)
+  }
+
+  /**
+   * The same, with the id minted by the caller.
+   *
+   * `requestSnapshot` needs the id BEFORE dispatch so the capture it registers
+   * and the ACK that ends it are provably the same exchange.
+   */
+  private requestWithId(
+    id: string,
+    action: string,
+    args: Record<string, unknown>,
+    timeoutMs: number,
+  ): Promise<Record<string, unknown>> {
     if (this.disposed) {
       return Promise.reject(
         new ArcadeBridgeError(ArcadeBridgeFailure.Stale, action, 'The editor was closed.'),
       )
     }
-    const id = this.options.newId()
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id)
@@ -504,18 +546,56 @@ export class ArcadeBridge {
     }
   }
 
+  /** Is a capture in flight right now? */
+  isCapturing(): boolean {
+    return this.capture !== null
+  }
+
   /**
-   * The full source, as the editor holds it right now.
+   * Stop the child typing into the frame while a capture is running, and let go
+   * again afterwards.
    *
-   * Asks the editor to save, then takes the project from whichever arrives
-   * first: the reply itself, or a `workspacesave` the request provoked. Only a
-   * save observed **at or after** the request counts — an older one is the
-   * editor's previous state, and storing that as an explicit Save would be the
-   * "stale frame" failure the slice names.
+   * `pointer-events: none` plus moving focus OUT of the iframe, because a
+   * keystroke reaches a focused iframe without any pointer event at all. An
+   * edit landing mid-capture would be an edit the stored version half-contains.
+   * Cosmetically invisible on purpose — the page draws its own "Getting your
+   * game…" state over the frame.
+   */
+  private freezeInput(frozen: boolean): void {
+    const frame = this.iframe
+    if (!frame) return
+    try {
+      frame.style.pointerEvents = frozen ? 'none' : ''
+      if (frozen) {
+        const active = frame.ownerDocument?.activeElement
+        if (active === frame) (active as HTMLElement).blur()
+      }
+    } catch {
+      // A frame detached mid-capture. The capture's own scope check refuses it.
+    }
+  }
+
+  /**
+   * The full source, as the editor holds it, fenced by the editor's own
+   * acknowledgment.
    *
-   * Rejects rather than falling back to the last thing seen. A Save that
-   * silently stored older bytes would be worse than one that failed, because
-   * the child would be told his change was kept.
+   * ── The fence, and why it is this one ──────────────────────────────────
+   *
+   * The stock 4.1.28 controller's `saveproject` awaits `saveFileAsync`, then
+   * `buildAssetsAsync`, then the workspace provider — and the iframe provider
+   * posts `workspacesave` BEFORE that chain resolves. So for one `saveproject`
+   * the observed order is: several full `workspacesave` events for the current
+   * header, then the matching `success: true` reply carrying **no project
+   * body**. That ordering is the only correlation available; there is no raw
+   * source-export action in the bundle and none is invented here.
+   *
+   * Therefore: dispatch, collect every valid same-header payload, and resolve
+   * on the matching ACK with the LAST payload collected before it. Nothing is
+   * raced. An ACK with no payload collected is a failure, not a fallback to
+   * whatever the frame last volunteered.
+   *
+   * Captures are **serialized**: a second call while one is in flight is
+   * refused rather than overwriting the first one's state.
    */
   async requestSnapshot(): Promise<AcceptedProject> {
     if (!this.loaded) {
@@ -525,46 +605,56 @@ export class ArcadeBridge {
         'The editor is still opening. Give it a moment and tap Save again.',
       )
     }
-    const requestedAt = this.now()
-    const fromHost = new Promise<AcceptedProject>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        if (this.snapshotWaiter?.settled === false) this.snapshotWaiter.settled = true
-        this.snapshotWaiter = null
-        reject(
-          new ArcadeBridgeError(
-            ArcadeBridgeFailure.Timeout,
-            'saveproject',
-            'The editor did not hand over the game in time. Nothing was saved.',
-          ),
-        )
-      }, ARCADE_SNAPSHOT_TIMEOUT_MS)
-      this.snapshotWaiter = { requestedAt, resolve, reject, timer, settled: false }
-    })
+    if (this.capture) {
+      throw new ArcadeBridgeError(
+        ArcadeBridgeFailure.Busy,
+        'saveproject',
+        'Your game is already being saved. One moment.',
+      )
+    }
 
-    const fromReply = this.request('saveproject', {}, ARCADE_SNAPSHOT_TIMEOUT_MS).then(
-      (msg) => {
-        const accepted = this.acceptProject(
-          (msg.project ?? (msg.resp as ArcadeProject)) as ArcadeProject | undefined,
-        )
-        if (!accepted) {
-          // Not a failure yet: `saveproject` commonly answers `{success:true}`
-          // with no project and the source arrives as a host `workspacesave`.
-          // So this branch waits for that one rather than rejecting the race.
-          return fromHost
-        }
-        return accepted
-      },
-    )
-
-    // Both branches get a handler attached BEFORE the race, so whichever one
-    // loses does not surface as an unhandled rejection. `Promise.race` still
-    // sees the original settlement — an extra `catch` observer does not change
-    // what the promise resolves or rejects with.
-    fromHost.catch(() => {})
-    fromReply.catch(() => {})
+    // Claimed synchronously, before the first await, so two taps in one tick
+    // cannot both get past the check above.
+    const requestId = this.options.newId()
+    this.capture = { requestId, startedAt: this.now(), latest: null, acked: false }
+    this.freezeInput(true)
 
     try {
-      const accepted = await Promise.race([fromReply, fromHost])
+      const ack = await this.requestWithId(
+        requestId,
+        'saveproject',
+        {},
+        ARCADE_SNAPSHOT_TIMEOUT_MS,
+      )
+      const state = this.capture
+      // The capture was retired under us — disposed, or a newer visit took
+      // over. Its answer belongs to nobody.
+      if (!state || state.requestId !== requestId) {
+        throw new ArcadeBridgeError(
+          ArcadeBridgeFailure.Stale,
+          'saveproject',
+          'That save arrived after you moved on, so nothing was stored.',
+        )
+      }
+      state.acked = true
+      // The reply's own body, if this editor version ever sends one; otherwise
+      // the last payload the provider posted before acknowledging. Both are
+      // put through the same `acceptProject` checks.
+      //
+      // Asked only when there IS a body: in stock 4.1.28 the ACK carries none,
+      // and running the acceptance checks over `undefined` would report a
+      // `foreign-project` rejection on every ordinary save — diagnostics that
+      // say something is wrong when nothing is.
+      const body = msgProject(ack)
+      const inReply = body ? this.acceptProject(body) : null
+      const collected = inReply ?? state.latest
+      if (!collected) {
+        throw new ArcadeBridgeError(
+          ArcadeBridgeFailure.BadProject,
+          'saveproject',
+          'The editor said it saved but did not hand the game over. Nothing was saved — try Save again.',
+        )
+      }
       if (!this.options.isScopeLive()) {
         throw new ArcadeBridgeError(
           ArcadeBridgeFailure.Stale,
@@ -572,13 +662,10 @@ export class ArcadeBridge {
           'That save arrived after you moved on, so nothing was stored.',
         )
       }
-      return accepted
+      return collected
     } finally {
-      const waiter = this.snapshotWaiter
-      if (waiter) {
-        clearTimeout(waiter.timer)
-        this.snapshotWaiter = null
-      }
+      if (this.capture?.requestId === requestId) this.capture = null
+      this.freezeInput(false)
     }
   }
 
@@ -600,19 +687,11 @@ export class ArcadeBridge {
       )
     }
     this.pending.clear()
-    const waiter = this.snapshotWaiter
-    if (waiter && !waiter.settled) {
-      waiter.settled = true
-      clearTimeout(waiter.timer)
-      waiter.reject(
-        new ArcadeBridgeError(
-          ArcadeBridgeFailure.Stale,
-          'saveproject',
-          'The editor was closed before it handed the game over.',
-        ),
-      )
-    }
-    this.snapshotWaiter = null
+    // The capture is retired rather than resolved. Its own `await` above is
+    // already rejected by the pending-request loop; clearing the state is what
+    // stops a late `workspacesave` being collected into a dead capture.
+    this.capture = null
+    this.freezeInput(false)
     this.iframe = null
   }
 }

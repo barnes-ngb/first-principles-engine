@@ -2,29 +2,35 @@
  * `/build-studio` — the one page (LOCAL-BUILD-001).
  *
  * It decides WHICH of the two surfaces to draw and nothing else: the child's
- * studio, or the parent's read-only view of that child's versions. Both read
- * the same shelf component and the same access rule, so neither can show the
- * other's controls by accident.
+ * studio, or the parent's read-only view of the selected child's versions.
+ * Both read the same shelf component and the same access rule, so neither can
+ * show the other's controls by accident.
  *
- * ── The child-switch answer, stated here because this is where it is made ──
+ * ── The parent's door is open before enrolment, deliberately ─────────────
  *
- * `BuildStudioEditor` is mounted with the resolved child as a PROP and is
- * keyed by it, so the identity the editor was started under cannot change
- * underneath it: a change of child or profile unmounts that editor and mounts
- * a new one for whoever the shell now resolves. Two things make that honest
- * rather than lossy:
+ * Gating her view on `enabled` made Build Studio vanish from her nav and
+ * redirect her route on first use — so the only way to turn it on was a
+ * Settings section she had no reason to open — and it hid versions a child had
+ * already saved the moment she turned it off. Her view now opens on a resolved
+ * family and child, SHOWS the enrolment state, and hosts the same
+ * propose→confirm control the Settings section uses. The child's editor still
+ * needs the affirmative opt-in, which is the capability.
  *
- *   • an accepted write already in flight is **BIND**ed to its own scope and
- *     completes against its own owner; its result is reported through
- *     `onOutOfScopeSave` rather than applied to the new visit or dropped;
- *   • unsaved EDITOR work cannot be carried across, so the loss is **made
- *     visible** — the notice below says it plainly instead of the page quietly
- *     reopening the starter for somebody else.
+ * ── Identity is affirmative ──────────────────────────────────────────────
  *
- * A parent cannot reach the editor at all (`ParentView` has no editing
- * controls), and a child profile cannot change child, so in practice the
- * crossing happens on a profile change. It is still handled rather than
- * assumed away.
+ * `profileChildResolved` is passed through from `useActiveChild`, because
+ * `activeChild.id === activeChildId` can be true about a SIBLING: the hook
+ * falls back to the selected id when a child profile matches no document.
+ *
+ * ── The child-switch answer ──────────────────────────────────────────────
+ *
+ * `BuildStudioEditor` is mounted with the resolved child as a PROP and keyed by
+ * it, so a change of child or profile unmounts that editor and mounts a new one
+ * for whoever the shell now resolves. Two things make that honest rather than
+ * lossy: an accepted write already in flight is **BIND**ed to its own scope and
+ * reports through `onOutOfScopeSave`; and an unfinished Save is held for its own
+ * owner in `buildStudioPendingStore`, so the exact retry is offered back when
+ * that child's editor mounts again rather than being lost with the component.
  */
 
 import { useCallback, useState } from 'react'
@@ -32,6 +38,7 @@ import Alert from '@mui/material/Alert'
 import AlertTitle from '@mui/material/AlertTitle'
 import Box from '@mui/material/Box'
 import CircularProgress from '@mui/material/CircularProgress'
+import Divider from '@mui/material/Divider'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 
@@ -42,10 +49,12 @@ import type { BuildStudioVersion } from '../../core/types/buildStudio'
 import { parseBuildStudioSource } from '../../core/types/buildStudio'
 import {
   BuildStudioAccess,
+  buildStudioChildEnrolled,
   resolveBuildStudioAccess,
 } from './buildStudioAccess'
 import { buildStudioDownloads, downloadTextFile } from './buildStudioExport'
 import BuildStudioEditor from './BuildStudioEditor'
+import BuildStudioSettingsSection from './BuildStudioSettingsSection'
 import { BUILD_STUDIO_PROJECT_ID } from './buildStudioStarter'
 import BuildStudioVersionShelf from './BuildStudioVersionShelf'
 import { useBuildStudioOptIn } from './useBuildStudioOptIn'
@@ -54,13 +63,14 @@ import { useBuildStudioVersions, VersionsStatus } from './useBuildStudioVersions
 /**
  * What a parent is told about where this runs.
  *
- * Said in the parent view and nowhere else, because it is a parent's decision
- * to understand: "private" here means nothing is published, NOT that
- * Microsoft's editor is uninvolved. Overstating that would be the dishonest
- * version of this feature.
+ * Two claims, both true and neither larger than it should be: saved versions
+ * are **not published** from here, and the editor is Microsoft's, which
+ * **receives the game's files**. It deliberately does not promise that nothing
+ * is ever shared — MakeCode is a third-party service with its own telemetry,
+ * and a child who later uses its own share button is outside this app.
  */
 export const BUILD_STUDIO_PRIVACY_LINE =
-  'Saved games live only in this family’s own records. Nothing is published or shared. The editor itself is Microsoft’s MakeCode Arcade, loaded in a frame — only the game’s own source is sent to it, never a name, a note or a recording.'
+  'Saved versions are kept in this family’s own records and are not published from here. The editor is Microsoft’s MakeCode Arcade, loaded in a frame, and it receives the game’s own files — nothing else is sent to it: no name, no note and no recording. MakeCode is a third-party service with its own terms and telemetry.'
 
 export default function BuildStudioPage() {
   const { familyId } = useAuth()
@@ -72,10 +82,15 @@ export default function BuildStudioPage() {
     isLoading,
     loadFailed,
     childrenFamilyId,
+    profileChildResolved,
   } = useActiveChild()
 
   const optIn = useBuildStudioOptIn(familyId, activeChildId || null)
-  const versions = useBuildStudioVersions(familyId, activeChildId || null)
+  const versions = useBuildStudioVersions(
+    familyId,
+    activeChildId || null,
+    BUILD_STUDIO_PROJECT_ID,
+  )
 
   const access = resolveBuildStudioAccess({
     familyId,
@@ -86,10 +101,11 @@ export default function BuildStudioPage() {
     childrenLoading: isLoading,
     childrenLoadFailed: loadFailed,
     childrenFamilyId,
+    profileChildResolved,
     optIn,
   })
 
-  /** A write that landed for a scope no longer on screen. Said, not hidden. */
+  /** A write that landed, or failed, for a scope no longer on screen. */
   const [outOfScope, setOutOfScope] = useState<string | null>(null)
   const noteOutOfScope = useCallback((detail: string) => setOutOfScope(detail), [])
 
@@ -117,8 +133,8 @@ export default function BuildStudioPage() {
 
   if (access === BuildStudioAccess.Closed) {
     // The route guard normally gets here first; this is the page refusing on
-    // its own account, because a surface that trusts its guard is a surface
-    // with one check instead of two.
+    // its own account, because a surface that trusts its guard has one check
+    // instead of two.
     return (
       <Box sx={{ p: 2 }}>
         <Alert severity="info">
@@ -129,11 +145,12 @@ export default function BuildStudioPage() {
   }
 
   // Unreachable: `resolveBuildStudioAccess` has already refused both of these.
-  // Kept so the narrowing below is the compiler's rather than a cast, which is
-  // the difference between a guarantee and a comment.
+  // Kept so the narrowing below is the compiler's rather than a cast.
   if (!familyId || !activeChildId) return null
 
-  const shelfChildIsCurrent = versions.childId === activeChildId
+  const shelfIsCurrent =
+    versions.childId === activeChildId && versions.projectId === BUILD_STUDIO_PROJECT_ID
+  const enrolled = buildStudioChildEnrolled(optIn, activeChildId)
 
   if (access === BuildStudioAccess.ParentView) {
     return (
@@ -143,24 +160,51 @@ export default function BuildStudioPage() {
             Build Studio — {activeChild?.name ?? 'this child'}
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Read-only. You can see and download what he has saved; the editing is
-            his.
+            Read-only. You can see and download what has been saved; the editing
+            is his.
           </Typography>
         </Stack>
-        <Alert severity="info">{BUILD_STUDIO_PRIVACY_LINE}</Alert>
+
+        {/* The enrolment state, said plainly, with the control beside it. */}
+        <Alert severity={enrolled ? 'success' : 'info'}>
+          <AlertTitle>
+            {enrolled
+              ? `The Build Studio is on for ${activeChild?.name ?? 'this child'}`
+              : `The Build Studio is off for ${activeChild?.name ?? 'this child'}`}
+          </AlertTitle>
+          {enrolled
+            ? 'He can open it and save his own versions. You can turn it off below; saved versions are kept either way.'
+            : 'He cannot open it yet. Turning it on below is what gives him the editor — anything already saved stays on the shelf regardless.'}
+        </Alert>
+
         {outOfScope && <Alert severity="warning">{outOfScope}</Alert>}
+
+        {/* The SAME propose→confirm control as the Settings section, reused
+            rather than reimplemented, so the two cannot drift. */}
+        <BuildStudioSettingsSection onlyChildId={activeChildId} hideHeading />
+
+        <Divider />
+
+        <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+          Saved versions
+        </Typography>
         <BuildStudioVersionShelf
-          read={versions}
+          read={
+            shelfIsCurrent
+              ? versions
+              : { ...versions, status: VersionsStatus.Loading, versions: [] }
+          }
           // The parent view's whole contract, in one prop. There is no `onOpen`
           // to pass, so there is no control to hide.
           canOpen={false}
           onDownload={handleDownload}
+          onRetryRead={versions.retry}
+          // Her question is "is this the source I think it is", so she keeps the
+          // digest, the byte size and the file count. The kid page does not.
+          showTechnicalDetail
         />
-        {!shelfChildIsCurrent && (
-          <Typography variant="caption" color="text.secondary">
-            Loading this child&apos;s list…
-          </Typography>
-        )}
+
+        <Alert severity="info">{BUILD_STUDIO_PRIVACY_LINE}</Alert>
       </Stack>
     )
   }
@@ -170,7 +214,7 @@ export default function BuildStudioPage() {
     <Stack spacing={2} sx={{ p: 2 }}>
       {outOfScope && (
         <Alert severity="warning">
-          <AlertTitle>One more save finished</AlertTitle>
+          <AlertTitle>About an earlier save</AlertTitle>
           {outOfScope}
         </Alert>
       )}
@@ -182,11 +226,10 @@ export default function BuildStudioPage() {
         childId={activeChildId}
         childName={activeChild?.name ?? 'Your'}
         projectId={BUILD_STUDIO_PROJECT_ID}
-        // A shelf read that is about another child is reported as still
-        // loading rather than shown: a previous child's versions under this
-        // child's heading would be the worst kind of wrong.
+        // A shelf read that is about another child or another project is
+        // reported as still loading rather than shown.
         versions={
-          shelfChildIsCurrent
+          shelfIsCurrent
             ? versions
             : { ...versions, status: VersionsStatus.Loading, versions: [] }
         }

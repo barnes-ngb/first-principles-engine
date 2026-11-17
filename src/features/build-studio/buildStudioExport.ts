@@ -12,23 +12,36 @@
  * and they are honest about what they are:
  *
  *   • **the archive** — the exact canonical bytes an app save would have
- *     stored. It is the recovery bundle: paired with this app it restores
- *     perfectly, because it IS what the collection holds.
+ *     stored. It is the recovery bundle, and {@link readRecoveryArchive} is the
+ *     route back IN, so the recovery this offers is real rather than advertised.
  *   • **`main.ts`** — the program as plain text, which can be pasted into the
  *     JavaScript side of stock `arcade.makecode.com` to rebuild the game by
- *     hand. That is a real external-editor route and it is deliberately not
- *     described as an import: this app cannot produce a `.mkcd`, which is
- *     MakeCode's own binary project file, and claiming otherwise would send a
- *     parent to a dialog that refuses the file.
+ *     hand. A real external-editor route, and deliberately not described as an
+ *     import.
+ *
+ * ── Three file kinds, and they are not interchangeable ──────────────────
+ *
+ * This matters because getting it wrong sends a person to a dialog that refuses
+ * their file:
+ *
+ *   • a **JSON archive** (`…-source.json`) is THIS app's format. Stock MakeCode
+ *     cannot open it; this app can, through {@link readRecoveryArchive}.
+ *   • a **`.ts` text file** is code to paste, not a project to import.
+ *   • a **MakeCode project PNG** is stock MakeCode's own import format. The one
+ *     this feature ships is the prepared STARTER
+ *     (`STARTER_PROJECT_PNG_URL`) and nothing else. It is never offered as
+ *     recovery of edited work — substituting the starter for a failed save
+ *     would replace what a child made with what he started from.
  *
  * Pure except for {@link downloadTextFile}, which is the only part that touches
- * the DOM, so the naming, the contents and the honesty of the pair are testable
- * without a browser.
+ * the DOM.
  */
 
 import {
+  BUILD_STUDIO_MAX_ARCHIVE_BYTES,
   parseBuildStudioSource,
   serializeBuildStudioSource,
+  utf8ByteLength,
   type BuildStudioSourceFiles,
 } from '../../core/types/buildStudio'
 
@@ -118,7 +131,45 @@ export function downloadTextFile(download: BuildStudioDownload): void {
  * Where to go when this app's editor will not come up at all.
  *
  * The plain editor, with no controller flag and nothing of ours in the URL — a
- * parent opens it, starts a project and pastes the code in. Stated as the
- * fallback it is rather than as a feature.
+ * parent opens it and imports the starter project file, or starts a project and
+ * pastes the code in. Stated as the fallback it is rather than as a feature.
  */
 export const ARCADE_PLAIN_EDITOR_URL = 'https://arcade.makecode.com/'
+
+/** The most bytes this will read back from a recovery file. */
+export const RECOVERY_MAX_BYTES = BUILD_STUDIO_MAX_ARCHIVE_BYTES
+
+export class RecoveryRefused extends Error {}
+
+/**
+ * Read one of THIS app's exported archives back into a file map.
+ *
+ * What makes the download a recovery rather than a souvenir. Bounded and
+ * checked exactly as a save is, because a file off a disk is untrusted input:
+ * a size ceiling before parsing, the same `parseBuildStudioSource` shape rule,
+ * and the same required manifest. It returns the files and nothing else — the
+ * caller decides what to do with them, and the caller is an explicit action.
+ *
+ * It deliberately does NOT accept a MakeCode project PNG: that is stock
+ * MakeCode's format, this app cannot read it, and pretending otherwise would
+ * refuse a parent's file with a confusing message.
+ */
+export function readRecoveryArchive(text: string): BuildStudioSourceFiles {
+  if (utf8ByteLength(text) > RECOVERY_MAX_BYTES) {
+    throw new RecoveryRefused('That file is too big to open here.')
+  }
+  let files: BuildStudioSourceFiles
+  try {
+    files = parseBuildStudioSource(text)
+  } catch {
+    throw new RecoveryRefused(
+      'That is not a game file this app saved. Pick the file ending in -source.json.',
+    )
+  }
+  if (typeof files['pxt.json'] !== 'string' || typeof files['main.ts'] !== 'string') {
+    throw new RecoveryRefused(
+      'That game file is missing part of the project, so it was not opened.',
+    )
+  }
+  return files
+}

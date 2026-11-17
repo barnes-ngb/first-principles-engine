@@ -570,15 +570,27 @@ written. Three derive:
 The rest derive to nothing, each for a reason the heuristic can state rather than one that has
 to be trusted: `arcadeBridge.ts`, `buildStudioAccess.ts`, `buildStudioExport.ts`,
 `buildStudioHints.ts`, `buildStudioScope.ts`, `buildStudioStarter.ts`,
+`buildStudioPendingStore.ts`, `useBuildStudioDepartureGuard.ts`,
 `core/types/buildStudio.ts`, `core/firebase/buildStudioVersionWrites.ts` and
 `core/firebase/buildStudioNoteWrites.ts` declare **no `useState`**, so `classifyCandidate` returns
 before either arm is considered; `BuildStudioVersionShelf.tsx` and `RequireBuildStudioAccess.tsx`
 hold no state either (the shelf is presentational and the guard renders or redirects);
 `BuildStudioSettingsSection.tsx` holds state but reads no active child and declares no `childId`
-prop — it is handed a whole `Child` and lists every child in the family; and
-`useBuildStudioVersions.ts` holds state and declares the prop but performs **no Firestore write**,
-which is the `.ts` prop arm's own requirement. A row for a file the script does not derive is what
-the invariant test rejects as `not-a-candidate`, so none of them gets one.
+prop — it is handed a whole `Child`, and its one additive prop is `onlyChildId`, which `\bchildId`
+cannot match; and `useBuildStudioVersions.ts` holds state and declares the prop but performs **no
+Firestore write**, which is the `.ts` prop arm's own requirement. A row for a file the script does
+not derive is what the invariant test rejects as `not-a-candidate`, so none of them gets one.
+
+**The C1 repair pass (2026-11-17, same day) moved no verdict and added no row.** Three things in it
+touch this rail and each is written into the rows that already exist rather than creating new ones:
+the live scope token is now **retired on unmount and on every visit change** (a `RETIRED` sentinel,
+set in the same effect's cleanup, so a retired visit's token never reads as live); an unfinished
+Save is held in `buildStudioPendingStore` **keyed by family + child + project**, in memory only, so
+the exact retry is offered back to its own owner and is invisible to a sibling's editor — which is
+BIND carried across a remount rather than a new verdict; and the departure guard is the data
+router's `useBlocker`, the `useUnsavedBookGuard` (UX-473) shape, so an in-app exit is held with a
+visible Stay / retry / explicit-leave choice instead of being lost to an unmount. The two new files
+that implement those hold no `useState` and derive to nothing.
 
 `AppShell.tsx`'s existing row is **unchanged and still correct**: the nav gate this run added is a
 read-only subscribe to one settings document, so *"no datastore write"* still holds and the **SAFE**

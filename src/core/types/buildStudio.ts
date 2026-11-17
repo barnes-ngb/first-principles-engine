@@ -25,13 +25,28 @@
  * ── The source is TEXT, not a map ──────────────────────────────────────────
  *
  * A MakeCode project is a map of file name → file text, and the file names are
- * `pxt.json`, `main.blocks`, `main.ts`, `assets.jres`. Stored as a Firestore
- * **map** those names become field paths, and a `.` in a field path is a
- * nesting separator — so `pxt.json` would be stored as a field `json` inside a
- * field `pxt`, and any later field-scoped read or write would address something
- * that is not the file. So the archive is serialized once, by this module's own
- * canonical rule, and stored as a single string. One field, one blob, no field
- * paths derived from somebody else's file names.
+ * `pxt.json`, `main.blocks`, `main.ts`, `assets.jres`. Those names contain a
+ * `.`, and a `.` is the SEPARATOR in Firestore's **field-path** syntax — the
+ * dotted strings that `updateDoc`, `setDoc(..., {mergeFields})`, field masks
+ * and `orderBy` take. So while a stored map key may legitimately contain a dot
+ * (the document would hold a key literally called `pxt.json`), every
+ * field-scoped operation naming it as a dotted path would address
+ * `pxt` → `json` instead, and would need `new FieldPath('pxt.json')` to mean
+ * the file. That is a trap sitting under every future reader of this
+ * collection, and it buys nothing: the archive is one opaque blob to this app.
+ *
+ * So the archive is serialized once, by this module's own canonical rule, and
+ * stored as a single string. One field, one blob, and no field path anywhere
+ * derived from somebody else's file names.
+ *
+ * ── Size is measured in BYTES ──────────────────────────────────────────────
+ *
+ * Firestore's 1 MiB limit is on the document's own serialized size, and a
+ * string field costs its UTF-8 byte length. `String.length` is UTF-16 code
+ * units, which is a different number for anything outside ASCII — two 185,000
+ * character files of a three-byte character are ~1.1 MB of UTF-8 and would have
+ * sailed through a character cap. Every limit here is therefore a byte limit,
+ * measured with {@link utf8ByteLength}.
  */
 
 /** The map a MakeCode editor hands over and takes back: file name → text. */
@@ -68,7 +83,12 @@ export interface BuildStudioVersion {
    * module docstring.
    */
   sourceArchive: string
-  /** `sourceArchive.length`, so a reader can size a version without parsing. */
+  /**
+   * The archive's real UTF-8 **byte** length, so a reader can size a version
+   * without parsing it — and so the number means the same thing as the limit it
+   * was checked against. Never `sourceArchive.length`, which counts UTF-16 code
+   * units and under-reports every multibyte character.
+   */
   byteSize: number
   /** How many files the archive holds. */
   fileCount: number
@@ -135,14 +155,53 @@ export const buildStudioVersionDocId = (
  */
 const EDITOR_PRIVATE_PREFIX = '_'
 
-/** The largest archive this app will store, in characters. */
-export const BUILD_STUDIO_MAX_ARCHIVE_CHARS = 600_000
+/**
+ * The archive's byte ceiling.
+ *
+ * Firestore's hard limit is 1 MiB (1,048,576 bytes) for the whole document,
+ * which also carries the path, the field names and every other field. 700,000
+ * bytes leaves roughly a third of the budget as margin, which is ample for a
+ * record whose other fields are a label, two ids and three stamps.
+ *
+ * **Bytes, not characters.** 185,000 characters of a three-byte character is
+ * 555,000 bytes; two such files passed the old 600,000-CHARACTER cap and would
+ * have been refused by Firestore at ~1.1 MB after the write was already in
+ * flight.
+ */
+export const BUILD_STUDIO_MAX_ARCHIVE_BYTES = 700_000
 
 /** The most files one project may carry. */
 export const BUILD_STUDIO_MAX_FILES = 24
 
-/** The largest single file, in characters. */
-export const BUILD_STUDIO_MAX_FILE_CHARS = 300_000
+/** The largest single file, in UTF-8 bytes. */
+export const BUILD_STUDIO_MAX_FILE_BYTES = 400_000
+
+/**
+ * The UTF-8 byte length of a string — what Firestore actually charges.
+ *
+ * `TextEncoder` where it exists (every browser this app runs in, and Node), and
+ * an explicit code-point fold otherwise, so the number is never silently the
+ * UTF-16 one. Lone surrogates are counted as the 3-byte replacement character,
+ * which is exactly what an encoder does with them.
+ */
+export function utf8ByteLength(value: string): number {
+  if (typeof TextEncoder !== 'undefined') {
+    return new TextEncoder().encode(value).length
+  }
+  let bytes = 0
+  for (let i = 0; i < value.length; i += 1) {
+    const code = value.codePointAt(i) as number
+    if (code <= 0x7f) bytes += 1
+    else if (code <= 0x7ff) bytes += 2
+    else if (code <= 0xffff) bytes += 3
+    else {
+      bytes += 4
+      // A surrogate pair is one code point and two code units.
+      i += 1
+    }
+  }
+  return bytes
+}
 
 /**
  * Which of a project's files belong in a stored version.

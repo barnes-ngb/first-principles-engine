@@ -196,9 +196,9 @@ describe('what it will not store', () => {
     // so this exercises the ARCHIVE limit rather than the per-file one.
     const huge = {
       'pxt.json': PXT,
-      'main.ts': 'a'.repeat(250_000),
-      'b.ts': 'b'.repeat(250_000),
-      'c.ts': 'c'.repeat(250_000),
+      'main.ts': 'a'.repeat(300_000),
+      'b.ts': 'b'.repeat(300_000),
+      'c.ts': 'c'.repeat(300_000),
     }
     await expect(saveBuildStudioVersion(args({ files: huge }))).rejects.toThrow(
       /Download a copy/,
@@ -208,9 +208,87 @@ describe('what it will not store', () => {
   it('refuses a single file over the per-file cap', async () => {
     await expect(
       saveBuildStudioVersion(
-        args({ files: { 'pxt.json': PXT, 'main.ts': 'a'.repeat(300_001) } }),
+        args({ files: { 'pxt.json': PXT, 'main.ts': 'a'.repeat(400_001) } }),
       ),
     ).rejects.toThrow(BuildStudioRefused)
+  })
+})
+
+/**
+ * The P1 repair. `String.length` is UTF-16 code units; Firestore charges UTF-8
+ * bytes against a 1 MiB document ceiling. Two 185,000-character files of a
+ * three-byte character are ~1.1 MB and sailed through the old 600,000-CHARACTER
+ * caps — the write would have been rejected by Firestore after it was already
+ * in flight.
+ *
+ * POSITIVE CONTROL: change `utf8ByteLength(...)` back to `.length` in the
+ * writer and the first two cases here fail.
+ */
+describe('the size gate counts BYTES, before the transaction', () => {
+  /** Three UTF-8 bytes each. The reported shape. */
+  const WIDE = '界'.repeat(185_000)
+
+  it('refuses two multibyte files that are under every CHARACTER cap', async () => {
+    expect(WIDE.length).toBe(185_000)
+    await expect(
+      saveBuildStudioVersion(
+        args({ files: { 'pxt.json': PXT, 'main.ts': WIDE, 'b.ts': WIDE } }),
+      ),
+    ).rejects.toThrow(BuildStudioRefused)
+    // Refused BEFORE anything was written, which is the point of checking here
+    // rather than letting Firestore reject it.
+    expect(sets).toHaveLength(0)
+  })
+
+  it('refuses a single multibyte file that is under the character cap', async () => {
+    // 150,000 characters is well under 400,000, and 450,000 bytes is over the
+    // per-file byte cap.
+    await expect(
+      saveBuildStudioVersion(
+        args({ files: { 'pxt.json': PXT, 'main.ts': '界'.repeat(150_000) } }),
+      ),
+    ).rejects.toThrow(BuildStudioRefused)
+    expect(sets).toHaveLength(0)
+  })
+
+  it('stores the TRUE byte size, not the character count', async () => {
+    const multibyte = `info.setLife(3)\n// 界界界\nsprites.create(1)\n`
+    const result = await saveBuildStudioVersion(args({ files: { 'pxt.json': PXT, 'main.ts': multibyte } }))
+    expect(result.version.byteSize).toBe(
+      new TextEncoder().encode(result.version.sourceArchive).length,
+    )
+    expect(result.version.byteSize).toBeGreaterThan(result.version.sourceArchive.length)
+  })
+
+  it('round-trips an under-limit multibyte project losslessly', async () => {
+    const files = {
+      'pxt.json': PXT,
+      'main.ts': 'info.setLife(3)\nsprites.create(1)\n// 界 🎮 café\n',
+      'main.blocks': '<xml><block type="pxt-on-start"><statement/></block>🎮</xml>',
+    }
+    const result = await saveBuildStudioVersion(args({ files }))
+    expect(result.outcome).toBe('created')
+    expect(JSON.parse(result.version.sourceArchive)).toEqual(files)
+  })
+
+  it('is idempotent on a multibyte retry — the exact same payload', async () => {
+    const files = {
+      'pxt.json': PXT,
+      'main.ts': 'info.setLife(3)\nsprites.create(1)\n// 🎮 surrogate pair\n',
+    }
+    await saveBuildStudioVersion(args({ files }))
+    sets = []
+    const again = await saveBuildStudioVersion(args({ files }))
+    expect(again.outcome).toBe('alreadySaved')
+    expect(sets).toHaveLength(0)
+  })
+
+  it('counts a lone surrogate without crashing', async () => {
+    // Not valid UTF-16, and an encoder turns it into the 3-byte replacement
+    // character. What matters is that the gate produces a number.
+    const files = { 'pxt.json': PXT, 'main.ts': `info.setLife(3)\nsprites.create(1)\n\uD800\n` }
+    const result = await saveBuildStudioVersion(args({ files }))
+    expect(result.version.byteSize).toBeGreaterThan(0)
   })
 })
 

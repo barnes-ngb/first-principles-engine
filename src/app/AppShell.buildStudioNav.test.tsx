@@ -33,6 +33,8 @@ const childrenRef = {
     childrenFamilyId: 'family-1' as string | null,
     isLoading: false,
     loadFailed: false,
+    /** `useActiveChild`'s affirmative identity fact. */
+    profileChildResolved: true,
   },
 }
 
@@ -78,10 +80,11 @@ beforeEach(() => {
     childrenFamilyId: 'family-1',
     isLoading: false,
     loadFailed: false,
+    profileChildResolved: true,
   }
 })
 
-describe('the entry appears only on an answered, enabled opt-in', () => {
+describe('the CHILD entry appears only on an answered, enabled opt-in', () => {
   it('shows it to the opted-in child', () => {
     renderAs(UserProfile.Lincoln)
     expect(screen.getAllByText('Build Studio').length).toBeGreaterThan(0)
@@ -93,11 +96,6 @@ describe('the entry appears only on an answered, enabled opt-in', () => {
       'href',
       '/build-studio',
     )
-  })
-
-  it('shows it to the parent too — the read-only view of that child', () => {
-    renderAs(UserProfile.Parents)
-    expect(screen.getAllByText('Build Studio').length).toBeGreaterThan(0)
   })
 
   it('hides it when the opt-in says no', () => {
@@ -118,15 +116,16 @@ describe('the entry appears only on an answered, enabled opt-in', () => {
     expect(screen.queryByText('Build Studio')).not.toBeInTheDocument()
   })
 
-  it('hides it from the parent too when that child is not opted in', () => {
-    optInRef.current = { status: 'ready', enabled: false, childId: 'c1' }
-    renderAs(UserProfile.Parents)
-    expect(screen.queryByText('Build Studio')).not.toBeInTheDocument()
-  })
-
   it('hides it when the opt-in answer is about a DIFFERENT child', () => {
     // Shared family auth is family access, not sibling authorisation.
     optInRef.current = { status: 'ready', enabled: true, childId: 'c2' }
+    renderAs(UserProfile.Lincoln)
+    expect(screen.queryByText('Build Studio')).not.toBeInTheDocument()
+  })
+
+  it('hides it when the child profile did not resolve to its own document', () => {
+    // `useActiveChild` falls back to the selected id, which can be a SIBLING.
+    childrenRef.current = { ...childrenRef.current, profileChildResolved: false }
     renderAs(UserProfile.Lincoln)
     expect(screen.queryByText('Build Studio')).not.toBeInTheDocument()
   })
@@ -146,6 +145,45 @@ describe('the entry appears only on an answered, enabled opt-in', () => {
   it('hides it when the children list belongs to another family', () => {
     childrenRef.current = { ...childrenRef.current, childrenFamilyId: 'family-2' }
     renderAs(UserProfile.Lincoln)
+    expect(screen.queryByText('Build Studio')).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * The P2 repair. A parent gated on `enabled` had no nav entry on FIRST USE —
+ * so the thing that grants access was behind the door it grants — and lost the
+ * entry again the moment she turned it off, taking the saved versions with it.
+ *
+ * POSITIVE CONTROL: move the opt-in checks back above the parent branch in
+ * `resolveBuildStudioAccess` and the first two cases here fail.
+ */
+describe('the PARENT entry is her door to granting and reviewing', () => {
+  it('shows it to the parent when the child IS enrolled', () => {
+    renderAs(UserProfile.Parents)
+    expect(screen.getAllByText('Build Studio').length).toBeGreaterThan(0)
+  })
+
+  it('shows it to the parent BEFORE the child is enrolled', () => {
+    optInRef.current = { status: 'ready', enabled: false, childId: 'c1' }
+    renderAs(UserProfile.Parents)
+    expect(screen.getAllByText('Build Studio').length).toBeGreaterThan(0)
+  })
+
+  it('shows it after she turns it off — her shelf must stay reachable', () => {
+    optInRef.current = { status: 'ready', enabled: false, childId: null }
+    renderAs(UserProfile.Parents)
+    expect(screen.getAllByText('Build Studio').length).toBeGreaterThan(0)
+  })
+
+  it('still hides it while her opt-in read has not answered', () => {
+    optInRef.current = { status: 'loading', enabled: false, childId: null }
+    renderAs(UserProfile.Parents)
+    expect(screen.queryByText('Build Studio')).not.toBeInTheDocument()
+  })
+
+  it('hides it when no child resolves at all', () => {
+    childrenRef.current = { ...childrenRef.current, activeChild: null }
+    renderAs(UserProfile.Parents)
     expect(screen.queryByText('Build Studio')).not.toBeInTheDocument()
   })
 })

@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  BUILD_STUDIO_MAX_ARCHIVE_BYTES,
+  BUILD_STUDIO_MAX_FILE_BYTES,
   buildStudioOptInDocId,
   buildStudioSourceDigest,
   buildStudioSourceKeys,
   buildStudioVersionDocId,
   parseBuildStudioSource,
   serializeBuildStudioSource,
+  utf8ByteLength,
 } from './buildStudio'
 
 /**
@@ -108,6 +111,42 @@ describe('a bad archive is refused, not guessed at', () => {
 
   it('refuses a file whose value is not text, naming it', () => {
     expect(() => parseBuildStudioSource('{"main.ts": 7}')).toThrow(/main\.ts/)
+  })
+})
+
+describe('size is measured in UTF-8 bytes', () => {
+  it('agrees with TextEncoder on ASCII, accents, CJK and emoji', () => {
+    for (const sample of ['', 'abc', 'café', '界', '界界界', '🎮', 'a界🎮z']) {
+      expect(utf8ByteLength(sample), sample).toBe(new TextEncoder().encode(sample).length)
+    }
+  })
+
+  it('is NOT the character count for anything outside ASCII', () => {
+    // The whole defect in one assertion: the old gate used the left number.
+    expect('界'.repeat(185_000).length).toBe(185_000)
+    expect(utf8ByteLength('界'.repeat(185_000))).toBe(555_000)
+  })
+
+  it('counts a surrogate pair as one four-byte character', () => {
+    expect('🎮'.length).toBe(2)
+    expect(utf8ByteLength('🎮')).toBe(4)
+  })
+
+  it('produces a number for a lone surrogate rather than throwing', () => {
+    expect(utf8ByteLength('\uD800')).toBeGreaterThan(0)
+  })
+
+  it('leaves a byte cap below Firestore’s 1 MiB with real margin', () => {
+    const FIRESTORE_MAX = 1_048_576
+    expect(BUILD_STUDIO_MAX_ARCHIVE_BYTES).toBeLessThan(FIRESTORE_MAX)
+    // At least a quarter of the budget left for the rest of the document.
+    expect(FIRESTORE_MAX - BUILD_STUDIO_MAX_ARCHIVE_BYTES).toBeGreaterThan(
+      FIRESTORE_MAX / 4,
+    )
+  })
+
+  it('keeps the per-file cap no larger than the whole archive cap', () => {
+    expect(BUILD_STUDIO_MAX_FILE_BYTES).toBeLessThanOrEqual(BUILD_STUDIO_MAX_ARCHIVE_BYTES)
   })
 })
 

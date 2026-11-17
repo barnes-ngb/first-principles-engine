@@ -23,7 +23,7 @@ import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 
 import type { BuildStudioVersion } from '../../core/types/buildStudio'
-import { formatClockTime } from '../../core/utils/clockTime'
+import { FAMILY_TIME_ZONE, formatClockTime } from '../../core/utils/clockTime'
 import { VersionsStatus, type BuildStudioVersionsRead } from './useBuildStudioVersions'
 
 export interface BuildStudioVersionShelfProps {
@@ -38,15 +38,47 @@ export interface BuildStudioVersionShelfProps {
   currentVersionId?: string | null
   /** A version whose open is in flight. */
   busyVersionId?: string | null
-  /** Ask for the read again, after a failure. */
-  onRetryRead?: () => void
+  /**
+   * Ask for the read again, after a failure. Required, not optional: a failed
+   * read offering no way back is a dead end, and when it was optional neither
+   * caller passed one.
+   */
+  onRetryRead: () => void
+  /**
+   * Show the per-version technical detail.
+   *
+   * `false` for the child — a digest and a file count are implementation
+   * routine, not something a seven-year-old reads about his own game. The
+   * parent's read-only view keeps them, because *is this the same source I
+   * saved* is exactly her question.
+   */
+  showTechnicalDetail?: boolean
 }
 
-/** The day and time a version was saved, in the family's own clock. */
-function savedLine(version: BuildStudioVersion): string {
-  const time = formatClockTime(version.createdAt)
-  const day = version.createdAt?.slice(0, 10) ?? ''
-  if (!day) return 'Saved — time unknown'
+/**
+ * The day and time a version was saved, in ONE clock — the family's.
+ *
+ * `createdAt.slice(0, 10)` was the bug: it is the UTC date, printed beside a
+ * `formatClockTime` reading in `America/Chicago`, so a 7 p.m. Central save
+ * showed tomorrow's date next to this evening's time. Both halves come out of
+ * the same `Intl` call now, so they cannot disagree.
+ */
+export function savedLine(createdAt: string | undefined): string {
+  if (!createdAt) return 'Saved — time unknown'
+  const instant = new Date(createdAt)
+  if (Number.isNaN(instant.getTime())) return 'Saved — time unknown'
+  const time = formatClockTime(createdAt)
+  let day: string
+  try {
+    day = new Intl.DateTimeFormat('en-US', {
+      timeZone: FAMILY_TIME_ZONE,
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    }).format(instant)
+  } catch {
+    return 'Saved — time unknown'
+  }
   return time ? `Saved ${day} at ${time}` : `Saved ${day}`
 }
 
@@ -58,6 +90,7 @@ export default function BuildStudioVersionShelf({
   currentVersionId,
   busyVersionId,
   onRetryRead,
+  showTechnicalDetail = false,
 }: BuildStudioVersionShelfProps) {
   if (read.status === VersionsStatus.Loading) {
     return (
@@ -75,11 +108,9 @@ export default function BuildStudioVersionShelf({
       <Alert
         severity="warning"
         action={
-          onRetryRead ? (
-            <Button size="small" onClick={onRetryRead} sx={{ textTransform: 'none' }}>
-              Try again
-            </Button>
-          ) : undefined
+          <Button size="small" onClick={onRetryRead} sx={{ textTransform: 'none' }}>
+            Try again
+          </Button>
         }
       >
         {/* The load-bearing sentence of this whole component: a failed read is
@@ -127,19 +158,22 @@ export default function BuildStudioVersionShelf({
                   {isCurrent && ' — open now'}
                 </Typography>
                 <Typography variant="caption" color="text.secondary">
-                  {savedLine(version)}
+                  {savedLine(version.createdAt)}
                 </Typography>
-                {/* The digest is shown rather than hidden: it is how a person
-                    confirms by eye that a reopened version is the same bytes
-                    that were stored, which is the slice's own acceptance
-                    check. */}
-                <Typography
-                  variant="caption"
-                  color="text.secondary"
-                  sx={{ fontFamily: 'monospace', wordBreak: 'break-all' }}
-                >
-                  {version.fileCount} files · {version.sourceDigest}
-                </Typography>
+                {/* PARENT ONLY. The digest is how she confirms by eye that a
+                    reopened version is the same bytes that were stored, which
+                    is this slice's own acceptance check. On the kid page it was
+                    routine implementation detail in the middle of his games. */}
+                {showTechnicalDetail && (
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ fontFamily: 'monospace', wordBreak: 'break-all' }}
+                  >
+                    {version.fileCount} files · {version.byteSize} bytes ·{' '}
+                    {version.sourceDigest}
+                  </Typography>
+                )}
               </Stack>
               <Stack direction="row" spacing={1} flexWrap="wrap" rowGap={1}>
                 {canOpen && onOpen && (

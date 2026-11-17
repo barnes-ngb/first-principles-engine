@@ -939,9 +939,13 @@ const buildStudioVersionConverter: FirestoreDataConverter<BuildStudioVersion> = 
  * same document instead of writing a second version of the same bytes.
  *
  * The source itself is ONE text field (`sourceArchive`), not a map of file
- * names: `pxt.json` as a Firestore map key is the field path `pxt` → `json`,
- * and a store whose field paths come from somebody else's file names is a
- * store that cannot be read back reliably. See `core/types/buildStudio.ts`.
+ * names. A stored map key may legitimately contain a dot, but `.` is the
+ * SEPARATOR in Firestore's field-path syntax — the dotted strings `updateDoc`,
+ * `mergeFields`, field masks and `orderBy` take — so every field-scoped
+ * operation naming `pxt.json` would address `pxt` → `json` and would need
+ * `new FieldPath('pxt.json')` to mean the file. That is a trap under every
+ * future reader of this collection and it buys nothing, since the archive is
+ * one opaque blob to this app. See `core/types/buildStudio.ts`.
  *
  * **Flat and family-owned on purpose.** It sits beside the family's other
  * collections, which the existing `families/{familyId}/{document=**}` owner

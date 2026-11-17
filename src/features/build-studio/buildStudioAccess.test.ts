@@ -6,6 +6,7 @@ import { UserProfile } from '../../core/types/enums'
 import {
   BuildStudioAccess,
   buildStudioCanEdit,
+  buildStudioChildEnrolled,
   buildStudioIsOpen,
   OptInStatus,
   resolveBuildStudioAccess,
@@ -40,6 +41,7 @@ function openForChild(childId = LINCOLN): BuildStudioAccessInput {
     childrenLoading: false,
     childrenLoadFailed: false,
     childrenFamilyId: 'family-1',
+    profileChildResolved: true,
     optIn: { status: OptInStatus.Ready, enabled: true, childId },
   }
 }
@@ -49,7 +51,7 @@ describe('the opt-in is the ONE thing that opens the door', () => {
     expect(resolveBuildStudioAccess(openForChild())).toBe(BuildStudioAccess.ChildBuild)
   })
 
-  it('closes when the opt-in says no, with everything else identical', () => {
+  it('closes the CHILD editor when the opt-in says no, with everything else identical', () => {
     const input = openForChild()
     expect(
       resolveBuildStudioAccess({
@@ -59,7 +61,7 @@ describe('the opt-in is the ONE thing that opens the door', () => {
     ).toBe(BuildStudioAccess.Closed)
   })
 
-  it('closes on a MISSING opt-in, which reads as not enabled', () => {
+  it('closes the child editor on a MISSING opt-in, which reads as not enabled', () => {
     const input = openForChild()
     expect(
       resolveBuildStudioAccess({
@@ -70,7 +72,7 @@ describe('the opt-in is the ONE thing that opens the door', () => {
     ).toBe(BuildStudioAccess.Closed)
   })
 
-  it('opens the PARENT view, read-only, on the same opt-in', () => {
+  it('opens the PARENT view, read-only', () => {
     const access = resolveBuildStudioAccess({
       ...openForChild(),
       profile: UserProfile.Parents,
@@ -81,6 +83,134 @@ describe('the opt-in is the ONE thing that opens the door', () => {
     // The whole point of the second verdict: a parent may look and not edit.
     expect(buildStudioCanEdit(access)).toBe(false)
   })
+})
+
+/**
+ * The P2 repair. Gating the parent on `enabled` removed her nav entry and
+ * redirected her route on FIRST USE — so the only way to turn it on was a
+ * Settings section she had no reason to open — and it hid versions a child had
+ * already saved the moment she turned it off.
+ *
+ * POSITIVE CONTROL: move the opt-in checks back above the parent branch and the
+ * first two cases here fail.
+ */
+describe('enrolment is the child’s capability, not the parent’s door', () => {
+  const asParent = (optIn: Parameters<typeof resolveBuildStudioAccess>[0]['optIn']) =>
+    resolveBuildStudioAccess({
+      ...openForChild(),
+      profile: UserProfile.Parents,
+      isChildProfile: false,
+      optIn,
+    })
+
+  it('opens for a parent BEFORE the child is enrolled', () => {
+    expect(asParent({ status: OptInStatus.Ready, enabled: false, childId: LINCOLN })).toBe(
+      BuildStudioAccess.ParentView,
+    )
+  })
+
+  it('opens for a parent AFTER she turns it off again', () => {
+    // Her saved-version shelf is the one thing she must always reach.
+    expect(asParent({ status: OptInStatus.Ready, enabled: false, childId: null })).toBe(
+      BuildStudioAccess.ParentView,
+    )
+  })
+
+  it('still waits while her opt-in read has not answered, because she reports it', () => {
+    expect(asParent({ status: OptInStatus.Loading, enabled: false, childId: null })).toBe(
+      BuildStudioAccess.Unsettled,
+    )
+  })
+
+  it('opens for her even on a FAILED opt-in read — the shelf is a separate read', () => {
+    expect(asParent({ status: OptInStatus.Failed, enabled: false, childId: LINCOLN })).toBe(
+      BuildStudioAccess.ParentView,
+    )
+  })
+
+  it('never gives her the editor', () => {
+    expect(
+      buildStudioCanEdit(asParent({ status: OptInStatus.Ready, enabled: true, childId: LINCOLN })),
+    ).toBe(false)
+  })
+
+  it('reports enrolment as its own question', () => {
+    expect(
+      buildStudioChildEnrolled({ status: OptInStatus.Ready, enabled: true, childId: LINCOLN }, LINCOLN),
+    ).toBe(true)
+    expect(
+      buildStudioChildEnrolled({ status: OptInStatus.Ready, enabled: true, childId: LONDON }, LINCOLN),
+    ).toBe(false)
+    expect(
+      buildStudioChildEnrolled({ status: OptInStatus.Failed, enabled: true, childId: LINCOLN }, LINCOLN),
+    ).toBe(false)
+    expect(
+      buildStudioChildEnrolled({ status: OptInStatus.Loading, enabled: false, childId: null }, LINCOLN),
+    ).toBe(false)
+  })
+})
+
+/**
+ * The P1 repair. `useActiveChild` falls back to `selectedChildId` when a child
+ * profile matches no `children` document, so `resolvedChild.id === childId` can
+ * be perfectly true about a SIBLING — every id agreeing, and the editor opening
+ * on the wrong child's game.
+ *
+ * POSITIVE CONTROL: delete the `profileChildResolved !== true` line and the
+ * first two cases here fail.
+ */
+describe('a child profile must resolve to its OWN document', () => {
+  it('refuses when the profile matched no document', () => {
+    expect(
+      resolveBuildStudioAccess({ ...openForChild(), profileChildResolved: false }),
+    ).toBe(BuildStudioAccess.Closed)
+  })
+
+  it('refuses when the answer was not reported at all', () => {
+    // An older mock or a consumer's stub. Unproven is not proven.
+    expect(
+      resolveBuildStudioAccess({ ...openForChild(), profileChildResolved: undefined }),
+    ).toBe(BuildStudioAccess.Closed)
+  })
+
+  it('refuses the parent view on an unresolved identity too', () => {
+    expect(
+      resolveBuildStudioAccess({
+        ...openForChild(),
+        profile: UserProfile.Parents,
+        isChildProfile: false,
+        profileChildResolved: false,
+      }),
+    ).toBe(BuildStudioAccess.Closed)
+  })
+
+  it('opens when the profile really is that child', () => {
+    expect(
+      resolveBuildStudioAccess({ ...openForChild(), profileChildResolved: true }),
+    ).toBe(BuildStudioAccess.ChildBuild)
+  })
+
+  it('refuses an unknown profile child even when a SIBLING is opted in', () => {
+    // The exact reported shape: London signed in with no London document,
+    // Lincoln selected and enrolled, every id consistent.
+    expect(
+      resolveBuildStudioAccess({
+        familyId: 'family-1',
+        profile: UserProfile.London,
+        isChildProfile: true,
+        childId: LINCOLN,
+        resolvedChild: { id: LINCOLN },
+        childrenLoading: false,
+        childrenLoadFailed: false,
+        childrenFamilyId: 'family-1',
+        profileChildResolved: false,
+        optIn: { status: OptInStatus.Ready, enabled: true, childId: LINCOLN },
+      }),
+    ).toBe(BuildStudioAccess.Closed)
+  })
+})
+
+describe('the two verdicts differ in exactly one capability', () => {
 
   it('lets only the child build', () => {
     expect(buildStudioCanEdit(BuildStudioAccess.ChildBuild)).toBe(true)

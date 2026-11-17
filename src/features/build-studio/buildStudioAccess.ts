@@ -35,6 +35,17 @@
  *     asked about is `Closed` too. Shared family auth is family access, not
  *     sibling authorisation: London signed in on London's profile cannot open
  *     Lincoln's studio, and the test asserts it rather than the comment.
+ *
+ * ── Enrolment is the capability; profile matching is only identity ─────────
+ *
+ * The two questions are separate and are answered separately. The per-child
+ * opt-in is what opens the CHILD's editor. `profileChildResolved` only answers
+ * *whose record is this*, and it is required of a child profile because
+ * `useActiveChild` falls back to the selected id when a profile matches no
+ * document — so a sibling's id can satisfy every other check. The parent's
+ * read-only view needs the identity and the family, not the enrolment: she is
+ * the one who grants it, and she must be able to see saved versions after
+ * turning it off.
  */
 
 import { UserProfile } from '../../core/types/enums'
@@ -104,6 +115,16 @@ export interface BuildStudioAccessInput {
   childrenLoadFailed?: boolean
   /** Which family's read produced the children list. */
   childrenFamilyId?: string | null
+  /**
+   * `useActiveChild().profileChildResolved` — did this id come from the
+   * PROFILE's own identity mapping, or from the fallback?
+   *
+   * The reason this is a separate input from `resolvedChild`: `useActiveChild`
+   * falls back to `selectedChildId` when a child profile matches no document,
+   * so `resolvedChild.id === childId` can be perfectly true about a SIBLING.
+   * Anything other than an explicit `true` is treated as not proven.
+   */
+  profileChildResolved?: boolean
   /** The opt-in document for `childId`. */
   optIn: BuildStudioOptInRead
 }
@@ -123,6 +144,7 @@ export function resolveBuildStudioAccess(
     childrenLoading,
     childrenLoadFailed,
     childrenFamilyId,
+    profileChildResolved,
     optIn,
   } = input
 
@@ -153,31 +175,60 @@ export function resolveBuildStudioAccess(
     return BuildStudioAccess.Closed
   }
 
-  // The opt-in, last, because it is the only affirmative input and must not be
-  // reachable while anything above it is unsettled.
+  // ── Identity has to be AFFIRMATIVE, not merely consistent ─────────────
+  //
+  // `useActiveChild` falls back to `selectedChildId` when a child profile
+  // matches no `children` document, so the check above can be satisfied by a
+  // SIBLING's record: London signed in with no London document, Lincoln
+  // selected and opted in, every id agreeing, and the editor opening on
+  // Lincoln's game. Only the profile's own identity mapping settles it, and an
+  // unreported answer counts as unproven.
+  if (profileChildResolved !== true) return BuildStudioAccess.Closed
+
+  // ── The parent's read-only view is not gated on enrolment ─────────────
+  //
+  // Enrolment is what opens the CHILD's editor. A parent who has not enabled it
+  // yet is exactly the person who needs the door — gating her on `enabled`
+  // removed the nav entry and redirected the route on first use, so the only
+  // way to turn it on was a Settings tab she had no reason to visit. It also
+  // hid versions a child had already saved the moment she turned it off, which
+  // is the one thing she must always be able to look at.
+  //
+  // So: resolved family, resolved child, parents profile → `ParentView`. That
+  // view has no editing controls, and the opt-in state is something it SHOWS.
+  // The opt-in read still has to have answered, because the view reports it.
+  if (!isChildProfile) {
+    if (profile !== UserProfile.Parents) return BuildStudioAccess.Closed
+    if (optIn.status === OptInStatus.Loading) return BuildStudioAccess.Unsettled
+    return BuildStudioAccess.ParentView
+  }
+
+  // ── The child's editor, which the opt-in alone opens ──────────────────
+  //
+  // Last, because it is the only affirmative input and must not be reachable
+  // while anything above it is unsettled.
   if (optIn.status === OptInStatus.Failed) return BuildStudioAccess.Closed
   if (optIn.status === OptInStatus.Loading) return BuildStudioAccess.Unsettled
   // A read made for another child never authorises this one.
   if (optIn.childId !== childId) return BuildStudioAccess.Closed
   if (optIn.enabled !== true) return BuildStudioAccess.Closed
 
-  if (isChildProfile) {
-    // A child profile is locked to its own child by `useActiveChild`, so
-    // reaching here with a child profile means the lock resolved to `childId`.
-    // The profile is still checked explicitly: `isChildProfile` is a boolean a
-    // caller passes, and the two child profiles are the only ones it may mean.
-    if (profile !== UserProfile.Lincoln && profile !== UserProfile.London) {
-      return BuildStudioAccess.Closed
-    }
-    return BuildStudioAccess.ChildBuild
+  // `isChildProfile` is a boolean a caller passes, and the two child profiles
+  // are the only ones it may mean.
+  if (profile !== UserProfile.Lincoln && profile !== UserProfile.London) {
+    return BuildStudioAccess.Closed
   }
-
-  if (profile === UserProfile.Parents) return BuildStudioAccess.ParentView
-
-  // A profile that is neither a parent nor one of the child profiles, or a
-  // child profile flag that disagrees with the profile. Refused.
-  return BuildStudioAccess.Closed
+  return BuildStudioAccess.ChildBuild
 }
+
+/**
+ * Is the child's own editor open, as opposed to the parent's view?
+ *
+ * The enrolment state a PARENT view reports is read from the opt-in directly —
+ * this is only about the editor.
+ */
+export const buildStudioChildEnrolled = (optIn: BuildStudioOptInRead, childId: string): boolean =>
+  optIn.status === OptInStatus.Ready && optIn.childId === childId && optIn.enabled === true
 
 /** May this verdict open the editor at all? */
 export const buildStudioCanEdit = (access: BuildStudioAccess): boolean =>

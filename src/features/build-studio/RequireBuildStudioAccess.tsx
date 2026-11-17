@@ -37,6 +37,7 @@ export default function RequireBuildStudioAccess({ children }: { children: React
     isLoading,
     loadFailed,
     childrenFamilyId,
+    profileChildResolved,
   } = useActiveChild()
   const optIn = useBuildStudioOptIn(familyId, activeChildId || null)
 
@@ -49,6 +50,10 @@ export default function RequireBuildStudioAccess({ children }: { children: React
     childrenLoading: isLoading,
     childrenLoadFailed: loadFailed,
     childrenFamilyId,
+    // Affirmative identity. `activeChild.id === activeChildId` can be true
+    // about a sibling, because `useActiveChild` falls back to the selected id
+    // when a child profile matches no document.
+    profileChildResolved,
     optIn,
   })
 

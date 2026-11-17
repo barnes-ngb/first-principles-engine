@@ -221,6 +221,7 @@ export function AppShell({ children }: AppShellProps) {
     activeChildId,
     isChildProfile,
     childrenFamilyId,
+    profileChildResolved,
     isLoading: childrenLoading,
     loadFailed: childrenLoadFailed,
   } = useActiveChild()
@@ -251,6 +252,11 @@ export function AppShell({ children }: AppShellProps) {
   // (LOCAL-BUILD-001), so the menu and the door can never disagree. It is one
   // settings-document subscribe, and `buildStudioIsOpen` is false for BOTH
   // refusals — a read that has not answered, or has failed, advertises nothing.
+  //
+  // A PARENT now sees the entry before enrolment, because her view is the
+  // read-only shelf plus the switch that grants it; gating her on `enabled`
+  // left no door to the thing that opens the door. A CHILD still needs the
+  // affirmative opt-in, and that is decided inside the rule.
   const buildStudioOptIn = useBuildStudioOptIn(familyId, activeChildId || null)
   const showBuildStudio = buildStudioIsOpen(
     resolveBuildStudioAccess({
@@ -262,6 +268,7 @@ export function AppShell({ children }: AppShellProps) {
       childrenLoading,
       childrenLoadFailed,
       childrenFamilyId,
+      profileChildResolved,
       optIn: buildStudioOptIn,
     }),
   )

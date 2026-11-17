@@ -11,10 +11,11 @@
 // anything yet". A rejected read rendered as an empty list would tell a child
 // his work is gone, which is the single worst thing this feature could say.
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { onSnapshot, query, where } from 'firebase/firestore'
 
 import { buildStudioVersionsCollection } from '../../core/firebase/firestore'
+import { buildStudioVersionDocId } from '../../core/types/buildStudio'
 import type { BuildStudioVersion } from '../../core/types/buildStudio'
 
 export const VersionsStatus = {
@@ -30,15 +31,41 @@ export interface BuildStudioVersionsRead {
   versions: BuildStudioVersion[]
   /** The child the answer is ABOUT, so a caller can refuse a stale one. */
   childId: string | null
+  /** The project the answer is ABOUT. Same reason, and it is also filtered on. */
+  projectId: string | null
   /** The failure, for a parent-readable line. */
   error: string | null
+  /** Run the read again after a failure. Always wired, by both audiences. */
+  retry: () => void
 }
 
-const UNSETTLED: BuildStudioVersionsRead = {
+const UNSETTLED: Omit<BuildStudioVersionsRead, 'retry'> = {
   status: VersionsStatus.Loading,
   versions: [],
   childId: null,
+  projectId: null,
   error: null,
+}
+
+/**
+ * Is this stored row really this child's, in this project?
+ *
+ * Three facts, all of which must agree: the `childId` field, the `projectId`
+ * field, and the document id, which is `{childId}__{projectId}__{versionId}` by
+ * construction. The id check is what catches a row whose fields were written
+ * under one identity and whose path says another — and it is the same predicate
+ * the open action uses, so the shelf and the import cannot disagree about which
+ * rows belong here.
+ */
+export function versionBelongsTo(
+  version: BuildStudioVersion,
+  childId: string,
+  projectId: string,
+): boolean {
+  if (!version.versionId) return false
+  if (version.childId !== childId) return false
+  if (version.projectId !== projectId) return false
+  return version.id === buildStudioVersionDocId(childId, projectId, version.versionId)
 }
 
 /**
@@ -53,26 +80,42 @@ const UNSETTLED: BuildStudioVersionsRead = {
 export function useBuildStudioVersions(
   familyId: string | null | undefined,
   childId: string | null | undefined,
+  projectId: string | null | undefined,
 ): BuildStudioVersionsRead {
-  const key = `${familyId ?? ''}\u0000${childId ?? ''}`
-  const [read, setRead] = useState<{ key: string; value: BuildStudioVersionsRead }>({
-    key: '',
-    value: UNSETTLED,
-  })
+  const key = `${familyId ?? ''}\u0000${childId ?? ''}\u0000${projectId ?? ''}`
+  const [read, setRead] = useState<{
+    key: string
+    value: Omit<BuildStudioVersionsRead, 'retry'>
+  }>({ key: '', value: UNSETTLED })
+  /** Bumped by `retry`, so the subscribe effect runs again. */
+  const [attempt, setAttempt] = useState(0)
+  const retry = useCallback(() => {
+    setRead({ key: '', value: UNSETTLED })
+    setAttempt((n) => n + 1)
+  }, [])
 
   useEffect(() => {
-    if (!familyId || !childId) return
+    if (!familyId || !childId || !projectId) return
+    // ONE equality filter, sorted and project-filtered in memory. Two equality
+    // filters would also be index-free, but keeping it to one removes the
+    // question entirely — `firestore.indexes.json` is untouched either way.
     const q = query(buildStudioVersionsCollection(familyId), where('childId', '==', childId))
     const unsubscribe = onSnapshot(
       q,
       (snap) => {
-        const versions = snap.docs.map((d) => ({ ...d.data(), id: d.id }))
+        const versions = snap.docs
+          .map((d) => ({ ...d.data(), id: d.id }))
+          // The project filter lives HERE as well as at the open action, so a
+          // same-child row from another project is never on this shelf to be
+          // tapped in the first place.
+          .filter((v) => versionBelongsTo(v, childId, projectId))
         setRead({
           key,
           value: {
             status: VersionsStatus.Ready,
             versions,
             childId,
+            projectId,
             error: null,
           },
         })
@@ -85,13 +128,14 @@ export function useBuildStudioVersions(
             status: VersionsStatus.Failed,
             versions: [],
             childId,
+            projectId,
             error: err instanceof Error ? err.message : String(err),
           },
         })
       },
     )
     return unsubscribe
-  }, [familyId, childId, key])
+  }, [familyId, childId, projectId, key, attempt])
 
   const value = read.key === key ? read.value : UNSETTLED
 
@@ -103,7 +147,8 @@ export function useBuildStudioVersions(
       versions: [...value.versions].sort((a, b) =>
         (b.createdAt ?? '').localeCompare(a.createdAt ?? ''),
       ),
+      retry,
     }),
-    [value],
+    [value, retry],
   )
 }
