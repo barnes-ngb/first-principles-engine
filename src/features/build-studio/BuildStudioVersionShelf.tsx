@@ -23,7 +23,7 @@ import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 
 import type { BuildStudioVersion } from '../../core/types/buildStudio'
-import { FAMILY_TIME_ZONE, formatClockTime } from '../../core/utils/clockTime'
+import { savedLine } from './buildStudioSavedLine'
 import { VersionsStatus, type BuildStudioVersionsRead } from './useBuildStudioVersions'
 
 export interface BuildStudioVersionShelfProps {
@@ -53,33 +53,6 @@ export interface BuildStudioVersionShelfProps {
    * saved* is exactly her question.
    */
   showTechnicalDetail?: boolean
-}
-
-/**
- * The day and time a version was saved, in ONE clock — the family's.
- *
- * `createdAt.slice(0, 10)` was the bug: it is the UTC date, printed beside a
- * `formatClockTime` reading in `America/Chicago`, so a 7 p.m. Central save
- * showed tomorrow's date next to this evening's time. Both halves come out of
- * the same `Intl` call now, so they cannot disagree.
- */
-export function savedLine(createdAt: string | undefined): string {
-  if (!createdAt) return 'Saved — time unknown'
-  const instant = new Date(createdAt)
-  if (Number.isNaN(instant.getTime())) return 'Saved — time unknown'
-  const time = formatClockTime(createdAt)
-  let day: string
-  try {
-    day = new Intl.DateTimeFormat('en-US', {
-      timeZone: FAMILY_TIME_ZONE,
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    }).format(instant)
-  } catch {
-    return 'Saved — time unknown'
-  }
-  return time ? `Saved ${day} at ${time}` : `Saved ${day}`
 }
 
 export default function BuildStudioVersionShelf({

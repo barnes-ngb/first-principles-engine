@@ -9,7 +9,7 @@ vi.mock('../../core/firebase/firestore', () => ({
 }))
 
 import type { BuildStudioVersion } from '../../core/types/buildStudio'
-import { savedLine } from './BuildStudioVersionShelf'
+import { savedLine } from './buildStudioSavedLine'
 import { versionBelongsTo } from './useBuildStudioVersions'
 
 /**

@@ -5,6 +5,7 @@ import {
   ArcadeBridge,
   ArcadeBridgeError,
   ArcadeBridgeFailure,
+  payloadWithinCaps,
   readProjectFiles,
   type RejectedMessage,
 } from './arcadeBridge'
@@ -818,54 +819,271 @@ describe('nothing here can publish', () => {
   })
 })
 
-describe('version drift is reported, never enforced', () => {
-  it('tells the host once when the editor is a different version', () => {
-    const drifts: Array<{ targetVersion?: string }> = []
-    const frame = fakeFrame()
-    const bridge = new ArcadeBridge({
-      projectName: BUILD_STUDIO_PROJECT_NAME,
-      isScopeLive: () => true,
-      newId: nextId,
-      now: () => 1,
-      onVersionDrift: (r) => drifts.push(r),
-    })
-    bridge.attach(frame.element)
-    const save = (targetVersion: string) =>
-      bridge.handleMessage(
-        event(frame, {
-          type: 'pxthost',
-          action: 'workspacesave',
-          frameId: bridge.frameId,
-          project: ourProject({ header: { targetVersion } }),
-        }),
-      )
-    save('9.9.9')
-    save('9.9.9')
-    expect(drifts).toEqual([{ target: 'arcade', targetVersion: '9.9.9' }])
-    // ...and the project was still ACCEPTED. A newer editor must keep working.
-    expect(bridge.editorSaveSeen()).not.toBeNull()
-  })
-
-  it('says nothing when the version matches', () => {
-    const drifts: unknown[] = []
-    const frame = fakeFrame()
-    const bridge = new ArcadeBridge({
-      projectName: BUILD_STUDIO_PROJECT_NAME,
-      isScopeLive: () => true,
-      newId: nextId,
-      now: () => 1,
-      onVersionDrift: (r) => drifts.push(r),
-    })
-    bridge.attach(frame.element)
+/**
+ * Runtime metadata comes from the editor's own `info` reply.
+ *
+ * The imported project's `header.targetVersion` is a placeholder — stock
+ * 4.1.28 reports `0.0.0` on it — so reading it as the runtime produced a banner
+ * telling a child his editor was the wrong version. The same runtime's `info`
+ * reply says `target: '4.1.28'`, `pxt: '13.1.25'`.
+ *
+ * POSITIVE CONTROL: have `acceptProject` set `runtime` from the header and the
+ * first case here fails.
+ */
+describe('the runtime is read from `info`, never inferred', () => {
+  it('is unknown until the reply lands', () => {
+    const { bridge, frame } = makeBridge()
     bridge.handleMessage(
       event(frame, {
         type: 'pxthost',
         action: 'workspacesave',
         frameId: bridge.frameId,
-        project: ourProject(),
+        // The placeholder the real editor sends.
+        project: ourProject({ header: { targetVersion: '0.0.0' } }),
       }),
     )
-    expect(drifts).toEqual([])
+    // The project was ACCEPTED, and told us nothing about the runtime.
+    expect(bridge.editorSaveSeen()).not.toBeNull()
+    expect(bridge.runtimeVersions()).toBeNull()
+  })
+
+  it('reads target and pxt out of the reply’s `resp.versions`', async () => {
+    const { bridge, frame } = makeBridge()
+    const pending = bridge.requestInfo()
+    expect(frame.posted.at(-1)!.message).toMatchObject({ action: 'info' })
+    bridge.handleMessage(
+      event(frame, {
+        type: 'pxteditor',
+        action: 'info',
+        id: frame.posted.at(-1)!.message.id,
+        frameId: bridge.frameId,
+        success: true,
+        resp: {
+          versions: { target: '4.1.28', pxt: '13.1.25', tag: 'v4.1.28' },
+          locale: 'en',
+        },
+      }),
+    )
+    await expect(pending).resolves.toEqual({
+      target: '4.1.28',
+      pxt: '13.1.25',
+      tag: 'v4.1.28',
+    })
+    expect(bridge.runtimeVersions()?.target).toBe('4.1.28')
+  })
+
+  it('stays unknown when the reply fails, and does not throw', async () => {
+    const { bridge, frame } = makeBridge()
+    const pending = bridge.requestInfo()
+    bridge.handleMessage(
+      event(frame, {
+        type: 'pxteditor',
+        action: 'info',
+        id: frame.posted.at(-1)!.message.id,
+        frameId: bridge.frameId,
+        success: false,
+      }),
+    )
+    await expect(pending).resolves.toBeNull()
+    expect(bridge.runtimeVersions()).toBeNull()
+  })
+
+  it('stays unknown when the reply carries no versions', async () => {
+    const { bridge, frame } = makeBridge()
+    const pending = bridge.requestInfo()
+    bridge.handleMessage(
+      event(frame, {
+        type: 'pxteditor',
+        action: 'info',
+        id: frame.posted.at(-1)!.message.id,
+        frameId: bridge.frameId,
+        success: true,
+        resp: { locale: 'en' },
+      }),
+    )
+    await expect(pending).resolves.toBeNull()
+  })
+
+  it('does not record a late reply for a retired scope', async () => {
+    let live = true
+    const frame = fakeFrame()
+    const bridge = new ArcadeBridge({
+      projectName: BUILD_STUDIO_PROJECT_NAME,
+      isScopeLive: () => live,
+      newId: nextId,
+      now: () => 1,
+    })
+    bridge.attach(frame.element)
+    const pending = bridge.requestInfo()
+    live = false
+    bridge.handleMessage(
+      event(frame, {
+        type: 'pxteditor',
+        action: 'info',
+        id: frame.posted.at(-1)!.message.id,
+        frameId: bridge.frameId,
+        success: true,
+        resp: { versions: { target: '4.1.28' } },
+      }),
+    )
+    await expect(pending).resolves.toBeNull()
+    expect(bridge.runtimeVersions()).toBeNull()
+  })
+})
+
+/**
+ * Play and Edit are the two MEASURED stock presentation modes.
+ * `startsimulator` alone leaves a 96 × 85 preview in a 688 × 576 frame;
+ * `setsimulatorfullscreen` with `enabled: true` gives 656 × 392 plus the touch
+ * controls, and `false` returns to Blocks.
+ */
+describe('Play and Edit use the verified stock actions', () => {
+  function answerAll(bridge: ArcadeBridge, frame: ReturnType<typeof fakeFrame>) {
+    for (const posted of [...frame.posted]) {
+      const msg = posted.message
+      if (msg.type !== 'pxteditor') continue
+      bridge.handleMessage(
+        event(frame, {
+          type: 'pxteditor',
+          action: msg.action,
+          id: msg.id,
+          frameId: bridge.frameId,
+          success: true,
+        }),
+      )
+    }
+  }
+
+  /** Answer whatever is outstanding, repeatedly, until the chain settles. */
+  async function drive(bridge: ArcadeBridge, frame: ReturnType<typeof fakeFrame>) {
+    for (let i = 0; i < 6; i += 1) {
+      answerAll(bridge, frame)
+      await new Promise((r) => setTimeout(r, 0))
+    }
+  }
+
+  it('starts the simulator AND expands it', async () => {
+    const { bridge, frame } = makeBridge()
+    const pending = bridge.playFullscreen()
+    // The first request goes out before the second is dispatched.
+    expect(frame.posted.at(-1)!.message).toMatchObject({ action: 'startsimulator' })
+    await drive(bridge, frame)
+    await expect(pending).resolves.toBe(true)
+    const actions = frame.posted.map((p) => p.message.action)
+    expect(actions).toContain('startsimulator')
+    const expand = frame.posted.find(
+      (p) => p.message.action === 'setsimulatorfullscreen',
+    )
+    expect(expand, 'never asked for the full-size simulator').toBeTruthy()
+    expect(expand!.message.enabled).toBe(true)
+  })
+
+  it('leaves play with enabled:false and shows Blocks', async () => {
+    const { bridge, frame } = makeBridge()
+    const pending = bridge.backToBlocks()
+    expect(frame.posted.at(-1)!.message).toMatchObject({
+      action: 'setsimulatorfullscreen',
+      enabled: false,
+    })
+    await drive(bridge, frame)
+    await pending
+    expect(frame.posted.map((p) => p.message.action)).toContain('switchblocks')
+  })
+
+  it('invents no simulator action beyond the measured three', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { resolve } = await import('node:path')
+    const code = readFileSync(resolve(__dirname, 'arcadeBridge.ts'), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^\s*\/\/.*$/gm, '')
+    // Every editor action this module can send, read off the three methods
+    // that can send one. A fabricated `savepng` or `exportproject` would show
+    // up here as a sixth name.
+    const actions = [
+      ...code.matchAll(/this\.(?:request|requestWithId|tolerant)\([^)]*?'([a-z]+)'/g),
+    ].map((m) => m[1])
+    expect([...new Set(actions)].sort()).toEqual([
+      'importproject',
+      'info',
+      'saveproject',
+      'setsimulatorfullscreen',
+      'startsimulator',
+      'switchblocks',
+    ])
+  })
+})
+
+/**
+ * Counts and UTF-8 byte caps are enforced before a payload is held as bridge
+ * state — not only before a Firestore write. An oversized project kept in
+ * memory and offered to Save would be refused after the child was told it was
+ * being saved.
+ */
+describe('an oversized payload is never held', () => {
+  it('refuses a project over the per-file byte cap', () => {
+    const { bridge, frame, rejected } = makeBridge()
+    bridge.handleMessage(
+      event(frame, {
+        type: 'pxthost',
+        action: 'workspacesave',
+        frameId: bridge.frameId,
+        project: ourProject({ text: { 'main.ts': '界'.repeat(150_000) } }),
+      }),
+    )
+    expect(rejected.map((r) => r.reason)).toEqual(['payload-too-big'])
+    expect(bridge.editorSaveSeen()).toBeNull()
+  })
+
+  it('refuses a project over the whole-archive byte cap', () => {
+    const { bridge, frame, rejected } = makeBridge()
+    const big = 'a'.repeat(300_000)
+    bridge.handleMessage(
+      event(frame, {
+        type: 'pxthost',
+        action: 'workspacesave',
+        frameId: bridge.frameId,
+        project: ourProject({ text: { 'main.ts': big, 'b.ts': big, 'c.ts': big } }),
+      }),
+    )
+    expect(rejected.map((r) => r.reason)).toEqual(['payload-too-big'])
+    expect(bridge.editorSaveSeen()).toBeNull()
+  })
+
+  it('refuses a project with too many files', () => {
+    const { bridge, frame, rejected } = makeBridge()
+    const text: Record<string, string> = { 'pxt.json': '{}' }
+    for (let i = 0; i < 40; i += 1) text[`f${i}.ts`] = 'x'
+    bridge.handleMessage(
+      event(frame, {
+        type: 'pxthost',
+        action: 'workspacesave',
+        frameId: bridge.frameId,
+        project: { header: ourProject().header, text },
+      }),
+    )
+    expect(rejected.map((r) => r.reason)).toEqual(['payload-too-big'])
+  })
+
+  it('accepts an ordinary project, including a multibyte asset', () => {
+    const { bridge, frame, rejected } = makeBridge()
+    bridge.handleMessage(
+      event(frame, {
+        type: 'pxthost',
+        action: 'workspacesave',
+        frameId: bridge.frameId,
+        project: ourProject({ text: { 'notes.txt': '界 🎮 café' } }),
+      }),
+    )
+    expect(rejected).toEqual([])
+    expect(bridge.editorSaveSeen()?.files['notes.txt']).toBe('界 🎮 café')
+  })
+
+  it('reads the same caps the writer does', () => {
+    expect(payloadWithinCaps({ 'pxt.json': '{}', 'main.ts': 'x' })).toBe(true)
+    expect(payloadWithinCaps({})).toBe(false)
+    expect(
+      payloadWithinCaps({ 'pxt.json': '{}', 'main.ts': '界'.repeat(150_000) }),
+    ).toBe(false)
   })
 })
 

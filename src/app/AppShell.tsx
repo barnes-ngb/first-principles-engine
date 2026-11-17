@@ -62,6 +62,10 @@ const navItems = [
 
 const kidNavItems = [
   { label: 'Today', to: '/today' },
+  // LOCAL-BUILD-001: the building-first pilot sits directly after Today so it
+  // is easy to find. It is the ONE new row, and every existing item keeps its
+  // relative order below it. Hidden until this child's own opt-in says yes.
+  { label: 'Build Studio', to: '/build-studio' },
   { label: 'Knowledge Mine', to: '/quest' },
   { label: 'My Books', to: '/books' },
   { label: 'Books About Me', to: '/books-about-me' },
@@ -82,8 +86,6 @@ const kidNavItems = [
   // Kid Today's own "📸 My Stuff" card is a different destination and stays.
   { label: 'Barnes Bros', to: '/business' },
   { label: 'Game Workshop', to: '/workshop' },
-  // His own entry, on the same per-child opt-in. Absent until it is on.
-  { label: 'Build Studio', to: '/build-studio' },
   { label: 'Dad Lab', to: '/dad-lab' },
 ]
 

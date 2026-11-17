@@ -15,6 +15,7 @@ import {
   sameNoteTarget,
   sameScope,
   scopeToken,
+  sourceSignature,
   type BuildStudioNoteTarget,
   type BuildStudioScope,
   type PendingSave,
@@ -69,6 +70,43 @@ describe('an A → B → A is a DIFFERENT scope', () => {
     const a = scopeToken({ ...SCOPE, childId: 'a', projectId: 'b' })
     const b = scopeToken({ ...SCOPE, childId: 'a\u0000b', projectId: '' })
     expect(a).not.toBe(b)
+  })
+})
+
+/**
+ * The signature is what "is this still what is on screen?" is answered with.
+ * A counter was wrong in the one case that mattered: it was read before the
+ * capture and incremented by the capture's own save events, so a clean Save
+ * reported newer work.
+ */
+describe('the source signature compares CONTENT', () => {
+  const files = { 'pxt.json': '{"files":["main.ts"]}', 'main.ts': 'info.setLife(3)' }
+
+  it('is stable for the same files in a different order', () => {
+    expect(sourceSignature(files)).toBe(
+      sourceSignature({ 'main.ts': files['main.ts'], 'pxt.json': files['pxt.json'] }),
+    )
+  })
+
+  it('IGNORES the editor’s own `_history` bookkeeping', () => {
+    // MakeCode rewrites `_history` on every keystroke. Counting it as a change
+    // would make every project permanently dirty.
+    expect(sourceSignature({ ...files, _history: '{"entries":[1]}' })).toBe(
+      sourceSignature({ ...files, _history: '{"entries":[1,2,3]}' }),
+    )
+    expect(sourceSignature({ ...files, _history: 'x' })).toBe(sourceSignature(files))
+  })
+
+  it('changes for a real edit', () => {
+    expect(sourceSignature({ ...files, 'main.ts': 'info.setLife(4)' })).not.toBe(
+      sourceSignature(files),
+    )
+  })
+
+  it('changes when a file is added or removed', () => {
+    expect(sourceSignature({ ...files, 'assets.jres': '{}' })).not.toBe(
+      sourceSignature(files),
+    )
   })
 })
 
@@ -141,7 +179,7 @@ describe('an unfinished Save is held for its own owner', () => {
     createdAt: '2026-11-17T21:00:00.000Z',
     files: { 'pxt.json': '{}', 'main.ts': 'info.setLife(4)' },
     attempts: 2,
-    capturedRevision: 7,
+    capturedSignature: 'sig-held',
   }
   const owner = {
     familyId: SCOPE.familyId,

@@ -44,7 +44,7 @@
             },
             {
               "key": "Content-Security-Policy",
-              "value": "frame-src 'self' https://www.youtube-nocookie.com"
+              "value": "frame-src 'self' https://www.youtube-nocookie.com https://arcade.makecode.com"
             }
           ]
         },

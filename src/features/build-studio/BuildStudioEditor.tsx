@@ -68,12 +68,18 @@ import {
   BuildStudioRefused,
 } from '../../core/firebase/buildStudioVersionWrites'
 import { useTTS } from '../../core/hooks/useTTS'
+import { useProfile } from '../../core/profile/useProfile'
 import {
   parseBuildStudioSource,
   type BuildStudioSourceFiles,
   type BuildStudioVersion,
 } from '../../core/types/buildStudio'
-import { ArcadeBridge, type AcceptedProject } from './arcadeBridge'
+import type { UserProfile } from '../../core/types/enums'
+import {
+  ARCADE_OPENING_TIMEOUT_MS,
+  ArcadeBridge,
+  type AcceptedProject,
+} from './arcadeBridge'
 import {
   ARCADE_PLAIN_EDITOR_URL,
   buildStudioDownloads,
@@ -105,6 +111,7 @@ import {
   noteTargetKey,
   sameNoteTarget,
   scopeToken,
+  sourceSignature,
   type BuildStudioNoteTarget,
   type BuildStudioScope,
   type PendingSave,
@@ -174,6 +181,7 @@ export default function BuildStudioEditor({
   onOutOfScopeSave,
 }: BuildStudioEditorProps) {
   const tts = useTTS()
+  const { selectProfile, registerProfileChangeGuard } = useProfile()
 
   const owner: PendingOwner = useMemo(
     () => ({ familyId, childId, projectId }),
@@ -212,27 +220,52 @@ export default function BuildStudioEditor({
     }
   }, [token])
 
-  const bridgeRef = useRef<ArcadeBridge | null>(null)
   const iframeRef = useRef<HTMLIFrameElement | null>(null)
 
-  const [frameUrl, setFrameUrl] = useState<string | null>(null)
+  /**
+   * One editor session: the scope token, the bridge and the frame URL, created
+   * together and rendered only while `session.token === token`.
+   *
+   * Three separate pieces of state meant a render could put the PREVIOUS
+   * frame's URL into a new iframe while an effect was still updating the URL —
+   * a frame and a bridge that did not belong to the same visit, which is how a
+   * reopen could sit on "Opening…" forever. The iframe is keyed by
+   * `bridge.frameId`, so a new bridge always gets a new element.
+   */
+  const [session, setSession] = useState<{
+    token: string
+    bridge: ArcadeBridge
+    url: string
+  } | null>(null)
+  const liveSession = session && session.token === token ? session : null
+  /** The live bridge, for handlers. Written in an effect, never during render. */
+  const bridgeRef = useRef<ArcadeBridge | null>(null)
+  useEffect(() => {
+    bridgeRef.current = liveSession?.bridge ?? null
+  }, [liveSession])
+
   const [phase, setPhase] = useState<EditorPhase>(EditorPhase.Opening)
   /** Did the round trip prove a usable project is open? Save is gated on it. */
   const [projectReady, setProjectReady] = useState(false)
   const [openFailure, setOpenFailure] = useState<string | null>(null)
   const [advisory, setAdvisory] = useState<string | null>(null)
-  const [drift, setDrift] = useState<string | null>(null)
   const [loadedToken, setLoadedToken] = useState<string | null>(null)
   /** The life number in the source that is actually open. Drives the hints. */
   const [openLives, setOpenLives] = useState<OpenLifeValue>(null)
+  /** True while the simulator is expanded for play. */
+  const [playing, setPlaying] = useState(false)
 
   /** The editor saved since the last durable app save. */
   const [editorDirty, setEditorDirty] = useState(false)
   /**
-   * Bumped on every editor save. A payload records the value it was captured
-   * at, so an acknowledgment can tell whether newer work has arrived since.
+   * The signature of the source this app currently believes is on the shelf (or
+   * was just imported), and the signature of the last source the EDITOR
+   * announced. Dirty is `announced !== settled`, which is a comparison of
+   * CONTENT — so the capture's own `workspacesave` events, a duplicate callback
+   * and a startup callback all read clean, and only a real edit reads dirty.
    */
-  const sourceRevisionRef = useRef(0)
+  const settledSignatureRef = useRef<string | null>(null)
+  const announcedSignatureRef = useRef<string | null>(null)
 
   const [label, setLabel] = useState('')
   const [saveState, setSaveState] = useState<SaveState>(SaveState.Idle)
@@ -247,9 +280,15 @@ export default function BuildStudioEditor({
     { versionId: string; versionDocId: string; label: string } | null
   >(null)
 
-  /** Claimed synchronously, before any await. The write-concurrency latch. */
-  const saveLatchRef = useRef(false)
-  const noteLatchRef = useRef(false)
+  /**
+   * Claimed synchronously, before any await. The write-concurrency latch.
+   *
+   * It holds the OPERATION's own id rather than a boolean, so an older
+   * operation's `finally` cannot release a newer operation's claim — which a
+   * shared boolean would, since a visit change does not remount this component.
+   */
+  const saveLatchRef = useRef<string | null>(null)
+  const noteLatchRef = useRef<string | null>(null)
 
   const [hintsOffered, setHintsOffered] = useState(0)
   const [noteDraft, setNoteDraft] = useState<
@@ -284,12 +323,134 @@ export default function BuildStudioEditor({
     inFlightRef.current = writeInFlight
   }, [writeInFlight])
 
-  const hasWorkAtRisk = useCallback(() => atRiskRef.current, [])
+  /**
+   * An edit can exist that the app has not been told about: a child types 4
+   * into the blocks and taps Today before MakeCode emits `workspacesave`. The
+   * app has NO signal for that, so while the editor is live "nothing at risk"
+   * is never assumed — the departure is held, a capture answers it, and a clean
+   * answer releases it immediately.
+   *
+   * `cleanConfirmedRef` is therefore transient: it is set by that capture and
+   * cleared the moment the departure ends. A durable flag would be a promise
+   * about the future that no edit announces.
+   */
+  const editorLiveRef = useRef(false)
+  const cleanConfirmedRef = useRef(false)
+  useEffect(() => {
+    editorLiveRef.current = phase === EditorPhase.Ready && projectReady
+  }, [phase, projectReady])
+
+  const hasWorkAtRisk = useCallback(
+    () => atRiskRef.current || (editorLiveRef.current && !cleanConfirmedRef.current),
+    [],
+  )
   const writeIsInFlight = useCallback(() => inFlightRef.current, [])
   const departure = useBuildStudioDepartureGuard({
     hasWorkAtRisk,
     writeInFlight: writeIsInFlight,
   })
+
+  /** What a pre-departure capture found. `idle` while nothing is being left. */
+  const [departureCheck, setDepartureCheck] = useState<
+    'idle' | 'checking' | 'clean' | 'dirty' | 'unknown'
+  >('idle')
+  /** A profile change a guard is holding, with its own dialog. */
+  const [heldProfile, setHeldProfile] = useState<UserProfile | null>(null)
+  /** Consumed once by the guard, so "Switch anyway" is one explicit act. */
+  const allowProfileOnceRef = useRef(false)
+
+  /** The bytes a pre-departure capture found, for "Save it now". */
+  const departureFilesRef = useRef<BuildStudioSourceFiles | null>(null)
+
+  /**
+   * Capture the editor's source NOW and say whether it matches the shelf.
+   *
+   * This is the pre-departure capture: it runs while the old editor is still
+   * intact, which is the only moment an unannounced edit can still be read.
+   * `unknown` is its own answer — a capture that fails is not a clean exit.
+   */
+  const checkSourceNow = useCallback(async (): Promise<'clean' | 'dirty' | 'unknown'> => {
+    const bridge = bridgeRef.current
+    if (!bridge || !editorLiveRef.current || inFlightRef.current) return 'unknown'
+    const ownToken = token
+    try {
+      const snapshot = await bridge.requestSnapshot()
+      if (liveTokenRef.current !== ownToken) return 'unknown'
+      const sig = sourceSignature(snapshot.files)
+      announcedSignatureRef.current = sig
+      const clean = sig === settledSignatureRef.current
+      setEditorDirty(!clean)
+      departureFilesRef.current = clean ? null : snapshot.files
+      return clean ? 'clean' : 'dirty'
+    } catch {
+      return 'unknown'
+    }
+  }, [token])
+
+  /**
+   * A held SPA departure is checked against the editor before anybody is
+   * warned. A clean exit releases itself — the guard's own effect proceeds once
+   * nothing is at risk — so an ordinary "Save, then Today" shows no dialog.
+   */
+  useEffect(() => {
+    if (!departure.held) {
+      cleanConfirmedRef.current = false
+      setDepartureCheck('idle')
+      return
+    }
+    if (departureCheck !== 'idle') return
+    if (inFlightRef.current || atRiskRef.current) {
+      setDepartureCheck('dirty')
+      return
+    }
+    setDepartureCheck('checking')
+    let cancelled = false
+    void checkSourceNow().then((result) => {
+      if (cancelled) return
+      setDepartureCheck(result)
+      if (result === 'clean') {
+        // Verified clean while the editor was still intact, so the person is
+        // not asked a question about nothing — the departure they already
+        // chose simply continues.
+        cleanConfirmedRef.current = true
+        departure.leaveAnyway()
+      }
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [departure, departureCheck, checkSourceNow])
+
+  /**
+   * The profile change, which is immediate and has no router hold.
+   *
+   * `ProfileMenu` switches straight away, this editor unmounts, and an edit it
+   * had not been told about is gone — so the guard is the last moment the work
+   * is still intact. It refuses conservatively and asks; nothing else in the
+   * app registers one, so every other surface behaves exactly as before.
+   */
+  useEffect(() => {
+    if (!registerProfileChangeGuard) return
+    return registerProfileChangeGuard((next) => {
+      if (allowProfileOnceRef.current) {
+        allowProfileOnceRef.current = false
+        return true
+      }
+      if (!inFlightRef.current && !hasWorkAtRisk()) return true
+      setHeldProfile(next)
+      // Confirm it while the editor is still here. A clean answer lets the
+      // change straight through rather than making a person answer a question
+      // about nothing.
+      void checkSourceNow().then((result) => {
+        if (result === 'clean') {
+          allowProfileOnceRef.current = true
+          setHeldProfile(null)
+          selectProfile(next)
+        }
+      })
+      return false
+    })
+  }, [registerProfileChangeGuard, hasWorkAtRisk, checkSourceNow, selectProfile])
 
   /**
    * Keep an unfinished Save for its owner across an unmount.
@@ -302,45 +463,78 @@ export default function BuildStudioEditor({
     if (pending) holdPendingSave(owner, pending)
   }, [pending, owner])
 
-  // ── The bridge, one per visit ───────────────────────────────────────────
+  // ── The session, one per visit ──────────────────────────────────────────
   useEffect(() => {
     const bridge = new ArcadeBridge({
       projectName: BUILD_STUDIO_PROJECT_NAME,
       isScopeLive: () => liveTokenRef.current === token,
       newId: () => newBridgeId(Date.now(), Math.random()),
-      onEditorLoaded: () => setLoadedToken(token),
-      onEditorSave: () => {
-        sourceRevisionRef.current += 1
-        setEditorDirty(true)
+      // A late readiness from a frame whose visit has retired must not revive
+      // it, so the token is checked here as well as inside the bridge.
+      onEditorLoaded: () => {
+        if (liveTokenRef.current === token) setLoadedToken(token)
       },
-      onVersionDrift: (reported) =>
-        setDrift(
-          `This is MakeCode ${reported.targetVersion ?? 'of an unknown version'}, not the one this page was built against. Saving and opening still work — tell a grown-up if something looks wrong.`,
-        ),
+      onEditorSave: (project) => {
+        const sig = sourceSignature(project.files)
+        announcedSignatureRef.current = sig
+        setEditorDirty(sig !== settledSignatureRef.current)
+      },
     })
-    bridgeRef.current = bridge
-    setFrameUrl(bridge.frameUrl())
+    setSession({ token, bridge, url: bridge.frameUrl() })
     setPhase(EditorPhase.Opening)
     setProjectReady(false)
     setOpenFailure(null)
     setAdvisory(null)
     setEditorDirty(false)
+    setPlaying(false)
     setOpenLives(null)
+    settledSignatureRef.current = null
+    announcedSignatureRef.current = null
     window.addEventListener('message', bridge.handleMessage)
     return () => {
       window.removeEventListener('message', bridge.handleMessage)
       bridge.dispose()
-      if (bridgeRef.current === bridge) bridgeRef.current = null
+      // Only this bridge's own session is torn down — StrictMode's second
+      // setup has already replaced it by the time the first cleanup runs.
+      setSession((current) => (current?.bridge === bridge ? null : current))
     }
   }, [token])
 
   // The frame element, bound as soon as it exists — before the editor's first
   // `workspacesync`, which `onLoad` alone does not guarantee.
   useEffect(() => {
-    const bridge = bridgeRef.current
     const frame = iframeRef.current
-    if (bridge && frame) bridge.attach(frame)
-  }, [frameUrl, token])
+    if (liveSession && frame) liveSession.bridge.attach(frame)
+  }, [liveSession])
+
+  // ── The opening deadline ───────────────────────────────────────────────
+  //
+  // Every other deadline belongs to a request, and every request waits for the
+  // handshake — so a frame that never hands shakes had none. Cleared by the
+  // handshake (which re-runs this effect into its early return), by a token
+  // change, and by unmount.
+  useEffect(() => {
+    if (!liveSession) return
+    if (loadedToken === token) return
+    const timer = setTimeout(() => {
+      if (liveTokenRef.current !== token) return
+      setPhase(EditorPhase.Failed)
+      setProjectReady(false)
+      setOpenFailure(
+        'The editor did not open in time. Nothing of yours was lost — tap Try again, or a grown-up can open the starter directly.',
+      )
+    }, ARCADE_OPENING_TIMEOUT_MS)
+    return () => clearTimeout(timer)
+  }, [liveSession, loadedToken, token])
+
+  /** Start a brand new visit on the same version — the Try again door. */
+  const reopenCurrent = useCallback(() => {
+    setLoadedToken(null)
+    setVisit((current) => ({
+      visitId: newVisitId(Date.now(), Math.random()),
+      version: current.version,
+    }))
+  }, [])
 
   // ── Import, then CHECK that it really arrived ──────────────────────────
   useEffect(() => {
@@ -359,8 +553,17 @@ export default function BuildStudioEditor({
             // never "whatever the latest frame happens to hold".
             parseBuildStudioSource(reopening.sourceArchive)
           : starterSourceFiles()
+        // What the app believes is on the shelf for this visit: a reopened
+        // version IS a saved version, and a freshly imported starter is
+        // unchanged. Either way the editor's first `workspacesave` carries
+        // these same bytes and must read CLEAN.
+        settledSignatureRef.current = sourceSignature(files)
         await bridge.importProject(files)
         if (!live()) return
+
+        // Best effort and never awaited by anything the child waits for: what
+        // the editor says it IS, from its own `info` reply.
+        void bridge.requestInfo()
 
         // The acceptance check, run by the app rather than assumed — and NOT a
         // `switchblocks` acknowledgment, which says nothing about whether a
@@ -387,6 +590,12 @@ export default function BuildStudioEditor({
         }
 
         setOpenLives(readOpenLifeValue(round.files['main.ts']))
+        // The round trip IS a capture, so it also answers "is the open source
+        // what the shelf holds" — which makes a freshly opened project a clean
+        // exit rather than an unanswered question.
+        const roundSig = sourceSignature(round.files)
+        announcedSignatureRef.current = roundSig
+        setEditorDirty(roundSig !== settledSignatureRef.current)
         const ok = reopening
           ? reopenedVersionLooksLoaded(round.files)
           : starterImportLooksCorrect(round.files)
@@ -465,10 +674,15 @@ export default function BuildStudioEditor({
             )
             return
           }
-          // Did newer work arrive while this was writing? If so the dirty mark
-          // STAYS — it belongs to edits this acknowledgment knows nothing
-          // about.
-          const stillCurrent = sourceRevisionRef.current === attempt.capturedRevision
+          // What is on the shelf is now these bytes, so that is what "clean"
+          // means from here on.
+          settledSignatureRef.current = attempt.capturedSignature
+          // Did a REAL new edit arrive while this was writing? Compared by
+          // content: the capture's own save events carry the captured bytes and
+          // read clean, and only different bytes read dirty. An editor that has
+          // announced nothing yet is also clean.
+          const announced = announcedSignatureRef.current
+          const stillCurrent = announced === null || announced === attempt.capturedSignature
           setSaveState(SaveState.Saved)
           setSaveMessage(
             !stillCurrent
@@ -522,7 +736,10 @@ export default function BuildStudioEditor({
     if (saveLatchRef.current) return
     const bridge = bridgeRef.current
     if (!bridge || phase !== EditorPhase.Ready || !projectReady) return
-    saveLatchRef.current = true
+    // The latch holds an OPERATION id, so an older operation's `finally`
+    // cannot release a newer one's claim.
+    const opId = newVersionId(Date.now(), Math.random())
+    saveLatchRef.current = opId
     // Synchronously, so a navigation in the same gesture is already held.
     inFlightRef.current = true
     atRiskRef.current = true
@@ -532,9 +749,6 @@ export default function BuildStudioEditor({
     // capture fails there is still work waiting to be retried, and clearing it
     // first would hide it; `commit` replaces it the moment a new one exists.
     try {
-      // The revision is read BEFORE the capture, so a save event that arrives
-      // during the capture counts as newer work rather than as part of it.
-      const capturedRevision = sourceRevisionRef.current
       let snapshot: AcceptedProject
       try {
         snapshot = await bridge.requestSnapshot()
@@ -552,34 +766,83 @@ export default function BuildStudioEditor({
         setSaveState(SaveState.Idle)
         return
       }
+      // The signature of the bytes that were ACTUALLY captured, taken from the
+      // fenced result rather than from a counter read before the capture began.
+      const runtime = bridge.runtimeVersions()
       const payload: PendingSave = {
         scope,
         versionId: newVersionId(Date.now(), Math.random()),
         label: label.trim() || defaultLabel(versions.versions.length + 1),
         createdAt: new Date().toISOString(),
         files: snapshot.files,
-        editorTarget: snapshot.header.target,
-        editorTargetVersion: snapshot.header.targetVersion,
+        // From the editor's own `info` reply, or left UNKNOWN. Never the
+        // project header's `targetVersion`, which is a `0.0.0` placeholder.
+        editorTarget: runtime?.target ? 'arcade' : undefined,
+        editorTargetVersion: runtime?.target,
         goalId: BUILD_STUDIO_GOAL.id,
         attempts: 0,
-        capturedRevision,
+        capturedSignature: sourceSignature(snapshot.files),
       }
       await commit(payload)
     } finally {
-      saveLatchRef.current = false
+      // Only if this operation still owns them.
+      if (saveLatchRef.current === opId) {
+        saveLatchRef.current = null
+        inFlightRef.current = false
+      }
     }
   }, [phase, projectReady, label, scope, token, versions.versions.length, commit])
 
   const handleRetrySave = useCallback(async () => {
     if (saveLatchRef.current) return
     if (!pending) return
-    saveLatchRef.current = true
+    const opId = newVersionId(Date.now(), Math.random())
+    saveLatchRef.current = opId
+    inFlightRef.current = true
     try {
       await commit(pending)
     } finally {
-      saveLatchRef.current = false
+      if (saveLatchRef.current === opId) {
+        saveLatchRef.current = null
+        inFlightRef.current = false
+      }
     }
   }, [pending, commit])
+
+  /**
+   * Save the bytes a pre-departure capture already read.
+   *
+   * No second capture: the editor may be about to go away, and the bytes in
+   * hand are the ones the person was shown a warning about.
+   */
+  const handleSaveCaptured = useCallback(async () => {
+    const files = departureFilesRef.current
+    if (!files || saveLatchRef.current) return
+    const opId = newVersionId(Date.now(), Math.random())
+    saveLatchRef.current = opId
+    inFlightRef.current = true
+    try {
+      const runtime = bridgeRef.current?.runtimeVersions() ?? null
+      await commit({
+        scope,
+        versionId: newVersionId(Date.now(), Math.random()),
+        label: label.trim() || defaultLabel(versions.versions.length + 1),
+        createdAt: new Date().toISOString(),
+        files,
+        editorTarget: runtime?.target ? 'arcade' : undefined,
+        editorTargetVersion: runtime?.target,
+        goalId: BUILD_STUDIO_GOAL.id,
+        attempts: 0,
+        capturedSignature: sourceSignature(files),
+      })
+      departureFilesRef.current = null
+    } finally {
+      if (saveLatchRef.current === opId) {
+        saveLatchRef.current = null
+        inFlightRef.current = false
+      }
+    }
+  }, [commit, scope, label, versions.versions.length])
 
   const handleDiscardPending = useCallback(() => {
     clearPendingSave(owner)
@@ -596,9 +859,14 @@ export default function BuildStudioEditor({
    * would replace what he made with what he began from.
    */
   const handleDownloadCurrent = useCallback(async () => {
-    const fromPending = pending?.files ?? null
-    const fromEditor = fromPending ? null : (bridgeRef.current?.editorSaveSeen()?.files ?? null)
-    const files = fromPending ?? fromEditor
+    // The LATEST source first, never a stale template: a pre-departure capture
+    // read the newest bytes, then a failed save's exact payload, then whatever
+    // the editor last announced.
+    const files =
+      departureFilesRef.current ??
+      pending?.files ??
+      bridgeRef.current?.editorSaveSeen()?.files ??
+      null
     if (!files) {
       setSaveMessage('There was nothing to download yet.')
       return
@@ -772,7 +1040,8 @@ export default function BuildStudioEditor({
     const target = noteDraft.target
     const draftText = noteDraft.text
     const ownToken = token
-    noteLatchRef.current = true
+    const opId = newNoteActionId(Date.now(), Math.random())
+    noteLatchRef.current = opId
     setNoteState('saving')
     setNoteMessage(null)
     try {
@@ -808,7 +1077,7 @@ export default function BuildStudioEditor({
           : 'Your words did not save. Try again — your game is safe either way.',
       )
     } finally {
-      noteLatchRef.current = false
+      if (noteLatchRef.current === opId) noteLatchRef.current = null
     }
   }, [noteDraft, noteTarget, token])
 
@@ -848,23 +1117,33 @@ export default function BuildStudioEditor({
           💡 Hint
           {hintsOffered > 0 ? ` (${hintsOffered} of ${BUILD_STUDIO_HINT_COUNT})` : ''}
         </Button>
+        {/* Play and Edit are the two measured stock presentation modes.
+            `startsimulator` alone leaves a 96 × 85 preview; expanding the
+            simulator is what gives a playable screen and the touch controls.
+            Both buttons live OUTSIDE the frame, so Save and Hint stay. */}
         <Button
-          variant="outlined"
+          variant={playing ? 'contained' : 'outlined'}
           size="large"
           disabled={gated}
-          onClick={() => void bridgeRef.current?.switchToBlocks()}
-          sx={{ textTransform: 'none', minHeight: 48, fontWeight: 600 }}
-        >
-          🧩 Edit the blocks
-        </Button>
-        <Button
-          variant="outlined"
-          size="large"
-          disabled={gated}
-          onClick={() => void bridgeRef.current?.startSimulator()}
+          onClick={() => {
+            setPlaying(true)
+            void bridgeRef.current?.playFullscreen()
+          }}
           sx={{ textTransform: 'none', minHeight: 48, fontWeight: 600 }}
         >
           ▶ Play it
+        </Button>
+        <Button
+          variant={playing ? 'outlined' : 'contained'}
+          size="large"
+          disabled={gated}
+          onClick={() => {
+            setPlaying(false)
+            void bridgeRef.current?.backToBlocks()
+          }}
+          sx={{ textTransform: 'none', minHeight: 48, fontWeight: 600 }}
+        >
+          🧩 Edit the blocks
         </Button>
       </Stack>
 
@@ -874,13 +1153,19 @@ export default function BuildStudioEditor({
         </Alert>
       )}
 
-      {drift && <Alert severity="info">{drift}</Alert>}
       {advisory && <Alert severity="warning">{advisory}</Alert>}
 
       {openFailure && (
-        <Alert severity="error">
+        <Alert
+          severity="error"
+          action={
+            <Button size="small" onClick={reopenCurrent} sx={{ textTransform: 'none' }}>
+              Try again
+            </Button>
+          }
+        >
           <AlertTitle>The editor would not open</AlertTitle>
-          {openFailure} Nothing of yours was lost.
+          {openFailure}
         </Alert>
       )}
 
@@ -916,19 +1201,22 @@ export default function BuildStudioEditor({
             borderColor: 'divider',
           }}
         >
-          {frameUrl && (
+          {liveSession && (
             <iframe
-              // Keyed by the scope, so a new visit is a NEW frame.
-              key={token}
+              // Keyed by the BRIDGE's own frame id, and given that same
+              // session's URL — so the element, the URL and the attached bridge
+              // always belong to one visit. Keying on the scope token alone let
+              // a new element render with the previous frame's URL while an
+              // effect caught up.
+              key={liveSession.bridge.frameId}
               ref={iframeRef}
-              src={frameUrl}
+              src={liveSession.url}
               title={`${BUILD_STUDIO_PROJECT_NAME} editor`}
               allow="autoplay; fullscreen; gamepad"
               style={{ width: '100%', height: '100%', border: 0, display: 'block' }}
               onLoad={() => {
-                const bridge = bridgeRef.current
                 const frame = iframeRef.current
-                if (bridge && frame) bridge.attach(frame)
+                if (frame) liveSession.bridge.attach(frame)
               }}
             />
           )}
@@ -1252,37 +1540,100 @@ export default function BuildStudioEditor({
         </Stack>
       </Stack>
 
-      {/* ── Leaving ─────────────────────────────────────────────────── */}
-      <Dialog open={departure.held} onClose={departure.stay}>
-        <DialogTitle>Keep your game first?</DialogTitle>
+      {/* ── Leaving ───────────────────────────────────────────────────
+          Shown only once the pre-departure capture has an answer, so a clean
+          exit never flashes a warning it is about to withdraw. */}
+      <Dialog
+        open={departure.held && departureCheck !== 'idle' && departureCheck !== 'clean'}
+        onClose={departure.stay}
+      >
+        <DialogTitle>
+          {departureCheck === 'checking' ? 'Checking your game…' : 'Keep your game first?'}
+        </DialogTitle>
         <DialogContent>
           <DialogContentText>
-            {departure.reason === 'in-flight'
-              ? 'Your game is being saved right now. Give it a moment — it will carry on by itself.'
-              : pending
-                ? `A save called “${pending.label}” did not finish. If you leave now it is gone.`
-                : 'Your game has changes that are not on your shelf yet. If you leave now they are gone.'}
+            {departureCheck === 'checking'
+              ? 'One moment — looking at what is in the editor.'
+              : departure.reason === 'in-flight'
+                ? 'Your game is being saved right now. Give it a moment — it will carry on by itself.'
+                : pending
+                  ? `A save called “${pending.label}” did not finish. If you leave now it is gone.`
+                  : departureCheck === 'unknown'
+                    ? 'This page could not read the editor just now, so it cannot tell whether your changes are saved. Leaving might lose them.'
+                    : 'Your game has changes that are not on your shelf yet. If you leave now they are gone.'}
+          </DialogContentText>
+        </DialogContent>
+        {departureCheck !== 'checking' && (
+          <DialogActions sx={{ flexWrap: 'wrap', gap: 1 }}>
+            <Button
+              variant="contained"
+              onClick={departure.stay}
+              sx={{ textTransform: 'none', fontWeight: 700, minHeight: 48 }}
+            >
+              Stay here
+            </Button>
+            {pending && (
+              <Button
+                onClick={() => void handleRetrySave()}
+                sx={{ textTransform: 'none', minHeight: 48 }}
+              >
+                Try saving again
+              </Button>
+            )}
+            {!pending && departureFilesRef.current && (
+              <Button
+                onClick={() => void handleSaveCaptured()}
+                sx={{ textTransform: 'none', minHeight: 48 }}
+              >
+                Save it now
+              </Button>
+            )}
+            {!pending && !departureFilesRef.current && canSave && (
+              <Button
+                onClick={() => void handleSave()}
+                sx={{ textTransform: 'none', minHeight: 48 }}
+              >
+                Save it now
+              </Button>
+            )}
+            <Button
+              onClick={() => void handleDownloadCurrent()}
+              sx={{ textTransform: 'none', minHeight: 48 }}
+            >
+              Download a copy
+            </Button>
+            <Button
+              color="error"
+              onClick={departure.leaveAnyway}
+              sx={{ textTransform: 'none', minHeight: 48 }}
+            >
+              Leave and lose it
+            </Button>
+          </DialogActions>
+        )}
+      </Dialog>
+
+      {/* ── Changing who is signed in ───────────────────────────────── */}
+      <Dialog open={heldProfile !== null} onClose={() => setHeldProfile(null)}>
+        <DialogTitle>Switch profile?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            {pending
+              ? `A save called “${pending.label}” did not finish. Switching now leaves it behind.`
+              : 'Your game may have changes that are not on your shelf yet. Switching closes the editor.'}
           </DialogContentText>
         </DialogContent>
         <DialogActions sx={{ flexWrap: 'wrap', gap: 1 }}>
           <Button
             variant="contained"
-            onClick={departure.stay}
+            onClick={() => setHeldProfile(null)}
             sx={{ textTransform: 'none', fontWeight: 700, minHeight: 48 }}
           >
             Stay here
           </Button>
-          {pending && (
+          {departureFilesRef.current && (
             <Button
-              onClick={() => void handleRetrySave()}
-              sx={{ textTransform: 'none', minHeight: 48 }}
-            >
-              Try saving again
-            </Button>
-          )}
-          {!pending && canSave && (
-            <Button
-              onClick={() => void handleSave()}
+              onClick={() => void handleSaveCaptured()}
               sx={{ textTransform: 'none', minHeight: 48 }}
             >
               Save it now
@@ -1296,10 +1647,17 @@ export default function BuildStudioEditor({
           </Button>
           <Button
             color="error"
-            onClick={departure.leaveAnyway}
+            onClick={() => {
+              const next = heldProfile
+              setHeldProfile(null)
+              if (!next) return
+              // One explicit act, consumed once by the guard.
+              allowProfileOnceRef.current = true
+              selectProfile(next)
+            }}
             sx={{ textTransform: 'none', minHeight: 48 }}
           >
-            Leave and lose it
+            Switch anyway
           </Button>
         </DialogActions>
       </Dialog>

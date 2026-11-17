@@ -48,13 +48,29 @@
  * the page says so to a parent in those words.
  */
 
-import type { BuildStudioSourceFiles } from '../../core/types/buildStudio'
-import { ARCADE_TARGET, ARCADE_TARGET_VERSION } from './buildStudioStarter'
+import {
+  BUILD_STUDIO_MAX_ARCHIVE_BYTES,
+  BUILD_STUDIO_MAX_FILES,
+  BUILD_STUDIO_MAX_FILE_BYTES,
+  buildStudioSourceKeys,
+  utf8ByteLength,
+  type BuildStudioSourceFiles,
+} from '../../core/types/buildStudio'
 
 /** The one origin. Exact match, never a prefix. */
 export const ARCADE_ORIGIN = 'https://arcade.makecode.com'
 
-/** Timeouts, in ms. Generous: a cold editor on a tablet is slow. */
+/**
+ * Timeouts, in ms. Generous: a cold editor on a tablet is slow.
+ *
+ * How long one frame gets to complete its handshake.
+ *
+ * Every other deadline here belongs to a REQUEST, and every request waits for
+ * `workspaceloaded` first — so a frame that never hands shakes had no deadline
+ * at all and the page sat on "Opening the editor…" forever. This is the one
+ * deadline that is not a request's.
+ */
+export const ARCADE_OPENING_TIMEOUT_MS = 45_000
 export const ARCADE_IMPORT_TIMEOUT_MS = 30_000
 export const ARCADE_SNAPSHOT_TIMEOUT_MS = 20_000
 export const ARCADE_SWITCH_TIMEOUT_MS = 10_000
@@ -128,7 +144,16 @@ export interface RejectedMessage {
     | 'scope'
     | 'foreign-project'
     | 'action'
+    /** Too many files, or too many bytes, to hold as bridge state. */
+    | 'payload-too-big'
   action?: string
+}
+
+/** What the editor says it IS, from its own `info` reply. Never inferred. */
+export interface ArcadeRuntimeVersions {
+  target?: string
+  pxt?: string
+  tag?: string
 }
 
 export interface ArcadeBridgeOptions {
@@ -153,8 +178,6 @@ export interface ArcadeBridgeOptions {
   onEditorLoaded?: () => void
   /** A message was refused. Diagnostics only. */
   onRejected?: (rejected: RejectedMessage) => void
-  /** The editor reported a target version we were not built against. */
-  onVersionDrift?: (reported: { target?: string; targetVersion?: string }) => void
   /** Overridable for tests. */
   origin?: string
 }
@@ -191,6 +214,24 @@ function msgProject(msg: Record<string, unknown>): ArcadeProject | undefined {
   const direct = msg.project as ArcadeProject | undefined
   if (direct) return direct
   return (msg.resp as ArcadeProject | undefined) ?? undefined
+}
+
+/**
+ * Is this payload small enough to hold at all?
+ *
+ * The same counts and UTF-8 byte caps the writer enforces, read from the same
+ * constants so the two can never disagree.
+ */
+export function payloadWithinCaps(files: BuildStudioSourceFiles): boolean {
+  const keys = buildStudioSourceKeys(files)
+  if (keys.length === 0 || keys.length > BUILD_STUDIO_MAX_FILES) return false
+  let total = 0
+  for (const key of keys) {
+    const bytes = utf8ByteLength(files[key])
+    if (bytes > BUILD_STUDIO_MAX_FILE_BYTES) return false
+    total += bytes
+  }
+  return total <= BUILD_STUDIO_MAX_ARCHIVE_BYTES
 }
 
 /**
@@ -232,7 +273,8 @@ export class ArcadeBridge {
   private disposed = false
   /** The last project the EDITOR saved. Not a durable save; see `onEditorSave`. */
   private lastEditorSave: AcceptedProject | null = null
-  private versionDriftReported = false
+  /** From the editor's own `info` reply, or null. Never inferred. */
+  private runtime: ArcadeRuntimeVersions | null = null
 
   constructor(options: ArcadeBridgeOptions) {
     this.options = options
@@ -415,30 +457,54 @@ export class ArcadeBridge {
       this.options.onRejected?.({ reason: 'foreign-project' })
       return null
     }
+    // The caps are enforced HERE, before the payload is held as bridge state —
+    // not only before a Firestore write. An oversized project kept in memory
+    // and offered to Save would be refused later, after the child was told it
+    // was being saved.
+    if (!payloadWithinCaps(files)) {
+      this.options.onRejected?.({ reason: 'payload-too-big' })
+      return null
+    }
     this.ourHeaderId = header.id
-    this.reportVersionDrift(header)
     return { header, files }
   }
 
   /**
-   * Say so, once, when the editor is not the one this was written against.
+   * What the editor says it is, from its OWN `info` reply.
    *
-   * Reported, never enforced: refusing to open a newer Arcade would break the
-   * feature on the day Microsoft ships an update, and the handshake is checked
-   * by its own results anyway. What the banner is for is the day something
-   * stops working — a reader can see which editor answered instead of guessing.
+   * `null` until the reply lands, and `null` forever if it never does — which
+   * must not block a healthy editor. Deliberately never inferred from the
+   * imported project's `header.targetVersion`: that is a placeholder (`0.0.0`
+   * in stock 4.1.28), and reading it as the runtime produced a banner telling a
+   * child his editor was the wrong version.
    */
-  private reportVersionDrift(header: ArcadeProjectHeader): void {
-    if (this.versionDriftReported) return
-    const sameTarget = !header.target || header.target === ARCADE_TARGET
-    const sameVersion =
-      !header.targetVersion || header.targetVersion === ARCADE_TARGET_VERSION
-    if (sameTarget && sameVersion) return
-    this.versionDriftReported = true
-    this.options.onVersionDrift?.({
-      target: header.target,
-      targetVersion: header.targetVersion,
-    })
+  runtimeVersions(): ArcadeRuntimeVersions | null {
+    return this.runtime
+  }
+
+  /**
+   * Ask the editor what it is. Best effort, scope-bound, and never awaited by
+   * anything the child is waiting for.
+   */
+  async requestInfo(): Promise<ArcadeRuntimeVersions | null> {
+    try {
+      const reply = await this.request('info', {}, ARCADE_SWITCH_TIMEOUT_MS)
+      const resp = reply.resp as { versions?: Record<string, unknown> } | undefined
+      const versions = resp?.versions
+      if (!versions) return null
+      const read = (key: string) =>
+        typeof versions[key] === 'string' ? (versions[key] as string) : undefined
+      const runtime: ArcadeRuntimeVersions = {
+        target: read('target'),
+        pxt: read('pxt'),
+        tag: read('tag'),
+      }
+      if (!this.options.isScopeLive()) return null
+      this.runtime = runtime
+      return runtime
+    } catch {
+      return null
+    }
   }
 
   private post(message: Record<string, unknown>): void {
@@ -520,26 +586,39 @@ export class ArcadeBridge {
    * is a better check than this action's own answer.
    */
   async switchToBlocks(): Promise<boolean> {
-    try {
-      await this.request('switchblocks', {}, ARCADE_SWITCH_TIMEOUT_MS)
-      return true
-    } catch {
-      return false
-    }
+    return this.tolerant('switchblocks', {})
   }
 
   /**
-   * Ask the editor to start its own simulator.
+   * Play it, at a usable size.
    *
-   * Tolerant for the same reason `switchToBlocks` is, and the UI does not
-   * depend on it: the Arcade editor draws its own green play control inside the
-   * frame, the page says so in words, and this is a convenience that either
-   * works or is silently not there. It is the one action here the probe did not
-   * exercise, which is exactly why nothing is claimed on its answer.
+   * Measured in stock 4.1.28: `startsimulator` (and `showsimulator`) leave a
+   * 96 × 85 preview inside a 688 × 576 editor frame — too small to play on a
+   * tablet. `setsimulatorfullscreen` with `enabled: true` expands it to
+   * 656 × 392 **with the larger touch controls**, which is the mode a child
+   * actually plays in. So Play is both: start, then expand.
+   *
+   * Tolerant: a failure returns false and the editor's own green play control
+   * is still there. The outer app controls live outside the frame and are
+   * unaffected either way.
    */
-  async startSimulator(): Promise<boolean> {
+  async playFullscreen(): Promise<boolean> {
+    const started = await this.tolerant('startsimulator', {})
+    const expanded = await this.tolerant('setsimulatorfullscreen', { enabled: true })
+    return started || expanded
+  }
+
+  /** Leave play and show Blocks again. `enabled: false` is the measured exit. */
+  async backToBlocks(): Promise<boolean> {
+    const shrunk = await this.tolerant('setsimulatorfullscreen', { enabled: false })
+    const blocks = await this.tolerant('switchblocks', {})
+    return shrunk || blocks
+  }
+
+  /** One presentation request that may fail without consequence. */
+  private async tolerant(action: string, args: Record<string, unknown>): Promise<boolean> {
     try {
-      await this.request('startsimulator', {}, ARCADE_SWITCH_TIMEOUT_MS)
+      await this.request(action, args, ARCADE_SWITCH_TIMEOUT_MS)
       return true
     } catch {
       return false

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { ThemeMode, UserProfile } from '../types/enums'
 import { ProfileContext } from './context'
@@ -26,7 +26,34 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<UserProfile | null>(readProfile)
   const [themeMode, setThemeModeState] = useState<ThemeMode>(readThemeMode)
 
+  /**
+   * Vetoes consulted before a profile change. Empty by default, so with no
+   * guard registered `selectProfile` is byte-for-byte the behaviour it had.
+   */
+  const guardsRef = useRef<Array<(next: UserProfile) => boolean>>([])
+
+  const registerProfileChangeGuard = useCallback(
+    (guard: (next: UserProfile) => boolean) => {
+      guardsRef.current = [...guardsRef.current, guard]
+      return () => {
+        guardsRef.current = guardsRef.current.filter((g) => g !== guard)
+      }
+    },
+    [],
+  )
+
   const selectProfile = useCallback((p: UserProfile) => {
+    // A guard that throws must not be able to lock the app into one profile,
+    // so a thrown guard is treated as "no objection".
+    for (const guard of guardsRef.current) {
+      let allowed = true
+      try {
+        allowed = guard(p) !== false
+      } catch {
+        allowed = true
+      }
+      if (!allowed) return
+    }
     localStorage.setItem(PROFILE_KEY, p)
     setProfile(p)
     // Auto-set theme based on profile
@@ -54,8 +81,24 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
   const canEdit = profile === UserProfile.Parents
 
   const value = useMemo(
-    () => ({ profile, themeMode, canEdit, selectProfile, setThemeMode, logout }),
-    [profile, themeMode, canEdit, selectProfile, setThemeMode, logout],
+    () => ({
+      profile,
+      themeMode,
+      canEdit,
+      selectProfile,
+      setThemeMode,
+      logout,
+      registerProfileChangeGuard,
+    }),
+    [
+      profile,
+      themeMode,
+      canEdit,
+      selectProfile,
+      setThemeMode,
+      logout,
+      registerProfileChangeGuard,
+    ],
   )
 
   return (

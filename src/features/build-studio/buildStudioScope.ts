@@ -14,6 +14,24 @@
  *      anything happened.
  */
 
+import {
+  buildStudioSourceDigest,
+  serializeBuildStudioSource,
+} from '../../core/types/buildStudio'
+
+/**
+ * The content signature of a project's source, for "is this still what is on
+ * screen?".
+ *
+ * Built on the canonical archive, so `_history` — MakeCode's own undo journal,
+ * which changes on every keystroke and is not part of the program — is excluded
+ * by construction. Versions still store the full file set; this is only the
+ * comparison.
+ */
+export function sourceSignature(files: Readonly<Record<string, string>>): string {
+  return buildStudioSourceDigest(serializeBuildStudioSource(files))
+}
+
 /** Everything a Save or an editor callback is bound to. */
 export interface BuildStudioScope {
   familyId: string
@@ -181,15 +199,16 @@ export interface PendingSave {
   /** How many times this exact payload has been sent. The auto-retry is one. */
   attempts: number
   /**
-   * The editor's source revision these bytes were captured at.
+   * The SIGNATURE of the source in this payload — a digest of the canonical
+   * archive, which excludes the editor's own `_history` bookkeeping.
    *
-   * The editor bumps a counter on every `workspacesave`, so this is a cheap
-   * fingerprint of "which state of the program is in this payload". When the
-   * durable write acknowledges, the editor compares the live counter to this
-   * one: equal means the acknowledged bytes ARE what is on screen, so the dirty
-   * mark clears; different means a newer edit arrived during the write, so it
-   * stays dirty. Without it a slow save cleared a mark that newer work had just
-   * earned.
+   * It replaces a counter, which was wrong in the one case that matters most.
+   * A counter was read before the capture and incremented by every
+   * `workspacesave` the capture itself provoked, so an ordinary clean Save
+   * acknowledged as "you have made more changes since then" and falsely held
+   * the next navigation. A signature compares CONTENT: the capture's own
+   * events, a duplicate callback and a startup callback all carry the same
+   * bytes and read clean, while a real edit reads dirty.
    */
-  capturedRevision: number
+  capturedSignature: string
 }
