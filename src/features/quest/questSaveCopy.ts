@@ -100,6 +100,22 @@ export const QUEST_EXIT_GUARD_COPY = {
   /** The plain explanation on the deliberate-departure tap. */
   leaveWarning: 'If you go now, they may be lost.',
   /**
+   * ── UX-497: the same door, for a REPLACEMENT rather than a departure ─────
+   *
+   * The intro's Start, its suggested Start, its error *Try Again* and the
+   * Resume card's confirmed Resume all replace the dig the held partial
+   * belongs to — a new run bumps the view that owns the payload, and with it
+   * the only Retry that could ever land those answers. The loss is the same
+   * loss, so the door is the same door; what differs is the sentence, because
+   * the child is not going anywhere and *"if you go now"* would be false.
+   *
+   * No promise in either direction, exactly like the departure warning: a
+   * write already dispatched may still land.
+   */
+  replaceWarning: 'If you go on, they may be lost.',
+  /** The same no-promise sentence on the ownerless face of the door. */
+  genericReplaceWarning: 'If you go on, it may be lost.',
+  /**
    * The OWNERLESS face of the door, for a current exit whose bound notice is
    * hidden from whoever is looking — a sibling profile, or a view the notice's
    * family does not reach. The hold is real (the payload still owes the child
@@ -113,8 +129,33 @@ export const QUEST_EXIT_GUARD_COPY = {
   genericWarning: 'If you go now, it may be lost.',
   stay: 'Stay here',
   leave: 'Leave without saving',
+  /**
+   * UX-497 — the deliberate replacement, labelled as what it does rather than
+   * as a generic *continue*: a child who means to open a new dig taps the dig,
+   * and a child who means to keep the old answers taps *Stay here*.
+   */
+  start: 'Start the new quest',
+  resume: 'Open the saved quest',
   retry: QUEST_SOURCE_COPY.retry,
 } as const
+
+/**
+ * What the door's deliberate button DOES — a departure, or a replacement
+ * (UX-497).
+ *
+ * The phase decides the three sentences about the save; this decides the one
+ * sentence about the tap and the label on it. Kept beside the copy for the same
+ * reason {@link QuestExitPhase} is: the hook and the dialog both need the word
+ * and neither should import the other.
+ */
+export type QuestExitAction = 'leave' | 'start' | 'resume'
+
+/** The label for the deliberate action, and nothing else about it. */
+export function questExitActionLabel(action: QuestExitAction): string {
+  if (action === 'start') return QUEST_EXIT_GUARD_COPY.start
+  if (action === 'resume') return QUEST_EXIT_GUARD_COPY.resume
+  return QUEST_EXIT_GUARD_COPY.leave
+}
 
 /**
  * Which face the exit door is wearing — the source save's own phase.
@@ -145,13 +186,22 @@ export interface QuestExitNotice {
  * of a problem: no error colour, no retry, no claim that anything was lost. A
  * `conflict` is a failure but not a retryable one — offering *Try saving again*
  * there would ask the child to re-send a payload that can never land.
+ *
+ * `action` changes ONE line — the warning, which is about the tap rather than
+ * about the save (UX-497). It defaults to the departure, so every UX-496 caller
+ * reads exactly as it did.
  */
-export function questExitNotice(phase: QuestExitPhase): QuestExitNotice {
+export function questExitNotice(
+  phase: QuestExitPhase,
+  action: QuestExitAction = 'leave',
+): QuestExitNotice {
+  const warning =
+    action === 'leave' ? QUEST_EXIT_GUARD_COPY.leaveWarning : QUEST_EXIT_GUARD_COPY.replaceWarning
   if (phase === 'saving') {
     return {
       title: QUEST_EXIT_GUARD_COPY.savingTitle,
       body: QUEST_EXIT_GUARD_COPY.savingBody,
-      warning: QUEST_EXIT_GUARD_COPY.leaveWarning,
+      warning,
       busy: true,
       retryable: false,
       failed: false,
@@ -161,7 +211,7 @@ export function questExitNotice(phase: QuestExitPhase): QuestExitNotice {
     return {
       title: QUEST_EXIT_GUARD_COPY.conflictTitle,
       body: QUEST_EXIT_GUARD_COPY.conflictBody,
-      warning: QUEST_EXIT_GUARD_COPY.leaveWarning,
+      warning,
       busy: false,
       // Nothing to retry: another run owns this id. The escape is the move.
       retryable: false,
@@ -171,7 +221,7 @@ export function questExitNotice(phase: QuestExitPhase): QuestExitNotice {
   return {
     title: QUEST_EXIT_GUARD_COPY.failedTitle,
     body: QUEST_EXIT_GUARD_COPY.failedBody,
-    warning: QUEST_EXIT_GUARD_COPY.leaveWarning,
+    warning,
     busy: false,
     retryable: true,
     failed: true,
@@ -188,11 +238,14 @@ export function questExitNotice(phase: QuestExitPhase): QuestExitNotice {
  * owning child on his own screen. Not retryable and not dressed as an error,
  * because neither claim is this viewer's to act on.
  */
-export function questExitGenericNotice(): QuestExitNotice {
+export function questExitGenericNotice(action: QuestExitAction = 'leave'): QuestExitNotice {
   return {
     title: QUEST_EXIT_GUARD_COPY.genericTitle,
     body: QUEST_EXIT_GUARD_COPY.genericBody,
-    warning: QUEST_EXIT_GUARD_COPY.genericWarning,
+    warning:
+      action === 'leave'
+        ? QUEST_EXIT_GUARD_COPY.genericWarning
+        : QUEST_EXIT_GUARD_COPY.genericReplaceWarning,
     busy: false,
     retryable: false,
     failed: false,

@@ -686,6 +686,43 @@ export function useQuestSession() {
    */
   const runGenerationRef = useRef(0)
   /**
+   * The SAME number, PUBLISHED — so a rendered control is never bound to a
+   * generation that has already moved (UX-497).
+   *
+   * The ref was read at render and returned raw, which is correct for every
+   * render that happens *after* a bump. The hole is a bump that renders
+   * NOTHING: a Start claims its generation before its first awaited read, and a
+   * Start refused in that window (a lost claim, a scope that moved mid-read)
+   * returns without touching a single piece of state. The intro then stayed on
+   * screen with every control bound to the previous generation, so the hook's
+   * own verdict called them all `stale` — and the correct answer to a stale
+   * exit control is to do NOTHING. That is the whole of the first blocker: a
+   * Start callback retained from the previous intro and a freshly rendered one
+   * were indistinguishable, and treating `stale` as a pass-through (so the
+   * fresh control still worked) is what let the retained one run and take the
+   * held partial's Retry with it.
+   *
+   * Fixed at the source, where the prompt asks for it: every bump goes through
+   * {@link bumpViewGeneration}, which publishes the new value and so guarantees
+   * the re-render. A control rendered after any bump carries the live
+   * generation, which makes `stale` mean exactly one thing again — *this
+   * handler is not the live view's* — and lets every caller refuse it outright.
+   */
+  const [publishedViewGeneration, setPublishedViewGeneration] = useState(0)
+  /**
+   * Advance the view generation and publish it, in one step.
+   *
+   * The ref stays the synchronous source of truth — every guard in this file
+   * reads it inside a handler or a continuation, where state cannot answer —
+   * and the published copy is what renders. They can never disagree in a
+   * committed render: the bump schedules one.
+   */
+  const bumpViewGeneration = useCallback(() => {
+    const next = (runGenerationRef.current += 1)
+    setPublishedViewGeneration(next)
+    return next
+  }, [])
+  /**
    * The start claim, held synchronously from the first refusal check until the
    * run is established or the attempt has failed.
    *
@@ -778,6 +815,36 @@ export function useQuestSession() {
     sourceNoticeAttemptRef.current = next.attemptId
     sourceNoticeRef.current = next
     setSourceSave(next)
+  }, [])
+
+  /**
+   * Drop the held PARTIAL a deliberately accepted replacement has replaced
+   * (UX-497).
+   *
+   * Narrow on purpose, and all three conditions are load-bearing:
+   *
+   *   • `partial` only — an independent `final` payload belongs to a summary
+   *     that closed, and this is not the decision that discards it;
+   *   • the exact `viewGeneration` being replaced, so a payload held by any
+   *     other view is left alone;
+   *   • the ref ONLY. The Firestore write this payload came from is already on
+   *     its way or already refused; nothing here cancels a write or touches a
+   *     stored record.
+   *
+   * Why it has to happen at all: a replacement retires the view that owned the
+   * payload, so its Retry is unreachable by construction — but the entry stayed
+   * in the one-slot ref, where `startQuest`'s *"a new run clears the last one's
+   * save notice unless a payload is still held"* read it as live and left the
+   * dead notice up, and a later `retrySourceSave` answered `identity-mismatch`
+   * instead of `nothing-pending`. The child chose the new dig; this is the
+   * minimal cleanup that choice implies.
+   */
+  const retireReplacedPartial = useCallback((replacedGeneration: number) => {
+    const pending = pendingSourceRef.current
+    if (!pending) return
+    if (pending.kind !== 'partial') return
+    if (pending.viewGeneration !== replacedGeneration) return
+    pendingSourceRef.current = null
   }, [])
 
   /**
@@ -1123,11 +1190,30 @@ export function useQuestSession() {
    * retires needs the same cleanup, not just its owner refs cleared.
    */
   const retireUnansweredRun = useCallback(
-    (run: QuestRun | null) => {
+    (
+      run: QuestRun | null,
+      /**
+       * UX-497 — `keepGeneration` retires a run that never became PLAYABLE.
+       *
+       * A Start pins the intro's generation while its reads and its first
+       * question are in flight (see `startQuest`), so bumping here would be the
+       * very loss this run repairs: the guarded intro is still the live view,
+       * and its unsaved partial's Retry lives on it. The run is invalidated by
+       * its own identity instead — the claim is dropped and `runRef` is
+       * cleared, and `instanceId` is monotonic, so this exact attempt can never
+       * be live again. Nothing is rolled back: a generation that was advanced
+       * stays advanced.
+       *
+       * Every other caller — a skipped-only failed run, which HAS asked
+       * questions — bumps exactly as before.
+       */
+      options?: { keepGeneration?: boolean },
+    ) => {
       if (!run || !isLiveRun(runRef.current, run)) return
       // The same bump a reset makes: every callback this run still has in
-      // flight stops being allowed to touch this hook's state.
-      runGenerationRef.current += 1
+      // flight stops being allowed to touch this hook's state. Published, so
+      // the intro this leaves behind renders controls bound to it (UX-497).
+      if (!options?.keepGeneration) bumpViewGeneration()
       startClaimRef.current = null
       if (timerRef.current) {
         clearInterval(timerRef.current)
@@ -1153,7 +1239,7 @@ export function useQuestSession() {
       runRef.current = null
       sessionOwnerRef.current = null
     },
-    [sessionTimer],
+    [sessionTimer, bumpViewGeneration],
   )
 
   // ── Start quest ───────────────────────────────────────────────
@@ -1203,13 +1289,59 @@ export function useQuestSession() {
       // *Try Again* — a newly rendered control — is still a first-class Start.
       if (runRef.current) return 'already-running'
 
-      const generation = (runGenerationRef.current += 1)
-      startClaimRef.current = { generation, scope: renderedScope, kind: 'start' }
+      /**
+       * ── The intro this Start would replace, PINNED while it loads (UX-497)
+       *
+       * The generation used to be advanced here, before a single read. Sol's
+       * last repro: a confirmed Start over a denied partial, its calibration
+       * read held, an `A → B → A` in that window, then release. The Start
+       * refuses its own scope and opens nothing at all — and the Retry for the
+       * answers the child had just been promised was gone anyway, because the
+       * view that owned them had already been retired by a dig that never
+       * started. A replacement that cannot open must replace nothing.
+       *
+       * So this Start runs ON the guarded intro: the generation is pinned, and
+       * it is advanced only at the moment the new dig becomes PLAYABLE (see
+       * `commitStartedRun`). Concurrency does not depend on the number — the
+       * synchronous claim below and the established run refuse a second Start
+       * exactly as they did, and the claim is matched by OBJECT IDENTITY, so a
+       * later attempt that happens to pin the same number can never release
+       * this one's.
+       */
+      const pinnedGeneration = runGenerationRef.current
+      const myClaim = {
+        generation: pinnedGeneration,
+        scope: renderedScope,
+        kind: 'start' as const,
+      }
+      startClaimRef.current = myClaim
       /** Still this Start's claim, and still its scope? */
       const claimHolds = () =>
-        startClaimRef.current?.generation === generation &&
-        runGenerationRef.current === generation &&
+        startClaimRef.current === myClaim &&
+        runGenerationRef.current === pinnedGeneration &&
         scopeStillLive(renderedScope, renderedEpoch)
+      /**
+       * The replacement is PLAYABLE — the first question or the passage is on
+       * screen. Only now is the intro the child left actually replaced: the
+       * view advances, the claim's work is done, and the exact partial that
+       * intro held is dropped (its Retry is unreachable from here by
+       * construction, and leaving it in the one-slot ref shadowed later saves).
+       * Nothing else is touched: no other payload, no stored record, no write.
+       */
+      const commitStartedRun = () => {
+        if (startClaimRef.current === myClaim) startClaimRef.current = null
+        bumpViewGeneration()
+        retireReplacedPartial(pinnedGeneration)
+        // The replaced intro's notice goes with its payload — the ordinary *a
+        // new run clears the last one's notice* rule, applied once there is
+        // nothing held to keep it for.
+        if (
+          !pendingSourceRef.current &&
+          sourceNoticeRef.current.viewGeneration === pinnedGeneration
+        ) {
+          publishSourceSave({ state: 'idle', canRetry: false })
+        }
+      }
       /** Set once this Start establishes its run, so a failure can release it. */
       let startedInstanceId: string | null = null
       /**
@@ -1230,12 +1362,20 @@ export function useQuestSession() {
        * timer or screen that replaced it.
        */
       const releaseClaim = (clearRun: boolean) => {
-        if (startClaimRef.current?.generation === generation) startClaimRef.current = null
+        if (startClaimRef.current === myClaim) startClaimRef.current = null
         if (!clearRun || !startedInstanceId) return
         const established = runRef.current
         if (established?.instanceId !== startedInstanceId) return
-        if (runGenerationRef.current !== generation) return
-        retireUnansweredRun(established)
+        if (runGenerationRef.current !== pinnedGeneration) return
+        /**
+         * UX-497 — pre-playable, so the guarded intro is KEPT. This attempt is
+         * invalidated by its own identity (claim dropped, `runRef` cleared,
+         * monotonic `instanceId`), and the unsaved partial the child was
+         * promised is still owned by the view he is being put back on, with its
+         * exact-source Retry intact — including a held write that settles on
+         * either side of this failure.
+         */
+        retireUnansweredRun(established, { keepGeneration: true })
         setScreen(QuestScreen.Intro)
       }
 
@@ -1425,9 +1565,36 @@ export function useQuestSession() {
       setCurrentPassageText('')
       conversationRef.current = []
       bonusRoundUsedRef.current = false
-      // A new run clears the last one's save notice — unless a payload is still
-      // held unsaved, whose retry is the only thing that can still land it.
-      if (!pendingSourceRef.current) publishSourceSave({ state: 'idle', canRetry: false })
+      /**
+       * A new run clears the last one's save notice — unless the guarded intro
+       * still owes the child something.
+       *
+       * UX-497: this run is established but NOT yet playable, so neither the
+       * payload nor the notice may be discarded here; `commitStartedRun`
+       * retires both at the moment the dig is actually on screen.
+       *
+       * The held PAYLOAD is not the whole question, which is the last bug Sol
+       * found. A partial write that is still in flight has no `pendingSourceRef`
+       * entry at all — the ref is only filled when the transaction rejects — so
+       * a provisional Start over a `saving` partial published `idle` and threw
+       * the guard away: the first question then failed, *Back to village* went
+       * straight through with nothing to ask about, and the denial that arrived
+       * afterwards had no screen left to recover on. The real notice is what the
+       * verdict reads, so the real notice is what is kept: this generation's own
+       * live `partial`, in any of its three phases, with or without a payload.
+       *
+       * Every other notice is cleared exactly as before — a `final` close, an
+       * acknowledged or idle save, and a partial belonging to any other view.
+       */
+      const guardedNotice = sourceNoticeRef.current
+      const introStillOwesSomething =
+        Boolean(pendingSourceRef.current) ||
+        (guardedNotice.kind === 'partial' &&
+          guardedNotice.viewGeneration === pinnedGeneration &&
+          (guardedNotice.state === 'saving' ||
+            guardedNotice.state === 'failed' ||
+            guardedNotice.state === 'conflict'))
+      if (!introStillOwesSomething) publishSourceSave({ state: 'idle', canRetry: false })
       setGraphSync({ state: 'idle' })
       // UX-339 — capture the owner in the same breath as the session identity.
       // From here every write in this session resolves through it, including
@@ -1561,8 +1728,8 @@ export function useQuestSession() {
           }, 1000)
 
           setScreen(QuestScreen.FluencyPassage)
-          // Established and running: the claim's work is done.
-          startClaimRef.current = null
+          // Playable: the passage is on screen, so the replacement is real.
+          commitStartedRun()
           return 'started'
         } catch (err) {
           const errMsg = err instanceof Error ? err.message : String(err)
@@ -1630,8 +1797,8 @@ export function useQuestSession() {
         setCurrentQuestion(probeQuestion)
         questionStartRef.current = Date.now()
         setScreen(QuestScreen.Question)
-        // Established and running.
-        startClaimRef.current = null
+        // Playable: the pilot's one checked item is the first question.
+        commitStartedRun()
         return 'started'
       }
 
@@ -1710,8 +1877,8 @@ export function useQuestSession() {
       setCurrentQuestion(question)
       questionStartRef.current = Date.now()
       setScreen(QuestScreen.Question)
-      // Established and running.
-      startClaimRef.current = null
+      // Playable: the first question is on screen.
+      commitStartedRun()
       return 'started'
     },
     [
@@ -1726,6 +1893,8 @@ export function useQuestSession() {
       scopeStillLive,
       retireUnansweredRun,
       publishSourceSave,
+      bumpViewGeneration,
+      retireReplacedPartial,
     ],
   )
 
@@ -3463,11 +3632,43 @@ export function useQuestSession() {
        * again. Holding the same claim Start holds makes that Start a refused
        * `busy` instead, and the claim is released only by this Resume, only
        * once its transition has resolved either way.
+       *
+       * ── PINNED, not advanced (UX-497) ───────────────────────────────────
+       *
+       * The generation used to be bumped HERE, before the transaction — and the
+       * transaction can refuse: the stored row may have been abandoned, claimed
+       * or finished since the card was drawn. The bump had already retired the
+       * view that owned the NEWER unsaved partial, so its *Try saving again*
+       * disappeared for a Resume that never opened anything. Sol saw exactly
+       * that: an older Resume tapped beside a denied newer partial, refused,
+       * and the newer dig's Retry gone with it.
+       *
+       * So the claim PINS the current generation and the lane is held exactly
+       * as before — the mutual exclusion is unchanged, because it is the claim
+       * and not the number that refuses a Start, a second Resume or a discard.
+       * Only an ACCEPTED claim whose scope and view still match advances it,
+       * below. Every refusal returns with the generation untouched, which
+       * leaves the newer payload, its notice and its Retry exactly as found —
+       * and leaves the previous intro's in-flight partial still able to report
+       * its own outcome while this claim is outstanding.
        */
-      const generation = (runGenerationRef.current += 1)
-      startClaimRef.current = { generation, scope: renderedScope, kind: 'resume' }
+      const pinnedGeneration = runGenerationRef.current
+      /**
+       * This Resume's own claim, matched by OBJECT IDENTITY (UX-497).
+       *
+       * Both doors pin now, so two attempts can legitimately hold the same
+       * number one after the other — a refused Start and the *Try Again*
+       * behind it — and a release matched on the number alone could drop the
+       * next attempt's claim. The object is this attempt's and nobody else's.
+       */
+      let myClaim = {
+        generation: pinnedGeneration,
+        scope: renderedScope,
+        kind: 'resume' as const,
+      }
+      startClaimRef.current = myClaim
       const releaseResumeClaim = () => {
-        if (startClaimRef.current?.generation === generation) startClaimRef.current = null
+        if (startClaimRef.current === myClaim) startClaimRef.current = null
       }
 
       /**
@@ -3501,7 +3702,7 @@ export function useQuestSession() {
       // Accepted — and, because the lane was claimed before the transaction, no
       // Start or second Resume can have established anything in that window: a
       // generation that has moved means a RESET, whose own claim this is not.
-      if (runGenerationRef.current !== generation) {
+      if (runGenerationRef.current !== pinnedGeneration) {
         releaseResumeClaim()
         return 'stale-scope'
       }
@@ -3509,6 +3710,26 @@ export function useQuestSession() {
         releaseResumeClaim()
         return 'stale-scope'
       }
+
+      /**
+       * ── The transition is going through, so NOW the old view is replaced ──
+       *
+       * The claim is acknowledged and the scope and view both still match, so
+       * this is the one path that may retire the intro the child resumed from:
+       * the generation advances here (UX-497), the claim is re-filed under it
+       * so only this Resume can still release it, and the partial that intro
+       * held — and only that one — is dropped from the held-payload slot. The
+       * saved record behind it is untouched: a write already accepted still
+       * lands, and a `final` payload held by some other view is not this
+       * decision's to discard.
+       */
+      myClaim = {
+        generation: bumpViewGeneration(),
+        scope: renderedScope,
+        kind: 'resume',
+      }
+      startClaimRef.current = myClaim
+      retireReplacedPartial(pinnedGeneration)
 
       // Everything played from here is the STORED document's, which is the only
       // copy whose eligibility was checked.
@@ -3630,6 +3851,8 @@ export function useQuestSession() {
       identityEpoch,
       scopeStillLive,
       publishSourceSave,
+      bumpViewGeneration,
+      retireReplacedPartial,
     ],
   )
 
@@ -3699,8 +3922,27 @@ export function useQuestSession() {
      * did), and it names the view that will own the partial's own then/catch —
      * which the bottom version could not, because the promise was already
      * running by the time it happened.
+     *
+     * ── Cancelling a dig that never became playable (UX-497) ──────────────
+     *
+     * *Back to mine* tapped on the Loading screen is the child's own cancel,
+     * and the dig it cancels has asked nothing and saved nothing. The Start
+     * that is loading PINNED this intro's generation, so bumping would retire
+     * the very view whose unsaved partial the child was promised — the same
+     * loss as a refused Start, through the other door. The one case is named
+     * exactly: a `start` claim still held, filed against the live view, which
+     * can only be true before that Start reached its first question (it is
+     * released at playability, and a second Start is refused while it is held).
+     * The exiting attempt is still invalidated — the claim is dropped here and
+     * `runRef` is cleared below, and its `instanceId` can never be live again —
+     * and no generation is rolled back.
      */
-    const introGeneration = (runGenerationRef.current += 1)
+    const cancellingPreplayableStart =
+      startClaimRef.current?.kind === 'start' &&
+      startClaimRef.current.generation === runGenerationRef.current
+    const introGeneration = cancellingPreplayableStart
+      ? runGenerationRef.current
+      : bumpViewGeneration()
     // A Start mid-read no longer owns anything after a reset.
     startClaimRef.current = null
     if (
@@ -3876,6 +4118,7 @@ export function useQuestSession() {
     streak.currentStreak,
     sessionTimer,
     publishSourceSave,
+    bumpViewGeneration,
   ])
 
   // UX-339 — what the quest screen needs to say whose quest this is. Read from
@@ -3926,8 +4169,12 @@ export function useQuestSession() {
     recoveryScope,
     /** The epoch it was rendered under — the same-tick `A → B → A` catch. */
     recoveryEpoch: identityEpoch,
-    /** The view generation a recovery control belongs to. */
-    viewGeneration: runGenerationRef.current,
+    /**
+     * The view generation a recovery control belongs to — the PUBLISHED copy
+     * (UX-497), so a control is never rendered bound to a generation the ref
+     * has already left behind. See `bumpViewGeneration`.
+     */
+    viewGeneration: publishedViewGeneration,
     /** Re-read the resume card: a partial has just landed (UX-494). */
     resumeReloadNonce,
     summarizing,
