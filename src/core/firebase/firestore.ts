@@ -57,6 +57,8 @@ import type {
   XpLedger,
 } from '../types'
 import type { ChildSkillMap } from '../curriculum/skillStatus'
+import type { BuildStudioVersion } from '../types/buildStudio'
+import { buildStudioOptInDocId } from '../types/buildStudio'
 import type { ErrorLog } from '../types/errorLog'
 import type {
   NativeProgressCorrectionMarker,
@@ -916,3 +918,57 @@ export const errorLogsCollection = (
   familyId: string,
 ): CollectionReference<ErrorLog> =>
   collection(db, `families/${familyId}/errorLog`) as CollectionReference<ErrorLog>
+
+// ── Build Studio: the child's own Arcade source (LOCAL-BUILD-001) ──
+
+const buildStudioVersionConverter: FirestoreDataConverter<BuildStudioVersion> = {
+  toFirestore: (data) => stripUndefined(data as unknown as Record<string, unknown>),
+  fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions) => {
+    const data = snapshot.data(options) as BuildStudioVersion
+    return { ...data, id: snapshot.id }
+  },
+}
+
+/**
+ * The IMMUTABLE list of a child's saved game sources (LOCAL-BUILD-001).
+ *
+ * One document per explicit Save, written once inside a create-or-same-payload
+ * transaction and never updated — the record of what the child actually made.
+ * The id is `{childId}__{projectId}__{versionId}`
+ * (`buildStudioVersionDocId`), so the retry of one Save action addresses the
+ * same document instead of writing a second version of the same bytes.
+ *
+ * The source itself is ONE text field (`sourceArchive`), not a map of file
+ * names: `pxt.json` as a Firestore map key is the field path `pxt` → `json`,
+ * and a store whose field paths come from somebody else's file names is a
+ * store that cannot be read back reliably. See `core/types/buildStudio.ts`.
+ *
+ * **Flat and family-owned on purpose.** It sits beside the family's other
+ * collections, which the existing `families/{familyId}/{document=**}` owner
+ * rule already admits, so `firestore.rules` and `storage.rules` are untouched
+ * and no new index is needed: versions are read with ONE equality filter on
+ * `childId` and sorted in memory. It is deliberately **not** a Storage object —
+ * the Storage rules are media-only, and a JSON archive is not media.
+ *
+ * Path: families/{familyId}/buildStudioVersions/{childId}__{projectId}__{versionId}
+ */
+export const buildStudioVersionsCollection = (
+  familyId: string,
+): CollectionReference<BuildStudioVersion> =>
+  collection(db, `families/${familyId}/buildStudioVersions`).withConverter(
+    buildStudioVersionConverter,
+  ) as CollectionReference<BuildStudioVersion>
+
+/**
+ * The per-child Build Studio opt-in document.
+ *
+ * A `settings/` document, like `plannerDefaults_{childId}` — this is a
+ * permission over a surface, not part of who the child is, and nothing on the
+ * child's record should be readable as one.
+ * Path: families/{familyId}/settings/buildStudio_{childId}
+ */
+export const buildStudioOptInDoc = (
+  familyId: string,
+  childId: string,
+): DocumentReference =>
+  doc(db, `families/${familyId}/settings/${buildStudioOptInDocId(childId)}`)

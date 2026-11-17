@@ -32,6 +32,12 @@ vi.mock('./DevAdminTab', () => ({ default: () => <div>dev-tab</div> }))
 vi.mock('./DiagnosticsTab', () => ({ default: () => <div>diagnostics-tab</div> }))
 vi.mock('./SoftProfileSection', () => ({ default: () => <div>soft-profile</div> }))
 vi.mock('./VoiceInputSection', () => ({ default: () => <div>voice-input</div> }))
+// LOCAL-BUILD-001 — the Build Studio opt-in section reads `children` and one
+// settings document per child. Stubbed like its siblings: this suite is about
+// WHICH panel a tab selects.
+vi.mock('../build-studio/BuildStudioSettingsSection', () => ({
+  default: () => <div>build-studio-optin</div>,
+}))
 vi.mock('./AccountSection', () => ({ default: () => <div>account</div> }))
 vi.mock('./AIUsagePanel', () => ({ default: () => <div>ai-usage</div> }))
 

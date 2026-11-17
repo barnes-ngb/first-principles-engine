@@ -33,6 +33,8 @@ import KidBookReaderPage from '../features/monthly-review/KidBookReaderPage'
 import UiPreviewPage from '../features/ui-preview/UiPreviewPage'
 import BusinessPage from '../features/business/BusinessPage'
 import WatchLibraryPage from '../features/watch/WatchLibraryPage'
+import BuildStudioPage from '../features/build-studio/BuildStudioPage'
+import RequireBuildStudioAccess from '../features/build-studio/RequireBuildStudioAccess'
 
 /**
  * Exported so route wiring — which paths sit inside which guard — is assertable
@@ -109,6 +111,19 @@ export const routes = [
       // board is — it is the village the child already has.
       { path: '/stonebridge', element: <StonebridgePage /> },
       { path: '/workshop', element: <WorkshopPage /> },
+      // The Build Studio (LOCAL-BUILD-001). Guarded on the SAME predicate the
+      // nav entry uses, so a direct link cannot reach a surface the menu is
+      // hiding, and it fails closed: an unsettled read waits, and anything
+      // short of an affirmative per-child opt-in redirects to Today with no
+      // "you can't" messaging — the `/quest` guard's shape.
+      {
+        path: '/build-studio',
+        element: (
+          <RequireBuildStudioAccess>
+            <BuildStudioPage />
+          </RequireBuildStudioAccess>
+        ),
+      },
       { path: '/business', element: <BusinessPage /> },
       { path: '/ladders', element: <Navigate to="/progress" replace /> },
       { path: '/evaluation', element: <Navigate to="/progress" replace /> },
