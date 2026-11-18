@@ -19,6 +19,17 @@ import { describe, expect, it } from 'vitest'
  * It is deliberately separate from `hostingCacheHeaders.invariant.test.ts`,
  * whose own header says changing the CSP does not require touching its cache
  * assertions. Nothing here reads a cache rule.
+ *
+ * ── Why the HEADER alone was not the policy ────────────────────────────────
+ *
+ * A browser enforces every CSP it is delivered, and a frame has to satisfy ALL
+ * of them — the effective `frame-src` is the INTERSECTION, not the union. The
+ * served header named `arcade.makecode.com`; `index.html` shipped a SECOND
+ * policy as a `<meta http-equiv>` that still named only `'self'` and YouTube,
+ * so the intersection blocked the editor and the Build Studio sat waiting for a
+ * frame that could never load — a production timeout with a console CSP
+ * violation and a header that looked correct. So the two lists are asserted to
+ * be the same list, and a missing meta fails by name rather than by absence.
  */
 
 type HostingHeader = { key: string; value: string }
@@ -38,6 +49,25 @@ const ALLOWED = [
   'https://www.youtube-nocookie.com',
   'https://arcade.makecode.com',
 ]
+
+/** The static document, which delivers a policy of its very own. */
+const INDEX_HTML = readFileSync(resolve(__dirname, '..', '..', 'index.html'), 'utf8')
+
+/** Every `<meta http-equiv="Content-Security-Policy">` in it, in document order. */
+const metaPolicyTags = [
+  ...INDEX_HTML.matchAll(
+    /<meta\s[^>]*http-equiv=["']Content-Security-Policy["'][^>]*>/gi,
+  ),
+].map((match) => match[0])
+
+const metaContent = (tag: string): string | undefined =>
+  tag.match(/content=["']([^"']*)["']/i)?.[1]
+
+/** One policy, as its source tokens — whitespace and wrapping normalised away. */
+const sourcesOf = (policy: string): string[] =>
+  policy.trim().replace(/^frame-src\s+/, '').split(/\s+/)
+
+const oneLine = (policy: string): string => policy.trim().replace(/\s+/g, ' ')
 
 describe('the app frame-src names exactly the origins we embed', () => {
   it('reads a real app hosting target and a real CSP (guards itself)', () => {
@@ -103,5 +133,48 @@ describe('the app frame-src names exactly the origins we embed', () => {
 
   it('puts the CSP on the broad rule, where every request picks it up', () => {
     expect(broadRule?.source).toBe('**')
+  })
+})
+
+describe('index.html delivers the SAME policy, because browsers intersect them', () => {
+  it('declares a Content-Security-Policy meta at all', () => {
+    expect(
+      metaPolicyTags.length,
+      'index.html declares no <meta http-equiv="Content-Security-Policy"> — if one is ' +
+        'added later it must carry the authorised list, since the browser enforces it ' +
+        'alongside the served header and frames only what BOTH allow',
+    ).toBeGreaterThan(0)
+  })
+
+  it('declares exactly ONE, so there is one list to keep right', () => {
+    expect(
+      metaPolicyTags.length,
+      `index.html declares ${metaPolicyTags.length} CSP metas; each one is enforced, so a ` +
+        'second list silently narrows the first',
+    ).toBe(1)
+  })
+
+  it('names exactly the authorised origins, in the same order as the header', () => {
+    const content = metaContent(metaPolicyTags[0])
+    expect(content, 'the CSP meta has no content attribute to read').toBeTruthy()
+    expect(content!.trim().startsWith('frame-src ')).toBe(true)
+    expect(sourcesOf(content!)).toEqual(ALLOWED)
+  })
+
+  it('is byte-for-byte the authorised header list', () => {
+    // The whole repair: one list, written twice, asserted to be one list.
+    expect(oneLine(metaContent(metaPolicyTags[0])!)).toBe(oneLine(csp!))
+  })
+
+  it('allows the MakeCode editor — the origin whose absence here timed out', () => {
+    expect(
+      metaContent(metaPolicyTags[0]) ?? '',
+      'the meta must allow https://arcade.makecode.com; however permissive the served ' +
+        'header is, the intersection of the two is what loads the editor',
+    ).toContain('https://arcade.makecode.com')
+  })
+
+  it('still allows the watch surface’s own origin', () => {
+    expect(metaContent(metaPolicyTags[0]) ?? '').toContain('https://www.youtube-nocookie.com')
   })
 })

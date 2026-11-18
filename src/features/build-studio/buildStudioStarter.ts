@@ -45,6 +45,9 @@
  */
 
 import type { BuildStudioSourceFiles } from '../../core/types/buildStudio'
+// The generated workspace as the FILE stock Arcade wrote, read as text rather
+// than retyped into a template literal — see {@link STARTER_MAIN_BLOCKS}.
+import STARTER_BLOCKS_ASSET from './appleDashStarter.main.blocks?raw'
 
 /** The project this slice has. One starter, one id. */
 export const BUILD_STUDIO_PROJECT_ID = 'apple-dash-starter'
@@ -164,70 +167,55 @@ controller.moveSprite(hero, 90, 0)
 `
 
 /**
+ * One pixel row of an `img` field: one-character colours, each followed by a
+ * single space — including the LAST, which is why a stock-written row ends in
+ * whitespace.
+ */
+const PIXEL_ROW = /^(?:[.0-9a-f] )+[.0-9a-f]$/
+
+/**
+ * The generator's exact bytes, from an asset no editor can corrupt.
+ *
+ * Two normalisations, both about determinism rather than taste:
+ *
+ * - **LF, always.** A Windows checkout (or any tool with a CRLF habit) must not
+ *   change what the editor is handed, or what the recorded digest means.
+ * - **The trailing space on every pixel row is put BACK.** PXT writes a space
+ *   after the last colour of a row, and trailing whitespace survives no editor,
+ *   formatter or review — so the asset stores those rows trimmed and the one
+ *   place that matters restores them. That is a byte-level claim, not a
+ *   cosmetic one: the test hashes the result.
+ */
+function stockBlocksBytes(asset: string): string {
+  return asset
+    .replace(/\r\n?/g, '\n')
+    .replace(/\n$/, '')
+    .split('\n')
+    .map((line) => (PIXEL_ROW.test(line) ? `${line} ` : line))
+    .join('\n')
+}
+
+/**
  * The REAL blocks workspace — generated offline by stock Arcade 4.1.28 /
  * PXT 13.1.25 from {@link STARTER_MAIN_TS} above, and verified in a fresh stock
  * runtime.
  *
- * Data, not hand-authored XML: it is the editor's own output for this exact
- * TypeScript, which is why its block ids, shadows, mutations and variable ids
- * are the ones Blockly expects. Every backtick inside it is escaped for the
- * template literal; the `img` literals keep their real newlines because that is
- * what the field value is.
+ * **A file now, never retyped.** It used to be a hand-escaped 10 kB template
+ * literal, and the escaping is what broke it: the literal carried one EXTRA
+ * `</block></next>` pair closing the *on start* chain, which makes the XML
+ * malformed — stock Arcade keeps the part it can read and DROPS both spawn
+ * intervals and both overlap handlers, so the game opened with no apples, no
+ * rocks, no score and no life loss before the child touched anything. The 48
+ * pixel rows had lost their trailing space as well. Neither defect is visible
+ * to a reader of a one-line literal, and neither changed the digest this file
+ * claimed to record.
+ *
+ * So the bytes come from `appleDashStarter.main.blocks` — the generator's own
+ * output, imported as text — through {@link stockBlocksBytes}.
  *
  * Paired with the TypeScript. Regenerate BOTH together or neither.
  */
-export const STARTER_MAIN_BLOCKS = `<xml xmlns="https://developers.google.com/blockly/xml"><variables><variable type="KIND_SpriteKind" id="#d)|q+y*)0P_amGPN-lJ">Player</variable><variable type="KIND_SpriteKind" id="YQFR%G.B3eqJY!tGr/a!">Projectile</variable><variable type="KIND_SpriteKind" id=":oSoV!-RclW^9/}9hu\`x">Food</variable><variable type="KIND_SpriteKind" id="8*#^NrwPkI@QT_)EgWFm">Enemy</variable><variable id=":QMXZ5atCqqE[j^]yTz9">apple</variable><variable id="f%1GeTRFf|XGG:(ihL(W">rock</variable><variable id="^43MAt/X!FD-gk!-V8QV">hero</variable></variables><block type="pxt-on-start" x="20" y="20"><statement name="HANDLER"><block type="gamesetbackgroundcolor"><value name="color"><shadow type="colorindexpicker"><field name="index">9</field></shadow></value><next><block type="hudSetLife"><value name="value"><shadow type="math_number"><field name="NUM">3</field></shadow></value><next><block type="hudsetScore"><value name="value"><shadow type="math_number"><field name="NUM">0</field></shadow></value><next><block type="gamecountdown"><value name="duration"><shadow type="math_number"><field name="NUM">45</field></shadow></value><next><block type="variables_set"><field name="VAR" id="^43MAt/X!FD-gk!-V8QV">hero</field><value name="VALUE"><shadow type="math_number"><field name="NUM">0</field></shadow><block type="spritescreate"><value name="img"><shadow type="screen_image_picker"><field name="img">img\`
-. . . . . . . . . . . . . . . .
-. . . . . . f f f f . . . . . .
-. . . . . f d d d d f . . . . .
-. . . . . f d f d f d . . . . .
-. . . . . f d d d d d . . . . .
-. . . . . . f d d d f . . . . .
-. . . . . . . f f f . . . . . .
-. . . . . . 8 8 8 8 8 . . . . .
-. . . . . 8 8 8 8 8 8 8 . . . .
-. . . . 5 8 8 8 8 8 8 8 5 . . .
-. . . . . . 8 8 8 8 8 . . . . .
-. . . . . . 8 8 . 8 8 . . . . .
-. . . . . . 1 1 . 1 1 . . . . .
-. . . . . . 1 1 . 1 1 . . . . .
-. . . . . f f f . f f f . . . .
-. . . . . . . . . . . . . . . .
-\`</field><data>{"commentRefs":[],"fieldData":{"img":null}}</data></shadow></value><value name="kind"><shadow type="spritekind"><field name="MEMBER">Player</field></shadow></value></block></value><next><block type="spritesetpos"><value name="sprite"><block type="variables_get"><field name="VAR" id="^43MAt/X!FD-gk!-V8QV">hero</field></block></value><value name="x"><shadow type="positionPicker"><field name="index">80</field></shadow></value><value name="y"><shadow type="positionPicker"><field name="index">104</field></shadow></value><next><block type="spritesetsetstayinscreen"><value name="sprite"><block type="variables_get"><field name="VAR" id="^43MAt/X!FD-gk!-V8QV">hero</field></block></value><value name="on"><shadow type="toggleOnOff"><field name="on">true</field></shadow></value><next><block type="game_control_sprite"><mutation xmlns="http://www.w3.org/1999/xhtml" _expanded="2" _input_init="true"></mutation><value name="sprite"><block type="variables_get"><field name="VAR" id="^43MAt/X!FD-gk!-V8QV">hero</field></block></value><value name="vx"><shadow type="spriteSpeedPicker"><field name="speed">90</field></shadow></value><value name="vy"><shadow type="spriteSpeedPicker"><field name="speed">0</field></shadow></value></block></next></block></next></block></next></block></next></block></next></block></next></block></next></block></next></block></statement></block><block type="gameinterval" x="20" y="547"><value name="period"><shadow type="timePicker"><field name="ms">1200</field></shadow></value><statement name="HANDLER"><block type="variables_set"><field name="VAR" id=":QMXZ5atCqqE[j^]yTz9">apple</field><value name="VALUE"><shadow type="math_number"><field name="NUM">0</field></shadow><block type="spritescreate"><value name="img"><shadow type="screen_image_picker"><field name="img">img\`
-. . . . . . . . . . . . . . . .
-. . . . . . . 7 7 . . . . . . .
-. . . . . . 7 7 . . . . . . . .
-. . . . 2 2 2 2 2 2 . . . . . .
-. . . 2 2 2 2 2 2 2 2 . . . . .
-. . 2 2 2 2 2 2 2 2 2 2 . . . .
-. . 2 2 1 2 2 2 2 2 2 2 . . . .
-. . 2 2 2 2 2 2 2 2 2 2 . . . .
-. . 2 2 2 2 2 2 2 2 2 2 . . . .
-. . . 2 2 2 2 2 2 2 2 . . . . .
-. . . . 2 2 2 2 2 2 . . . . . .
-. . . . . 2 2 2 2 . . . . . . .
-. . . . . . . . . . . . . . . .
-. . . . . . . . . . . . . . . .
-. . . . . . . . . . . . . . . .
-. . . . . . . . . . . . . . . .
-\`</field><data>{"commentRefs":[],"fieldData":{"img":null}}</data></shadow></value><value name="kind"><shadow type="spritekind"><field name="MEMBER">Food</field></shadow></value></block></value><next><block type="spritesetpos"><value name="sprite"><block type="variables_get"><field name="VAR" id=":QMXZ5atCqqE[j^]yTz9">apple</field></block></value><value name="x"><shadow type="positionPicker"><field name="index">0</field></shadow><block type="device_random"><value name="min"><shadow type="math_number"><field name="NUM">8</field></shadow></value><value name="limit"><shadow type="math_number"><field name="NUM">152</field></shadow></value></block></value><value name="y"><shadow type="positionPicker"><field name="index">2</field></shadow></value><next><block type="spritesetsetflag"><field name="flag">SpriteFlag.AutoDestroy</field><value name="sprite"><block type="variables_get"><field name="VAR" id=":QMXZ5atCqqE[j^]yTz9">apple</field></block></value><value name="on"><shadow type="toggleOnOff"><field name="on">true</field></shadow></value><next><block type="Sprite_blockCombine_set"><field name="property">Sprite.vy@set</field><value name="mySprite"><block type="variables_get"><field name="VAR" id=":QMXZ5atCqqE[j^]yTz9">apple</field></block></value><value name="value"><shadow type="math_number"><field name="NUM">45</field></shadow></value></block></next></block></next></block></next></block></statement></block><block type="gameinterval" x="20" y="882"><value name="period"><shadow type="timePicker"><field name="ms">2000</field></shadow></value><statement name="HANDLER"><block type="variables_set"><field name="VAR" id="f%1GeTRFf|XGG:(ihL(W">rock</field><value name="VALUE"><shadow type="math_number"><field name="NUM">0</field></shadow><block type="spritescreate"><value name="img"><shadow type="screen_image_picker"><field name="img">img\`
-. . . . . . . . . . . . . . . .
-. . . . . . . . . . . . . . . .
-. . . . . . . . . . . . . . . .
-. . . . . . . . . . . . . . . .
-. . . . . e e e e . . . . . . .
-. . . . e e e e e e . . . . . .
-. . . e e e e e e e e . . . . .
-. . e e e d e e e e e e . . . .
-. . e e e e e e e e e e . . . .
-. . e e e e e e d e e e . . . .
-. . . e e e e e e e e . . . . .
-. . . . e e e e e e . . . . . .
-. . . . . . . . . . . . . . . .
-. . . . . . . . . . . . . . . .
-. . . . . . . . . . . . . . . .
-. . . . . . . . . . . . . . . .
-\`</field><data>{"commentRefs":[],"fieldData":{"img":null}}</data></shadow></value><value name="kind"><shadow type="spritekind"><field name="MEMBER">Enemy</field></shadow></value></block></value><next><block type="spritesetpos"><value name="sprite"><block type="variables_get"><field name="VAR" id="f%1GeTRFf|XGG:(ihL(W">rock</field></block></value><value name="x"><shadow type="positionPicker"><field name="index">0</field></shadow><block type="device_random"><value name="min"><shadow type="math_number"><field name="NUM">8</field></shadow></value><value name="limit"><shadow type="math_number"><field name="NUM">152</field></shadow></value></block></value><value name="y"><shadow type="positionPicker"><field name="index">2</field></shadow></value><next><block type="spritesetsetflag"><field name="flag">SpriteFlag.AutoDestroy</field><value name="sprite"><block type="variables_get"><field name="VAR" id="f%1GeTRFf|XGG:(ihL(W">rock</field></block></value><value name="on"><shadow type="toggleOnOff"><field name="on">true</field></shadow></value><next><block type="Sprite_blockCombine_set"><field name="property">Sprite.vy@set</field><value name="mySprite"><block type="variables_get"><field name="VAR" id="f%1GeTRFf|XGG:(ihL(W">rock</field></block></value><value name="value"><shadow type="math_number"><field name="NUM">60</field></shadow></value></block></next></block></next></block></next></block></statement></block><block type="spritesoverlap" x="20" y="1217"><value name="HANDLER_DRAG_PARAM_sprite"><block type="argument_reporter_custom" deletable="false"><mutation typename="Sprite"></mutation><field name="VALUE">sprite</field></block></value><value name="kind"><shadow type="spritekind"><field name="MEMBER">Player</field></shadow></value><value name="HANDLER_DRAG_PARAM_otherSprite"><block type="argument_reporter_custom" deletable="false"><mutation typename="Sprite"></mutation><field name="VALUE">otherSprite</field></block></value><value name="otherKind"><shadow type="spritekind"><field name="MEMBER">Food</field></shadow></value><statement name="HANDLER"><block type="spritedestroy"><mutation xmlns="http://www.w3.org/1999/xhtml" _expanded="0" _input_init="true"></mutation><field name="effect">effects.spray</field><value name="sprite"><block type="argument_reporter_custom"><mutation typename="Sprite"></mutation><field name="VALUE">otherSprite</field></block></value><next><block type="hudChangeScoreBy"><value name="value"><shadow type="math_number"><field name="NUM">1</field></shadow></value></block></next></block></statement></block><block type="spritesoverlap" x="20" y="1446"><value name="HANDLER_DRAG_PARAM_sprite"><block type="argument_reporter_custom" deletable="false"><mutation typename="Sprite"></mutation><field name="VALUE">sprite</field></block></value><value name="kind"><shadow type="spritekind"><field name="MEMBER">Player</field></shadow></value><value name="HANDLER_DRAG_PARAM_otherSprite"><block type="argument_reporter_custom" deletable="false"><mutation typename="Sprite"></mutation><field name="VALUE">otherSprite</field></block></value><value name="otherKind"><shadow type="spritekind"><field name="MEMBER">Enemy</field></shadow></value><statement name="HANDLER"><block type="spritedestroy"><mutation xmlns="http://www.w3.org/1999/xhtml" _expanded="0" _input_init="true"></mutation><field name="effect">effects.spray</field><value name="sprite"><block type="argument_reporter_custom"><mutation typename="Sprite"></mutation><field name="VALUE">otherSprite</field></block></value><next><block type="hudChangeLifeBy"><value name="value"><shadow type="math_number"><field name="NUM">-1</field></shadow></value></block></next></block></statement></block></xml>`
+export const STARTER_MAIN_BLOCKS = stockBlocksBytes(STARTER_BLOCKS_ASSET)
 
 /**
  * The exact verified pair, recorded as data.
@@ -406,6 +394,117 @@ export function blocksLookAuthored(mainBlocks: string | undefined): boolean {
   return mainBlocks.includes(`type="${LIFE_BLOCK_TYPE}"`)
 }
 
+// ── The PREPARED STARTER's own scaffold, checked on the way in ─────────────
+//
+// Everything below runs on ONE input: the readback of a freshly imported
+// starter, before the child has touched anything. It is deliberately stricter
+// than `blocksLookAuthored`, and deliberately NOT reused on a saved, customised
+// or recovered game — his game is his, and an app that required apples in it
+// would be deciding what he is allowed to make.
+
+/** The spawn loops (*on game update every N ms*) — one apple, one rock. */
+const SPAWN_LOOP_BLOCK_TYPE = 'gameinterval'
+/** The two *on sprite overlap* handlers — the catch and the hit. */
+const OVERLAP_BLOCK_TYPE = 'spritesoverlap'
+/** What each loop is FOR: a sprite actually gets created. */
+const SPRITE_CREATE_BLOCK_TYPE = 'spritescreate'
+/** What a catch and a hit do. A starter missing these plays silently wrong. */
+const SCORE_RESPONSE_BLOCK_TYPE = 'hudChangeScoreBy'
+const LIFE_RESPONSE_BLOCK_TYPE = 'hudChangeLifeBy'
+
+/**
+ * The ROOT blocks the starter is made of, and how many of each.
+ *
+ * Counted at the top level on purpose. The malformed literal closed the
+ * workspace early, and what stock Arcade handed back was a perfectly readable
+ * *on start* — background, life 3, score, countdown, hero, movement — with both
+ * spawn loops and both overlap handlers simply gone. Every string check in this
+ * file passed it, the life number agreed with the TypeScript, and the game had
+ * no apples, no rocks, no score and no way to lose a life.
+ */
+const STARTER_ROOT_BLOCKS: ReadonlyArray<readonly [type: string, count: number]> = [
+  [ON_START_BLOCK_TYPE, 1],
+  [SPAWN_LOOP_BLOCK_TYPE, 2],
+  [OVERLAP_BLOCK_TYPE, 2],
+]
+
+/**
+ * Parse `main.blocks` as XML, STRICTLY. `null` when it is not well-formed.
+ *
+ * `DOMParser` is the runtime's own parser — the same one the editor reads
+ * through — and it reports a malformed document by returning a `parsererror`
+ * element rather than by throwing, so both answers are handled. Nothing here is
+ * lenient: the extra closing tag that caused this repair has to come back as
+ * `null`, not as a half-read workspace.
+ */
+function parseBlocksWorkspace(mainBlocks: string): Element | null {
+  if (typeof DOMParser === 'undefined') return null
+  let parsed: Document
+  try {
+    parsed = new DOMParser().parseFromString(mainBlocks, 'text/xml')
+  } catch {
+    return null
+  }
+  if (parsed.getElementsByTagName('parsererror').length > 0) return null
+  const root = parsed.documentElement
+  return root && root.tagName === 'xml' ? root : null
+}
+
+/** The `type` of every `block` at or below this element. */
+function blockTypesIn(parent: Element): string[] {
+  return Array.from(parent.getElementsByTagName('block')).map(
+    (block) => block.getAttribute('type') ?? '',
+  )
+}
+
+/**
+ * Is this the WHOLE prepared starter — parsed, not pattern-matched?
+ *
+ * Starter-only. It asks the questions a child would notice the answer to: does
+ * the workspace parse at all, are all five root blocks there, does each spawn
+ * loop create something, and does one overlap add a point while the other takes
+ * a life. A right-looking `set life to 3` is explicitly not enough on its own —
+ * that is exactly what the broken literal had.
+ */
+export function starterScaffoldLooksComplete(mainBlocks: string | undefined): boolean {
+  if (!mainBlocks) return false
+  const root = parseBlocksWorkspace(mainBlocks)
+  if (!root) return false
+
+  const roots = Array.from(root.children).filter((child) => child.tagName === 'block')
+  const typeOf = (block: Element) => block.getAttribute('type')
+  for (const [type, count] of STARTER_ROOT_BLOCKS) {
+    if (roots.filter((block) => typeOf(block) === type).length !== count) return false
+  }
+
+  // The tuning numbers all live in `on start`, including the one the goal names.
+  const onStart = roots.find((block) => typeOf(block) === ON_START_BLOCK_TYPE)
+  if (!onStart) return false
+  const inOnStart = blockTypesIn(onStart)
+  for (const type of [
+    LIFE_BLOCK_TYPE,
+    'hudsetScore',
+    'gamecountdown',
+    'game_control_sprite',
+    SPRITE_CREATE_BLOCK_TYPE,
+  ]) {
+    if (!inOnStart.includes(type)) return false
+  }
+
+  // A loop that spawns nothing is a loop with no apple and no rock in it.
+  const spawnLoops = roots.filter((block) => typeOf(block) === SPAWN_LOOP_BLOCK_TYPE)
+  if (!spawnLoops.every((loop) => blockTypesIn(loop).includes(SPRITE_CREATE_BLOCK_TYPE))) {
+    return false
+  }
+
+  // One overlap answers a catch, the other answers a hit.
+  const responses = roots
+    .filter((block) => typeOf(block) === OVERLAP_BLOCK_TYPE)
+    .map((overlap) => blockTypesIn(overlap))
+  if (!responses.some((types) => types.includes(SCORE_RESPONSE_BLOCK_TYPE))) return false
+  return responses.some((types) => types.includes(LIFE_RESPONSE_BLOCK_TYPE))
+}
+
 /**
  * Do these Blocks and this TypeScript describe the SAME program?
  *
@@ -446,12 +545,21 @@ export function starterBlocksMatchSource(
  * made this necessary passed the old version of this check: a project whose
  * TypeScript was fine and whose Blocks were blank, which the next save would
  * have written over the TypeScript.
+ *
+ * Three things now, because the second verified failure passed BOTH of the
+ * first two: a workspace carrying a readable `on start` with the right life
+ * number, and nothing else — no apple, no rock, no score, no life lost. So the
+ * Blocks are also PARSED and the whole scaffold counted
+ * ({@link starterScaffoldLooksComplete}). A `false` here is what turns the save
+ * controls off and puts the honest recovery sentence and *Try again* on screen.
  */
 export function starterImportLooksCorrect(files: BuildStudioSourceFiles): boolean {
   const ts = files['main.ts']
   if (typeof ts !== 'string' || !ts.includes('sprites.create')) return false
   if (!ts.includes('info.setLife')) return false
-  return starterBlocksMatchSource(files['main.blocks'], ts)
+  const blocks = files['main.blocks']
+  if (!starterScaffoldLooksComplete(blocks)) return false
+  return starterBlocksMatchSource(blocks, ts)
 }
 
 /**
