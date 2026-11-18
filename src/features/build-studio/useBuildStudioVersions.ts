@@ -18,7 +18,7 @@
 // cannot reuse the first A's list, and a snapshot already in flight when the
 // child changed or Try again was tapped cannot overwrite the newest answer.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { onSnapshot, query, where } from 'firebase/firestore'
 
 import { buildStudioVersionsCollection } from '../../core/firebase/firestore'
@@ -78,21 +78,18 @@ export function versionBelongsTo(
 /**
  * ONE subscription's identity.
  *
- * An OBJECT, minted fresh for every family / child / project / attempt — never
- * the comparable string on its own, which is what let an `A → B → A` reuse A's
- * first answer: the third subscription's key is character-for-character the
- * first one's, so an answer (or a late callback) from before the switch read as
- * current. Object identity cannot be re-created by accident, so the answer for
- * the first A is not an answer for the second one.
- *
- * `signature` is kept only to decide WHEN to mint the next one; it is never
- * what a stored value is matched on.
+ * An OBJECT, not a string key. A string built from the family, child and
+ * project is identical for two different subscriptions, which is what let an
+ * `A → B → A` reuse A's first answer — and let a callback from before the
+ * switch overwrite the newest one. Object identity cannot be re-created by
+ * accident, so A's first answer is not an answer about A's second subscription.
  */
 interface VersionsRequest {
   familyId: string | null
   childId: string | null
   projectId: string | null
-  signature: string
+  /** The retry this request belongs to, so a retry is a new subscription. */
+  attempt: number
 }
 
 /**
@@ -120,35 +117,27 @@ export function useBuildStudioVersions(
   }, [])
 
   /**
-   * The request this render WANTS, minted during render so the comparison below
-   * is about the current inputs rather than about whatever the last effect
-   * happened to subscribe for. Re-used while the inputs are unchanged, which is
-   * what keeps the effect from re-subscribing on every render.
+   * The request this render wants. `attempt` is in it, so *Try again* mints a
+   * new identity and therefore a new subscription. A memo React drops can only
+   * cost a fresh read, which is safe.
    */
-  const signature = [familyId ?? '', childId ?? '', projectId ?? '', attempt].join('\u0000')
-  const requestRef = useRef<VersionsRequest | null>(null)
-  const held = requestRef.current
-  const request: VersionsRequest =
-    held && held.signature === signature
-      ? held
-      : {
-          familyId: familyId ?? null,
-          childId: childId ?? null,
-          projectId: projectId ?? null,
-          signature,
-        }
-  requestRef.current = request
+  const request: VersionsRequest = useMemo(
+    () => ({
+      familyId: familyId ?? null,
+      childId: childId ?? null,
+      projectId: projectId ?? null,
+      attempt,
+    }),
+    [familyId, childId, projectId, attempt],
+  )
 
   useEffect(() => {
     const { familyId: family, childId: child, projectId: project } = request
     if (!family || !child || !project) return
-    /**
-     * This subscription's own retirement, closed over by its callbacks.
-     *
-     * Set BEFORE `unsubscribe`, because a snapshot already queued must not land
-     * as this hook's answer: a callback that ran after a switch or a retry
-     * could otherwise overwrite the newest answer with an older one.
-     */
+    // This subscription's own retirement, closed over by both callbacks and
+    // set BEFORE `unsubscribe`: a snapshot already queued when the child
+    // changed, or when Try again was tapped, must not overwrite the newest
+    // answer.
     let retired = false
     // ONE equality filter, sorted and project-filtered in memory. Two equality
     // filters would also be index-free, but keeping it to one removes the
