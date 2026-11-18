@@ -2478,3 +2478,56 @@ describe('the reflection mic gets the resolved child’s voice setting', () => {
     expect(retry.noteActionId).toBe(first.noteActionId)
   })
 })
+
+/**
+ * A capture the caps refused stores NOTHING — and in particular not an older
+ * version (PR #1974 round 2).
+ *
+ * What makes a refused capture a failure instead of a success carrying older
+ * bytes is in the bridge, where the message order lives, and it is asserted
+ * against the real protocol there (`arcadeBridge.test.ts` → "a capture never
+ * answers with a version older than a refused one"). This is the app side of
+ * that same contract, which is the part a child meets: the size failure is what
+ * he is told, the shelf is not written to, no Retry slot is created for bytes
+ * nobody captured, and leaving is still held because what is open is not saved.
+ */
+describe('a capture refused for size stores nothing at all', () => {
+  /** The current source, over the per-file cap: his own edited blocks, too big. */
+  const tooBigFiles = (lives: number) => {
+    const files = editedFiles(lives)
+    return {
+      ...files,
+      'main.blocks': `${files['main.blocks']}<!--${'b'.repeat(400_001)}-->`,
+    }
+  }
+
+  it('writes no version, holds no retry, and keeps a departure held', async () => {
+    const bridge = await openEditor()
+    // An older game the editor announced and this app accepted.
+    await act(async () => {
+      bridge.announce(editedFiles(4))
+    })
+    // He builds past the cap. The bridge refuses the capture outright rather
+    // than handing back the older four-life payload it had collected.
+    bridge.refuseTooBig(tooBigFiles(5))
+    bridge.captureError = new Error('Your game is now too big for this app to keep')
+    await tapSave()
+    await waitFor(() =>
+      expect(screen.getByText(/too big for this app to keep/)).toBeInTheDocument(),
+    )
+
+    // Nothing was stored, nothing claims to have been stored, and there is no
+    // unfinished save holding an older version for a Retry.
+    expect(saveVersion).not.toHaveBeenCalled()
+    expect(readPendingSave(OWNER)).toBeNull()
+    expect(screen.queryByText('Saved. Your game is on your shelf.')).not.toBeInTheDocument()
+
+    // And leaving is held, because the game in front of him is not on the shelf.
+    await attemptDeparture()
+    await waitFor(() =>
+      expect(screen.getByText('Keep your game first?')).toBeInTheDocument(),
+    )
+    expect(proceedSpy).not.toHaveBeenCalled()
+    expect(saveVersion).not.toHaveBeenCalled()
+  })
+})

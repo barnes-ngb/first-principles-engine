@@ -1343,6 +1343,302 @@ describe('a source that is too big to save is not an older source', () => {
   })
 })
 
+/**
+ * MESSAGE ORDER: a refused-for-size payload invalidates what the capture had
+ * already collected (PR #1974 round 2).
+ *
+ * The reported hole, reproduced locally by the reviewer: the editor announces a
+ * valid three-life `workspacesave`, the child's next save is over the caps, and
+ * the matching ACK then arrives. `acceptProject` recorded the refusal but left
+ * `capture.latest` holding the OLDER payload, so `requestSnapshot` resolved
+ * with three-life bytes while `oversizedSourceForDownload()` held the four-life
+ * game actually in the editor — Save storing the wrong version, and a departure
+ * check reading a stale source as "clean".
+ *
+ * These drive the real `postMessage` protocol in its real order: events, then
+ * the matching reply. Nothing is stubbed but the frame.
+ *
+ * POSITIVE CONTROL for the whole block: drop `this.capture.latest = null` from
+ * the cap refusal in `acceptProject` and every "refuses" case here resolves
+ * with the older `info.setLife(3)` source instead, which is the defect.
+ */
+describe('a capture never answers with a version older than a refused one', () => {
+  function readyBridge() {
+    const made = makeBridge()
+    made.bridge.handleMessage(
+      event(made.frame, {
+        type: 'pxthost',
+        action: 'workspaceloaded',
+        id: 'l',
+        frameId: made.bridge.frameId,
+      }),
+    )
+    made.frame.posted.length = 0
+    return made
+  }
+
+  /** One `workspacesave` event, as the provider posts them. */
+  function announce(
+    made: ReturnType<typeof readyBridge>,
+    text: Record<string, unknown>,
+    header: Record<string, unknown> = {},
+  ) {
+    made.bridge.handleMessage(
+      event(made.frame, {
+        type: 'pxthost',
+        action: 'workspacesave',
+        frameId: made.bridge.frameId,
+        project: ourProject({ text, header }),
+      }),
+    )
+  }
+
+  /** The matching `saveproject` reply. Stock 4.1.28 carries no project body. */
+  function ack(
+    made: ReturnType<typeof readyBridge>,
+    id: unknown,
+    extra: Record<string, unknown> = {},
+  ) {
+    made.bridge.handleMessage(
+      event(made.frame, {
+        type: 'pxteditor',
+        action: 'saveproject',
+        id,
+        frameId: made.bridge.frameId,
+        success: true,
+        ...extra,
+      }),
+    )
+  }
+
+  const captureId = (made: ReturnType<typeof readyBridge>) =>
+    made.frame.posted.at(-1)!.message.id
+
+  /** Over the PER-FILE cap only — the whole map still fits the archive cap. */
+  const overFileCap = (lives: number) => ({
+    'main.ts': `info.setLife(${lives})`,
+    'main.blocks': 'b'.repeat(400_001),
+  })
+  /** Over the TOTAL archive cap, with no single file over the per-file one. */
+  const overTotalCap = (lives: number) => ({
+    'main.ts': `info.setLife(${lives})`,
+    'main.blocks': 'b'.repeat(300_000),
+    'a.ts': 'a'.repeat(300_000),
+    'c.ts': 'c'.repeat(300_000),
+  })
+  /** Over the FILE-COUNT cap: 24 is the most a project may carry. */
+  const overFileCountCap = (lives: number) => {
+    const text: Record<string, string> = { 'main.ts': `info.setLife(${lives})` }
+    for (let i = 0; i < 30; i += 1) text[`f${i}.ts`] = 'x'
+    return text
+  }
+
+  it('refuses the capture when the newer payload broke the PER-FILE cap', async () => {
+    const made = readyBridge()
+    const pending = made.bridge.requestSnapshot()
+    const id = captureId(made)
+    // The valid payload the stock provider posts first, and collects.
+    announce(made, { 'main.ts': 'info.setLife(3)' })
+    // Then the child's current, bigger game — ours, and refused.
+    announce(made, overFileCap(4))
+    ack(made, id)
+
+    // The size failure, NOT a success carrying the older three-life bytes.
+    await expect(pending).rejects.toMatchObject({
+      kind: ArcadeBridgeFailure.BadProject,
+      message: ARCADE_TOO_BIG_TO_SAVE,
+    })
+    expect(made.rejected.map((r) => r.reason)).toContain('payload-too-big')
+    // The refused source is still the newest one this bridge has read, and is
+    // available as itself for a download — unchanged by this repair.
+    expect(made.bridge.sourceOverCaps()).toBe(true)
+    expect(made.bridge.oversizedSourceForDownload()?.['main.ts']).toBe('info.setLife(4)')
+    // The older accepted project is an editor save and nothing more.
+    expect(made.bridge.editorSaveSeen()?.files['main.ts']).toBe('info.setLife(3)')
+    expect(made.bridge.isCapturing()).toBe(false)
+  })
+
+  it('refuses it for the TOTAL archive cap, with nothing to hand back', async () => {
+    const made = readyBridge()
+    const pending = made.bridge.requestSnapshot()
+    const id = captureId(made)
+    announce(made, { 'main.ts': 'info.setLife(3)' })
+    announce(made, overTotalCap(4))
+    ack(made, id)
+
+    await expect(pending).rejects.toMatchObject({
+      kind: ArcadeBridgeFailure.BadProject,
+      message: ARCADE_TOO_BIG_TO_SAVE,
+    })
+    expect(made.bridge.sourceOverCaps()).toBe(true)
+    // Too big to hold at all: the FACT, not the bytes.
+    expect(made.bridge.oversizedSourceForDownload()).toBeNull()
+  })
+
+  it('refuses it when the newer payload broke the FILE-COUNT cap', async () => {
+    const made = readyBridge()
+    const pending = made.bridge.requestSnapshot()
+    const id = captureId(made)
+    announce(made, { 'main.ts': 'info.setLife(3)' })
+    announce(made, overFileCountCap(4))
+    ack(made, id)
+
+    await expect(pending).rejects.toMatchObject({
+      kind: ArcadeBridgeFailure.BadProject,
+      message: ARCADE_TOO_BIG_TO_SAVE,
+    })
+    expect(made.bridge.oversizedSourceForDownload()).toBeNull()
+  })
+
+  /**
+   * The other direction, which must still SUCCEED: he went over the cap, then
+   * deleted some of it again before the ACK. The capture's answer is that last
+   * acceptable payload — never the refused one, and never a failure.
+   */
+  it('succeeds with a LATER valid payload that replaced the refused one', async () => {
+    const made = readyBridge()
+    const pending = made.bridge.requestSnapshot()
+    const id = captureId(made)
+    announce(made, overFileCap(4))
+    announce(made, { 'main.ts': 'info.setLife(5)' })
+    ack(made, id)
+
+    const result = await pending
+    expect(result.files['main.ts']).toBe('info.setLife(5)')
+    expect(result.files['main.blocks']).toBe('<xml/>')
+    // The refusal is no longer true about the editor.
+    expect(made.bridge.sourceOverCaps()).toBe(false)
+    expect(made.bridge.oversizedSourceForDownload()).toBeNull()
+  })
+
+  it('succeeds with the last valid payload across valid → overcap → valid', async () => {
+    const made = readyBridge()
+    const pending = made.bridge.requestSnapshot()
+    const id = captureId(made)
+    announce(made, { 'main.ts': 'info.setLife(3)' })
+    announce(made, overFileCap(4))
+    announce(made, { 'main.ts': 'info.setLife(5)' })
+    ack(made, id)
+
+    await expect(pending).resolves.toMatchObject({
+      files: { 'main.ts': 'info.setLife(5)' },
+    })
+  })
+
+  it('is NOT rescued by a valid payload that arrives after the ACK', async () => {
+    const made = readyBridge()
+    const pending = made.bridge.requestSnapshot()
+    const id = captureId(made)
+    announce(made, { 'main.ts': 'info.setLife(3)' })
+    announce(made, overFileCap(4))
+    ack(made, id)
+    await expect(pending).rejects.toMatchObject({
+      kind: ArcadeBridgeFailure.BadProject,
+      message: ARCADE_TOO_BIG_TO_SAVE,
+    })
+    // A later autosave belongs to no capture: it is an editor save, and the
+    // failed capture stays failed until somebody taps Save again.
+    announce(made, { 'main.ts': 'info.setLife(5)' })
+    expect(made.bridge.editorSaveSeen()?.files['main.ts']).toBe('info.setLife(5)')
+    expect(made.bridge.isCapturing()).toBe(false)
+  })
+
+  /**
+   * Identity comes FIRST, and this repair does not give an outsider a new
+   * power: a foreign, published or differently-headed oversized event says
+   * nothing about the child's own game, so it may neither contribute bytes nor
+   * throw away a correct capture.
+   */
+  it('lets no FOREIGN oversized event invalidate our valid capture', async () => {
+    const strangers = [
+      { name: 'Untitled' },
+      { pubId: 'pub-1' },
+      { id: 'header-2' },
+      { id: '' },
+    ]
+    for (const header of strangers) {
+      const made = readyBridge()
+      const pending = made.bridge.requestSnapshot()
+      const id = captureId(made)
+      // Ours, so the header is pinned and the payload collected.
+      announce(made, { 'main.ts': 'info.setLife(3)' })
+      // A stranger's enormous save, mid-capture.
+      announce(made, overFileCap(9), header)
+      ack(made, id)
+
+      await expect(pending).resolves.toMatchObject({
+        files: { 'main.ts': 'info.setLife(3)' },
+      })
+      expect(made.rejected.map((r) => r.reason)).toEqual(['foreign-project'])
+      // And it contributed nothing to the download route either.
+      expect(made.bridge.sourceOverCaps()).toBe(false)
+      expect(made.bridge.oversizedSourceForDownload()).toBeNull()
+    }
+  })
+
+  it('lets no MALFORMED or wrong-addressed oversized event invalidate it', async () => {
+    const made = readyBridge()
+    const pending = made.bridge.requestSnapshot()
+    const id = captureId(made)
+    announce(made, { 'main.ts': 'info.setLife(3)' })
+
+    // Unreadable: a huge map with a non-string file in it.
+    announce(made, { ...overFileCap(9), 'bad.ts': 7 })
+    // The PREVIOUS frame's enormous save.
+    made.bridge.handleMessage(
+      event(made.frame, {
+        type: 'pxthost',
+        action: 'workspacesave',
+        frameId: 'an-older-frame',
+        project: ourProject({ text: overFileCap(9) }),
+      }),
+    )
+    // And one from somewhere else entirely.
+    made.bridge.handleMessage(
+      event(
+        made.frame,
+        {
+          type: 'pxthost',
+          action: 'workspacesave',
+          frameId: made.bridge.frameId,
+          project: ourProject({ text: overFileCap(9) }),
+        },
+        'https://evil.example',
+      ),
+    )
+    ack(made, id)
+
+    await expect(pending).resolves.toMatchObject({
+      files: { 'main.ts': 'info.setLife(3)' },
+    })
+    expect(made.rejected.map((r) => r.reason)).toEqual([
+      'foreign-project',
+      'frame-id',
+      'origin',
+    ])
+    expect(made.bridge.sourceOverCaps()).toBe(false)
+  })
+
+  /**
+   * The same hole on the other correlation route: a version that DOES send a
+   * project body on the reply, and that body is over the caps. The older
+   * collected payload is not a fallback for it.
+   */
+  it('refuses an over-cap project body carried ON the acknowledgment', async () => {
+    const made = readyBridge()
+    const pending = made.bridge.requestSnapshot()
+    const id = captureId(made)
+    announce(made, { 'main.ts': 'info.setLife(3)' })
+    ack(made, id, { project: ourProject({ text: overFileCap(4) }) })
+
+    await expect(pending).rejects.toMatchObject({
+      kind: ArcadeBridgeFailure.BadProject,
+      message: ARCADE_TOO_BIG_TO_SAVE,
+    })
+    expect(made.bridge.oversizedSourceForDownload()?.['main.ts']).toBe('info.setLife(4)')
+  })
+})
+
 describe('the failure kinds the page branches on are all named', () => {
   it('declares every one it throws', () => {
     expect(Object.values(ArcadeBridgeFailure).sort()).toEqual([

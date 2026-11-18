@@ -216,6 +216,14 @@ interface CaptureState {
   requestId: string
   /** When the capture was dispatched. Diagnostic; the ACK is the fence. */
   startedAt: number
+  /**
+   * The last valid payload of ours collected since dispatch, or `null`.
+   *
+   * Back to `null` when a NEWER payload of ours is refused for size: the thing
+   * collected before it is then a provably older version of the same project,
+   * and a capture must never answer with one (PR #1974 round 2). Only a later
+   * acceptable payload, still before this capture's ACK, puts one back.
+   */
   latest: AcceptedProject | null
   /** Set once the matching ACK has arrived, so a later event cannot overwrite. */
   acked: boolean
@@ -238,7 +246,9 @@ interface CaptureState {
  * stale download out loud instead of quietly substituting an older game.
  *
  * It is never a save candidate: it is not `lastEditorSave`, it is not collected
- * into a capture, and nothing here can write it.
+ * into a capture, and nothing here can write it. Seeing one also INVALIDATES
+ * whatever the running capture had collected, because this is the newer source
+ * of the same project — see {@link CaptureState.latest}.
  */
 interface OverCapsCapture {
   files: BuildStudioSourceFiles | null
@@ -589,7 +599,30 @@ export class ArcadeBridge {
     const reading = readPayloadCaps(files)
     if (!reading.withinCaps) {
       this.overCaps = { files: reading.overFileCapOnly ? files : null, reading }
-      if (this.capture && !this.capture.acked) this.capture.refusedTooBig = true
+      // ── A refusal INVALIDATES what this capture had collected ─────────────
+      //
+      // This payload is OURS — it passed every identity check above — and it is
+      // NEWER than anything the capture has collected, because collection and
+      // refusal both happen in postMessage order. So a payload collected
+      // earlier in this same capture is a strictly OLDER version of the same
+      // project, and handing it back on the ACK was the reported defect
+      // (PR #1974 round 2): `requestSnapshot` resolved with three-life bytes
+      // while the editor held the four-life game the caps had just refused, so
+      // Save stored the wrong version and a departure read that stale source as
+      // clean.
+      //
+      // Only a LATER acceptable payload of ours, arriving before this capture's
+      // own ACK, may replace it and succeed — `handleHostAction` collects it
+      // exactly as before.
+      //
+      // Deliberately NOT fenced by `acked`, unlike collection: invalidation can
+      // only ever turn a success into the refusal the caps had already decided
+      // on, never the other way round, and leaving it unfenced is also what
+      // covers an over-cap project body carried ON the ACK itself.
+      if (this.capture) {
+        this.capture.latest = null
+        this.capture.refusedTooBig = true
+      }
       this.options.onRejected?.({ reason: 'payload-too-big' })
       return null
     }
@@ -811,6 +844,11 @@ export class ArcadeBridge {
    * raced. An ACK with no payload collected is a failure, not a fallback to
    * whatever the frame last volunteered.
    *
+   * And a payload of ours that the CAPS refuse mid-capture discards what was
+   * collected before it (`acceptProject`), because it is the newer source of
+   * the same project: the answer is then the size failure, never the older
+   * version the caps had happened to let through.
+   *
    * Captures are **serialized**: a second call while one is in flight is
    * refused rather than overwriting the first one's state.
    */
@@ -870,6 +908,8 @@ export class ArcadeBridge {
       // say something is wrong when nothing is.
       const body = msgProject(ack)
       const inReply = body ? this.acceptProject(body) : null
+      // Read AFTER `acceptProject`, never before: an over-cap body on the ACK
+      // invalidates `state.latest` rather than falling back to it.
       const collected = inReply ?? state.latest
       if (!collected) {
         // Same failure KIND either way — nothing was captured, nothing was
