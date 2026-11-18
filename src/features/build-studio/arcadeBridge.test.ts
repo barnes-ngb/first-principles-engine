@@ -290,6 +290,84 @@ describe('a project is accepted only when it is OURS', () => {
     expect(bridge.editorSaveSeen()?.header.id).toBe('header-1')
   })
 
+  /**
+   * Stock assigns a NEW header id to every import. The pin from a previous
+   * import is therefore about a project that no longer exists, and keeping it
+   * refused every save event from the project just imported — which is how a
+   * recovered file opened visibly and then could never be saved.
+   *
+   * POSITIVE CONTROL: remove `this.ourHeaderId = null` from `importProject` and
+   * the first case here fails.
+   */
+  it('accepts the NEW header the editor assigns to a fresh import', async () => {
+    const { bridge, frame, rejected } = loadedBridge()
+    // The first project pins its header.
+    bridge.handleMessage(
+      event(frame, {
+        type: 'pxthost',
+        action: 'workspacesave',
+        frameId: bridge.frameId,
+        project: ourProject({ header: { id: 'header-first' } }),
+      }),
+    )
+    expect(bridge.editorSaveSeen()?.header.id).toBe('header-first')
+
+    // A new import. Stock gives it a different header id.
+    const pending = bridge.importProject({ 'pxt.json': '{}', 'main.ts': 'x' })
+    const id = frame.posted.at(-1)!.message.id
+    bridge.handleMessage(
+      event(frame, {
+        type: 'pxteditor',
+        action: 'importproject',
+        id,
+        frameId: bridge.frameId,
+        success: true,
+      }),
+    )
+    await pending
+
+    bridge.handleMessage(
+      event(frame, {
+        type: 'pxthost',
+        action: 'workspacesave',
+        frameId: bridge.frameId,
+        project: ourProject({ header: { id: 'header-second' } }),
+      }),
+    )
+    expect(rejected.map((r) => r.reason)).toEqual([])
+    expect(bridge.editorSaveSeen()?.header.id).toBe('header-second')
+  })
+
+  it('re-pins after the import, so a THIRD header is still refused', async () => {
+    // Resetting the pin on import is not a relaxation: once the imported
+    // project is accepted, a different project is refused exactly as before.
+    const { bridge, frame, rejected } = loadedBridge()
+    const pending = bridge.importProject({ 'pxt.json': '{}', 'main.ts': 'x' })
+    bridge.handleMessage(
+      event(frame, {
+        type: 'pxteditor',
+        action: 'importproject',
+        id: frame.posted.at(-1)!.message.id,
+        frameId: bridge.frameId,
+        success: true,
+      }),
+    )
+    await pending
+    const save = (id: string) =>
+      bridge.handleMessage(
+        event(frame, {
+          type: 'pxthost',
+          action: 'workspacesave',
+          frameId: bridge.frameId,
+          project: ourProject({ header: { id } }),
+        }),
+      )
+    save('header-imported')
+    save('header-stranger')
+    expect(rejected.map((r) => r.reason)).toEqual(['foreign-project'])
+    expect(bridge.editorSaveSeen()?.header.id).toBe('header-imported')
+  })
+
   it('refuses a project whose text is not all strings', () => {
     const { bridge, frame, rejected } = loadedBridge()
     bridge.handleMessage(

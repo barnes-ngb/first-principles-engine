@@ -16,6 +16,8 @@
 
 import {
   buildStudioSourceDigest,
+  buildStudioSourceKeys,
+  EDITOR_SCRATCH_FILES,
   serializeBuildStudioSource,
 } from '../../core/types/buildStudio'
 
@@ -23,13 +25,25 @@ import {
  * The content signature of a project's source, for "is this still what is on
  * screen?".
  *
- * Built on the canonical archive, so `_history` — MakeCode's own undo journal,
- * which changes on every keystroke and is not part of the program — is excluded
- * by construction. Versions still store the full file set; this is only the
- * comparison.
+ * Two kinds of file are left out of the comparison, and **only** out of the
+ * comparison — the stored archive keeps every byte:
+ *
+ *   • `_`-prefixed keys, excluded by the canonical archive itself. `_history`
+ *     is MakeCode's undo journal and changes on every keystroke.
+ *   • {@link EDITOR_SCRATCH_FILES}, the measured simulator scratch
+ *     (`.simstate.json`), which a clean Save → Today adds or rewrites.
+ *
+ * Anything else that differs is a real code, configuration or asset
+ * difference and reads as one.
  */
 export function sourceSignature(files: Readonly<Record<string, string>>): string {
-  return buildStudioSourceDigest(serializeBuildStudioSource(files))
+  const scratch = new Set(EDITOR_SCRATCH_FILES)
+  const comparable: Record<string, string> = {}
+  for (const key of buildStudioSourceKeys(files)) {
+    if (scratch.has(key)) continue
+    comparable[key] = files[key]
+  }
+  return buildStudioSourceDigest(serializeBuildStudioSource(comparable))
 }
 
 /** Everything a Save or an editor callback is bound to. */

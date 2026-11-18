@@ -190,6 +190,7 @@ where the guard can see it.
 | Records → historical hours / adjustment | `hoursAdjustments` | typed | `reason` | typed — local |
 | Planner → Apply | `days` | `plannedMinutes` only, which the fold **ignores** | the item's `label` | the chosen week's Mon–Fri |
 | Strand session | `artifacts` + `activityConfigs` | **none** — a count, never minutes (`UX-283`) | the artifact's `topic` | local |
+| Build Studio → Save my words | `artifacts` | **none** — a reflection never adds minutes | the confirmed note linked to its exact game version | ISO timestamp |
 | Any capture (photo / audio / note) | `artifacts` | **none** — evidence carries no minutes | the artifact's `title` | local |
 
 **The owner's phrase was "I added time in artefacts", and the table answers it.** An
@@ -223,6 +224,7 @@ no document.
 | `functions/src/ai/tasks/weeklyFocus.ts` | days | READ | — (reads `days` for the week's items) | Builds the week-focus prompt. No minutes |
 | `src/components/ArtifactGallery.tsx` | artifacts | READ | — (no range rule) | Reads evidence for display |
 | `src/core/data/seed.ts` | artifacts | BOTH | — (dev seed) | Dev-only seeding of demo artifacts. Not a door a parent can reach |
+| `src/core/firebase/buildStudioNoteWrites.ts` | artifacts | WRITE | ISO timestamp; no minute/date fold | **LOCAL-BUILD-001.** Explicit confirmed words linked to an acknowledged private game version. The transaction checks version ownership and same-note retry identity. No hours, rewards or learner-state writes |
 | `src/core/firebase/migrateHoursAdjustments.ts` | hoursAdjustments | BOTH | — (whole collection, no range) | The DATA-09 one-shot stamp of unattributed adjustments to `'both'`. Run from Records on load; hours-neutral by construction |
 | `src/core/firebase/strandSessionWrites.ts` | artifacts | WRITE | — (no minute write, by design) | **WRITER.** A strand session: one artifact carrying `topic` + `activityConfigId`, and an `increment(1)` on the config. Deliberately writes **no** minutes |
 | `src/core/hooks/useCreativeTimer.ts` | hours | WRITE | `todayKey()` — local | **WRITER.** The creative timer's stop: measured minutes rounded up to 5, `notes` = the session description, owner resolved by `creativeTimerOwner` (`UX-327`) |

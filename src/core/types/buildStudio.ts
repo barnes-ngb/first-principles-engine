@@ -156,6 +156,24 @@ export const buildStudioVersionDocId = (
 const EDITOR_PRIVATE_PREFIX = '_'
 
 /**
+ * Files the editor writes for ITSELF, which are not the program.
+ *
+ * These are excluded from the "has the source changed?" COMPARISON only. The
+ * stored archive keeps every byte the editor handed over — a version is the
+ * record of a moment, and trimming it would make a reopened version differ
+ * from what was saved.
+ *
+ * `.simstate.json` is the measured one: a clean Save → Today in stock 4.1.28
+ * adds or updates exactly this file, 55 bytes, holding `S/#run` and `S/#scope`.
+ * It is the simulator's scratch state, it changes every time the game runs, and
+ * counting it as an edit made every ordinary departure report unsaved work.
+ *
+ * Deliberately a NAMED list, not a pattern: anything else that differs is a
+ * real code, configuration or asset difference and must read as one.
+ */
+export const EDITOR_SCRATCH_FILES: readonly string[] = ['.simstate.json']
+
+/**
  * The archive's byte ceiling.
  *
  * Firestore's hard limit is 1 MiB (1,048,576 bytes) for the whole document,

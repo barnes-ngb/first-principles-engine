@@ -193,6 +193,16 @@ export default function BuildStudioEditor({
   const [visit, setVisit] = useState(() => ({
     visitId: newVisitId(Date.now(), Math.random()),
     version: null as BuildStudioVersion | null,
+    /**
+     * Validated files from a downloaded archive, when this visit is a recovery.
+     *
+     * A recovery is its own visit rather than an import into the open one: the
+     * editor assigns a new header per import, and a recovered project opened
+     * into the starter's bridge could never be saved afterwards. A fresh visit
+     * means a fresh frame, a fresh header, the same startup readback, and the
+     * previous visit's callbacks and note target retired.
+     */
+    recovery: null as BuildStudioSourceFiles | null,
   }))
 
   const scope: BuildStudioScope = useMemo(
@@ -611,12 +621,13 @@ export default function BuildStudioEditor({
     return () => clearTimeout(timer)
   }, [liveSession, loadedToken, token])
 
-  /** Start a brand new visit on the same version — the Try again door. */
+  /** Start a brand new visit on the same source — the Try again door. */
   const reopenCurrent = useCallback(() => {
     setLoadedToken(null)
     setVisit((current) => ({
       visitId: newVisitId(Date.now(), Math.random()),
       version: current.version,
+      recovery: current.recovery,
     }))
   }, [])
 
@@ -632,16 +643,23 @@ export default function BuildStudioEditor({
       setPhase(EditorPhase.Importing)
       try {
         const reopening = visit.version
-        const files: BuildStudioSourceFiles = reopening
-          ? // The chosen version's OWN bytes, read back from its archive —
-            // never "whatever the latest frame happens to hold".
-            parseBuildStudioSource(reopening.sourceArchive)
-          : starterSourceFiles()
+        const recovering = visit.recovery
+        const files: BuildStudioSourceFiles = recovering
+          ? recovering
+          : reopening
+            ? // The chosen version's OWN bytes, read back from its archive —
+              // never "whatever the latest frame happens to hold".
+              parseBuildStudioSource(reopening.sourceArchive)
+            : starterSourceFiles()
         // What the app believes is on the shelf for this visit: a reopened
         // version IS a saved version, and a freshly imported starter is
         // unchanged. Either way the editor's first `workspacesave` carries
         // these same bytes and must read CLEAN.
-        settledSignatureRef.current = sourceSignature(files)
+        //
+        // A RECOVERY is the exception and stays `null`: nothing recovered from
+        // a file is on the shelf, so it reads DIRTY until a deliberate Save —
+        // which is also what keeps the departure guard protecting it.
+        settledSignatureRef.current = recovering ? null : sourceSignature(files)
         await bridge.importProject(files)
         if (!live()) return
 
@@ -680,16 +698,24 @@ export default function BuildStudioEditor({
         const roundSig = sourceSignature(round.files)
         announcedSignatureRef.current = roundSig
         setEditorDirty(roundSig !== settledSignatureRef.current)
-        const ok = reopening
-          ? reopenedVersionLooksLoaded(round.files)
-          : starterImportLooksCorrect(round.files)
+        // A recovered file and a reopened version are both the child's OWN
+        // bytes, so they are judged by the weaker rule: the app does not get to
+        // require a life block in his game.
+        const ok =
+          reopening || recovering
+            ? reopenedVersionLooksLoaded(round.files)
+            : starterImportLooksCorrect(round.files)
         setProjectReady(ok)
         setAdvisory(
           ok
-            ? null
-            : reopening
-              ? 'That saved game did not open properly, so saving is turned off to protect it. Use Download a copy, or try opening it again.'
-              : 'The starter did not open properly, so saving is turned off. Nothing is lost — a grown-up can import the starter file below into MakeCode.',
+            ? recovering
+              ? 'Your game file is open. It is not on your shelf yet — tap Save my version to keep it here.'
+              : null
+            : recovering
+              ? 'That game file did not open properly, so saving is turned off to protect it. Try opening the file again.'
+              : reopening
+                ? 'That saved game did not open properly, so saving is turned off to protect it. Use Download a copy, or try opening it again.'
+                : 'The starter did not open properly, so saving is turned off. Nothing is lost — a grown-up can import the starter file below into MakeCode.',
         )
       } catch (err) {
         if (cancelled) return
@@ -706,7 +732,7 @@ export default function BuildStudioEditor({
     return () => {
       cancelled = true
     }
-  }, [loadedToken, token, visit.version])
+  }, [loadedToken, token, visit.version, visit.recovery])
 
   // ── Save ───────────────────────────────────────────────────────────────
 
@@ -996,7 +1022,11 @@ export default function BuildStudioEditor({
       setLoadedToken(null)
       // A brand new visit: a new id, so nothing from the previous one can act
       // here even on an `A → B → A`.
-      setVisit({ visitId: newVisitId(Date.now(), Math.random()), version })
+      setVisit({
+        visitId: newVisitId(Date.now(), Math.random()),
+        version,
+        recovery: null,
+      })
     },
     [childId, projectId],
   )
@@ -1031,20 +1061,10 @@ export default function BuildStudioEditor({
   const handleRecoveryFile = useCallback(
     async (file: File | null | undefined) => {
       if (!file) return
-      const bridge = bridgeRef.current
-      if (!bridge || phase !== EditorPhase.Ready) return
       const ownToken = token
+      let files: BuildStudioSourceFiles
       try {
-        const files = readRecoveryArchive(await file.text())
-        if (liveTokenRef.current !== ownToken) return
-        await bridge.importProject(files)
-        if (liveTokenRef.current !== ownToken) return
-        setOpenLives(readOpenLifeValue(files['main.ts']))
-        setEditorDirty(true)
-        setSaveMessage(
-          'That game file is open in the editor. Tap Save my version to keep it here.',
-        )
-        setSaveState(SaveState.Idle)
+        files = readRecoveryArchive(await file.text())
       } catch (err) {
         if (liveTokenRef.current !== ownToken) return
         setSaveMessage(
@@ -1053,9 +1073,31 @@ export default function BuildStudioEditor({
             : 'That file could not be opened.',
         )
         setSaveState(SaveState.Failed)
+        return
       }
+      if (liveTokenRef.current !== ownToken) return
+      // A whole new visit, carrying the validated files. Not an import into the
+      // open editor: stock assigns a new header per import, and a recovered
+      // project pushed into the starter's bridge opened fine and then could
+      // never be saved. A fresh visit gets a fresh frame, a fresh header and
+      // the same startup readback, and retires this visit's callbacks, note
+      // target and pre-departure capture.
+      setSaveState(SaveState.Idle)
+      setSaveMessage(null)
+      setLastSaved(null)
+      setNoteDraft(null)
+      setNoteState('idle')
+      setNoteMessage(null)
+      setHintsOffered(0)
+      departureFilesRef.current = null
+      setLoadedToken(null)
+      setVisit({
+        visitId: newVisitId(Date.now(), Math.random()),
+        version: null,
+        recovery: files,
+      })
     },
-    [phase, token],
+    [token],
   )
 
   const handleDownloadVersion = useCallback((version: BuildStudioVersion) => {

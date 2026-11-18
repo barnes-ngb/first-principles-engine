@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 
+import { EDITOR_SCRATCH_FILES } from '../../core/types/buildStudio'
 import {
   clearPendingSave,
   holdPendingSave,
@@ -96,6 +97,38 @@ describe('the source signature compares CONTENT', () => {
       sourceSignature({ ...files, _history: '{"entries":[1,2,3]}' }),
     )
     expect(sourceSignature({ ...files, _history: 'x' })).toBe(sourceSignature(files))
+  })
+
+  /**
+   * The measured stock behaviour: a clean Save → Today in Arcade 4.1.28 adds or
+   * updates exactly `.simstate.json`, 55 bytes, holding `S/#run` and `S/#scope`.
+   * TypeScript, Blocks, `pxt.json` and assets are untouched. Counting that as an
+   * edit made every ordinary departure report unsaved work.
+   *
+   * POSITIVE CONTROL: remove `.simstate.json` from `EDITOR_SCRATCH_FILES` and
+   * the first two cases here fail.
+   */
+  it('IGNORES the simulator scratch file stock rewrites on every run', () => {
+    const before = { ...files, '.simstate.json': '{"S/#run":"0","S/#scope":"a"}' }
+    const after = { ...files, '.simstate.json': '{"S/#run":"1","S/#scope":"b"}' }
+    expect(sourceSignature(before)).toBe(sourceSignature(after))
+    // …and its first appearance is not an edit either.
+    expect(sourceSignature(after)).toBe(sourceSignature(files))
+  })
+
+  it('still sees a real change made in the SAME save as the scratch file', () => {
+    // The exclusion is one named file, not a licence to miss a code change
+    // that happens to arrive beside it.
+    const scratchOnly = { ...files, '.simstate.json': '{"S/#run":"1"}' }
+    const alsoEdited = {
+      ...scratchOnly,
+      'main.ts': 'info.setLife(4)',
+    }
+    expect(sourceSignature(alsoEdited)).not.toBe(sourceSignature(scratchOnly))
+  })
+
+  it('names exactly one scratch file, and it is that one', () => {
+    expect([...EDITOR_SCRATCH_FILES]).toEqual(['.simstate.json'])
   })
 
   it('changes for a real edit', () => {

@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 /**
@@ -27,17 +27,30 @@ interface FakeProject {
   files: Record<string, string>
 }
 
-const PXT = JSON.stringify({ name: 'Apple Dash starter', files: ['main.blocks', 'main.ts'] })
-const BLOCKS =
-  '<xml xmlns="x"><block type="pxt-on-start"><statement name="HANDLER">' +
-  '<block type="hudSetLife"><value name="value"><shadow type="math_number">' +
-  '<field name="NUM">3</field></shadow></value></block></statement></block></xml>'
+/**
+ * The REAL starter bytes, not a stand-in.
+ *
+ * This is the driver bug the C3 root run found. The component imports
+ * `starterSourceFiles()` and records ITS signature as "what is on the shelf";
+ * a fake peer that announced different bytes therefore read as a permanent
+ * edit, so every clean-source assertion failed — a broken synthetic driver
+ * reporting a product defect that was not there. The fake editor now holds the
+ * same project the component does.
+ */
+const starterFiles = (): Record<string, string> => ({ ...starterSourceFiles() })
 
-const starterFiles = () => ({
-  'pxt.json': PXT,
-  'main.blocks': BLOCKS,
-  'main.ts': 'info.setLife(3)\nsprites.create(1)\n',
-})
+/** The same project with the life number changed, as a child's edit would. */
+const editedFiles = (lives: number): Record<string, string> => {
+  const files = starterFiles()
+  return {
+    ...files,
+    'main.ts': files['main.ts'].replace('info.setLife(3)', `info.setLife(${lives})`),
+    'main.blocks': files['main.blocks'].replace(
+      /(type="hudSetLife"[\s\S]{0,200}?<field name="NUM">)3(<\/field>)/,
+      `$1${lives}$2`,
+    ),
+  }
+}
 
 /** Every fake bridge the component built, newest last. */
 const bridges: FakeBridgeStub[] = []
@@ -193,7 +206,9 @@ vi.mock('../../core/firebase/firestore', () => ({
   buildStudioVersionsCollection: () => ({ __col: 'buildStudioVersions' }),
 }))
 
+import { serializeBuildStudioSource } from '../../core/types/buildStudio'
 import { resetPendingSaveStore, readPendingSave } from './buildStudioPendingStore'
+import { starterSourceFiles } from './buildStudioStarter'
 import { VersionsStatus } from './useBuildStudioVersions'
 
 /**
@@ -269,7 +284,7 @@ describe('an ordinary clean Save becomes clean', () => {
   it('does not claim newer changes when none were made', async () => {
     const bridge = await openEditor()
     // The child edits, MakeCode announces it, and he saves.
-    const edited = { ...starterFiles(), 'main.ts': 'info.setLife(4)\nsprites.create(1)\n' }
+    const edited = editedFiles(4)
     await act(async () => {
       bridge.announce(edited)
     })
@@ -290,7 +305,7 @@ describe('an ordinary clean Save becomes clean', () => {
     // `workspacesave` events carrying the bytes being captured. Those are the
     // payload, not newer work.
     const bridge = await openEditor()
-    const edited = { ...starterFiles(), 'main.ts': 'info.setLife(4)\nsprites.create(1)\n' }
+    const edited = editedFiles(4)
     bridge.nextCapture = edited
     await act(async () => {
       bridge.announce(edited)
@@ -323,8 +338,8 @@ describe('an ordinary clean Save becomes clean', () => {
 
   it('STAYS dirty when a real edit lands during the cloud write', async () => {
     const bridge = await openEditor()
-    const first = { ...starterFiles(), 'main.ts': 'info.setLife(4)\nsprites.create(1)\n' }
-    const later = { ...starterFiles(), 'main.ts': 'info.setLife(9)\nsprites.create(1)\n' }
+    const first = editedFiles(4)
+    const later = editedFiles(9)
 
     let release: (() => void) | null = null
     saveVersion.mockImplementation(
@@ -356,7 +371,7 @@ describe('an ordinary clean Save becomes clean', () => {
 
   it('writes the signature of the bytes it actually captured', async () => {
     const bridge = await openEditor()
-    const edited = { ...starterFiles(), 'main.ts': 'info.setLife(4)\nsprites.create(1)\n' }
+    const edited = editedFiles(4)
     bridge.nextCapture = edited
     await tapSave()
     await waitFor(() => expect(saveVersion).toHaveBeenCalled())
@@ -408,7 +423,7 @@ describe('a held departure is checked before anybody is warned', () => {
   it('captures an UNANNOUNCED edit and offers the real choice', async () => {
     const bridge = await openEditor()
     // He typed 4 into the blocks; MakeCode has said nothing.
-    bridge.nextCapture = { ...starterFiles(), 'main.ts': 'info.setLife(4)\nsprites.create(1)\n' }
+    bridge.nextCapture = editedFiles(4)
     const before = bridge.captures
     blocker.state = 'blocked'
     await act(async () => {
@@ -436,7 +451,7 @@ describe('a held departure is checked before anybody is warned', () => {
    */
   it('an ordinary Save then Today completes and releases the navigation', async () => {
     const bridge = await openEditor()
-    const edited = { ...starterFiles(), 'main.ts': 'info.setLife(4)\nsprites.create(1)\n' }
+    const edited = editedFiles(4)
     bridge.nextCapture = edited
     await act(async () => {
       bridge.announce(edited)
@@ -479,7 +494,7 @@ describe('a held departure is checked before anybody is warned', () => {
 
   it('edit then Today then Stay keeps the editor and the work', async () => {
     const bridge = await openEditor()
-    const edited = { ...starterFiles(), 'main.ts': 'info.setLife(4)\nsprites.create(1)\n' }
+    const edited = editedFiles(4)
     bridge.nextCapture = edited
     blocker.state = 'blocked'
     await act(async () => {
@@ -526,7 +541,7 @@ describe('a profile change is held while the work is still intact', () => {
 
   it('refuses the change and asks, when it cannot prove the source is clean', async () => {
     const bridge = await openEditor()
-    bridge.nextCapture = { ...starterFiles(), 'main.ts': 'info.setLife(4)\nsprites.create(1)\n' }
+    bridge.nextCapture = editedFiles(4)
     let allowed: boolean | undefined
     await act(async () => {
       allowed = registeredGuard!('london')
@@ -590,7 +605,7 @@ describe('a profile change is held while the work is still intact', () => {
     })
     await waitFor(() => expect(screen.getByText('Switch anyway')).toBeDisabled())
     await act(async () => {
-      releaseCapture!({ ...starterFiles(), 'main.ts': 'info.setLife(4)\nsprites.create(1)\n' })
+      releaseCapture!(editedFiles(4))
     })
     await waitFor(() => expect(screen.getByText('Switch anyway')).toBeEnabled())
     expect(screen.getByText('Switch profile?')).toBeInTheDocument()
@@ -617,7 +632,7 @@ describe('a profile change is held while the work is still intact', () => {
 
   it('switches on the explicit choice, consuming the allowance once', async () => {
     const bridge = await openEditor()
-    bridge.nextCapture = { ...starterFiles(), 'main.ts': 'info.setLife(4)\nsprites.create(1)\n' }
+    bridge.nextCapture = editedFiles(4)
     await act(async () => {
       registeredGuard!('london')
     })
@@ -655,12 +670,12 @@ describe('a failed Save keeps its exact retry, and the latch is released', () =>
 
   it('holds the exact payload for its owner when the write fails', async () => {
     const bridge = await openEditor()
-    bridge.nextCapture = { ...starterFiles(), 'main.ts': 'info.setLife(4)\nsprites.create(1)\n' }
+    bridge.nextCapture = editedFiles(4)
     saveVersion.mockRejectedValue(new Error('offline'))
     await tapSave()
     await waitFor(() => expect(screen.getByText('offline')).toBeInTheDocument())
     const held = readPendingSave(OWNER)
-    expect(held?.files['main.ts']).toBe('info.setLife(4)\nsprites.create(1)\n')
+    expect(held?.files['main.ts']).toBe(editedFiles(4)['main.ts'])
     // Owner-bound: a sibling's editor cannot see it.
     expect(readPendingSave({ ...OWNER, childId: 'c2' })).toBeNull()
   })
@@ -701,7 +716,7 @@ describe('a failed Save keeps its exact retry, and the latch is released', () =>
   it('an old save’s acknowledgment leaves a newer pending save retriable', async () => {
     // ── A ──
     const first = await openEditor()
-    first.nextCapture = { ...starterFiles(), 'main.ts': 'info.setLife(4)\nsprites.create(1)\n' }
+    first.nextCapture = editedFiles(4)
     let releaseA: ((ok: boolean) => void) | null = null
     saveVersion.mockImplementation(
       (args: { versionId: string }) =>
@@ -722,7 +737,7 @@ describe('a failed Save keeps its exact retry, and the latch is released', () =>
     expect(readPendingSave(OWNER)?.versionId).toBe(idA)
 
     // ── B, which fails ──
-    second.nextCapture = { ...starterFiles(), 'main.ts': 'info.setLife(7)\nsprites.create(1)\n' }
+    second.nextCapture = editedFiles(7)
     saveVersion.mockReset()
     saveVersion.mockRejectedValue(new Error('offline'))
     await tapSave()
@@ -739,7 +754,7 @@ describe('a failed Save keeps its exact retry, and the latch is released', () =>
     // B is still exactly there, with its own bytes.
     const slot = readPendingSave(OWNER)
     expect(slot?.versionId).toBe(idB)
-    expect(slot?.files['main.ts']).toBe('info.setLife(7)\nsprites.create(1)\n')
+    expect(slot?.files['main.ts']).toBe(editedFiles(7)['main.ts'])
     // …and its retry is still on screen.
     expect(screen.getByText('Try again')).toBeInTheDocument()
   })
@@ -758,6 +773,84 @@ describe('a failed Save keeps its exact retry, and the latch is released', () =>
       screen.getByText('Try again').click()
     })
     await waitFor(() => expect(readPendingSave(OWNER)).toBeNull())
+  })
+})
+
+/**
+ * The verified recovery failure: a downloaded copy opened visibly and then
+ * every Save failed forever, because the file was imported into the starter's
+ * bridge whose pinned header no longer matched the project stock had just
+ * created.
+ *
+ * POSITIVE CONTROL: import into the live bridge instead of starting a visit and
+ * the first case sees one bridge rather than two.
+ */
+describe('opening a downloaded copy starts a fresh visit', () => {
+  async function openRecoveryFile(files: Record<string, string>) {
+    const input = screen.getByLabelText('Open a downloaded game file')
+    const file = new File([serializeBuildStudioSource(files)], 'my-game-source.json', {
+      type: 'application/json',
+    })
+    await act(async () => {
+      fireEvent.change(input, { target: { files: [file] } })
+    })
+  }
+
+  it('builds a new bridge and frame, and retires the old one', async () => {
+    const first = await openEditor()
+    const recovered = editedFiles(4)
+    await openRecoveryFile(recovered)
+
+    const second = bridges[bridges.length - 1]
+    expect(second).not.toBe(first)
+    expect(first.disposed).toBe(true)
+    // The recovered bytes are what the new visit imports.
+    second.nextCapture = recovered
+    await act(async () => {
+      second.ready()
+    })
+    await waitFor(() => expect(second.imported.length).toBeGreaterThan(0))
+    expect(second.imported[0]['main.ts']).toBe(recovered['main.ts'])
+    expect(second.imported[0]['main.blocks']).toBe(recovered['main.blocks'])
+  })
+
+  it('reads as NOT saved, and then an explicit Save succeeds', async () => {
+    await openEditor()
+    const recovered = editedFiles(4)
+    await openRecoveryFile(recovered)
+    const second = bridges[bridges.length - 1]
+    second.nextCapture = recovered
+    await act(async () => {
+      second.ready()
+    })
+    await waitFor(() => expect(screen.getByText('💾 Save my version')).toBeEnabled())
+    // Nothing recovered from a file is on the shelf yet.
+    expect(screen.getByText(/not saved to your shelf yet/)).toBeInTheDocument()
+
+    await tapSave()
+    await waitFor(() =>
+      expect(screen.getByText('Saved. Your game is on your shelf.')).toBeInTheDocument(),
+    )
+    expect(saveVersion.mock.calls[0][0].files['main.ts']).toBe(recovered['main.ts'])
+    // …and it is clean afterwards, so Today is not held.
+    expect(screen.queryByText(/not saved to your shelf yet/)).not.toBeInTheDocument()
+  })
+
+  it('refuses a file that is not one of this app’s archives', async () => {
+    await openEditor()
+    const before = bridges.length
+    const input = screen.getByLabelText('Open a downloaded game file')
+    const file = new File(['not json at all'], 'whatever.json', {
+      type: 'application/json',
+    })
+    await act(async () => {
+      fireEvent.change(input, { target: { files: [file] } })
+    })
+    await waitFor(() =>
+      expect(screen.getByText(/not a game file this app saved/)).toBeInTheDocument(),
+    )
+    // No visit was started, so the open editor is untouched.
+    expect(bridges.length).toBe(before)
   })
 })
 

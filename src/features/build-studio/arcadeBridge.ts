@@ -569,6 +569,16 @@ export class ArcadeBridge {
    * afterwards would throw that away.
    */
   async importProject(files: BuildStudioSourceFiles): Promise<void> {
+    // Stock assigns a NEW header id to every import, so the pin from a previous
+    // import is about a project that no longer exists — and keeping it rejected
+    // every save event from the project just imported, which is how a recovered
+    // file opened fine and then could never be saved. Cleared here, re-pinned by
+    // the first project accepted afterwards.
+    //
+    // This is NOT a relaxation: the name check, the `pubId` refusal, the file
+    // map validation and the caps all still run, and once a project is accepted
+    // a second one with a different id is refused exactly as before.
+    this.ourHeaderId = null
     // The header is deliberately NOT sent: the editor assigns its own id, and
     // sending one of ours would be the app claiming to own a document in the
     // editor's workspace. Only `text` — editor-required source and nothing else.
