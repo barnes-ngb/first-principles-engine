@@ -55,6 +55,7 @@ import {
   type BuildStudioVersion,
 } from '../../core/types/buildStudio'
 import {
+  clearPendingSave,
   holdPendingNote,
   holdPendingSave,
   readPendingSave,
@@ -192,7 +193,7 @@ describe('the entry opens nothing until the child says which game', () => {
 
   it('names the newest save and when it was saved, before the tap', () => {
     render(entry(readyRead([NEWEST, OLDER])))
-    const line = screen.getByText(/That opens/)
+    const line = screen.getByText(new RegExp(NEWEST.label))
     expect(line.textContent).toContain(NEWEST.label)
     expect(line.textContent).toContain(savedLine(NEWEST.createdAt))
     // The offer is about the NEWEST one and says so by naming only it.
@@ -371,12 +372,51 @@ describe('work that did not land comes before any game', () => {
     expect(readPendingSave(OWNER)?.versionId).toBe('v-unfinished')
   })
 
+  /**
+   * The second tap is a read too — Chrome reproduced this one.
+   *
+   * An acknowledgement for the exact held save landed between the tap that
+   * raised the notice and the tap on *Open my studio*, so by then there was
+   * nothing to deal with and the studio opened the STARTER with nothing said.
+   * The slot is read again at that button: an empty one retires the notice and
+   * puts the real chooser back, built from the latest read, and the saved game
+   * is still one tap away.
+   *
+   * POSITIVE CONTROL: drop the re-read in `openForHeldWork` and this case
+   * mounts the editor on the starter instead of showing the chooser.
+   */
+  it('retires the notice and shows the real chooser when the work has gone', async () => {
+    render(entry(readyRead([NEWEST, OLDER])))
+    holdPendingSave(OWNER, heldSave('My rocket version'))
+    await tap('▶ Continue my saved game')
+    expect(screen.getByText('Open my studio')).toBeInTheDocument()
+
+    // The write he was warned about landed, and released its own slot.
+    clearPendingSave(OWNER, 'v-unfinished')
+    await tap('Open my studio')
+
+    // Nothing was imported, and the ordinary chooser is what is on screen —
+    // naming the newest save and its date, not the starter.
+    expect(editorProps).toHaveLength(0)
+    expect(screen.queryByText('Open my studio')).not.toBeInTheDocument()
+    expect(screen.getByText('▶ Continue my saved game')).toBeInTheDocument()
+    expect(screen.getByText(new RegExp(NEWEST.label)).textContent).toContain(
+      savedLine(NEWEST.createdAt),
+    )
+    // Focus went with the screen, onto the choice he now has to make.
+    expect(document.activeElement).toBe(screen.getByText('▶ Continue my saved game'))
+
+    // And the choice still works, on the exact version it named.
+    await tap('▶ Continue my saved game')
+    expect(lastEditor()?.initialVersion).toBe(NEWEST)
+  })
+
   it('rechecks at the tap for words as well', async () => {
     render(entry(readyRead([NEWEST])))
     holdPendingNote(OWNER, heldWords())
     await tap('🍎 Start Apple Dash')
     expect(editorProps).toHaveLength(0)
-    expect(screen.getByText(/have not been written down yet/)).toBeInTheDocument()
+    expect(screen.getByText(/not written down yet/)).toBeInTheDocument()
     await tap('Open my studio')
     expect(editorProps).not.toHaveLength(0)
   })

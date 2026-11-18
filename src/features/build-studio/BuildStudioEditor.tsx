@@ -391,9 +391,10 @@ export interface BuildStudioEditorProps {
    *
    * Read ONCE, when the first visit is built, and never again: the choice is
    * frozen by the click that made it, so a later snapshot cannot swap which
-   * game this mount has open. It goes through {@link versionBelongsTo} — the
-   * same identity the shelf's Open uses — and a row that is not this child's in
-   * this project is refused out loud rather than quietly opened.
+   * game this mount has open. Its identity is checked where the choice is made
+   * — `BuildStudioChildEntry` runs {@link versionBelongsTo} and refuses to open
+   * anything when it fails — so this editor is handed a row that already
+   * belongs here and does not substitute a starter for one that does not.
    *
    * It changes nothing else. The import is the existing one (the version's own
    * archive, parsed), the readback is the existing one, and because the version
@@ -442,30 +443,18 @@ export default function BuildStudioEditor({
     [childId, childVoiceInputEnhanced],
   )
 
-  /**
-   * An initial version this editor will NOT open, because it is not this
-   * child's in this project.
-   *
-   * The caller validates before it launches, so this is defence in depth — and
-   * it is said on screen rather than swallowed, because an editor that quietly
-   * opened the starter after a person chose a saved game would be the silent
-   * swap the whole entry exists to prevent. Derived from props, so it cannot go
-   * stale against the visit built below.
-   */
-  const initialVersionRefused =
-    initialVersion != null && !versionBelongsTo(initialVersion, childId, projectId)
-
   // ── The visit ────────────────────────────────────────────────────────────
   const [visit, setVisit] = useState(() => ({
     visitId: newVisitId(Date.now(), Math.random()),
     /**
-     * The explicitly chosen saved version, or `null` for the starter. Captured
-     * in the initializer, so this mount's game is decided once.
+     * The explicitly chosen saved version, or `null` for the starter.
+     *
+     * Captured in the initializer, so this mount's game is decided once. The
+     * identity check that admits it is the ENTRY's, which fails closed and
+     * opens nothing — there is deliberately no second check here that would
+     * substitute the starter for a row somebody chose.
      */
-    version:
-      initialVersion && versionBelongsTo(initialVersion, childId, projectId)
-        ? initialVersion
-        : (null as BuildStudioVersion | null),
+    version: initialVersion ?? (null as BuildStudioVersion | null),
     /**
      * Validated files from a downloaded archive, when this visit is a recovery.
      *
@@ -2423,16 +2412,6 @@ export default function BuildStudioEditor({
       {currentHint && (
         <Alert severity="info" icon={false}>
           {currentHint.text}
-        </Alert>
-      )}
-
-      {/* A chosen version this editor would not open, named rather than
-          silently replaced by the starter. */}
-      {initialVersionRefused && (
-        <Alert severity="warning">
-          That saved game is not part of this one, so it was not opened. The
-          starter is open instead — your saved games are still on your shelf
-          below.
         </Alert>
       )}
 

@@ -2,55 +2,41 @@
  * The child's way IN: which game opens, chosen before anything is loaded
  * (LOCAL-BUILD-001).
  *
- * ── Why this exists ─────────────────────────────────────────────────────
- *
- * The studio used to mount the editor immediately and import the prepared
- * starter, every time. A child who had saved four versions and came back to
- * change something therefore arrived in the starter, with his own games one
- * scroll down behind an *Open this one* that is a REPLACEMENT — a door the page
- * is obliged to warn him about, because it throws away whatever is open. So the
- * ordinary case ("carry on with my game") was the one that cost the most taps
- * and read the most like a loss.
- *
- * Now the first screen is a question with two explicit answers — *Continue my
- * saved game*, naming the newest save and when it was saved, and *Start Apple
- * Dash* — and neither is taken for him.
+ * The studio used to mount the editor and import the prepared starter every
+ * time, so a child with four saved versions came back to the starter with his
+ * own games behind an *Open this one* that REPLACES what is open. The ordinary
+ * case — carry on with my game — cost the most taps and read like a loss. The
+ * first screen is now a question with explicit answers, and neither is taken
+ * for him.
  *
  * ── What it refuses to do ───────────────────────────────────────────────
  *
- *   • It never chooses. A read that has not settled says it is LOOKING and
- *     offers nothing; a read that FAILED says so, offers *Try again* and an
- *     explicit starter, and never claims the shelf is empty; only a settled,
- *     genuinely empty list shows the one starter choice.
- *   • It never opens a game on a stale answer. The list must be the one for
- *     THIS family, child and project (`childId`/`projectId` on the read are
- *     checked, not assumed), which is what an `A → B → A` cannot fake away, and
- *     the chosen row is re-checked through `versionBelongsTo` at the tap.
- *   • It never swaps a game after the tap. The click freezes ONE decision for
- *     this mount, and the editor reads it once in its first visit — so a
- *     snapshot that lands a moment later cannot change what is open or what it
- *     is called.
+ *   • It never chooses. An unsettled read says it is LOOKING and offers
+ *     nothing; a failed read says so, offers *Try again* and an explicit
+ *     starter, and never claims the shelf is empty; only a settled, genuinely
+ *     empty list shows one starter choice.
+ *   • It never opens a game on a stale answer. The read must be about THIS
+ *     child and project, and the chosen row goes through `versionBelongsTo` at
+ *     the tap — the one identity check, which fails closed here.
+ *   • It never swaps a game after the tap. One click freezes the decision for
+ *     this mount and the editor reads it once, in its first visit.
  *
  * ── Work that did not land comes first ──────────────────────────────────
  *
- * An unfinished Save, or words nobody has written down, live in
+ * An unfinished Save, or words nobody wrote down, live in
  * `buildStudioPendingStore` for this exact owner. They are not a game to
- * choose; they are work at risk, and the editor is where the exact *Try again*
- * and the exact words are offered back. So when the slot holds something on
- * arrival this screen does not ask a question at all — the studio opens and the
- * retry is reachable without first choosing a saved game. The slot is read
- * AGAIN at the tap, because a write started in an earlier mount can land while
- * this screen is sitting there: that work then takes priority, said in a
- * sentence, with one explicit button into the studio rather than a game chosen
- * for him.
+ * choose: the editor is where the exact *Try again* and the exact words are
+ * offered back, so when the slot holds something on arrival this screen asks
+ * nothing and the studio opens. The slot is read again at every tap — at a
+ * choice, because a write from an earlier mount can land while this screen
+ * sits here, and at *Open my studio*, because an acknowledgement can land
+ * between the two taps and leave nothing to deal with (Chrome reproduced
+ * exactly that, silently importing the starter).
  *
- * ── What it does not touch ──────────────────────────────────────────────
- *
- * Nothing is written, nothing is read from Firestore here (the page's existing
- * subscription is passed in), the parent's view never reaches this component,
- * and once the editor is mounted every existing guard — the visit boundary, the
- * pre-replacement capture, the departure and profile holds, the dirty
- * comparison, recovery, downloads — is the one that was already there.
+ * Nothing here is written and nothing is read from Firestore (the page's
+ * existing subscription is passed in); the parent's view never reaches this
+ * component; and once the editor is mounted every existing guard is the one
+ * that was already there.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -94,11 +80,8 @@ interface Launch {
 
 /**
  * This owner's work that did not land — a Save that did not finish, or words
- * nobody wrote down — or `null`.
- *
- * Read from the store on demand rather than subscribed, because it is consulted
- * at exactly two moments: when this screen first appears, and at the tap. The
- * label is carried so the sentence can name the save instead of describing it.
+ * nobody wrote down — or `null`. The label is carried so a sentence can name
+ * the save rather than describe it.
  */
 function unresolvedWork(owner: PendingOwner): { saveLabel: string | null } | null {
   const save = readPendingSave(owner)
@@ -118,11 +101,9 @@ export default function BuildStudioChildEntry({
 }: BuildStudioChildEntryProps) {
   /**
    * The decision, frozen. Set once — by a tap, or on arrival when work is
-   * already waiting — and never replaced, so this mount has one game.
-   *
-   * The component is keyed by family + child by its caller, so a route or
-   * profile change retires the whole screen rather than carrying an answer
-   * about one child into another's.
+   * already waiting — and never replaced, so this mount has one game. The
+   * caller keys this component by family + child, so a route or profile change
+   * retires the answer with the screen.
    */
   const [launch, setLaunch] = useState<Launch | null>(() =>
     unresolvedWork({ familyId, childId, projectId }) ? { version: null } : null,
@@ -133,24 +114,27 @@ export default function BuildStudioChildEntry({
   const [heldAtTap, setHeldAtTap] = useState<{ saveLabel: string | null } | null>(null)
   /** A chosen row that is not this child's in this project. Said, not opened. */
   const [refused, setRefused] = useState(false)
+  /** Bumped when the held-work notice retired because the slot had emptied. */
+  const [workRetired, setWorkRetired] = useState(0)
 
   /**
-   * Did a tap on THIS screen open the studio?
-   *
-   * Only then is focus moved. Arriving to waiting work is not an explicit
-   * launch, and taking focus on first paint would be a surprise rather than a
-   * courtesy.
+   * Did a tap on THIS screen open the studio? Only then is focus moved —
+   * arriving to waiting work is not an explicit launch, and taking focus on
+   * first paint would be a surprise.
    */
   const launchedByTapRef = useRef(false)
   const studioRef = useRef<HTMLDivElement | null>(null)
+  /** The ordinary chooser's primary button, for focus after a retired notice. */
+  const primaryChoiceRef = useRef<HTMLButtonElement | null>(null)
 
   /**
-   * Put keyboard focus into the studio after an explicit launch.
+   * Put keyboard focus where the screen just went.
    *
-   * The `QuestExitGuardDialog` pattern: focus the element outright, guarded on
-   * it still being connected. The region itself is the target rather than a
-   * control, so nothing is pressed by accident and the next Tab lands on the
-   * studio's own first button instead of the top of the page.
+   * The `QuestExitGuardDialog` pattern — focus the element outright, guarded on
+   * it still being connected. After a launch the target is the studio REGION
+   * rather than a control, so nothing is pressed by accident and the next Tab
+   * is the studio's own first button; after a retired notice it is the primary
+   * choice, because the button that was tapped has gone.
    */
   useEffect(() => {
     if (!launch || !launchedByTapRef.current) return
@@ -159,19 +143,24 @@ export default function BuildStudioChildEntry({
     region.focus()
   }, [launch])
 
+  useEffect(() => {
+    if (workRetired === 0) return
+    const button = primaryChoiceRef.current
+    if (!button?.isConnected) return
+    button.focus()
+  }, [workRetired])
+
   /** Take one explicit choice: a saved version, or the starter. */
   const choose = useCallback(
     (version: BuildStudioVersion | null) => {
       if (launchedRef.current) return
-      // The same identity the shelf's Open and the import both use. A row that
-      // is not this child's in this project opens nothing and says so.
+      // The one identity check, and it fails closed: a row that is not this
+      // child's in this project opens nothing and says so.
       if (version && !versionBelongsTo(version, childId, projectId)) {
         setRefused(true)
         return
       }
-      // Re-read at the TAP, not only at the render that drew the buttons: a
-      // write from an earlier mount can land in the recovery slot while this
-      // screen is sitting here, and that work comes before a new game.
+      // Read at the TAP, not only at the render that drew the buttons.
       const held = unresolvedWork({ familyId, childId, projectId })
       if (held) {
         setHeldAtTap(held)
@@ -185,28 +174,38 @@ export default function BuildStudioChildEntry({
     [familyId, childId, projectId],
   )
 
-  /** Open the studio for work that is waiting — its own deliberate tap. */
+  /**
+   * Open the studio for work that is waiting — after reading the slot again.
+   *
+   * An acknowledgement for the exact held save can land between the tap that
+   * raised the notice and this one. If it did, there is nothing to deal with:
+   * the notice retires and the ordinary chooser comes back, built from the
+   * latest read, instead of the starter opening with nothing said.
+   */
   const openForHeldWork = useCallback(() => {
     if (launchedRef.current) return
+    if (!unresolvedWork({ familyId, childId, projectId })) {
+      setHeldAtTap(null)
+      setWorkRetired((n) => n + 1)
+      return
+    }
     launchedRef.current = true
     launchedByTapRef.current = true
     setLaunch({ version: null })
-  }, [])
+  }, [familyId, childId, projectId])
 
   if (launch) {
     return (
       <Box
         ref={studioRef}
-        // Focusable programmatically, deliberately NOT in the tab order: this
-        // is where focus is put after a launch, not a stop on the way through.
+        // Focusable programmatically, deliberately NOT in the tab order.
         tabIndex={-1}
         role="region"
         aria-label={`${childName}’s Build Studio`}
         sx={{ outline: 'none' }}
       >
         <BuildStudioEditor
-          // Keyed by the child AND the family, exactly as before: the editor
-          // for one identity can never be reused for another.
+          // Keyed by the child AND the family, exactly as before.
           key={`${familyId}\u0000${childId}`}
           familyId={familyId}
           childId={childId}
@@ -225,11 +224,9 @@ export default function BuildStudioChildEntry({
   // ── The question ───────────────────────────────────────────────────────
 
   /**
-   * Is this read about the child and project on screen?
-   *
-   * Asked rather than assumed. An answer about anybody else is reported as not
-   * settled, so no label, date or choice can come out of another child's or
-   * another project's list.
+   * Is this read about the child and project on screen? Asked, not assumed —
+   * an answer about anybody else is reported as not settled, so no label, date
+   * or choice can come out of another child's list.
    */
   const readIsOurs = versions.childId === childId && versions.projectId === projectId
   const status = readIsOurs ? versions.status : VersionsStatus.Loading
@@ -248,8 +245,8 @@ export default function BuildStudioChildEntry({
         <Alert severity="warning">
           <AlertTitle>Something from last time is still here</AlertTitle>
           {heldAtTap.saveLabel
-            ? `A save called “${heldAtTap.saveLabel}” did not finish, so that comes first. Open your studio and you can try it again — or let it go — in there.`
-            : 'Words you said earlier have not been written down yet, so those come first. Open your studio and you can save them — or let them go — in there.'}
+            ? `A save called “${heldAtTap.saveLabel}” did not finish, so that comes first.`
+            : 'Words you said earlier are not written down yet, so those come first.'}
         </Alert>
         <Button
           variant="contained"
@@ -260,23 +257,14 @@ export default function BuildStudioChildEntry({
         >
           Open my studio
         </Button>
-        <Typography variant="caption" color="text.secondary">
-          Your saved games are all still on your shelf in there, and you can open
-          any of them once that is sorted out.
-        </Typography>
       </Stack>
     )
   }
 
-  /**
-   * The starter, as an explicit answer.
-   *
-   * Primary when it is the only one there is, secondary beside a saved game —
-   * the shape of the screen says which is the ordinary thing to do, and neither
-   * happens without a tap.
-   */
+  /** The starter, as an explicit answer. Primary when it is the only one. */
   const starterChoice = (
     <Button
+      ref={latest ? undefined : primaryChoiceRef}
       variant={latest ? 'outlined' : 'contained'}
       size="large"
       fullWidth
@@ -289,24 +277,18 @@ export default function BuildStudioChildEntry({
 
   return (
     <Stack spacing={2} sx={{ maxWidth: 560 }}>
-      <Stack spacing={0.5}>
-        <Typography variant="h5" sx={{ fontWeight: 800 }}>
-          {childName}&apos;s Build Studio
-        </Typography>
-        <Typography variant="body1">
-          Carry on with a game you saved, or start the Apple Dash starter.
-        </Typography>
-      </Stack>
+      <Typography variant="h5" sx={{ fontWeight: 800 }}>
+        {childName}&apos;s Build Studio
+      </Typography>
 
       {refused && (
         <Alert severity="warning">
-          That saved game is not part of this one, so nothing was opened. Nothing
-          changed — try one of your own saves, or start Apple Dash.
+          That saved game is not part of this one, so nothing was opened.
         </Alert>
       )}
 
-      {/* LOOKING. It says what it is doing and offers no choice at all: a
-          starter door drawn over an unsettled shelf is this screen choosing. */}
+      {/* LOOKING. No choice at all: a starter door over an unsettled shelf is
+          this screen choosing. */}
       {status === VersionsStatus.Loading && (
         <Stack
           direction="row"
@@ -323,9 +305,7 @@ export default function BuildStudioChildEntry({
       )}
 
       {/* FAILED. The load-bearing sentence: a read that did not come back is
-          NOT an empty shelf, and a child is never told his games are gone
-          because one request failed. The starter is still offered — as a
-          starter, named, with what it does and does not do said out loud. */}
+          NOT an empty shelf. The starter is still offered, as a tap. */}
       {status === VersionsStatus.Failed && (
         <>
           <Alert
@@ -340,23 +320,19 @@ export default function BuildStudioChildEntry({
               </Button>
             }
           >
-            <AlertTitle>Couldn&apos;t look at your shelf just now</AlertTitle>
             Your saved games are still there — this is the list that didn&apos;t
-            load, not your games. Tap Try again to look once more.
+            load, not your games.
           </Alert>
           {starterChoice}
-          <Typography variant="caption" color="text.secondary">
-            Starting Apple Dash opens the prepared starter game. It saves nothing
-            and changes nothing you have saved before.
-          </Typography>
         </>
       )}
 
-      {/* READY, with saved games. The newest one is named and dated, so the
-          choice is made on what it IS rather than on a promise. */}
+      {/* READY, with saved games. The newest one is named and dated on one
+          line, so the choice is made on what it IS. */}
       {status === VersionsStatus.Ready && latest && (
         <>
           <Button
+            ref={primaryChoiceRef}
             variant="contained"
             size="large"
             fullWidth
@@ -366,23 +342,18 @@ export default function BuildStudioChildEntry({
             ▶ Continue my saved game
           </Button>
           <Typography variant="body2">
-            That opens “{latest.label}” — {savedLine(latest.createdAt)}.
+            “{latest.label}” — {savedLine(latest.createdAt)}
           </Typography>
           {starterChoice}
-          <Typography variant="caption" color="text.secondary">
-            Apple Dash is the prepared starter, not one of your saves. Every game
-            you have saved is on your shelf once you are in, and you can open any
-            of them there.
-          </Typography>
         </>
       )}
 
       {/* READY and genuinely empty — the one state where "nothing saved yet" is
-          a true sentence, and the one state with a single choice. */}
+          true, and the one state with a single choice. */}
       {status === VersionsStatus.Ready && !latest && (
         <>
           <Typography variant="body2" color="text.secondary">
-            Nothing saved yet. This is where your saved games will be.
+            Nothing saved yet.
           </Typography>
           {starterChoice}
         </>
