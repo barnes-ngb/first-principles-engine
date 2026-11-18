@@ -1694,6 +1694,20 @@ export default function BuildStudioEditor({
   }, [heldNote, token, commitNote])
 
   /**
+   * Has the action in the box already been SENT? Answered synchronously, from
+   * the store, so a handler kept by a stale render cannot reset the attempt
+   * state or replace the exact words a retry is for.
+   */
+  const draftWasSubmitted = useCallback(() => {
+    const draft = noteDraftRef.current
+    if (!draft) return false
+    const slot = readPendingNote(owner)
+    const record =
+      slot && slot.target.noteActionId === draft.target.noteActionId ? slot : draft
+    return record.attempts > 0 || record.state !== 'unsent'
+  }, [owner])
+
+  /**
    * Throw the words on screen away, on purpose. Nothing else does this.
    *
    * Tombstoned by action id, so a failure that arrives afterwards cannot put
@@ -1745,6 +1759,27 @@ export default function BuildStudioEditor({
    * then, because none of them is true while an accepted write is out.
    */
   const noteBusy = noteState === 'saving' || wordsSending
+
+  /**
+   * Have the words in the box already been SENT under this action id?
+   *
+   * From the store when the store knows this action, because that is the
+   * authority across mounts. Once an action has been attempted its text is
+   * immutable: the writer keeps one note per action id and will not replace
+   * its text, so a correction typed after a failure (or after a persisted
+   * write whose acknowledgment was lost) could only be refused. Retry keeps
+   * these words; Start over is the door to different ones.
+   */
+  const draftRecord =
+    noteDraft &&
+    storedNote &&
+    storedNote.target.noteActionId === noteDraft.target.noteActionId
+      ? storedNote
+      : noteDraft
+  const draftSubmitted =
+    draftRecord !== null && (draftRecord.attempts > 0 || draftRecord.state !== 'unsent')
+  /** The box is shut while a send owns it, and for good once it was sent. */
+  const noteLocked = noteBusy || draftSubmitted
 
   /**
    * A local "Saving…" cannot outlive the send it was about.
@@ -2238,18 +2273,23 @@ export default function BuildStudioEditor({
             </Typography>
             <TextField
               value={noteDraft.text}
-              // Closed while the write owns these words. A correction typed
-              // mid-flight produced a filed sentence and a different one on
-              // screen, with nothing saying which was which; the latch is
-              // claimed synchronously, so this is shut before the first await.
-              disabled={noteBusy}
+              // Closed while the write owns these words, AND once they have
+              // been sent at all. A send that failed — or that persisted and
+              // lost its acknowledgment — leaves an action whose text the
+              // writer will not change, so editing here produced words the
+              // retry could only be refused for. Retry keeps these words;
+              // Start over is how different words are said.
+              disabled={noteLocked}
               onChange={(e) => {
                 if (noteLatchRef.current) return
+                // Guarded here too, from the authoritative payload: a retained
+                // callback must not reset the attempt state or replace the
+                // text an existing action is being retried with.
+                if (draftWasSubmitted()) return
                 // A typed correction keeps the ORIGINAL capture and event id:
                 // the words began as speech, and relabelling them as typed
                 // would misreport how they were given, and it keeps the frozen
-                // help and stamp. A changed sentence is a fresh send of the
-                // same note action, so the attempt count starts again.
+                // help and stamp.
                 putDraft({
                   ...noteDraft,
                   text: e.target.value,
@@ -2260,7 +2300,10 @@ export default function BuildStudioEditor({
               multiline
               minRows={2}
               fullWidth
-              inputProps={{ 'aria-label': 'What you were trying' }}
+              inputProps={{
+                'aria-label': 'What you were trying',
+                readOnly: noteLocked,
+              }}
             />
             <Stack direction="row" spacing={1} flexWrap="wrap" rowGap={1}>
               <Button
@@ -2270,7 +2313,11 @@ export default function BuildStudioEditor({
                 onClick={() => void handleSaveNote()}
                 sx={{ textTransform: 'none', fontWeight: 600, minHeight: 48 }}
               >
-                {noteBusy ? 'Saving…' : 'Save my words'}
+                {noteBusy
+                  ? 'Saving…'
+                  : draftSubmitted
+                    ? 'Try again with these words'
+                    : 'Save my words'}
               </Button>
               <Button
                 variant="text"
@@ -2285,7 +2332,9 @@ export default function BuildStudioEditor({
               </Button>
             </Stack>
             <Typography variant="caption" color="text.secondary">
-              Nothing is saved until you press Save my words.
+              {draftSubmitted
+                ? 'Try again keeps these exact words. Start over clears them so you can say something different.'
+                : 'Nothing is saved until you press Save my words.'}
               {noteBusy ? ' Keeping your words — one moment.' : ''}
             </Typography>
           </Stack>

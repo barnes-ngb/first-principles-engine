@@ -1751,6 +1751,105 @@ describe('the store is the one current answer about a note', () => {
   })
 })
 
+/**
+ * The last reported defect: a note whose write FAILED (or persisted and lost
+ * its acknowledgment) left an action the writer keeps one text for — and the
+ * box was editable again, so a correction produced words the retry could only
+ * be refused for. An attempted action's words are immutable; Start over is the
+ * door to different ones.
+ */
+describe('an attempted note keeps the exact words it was sent with', () => {
+  it('locks the box after a failure and retries the original payload', async () => {
+    const bridge = await openEditor()
+    await saveAVersion(bridge)
+    await sayWords()
+    // A correction BEFORE the first send is still allowed.
+    expect(screen.getByLabelText('What you were trying')).toBeEnabled()
+    await editWords('I wanted the apples faster')
+
+    saveNote.mockRejectedValueOnce(new Error('lost answer'))
+    await act(async () => {
+      screen.getByRole('button', { name: 'Save my words' }).click()
+    })
+    await waitFor(() => expect(screen.getByText('lost answer')).toBeInTheDocument())
+    const sent = saveNote.mock.calls[0][0]
+    const held = readPendingNote(OWNER)
+    expect(sent.text).toBe('I wanted the apples faster')
+
+    // Now the words belong to an attempted action: the box is shut, and the
+    // button says what trying again does.
+    const box = screen.getByLabelText('What you were trying')
+    expect(box).toBeDisabled()
+    expect(
+      screen.getByRole('button', { name: 'Try again with these words' }),
+    ).toBeEnabled()
+    expect(screen.getByText(/Try again keeps these exact words/)).toBeInTheDocument()
+
+    // Even a retained callback firing cannot rewrite the pending payload.
+    await act(async () => {
+      fireEvent.change(box, { target: { value: 'completely different words' } })
+    })
+    expect(screen.getByLabelText('What you were trying')).toHaveValue(
+      'I wanted the apples faster',
+    )
+    const after = readPendingNote(OWNER)
+    expect(after?.text).toBe(held?.text)
+    expect(after?.target.noteActionId).toBe(held?.target.noteActionId)
+    expect(after?.createdAt).toBe(held?.createdAt)
+    expect(after?.target.versionId).toBe(held?.target.versionId)
+    expect(after?.voiceEventId).toBe(voiceScript.eventId)
+    expect(after?.target.help).toBe('none-offered')
+    expect(after?.attempts).toBe(1)
+    expect(after?.state).toBe('failed')
+
+    // And the retry sends exactly that, once.
+    await act(async () => {
+      screen.getByRole('button', { name: 'Try again with these words' }).click()
+    })
+    await waitFor(() => expect(saveNote).toHaveBeenCalledTimes(2))
+    const retry = saveNote.mock.calls[1][0]
+    expect(retry.text).toBe(sent.text)
+    expect(retry.noteActionId).toBe(sent.noteActionId)
+    expect(retry.createdAt).toBe(sent.createdAt)
+    expect(retry.versionId).toBe(sent.versionId)
+    expect(retry.versionDocId).toBe(sent.versionDocId)
+    expect(retry.voiceEventId).toBe(sent.voiceEventId)
+    expect(retry.help).toBe(sent.help)
+    await waitFor(() => expect(readPendingNote(OWNER)).toBeNull())
+  })
+
+  it('Start over mints a NEW action, and that box is editable again', async () => {
+    const bridge = await openEditor()
+    await saveAVersion(bridge)
+    await sayWords()
+    saveNote.mockRejectedValueOnce(new Error('offline'))
+    await act(async () => {
+      screen.getByRole('button', { name: 'Save my words' }).click()
+    })
+    await waitFor(() => expect(screen.getByText('offline')).toBeInTheDocument())
+    const firstId = saveNote.mock.calls[0][0].noteActionId
+
+    // Different words are a deliberate restart, not an edit of a sent note.
+    await act(async () => {
+      screen.getByRole('button', { name: 'Start over' }).click()
+    })
+    expect(readPendingNote(OWNER)).toBeNull()
+
+    await sayWords()
+    expect(screen.getByLabelText('What you were trying')).toBeEnabled()
+    await editWords('this time I changed the bomb')
+    await act(async () => {
+      screen.getByRole('button', { name: 'Save my words' }).click()
+    })
+    await waitFor(() => expect(saveNote).toHaveBeenCalledTimes(2))
+    const second = saveNote.mock.calls[1][0]
+    expect(second.noteActionId).not.toBe(firstId)
+    expect(second.text).toBe('this time I changed the bomb')
+    // The first, refused attempt was not re-sent or overwritten.
+    expect(saveNote.mock.calls[0][0].noteActionId).toBe(firstId)
+  })
+})
+
 describe('a note records the help that had been OFFERED when he spoke', () => {
   it('records a hint offered after the save and before the words', async () => {
     const bridge = await openEditor()
@@ -1788,10 +1887,11 @@ describe('a note records the help that had been OFFERED when he spoke', () => {
     expect(first.help).toBe('none-offered')
     expect(first.hintsOffered).toBeUndefined()
 
-    // And the retry carries the ORIGINAL metadata, not the newer help.
+    // And the retry carries the ORIGINAL metadata, not the newer help. The
+    // button is named for what it does now that these words were sent once.
     saveNote.mockResolvedValue({ id: 'note-1', alreadySaved: false })
     await act(async () => {
-      screen.getByRole('button', { name: 'Save my words' }).click()
+      screen.getByRole('button', { name: 'Try again with these words' }).click()
     })
     await waitFor(() => expect(saveNote).toHaveBeenCalledTimes(2))
     const retry = saveNote.mock.calls[1][0]
