@@ -2060,7 +2060,7 @@ describe('a download is the CURRENT game or an honest refusal', () => {
    * The current source, over the per-file cap: the real shape of it, which is
    * the child's own edited blocks with far too much in them.
    */
-  const tooBigFiles = (lives: number) => {
+  const tooBigFiles = (lives: number): Record<string, string> => {
     const files = editedFiles(lives)
     return {
       ...files,
