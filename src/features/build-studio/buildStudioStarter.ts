@@ -506,6 +506,39 @@ export function starterScaffoldLooksComplete(mainBlocks: string | undefined): bo
 }
 
 /**
+ * The calls the starter's TypeScript must still make, as stock PXT emits them.
+ *
+ * Counted by CALL, never by text, and with no number in any pattern: every
+ * number in this file is one the child is invited to change, so
+ * `info.startCountdown(50)` is his first edit and not a defect. What may not go
+ * missing is a loop, a handler or a response. Whitespace is tolerated because
+ * the readback is the editor's emission rather than this file's bytes.
+ */
+const STARTER_TS_CALLS: ReadonlyArray<readonly [call: RegExp, atLeast: number]> = [
+  [/\bgame\s*\.\s*onUpdateInterval\s*\(/g, 2], // the apple loop and the rock loop
+  [/\bsprites\s*\.\s*onOverlap\s*\(/g, 2], // the catch and the hit
+  [/\bsprites\s*\.\s*create\s*\(/g, 3], // hero, apple, rock
+  [/\binfo\s*\.\s*changeScoreBy\s*\(/g, 1], // what catching an apple is worth
+  [/\binfo\s*\.\s*changeLifeBy\s*\(/g, 1], // what hitting a rock costs
+]
+
+/**
+ * Does the starter's TYPESCRIPT still describe the whole game?
+ *
+ * Starter-only, and the other half of the same lesson. A readback was verified
+ * arriving with COMPLETE Blocks and TypeScript truncated to the hero and
+ * `info.setLife(3)`: the Blocks parsed, the scaffold counted, the life numbers
+ * agreed — and the project reached Ready with no apples, no rocks, no score and
+ * no cost. Blocks-first or not, the TypeScript is half of what gets saved, so
+ * both halves are now counted rather than one.
+ */
+function starterSourceLooksComplete(mainTs: string): boolean {
+  return STARTER_TS_CALLS.every(
+    ([call, atLeast]) => (mainTs.match(call) ?? []).length >= atLeast,
+  )
+}
+
+/**
  * Do these Blocks and this TypeScript describe the SAME program?
  *
  * Not a decompile — a correspondence check on the handful of facts that would
@@ -546,17 +579,23 @@ export function starterBlocksMatchSource(
  * TypeScript was fine and whose Blocks were blank, which the next save would
  * have written over the TypeScript.
  *
- * Three things now, because the second verified failure passed BOTH of the
- * first two: a workspace carrying a readable `on start` with the right life
- * number, and nothing else — no apple, no rock, no score, no life lost. So the
- * Blocks are also PARSED and the whole scaffold counted
- * ({@link starterScaffoldLooksComplete}). A `false` here is what turns the save
- * controls off and puts the honest recovery sentence and *Try again* on screen.
+ * FOUR things now, because each later failure passed every earlier check. The
+ * Blocks arriving as a readable `on start` with the right life number and
+ * nothing else — no apple, no rock, no score, no life lost — passed the first
+ * two, so the Blocks are PARSED and the whole scaffold counted
+ * ({@link starterScaffoldLooksComplete}). Then the mirror image was verified:
+ * complete Blocks beside TypeScript truncated to the hero and the life line,
+ * reaching Ready. So the source is counted too
+ * ({@link starterSourceLooksComplete}).
+ *
+ * A `false` here is what turns the save controls off and puts the honest
+ * recovery sentence and *Try again* on screen.
  */
 export function starterImportLooksCorrect(files: BuildStudioSourceFiles): boolean {
   const ts = files['main.ts']
   if (typeof ts !== 'string' || !ts.includes('sprites.create')) return false
   if (!ts.includes('info.setLife')) return false
+  if (!starterSourceLooksComplete(ts)) return false
   const blocks = files['main.blocks']
   if (!starterScaffoldLooksComplete(blocks)) return false
   return starterBlocksMatchSource(blocks, ts)

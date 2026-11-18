@@ -356,6 +356,55 @@ describe('the prepared starter is checked as a WHOLE workspace', () => {
     expect(starterScaffoldLooksComplete(blocks)).toBe(false)
   })
 
+  it('refuses complete Blocks beside TypeScript stripped of the gameplay', () => {
+    // The mirror image of the malformed-XML case, and verified reaching Ready:
+    // the hero and the life line survived, so both halves agreed on 3 and the
+    // Blocks counted perfectly — and there was nothing to catch, nothing to
+    // dodge, no point to score and no life to lose.
+    const strippedTs = [
+      'let hero: Sprite = null',
+      'scene.setBackgroundColor(9)',
+      'info.setLife(3)',
+      'info.setScore(0)',
+      'hero = sprites.create(null, SpriteKind.Player)',
+      'hero.setPosition(80, 104)',
+      'controller.moveSprite(hero, 90, 0)',
+      '',
+    ].join('\n')
+    expect(starterScaffoldLooksComplete(STARTER_MAIN_BLOCKS)).toBe(true)
+    expect(starterBlocksMatchSource(STARTER_MAIN_BLOCKS, strippedTs)).toBe(true)
+    expect(
+      starterImportLooksCorrect({
+        'pxt.json': STARTER_PXT_JSON,
+        'main.ts': strippedTs,
+        'main.blocks': STARTER_MAIN_BLOCKS,
+      }),
+    ).toBe(false)
+  })
+
+  it('permits a CHANGED number — the countdown at 50 instead of 45', () => {
+    // Loops, handlers and responses are counted; no number is pinned. So a
+    // child's own edit stays importable and reads DIRTY against the shelf,
+    // rather than being refused as a broken starter.
+    const fiftyTs = STARTER_MAIN_TS.replace(
+      'info.startCountdown(45)',
+      'info.startCountdown(50)',
+    )
+    const fiftyBlocks = STARTER_MAIN_BLOCKS.replace(
+      /(type="gamecountdown"[\s\S]{0,200}?<field name="NUM">)45(<\/field>)/,
+      '$150$2',
+    )
+    expect(fiftyTs).not.toBe(STARTER_MAIN_TS)
+    expect(fiftyBlocks).not.toBe(STARTER_MAIN_BLOCKS)
+    expect(
+      starterImportLooksCorrect({
+        'pxt.json': STARTER_PXT_JSON,
+        'main.ts': fiftyTs,
+        'main.blocks': fiftyBlocks,
+      }),
+    ).toBe(true)
+  })
+
   it('leaves a SAVED or RECOVERED game judged exactly as gently as before', () => {
     // The strict scaffold is the STARTER IMPORT's alone. A child who truncated,
     // rebuilt or emptied his own workspace still opens his own game.
@@ -372,6 +421,15 @@ describe('the prepared starter is checked as a WHOLE workspace', () => {
         }),
       ).toBe(true)
     }
+    // The TypeScript half stays just as gentle: his own game needs no apples,
+    // no rocks and no score in it to be the thing he saved.
+    expect(
+      reopenedVersionLooksLoaded({
+        'pxt.json': STARTER_PXT_JSON,
+        'main.ts': 'scene.setBackgroundColor(5)\n',
+        'main.blocks': STARTER_MAIN_BLOCKS,
+      }),
+    ).toBe(true)
   })
 })
 

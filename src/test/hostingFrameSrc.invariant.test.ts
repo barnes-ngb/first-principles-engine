@@ -53,20 +53,23 @@ const ALLOWED = [
 /** The static document, which delivers a policy of its very own. */
 const INDEX_HTML = readFileSync(resolve(__dirname, '..', '..', 'index.html'), 'utf8')
 
-/** Every `<meta http-equiv="Content-Security-Policy">` in it, in document order. */
-const metaPolicyTags = [
-  ...INDEX_HTML.matchAll(
-    /<meta\s[^>]*http-equiv=["']Content-Security-Policy["'][^>]*>/gi,
-  ),
-].map((match) => match[0])
+/**
+ * Every `<meta http-equiv="Content-Security-Policy">` in it, in document order.
+ *
+ * Read with the jsdom test environment's own `DOMParser` rather than a regex:
+ * the policy contains `'self'`, and a pattern matching `["']` either side of an
+ * attribute stops at that apostrophe inside a double-quoted value. The parser
+ * is the thing a browser actually does.
+ */
+const metaPolicies = Array.from(
+  new DOMParser()
+    .parseFromString(INDEX_HTML, 'text/html')
+    .querySelectorAll('meta[http-equiv]'),
+).filter(
+  (meta) => meta.getAttribute('http-equiv')?.toLowerCase() === 'content-security-policy',
+)
 
-const metaContent = (tag: string): string | undefined =>
-  tag.match(/content=["']([^"']*)["']/i)?.[1]
-
-/** One policy, as its source tokens — whitespace and wrapping normalised away. */
-const sourcesOf = (policy: string): string[] =>
-  policy.trim().replace(/^frame-src\s+/, '').split(/\s+/)
-
+/** One policy, with wrapping and runs of whitespace normalised away. */
 const oneLine = (policy: string): string => policy.trim().replace(/\s+/g, ' ')
 
 describe('the app frame-src names exactly the origins we embed', () => {
@@ -137,44 +140,26 @@ describe('the app frame-src names exactly the origins we embed', () => {
 })
 
 describe('index.html delivers the SAME policy, because browsers intersect them', () => {
-  it('declares a Content-Security-Policy meta at all', () => {
+  it('declares exactly ONE Content-Security-Policy meta', () => {
+    // Zero is the failure that hid this: the served header alone is not what a
+    // browser enforces. More than one is the same bug twice, since each is
+    // enforced and the effective list is their intersection.
     expect(
-      metaPolicyTags.length,
-      'index.html declares no <meta http-equiv="Content-Security-Policy"> — if one is ' +
-        'added later it must carry the authorised list, since the browser enforces it ' +
-        'alongside the served header and frames only what BOTH allow',
-    ).toBeGreaterThan(0)
-  })
-
-  it('declares exactly ONE, so there is one list to keep right', () => {
-    expect(
-      metaPolicyTags.length,
-      `index.html declares ${metaPolicyTags.length} CSP metas; each one is enforced, so a ` +
-        'second list silently narrows the first',
+      metaPolicies.length,
+      metaPolicies.length === 0
+        ? 'index.html declares no <meta http-equiv="Content-Security-Policy">; one must ' +
+          'carry the authorised frame-src, because the browser enforces it alongside ' +
+          'the served header and frames only what BOTH allow'
+        : `index.html declares ${metaPolicies.length} CSP metas; a second list silently ` +
+          'narrows the first',
     ).toBe(1)
   })
 
-  it('names exactly the authorised origins, in the same order as the header', () => {
-    const content = metaContent(metaPolicyTags[0])
+  it('carries the authorised header’s list, exactly', () => {
+    // The whole repair: one list, written in two places, asserted to be one
+    // list. The origins themselves are checked against ALLOWED above.
+    const content = metaPolicies[0]?.getAttribute('content')
     expect(content, 'the CSP meta has no content attribute to read').toBeTruthy()
-    expect(content!.trim().startsWith('frame-src ')).toBe(true)
-    expect(sourcesOf(content!)).toEqual(ALLOWED)
-  })
-
-  it('is byte-for-byte the authorised header list', () => {
-    // The whole repair: one list, written twice, asserted to be one list.
-    expect(oneLine(metaContent(metaPolicyTags[0])!)).toBe(oneLine(csp!))
-  })
-
-  it('allows the MakeCode editor — the origin whose absence here timed out', () => {
-    expect(
-      metaContent(metaPolicyTags[0]) ?? '',
-      'the meta must allow https://arcade.makecode.com; however permissive the served ' +
-        'header is, the intersection of the two is what loads the editor',
-    ).toContain('https://arcade.makecode.com')
-  })
-
-  it('still allows the watch surface’s own origin', () => {
-    expect(metaContent(metaPolicyTags[0]) ?? '').toContain('https://www.youtube-nocookie.com')
+    expect(oneLine(content!)).toBe(oneLine(csp!))
   })
 })
