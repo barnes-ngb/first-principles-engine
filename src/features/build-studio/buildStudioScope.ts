@@ -195,6 +195,53 @@ export const noteTargetKey = (target: BuildStudioNoteTarget | null): string =>
     : 'no-target'
 
 /**
+ * The exact words one *Save my words* action will send, and what they are about.
+ *
+ * Words are the one thing in this feature the app cannot re-read: a game can be
+ * captured from the editor again, but a sentence a child said once is gone the
+ * moment the component unmounts. Verification found exactly that — accepted
+ * words, an edit to them, a tap on *Today*, and nothing left. So the words are
+ * carried as a payload of their own, with:
+ *
+ *   • the {@link BuildStudioNoteTarget} they were accepted against, frozen —
+ *     the version, its document, the visit, the help that had been offered and
+ *     the one `noteActionId` the write is idempotent on;
+ *   • how they were given (`capture`) and the voice event they came from, so a
+ *     typed correction never relabels speech as typing;
+ *   • `attempts`, so the page can say "not saved yet" and "that did not save"
+ *     as two different, true things.
+ *
+ * It is a PAYLOAD, not a record: nothing is durable until *Save my words*.
+ */
+export interface PendingNote {
+  target: BuildStudioNoteTarget
+  /** The exact words. Never trimmed, never rewritten — his sentence. */
+  text: string
+  capture: 'voice' | 'typed'
+  voiceEventId?: string
+  /**
+   * The label of the save these words are about, for saying so on screen.
+   * Display only: the write uses the target's ids.
+   */
+  versionLabel?: string
+  /** How many times these exact words have been sent. `0` means never. */
+  attempts: number
+}
+
+/** Are these two note payloads the same words of the same save action? */
+export function sameNotePayload(
+  a: PendingNote | null,
+  b: PendingNote | null,
+): boolean {
+  if (!a || !b) return false
+  return (
+    a.target.noteActionId === b.target.noteActionId &&
+    sameNoteTarget(a.target, b.target) &&
+    a.text === b.text
+  )
+}
+
+/**
  * The exact payload one Save action will keep retrying.
  *
  * Held by the page so that a retry preserves **the bytes and the identity**

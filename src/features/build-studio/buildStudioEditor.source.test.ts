@@ -67,18 +67,58 @@ describe('the helper can only talk', () => {
   })
 })
 
+/**
+ * Both scans below take a BOUNDED slice, and both guard the slice itself.
+ *
+ * They used to end at `const openVersion =`, a handler the editor no longer
+ * has: `indexOf` returned `-1`, so one scan read to the end of the file and
+ * reached the adult-assisted starter link 300 lines further down, and the other
+ * sliced an empty string and asserted nothing at all. A slice whose boundaries
+ * are not checked is a test that cannot fail.
+ */
+function slice(from: string, to: string): string {
+  const start = CODE.indexOf(from)
+  const end = CODE.indexOf(to)
+  expect(start, `boundary missing: ${from}`).toBeGreaterThanOrEqual(0)
+  expect(end, `boundary missing: ${to}`).toBeGreaterThan(start)
+  return CODE.slice(start, end)
+}
+
 describe('the starter is never offered as recovery of edited work', () => {
   it('keeps the edited-source download off the starter entirely', () => {
-    const download = CODE.slice(
-      CODE.indexOf('const handleDownloadCurrent ='),
-      CODE.indexOf('const openVersion ='),
-    )
+    // The download handler ONLY, bounded by the next declaration after it.
+    const download = slice('const handleDownloadCurrent =', 'const applyReplace =')
     expect(download).not.toContain('starterSourceFiles')
     expect(download).not.toContain('STARTER_PROJECT_PNG_URL')
+    // And it reaches for the latest real bytes rather than a template.
+    expect(download).toContain('departureFilesRef.current')
+    expect(download).toContain('pending?.files')
   })
 
   it('says plainly that the project file is not a copy of saved work', () => {
     expect(EDITOR).toContain('not a copy of any game saved')
+  })
+})
+
+describe('words are written only by a deliberate act, under their own owner', () => {
+  it('has ONE note write, inside the commit, bound to the payload', () => {
+    // One call site, so there is nowhere for an automatic write to hide.
+    expect(CODE.split('saveBuildStudioNote(').length - 1).toBe(1)
+    const commit = slice('const commitNote =', 'const handleSaveNote =')
+    expect(commit).toContain('saveBuildStudioNote(')
+    // Provenance comes from the payload's frozen target — the version, its
+    // document and the one action id — never from whatever the screen shows.
+    expect(commit).toContain('sending.target.noteActionId')
+    expect(commit).toContain('payload.target.childId')
+    expect(commit).not.toContain('noteTarget')
+  })
+
+  it('clears held words by action id, never by owner alone', () => {
+    // An owner-only clear let one acknowledgment wipe another set of words.
+    for (const call of CODE.match(/clearPendingNote\([^)]*\)/g) ?? []) {
+      expect(call, call).toContain('noteActionId')
+    }
+    expect(CODE).toContain('clearPendingNote(')
   })
 })
 
@@ -107,7 +147,10 @@ describe('the kid page carries no routine implementation detail', () => {
 
 describe('every open action is checked against child AND project', () => {
   it('re-checks ownership in the action that imports bytes', () => {
-    const open = CODE.slice(CODE.indexOf('const openVersion ='))
+    // `applyReplace` is that action now — one path for the shelf's Open and
+    // for a recovered file — and the check lives inside it, not only on the
+    // shelf row that offered it.
+    const open = slice('const applyReplace =', 'const requestReplace =')
     expect(open).toContain('versionBelongsTo(version, childId, projectId)')
   })
 

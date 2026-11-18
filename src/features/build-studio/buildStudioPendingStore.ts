@@ -1,6 +1,6 @@
 /**
- * The one place a Save that did not land is kept across a remount
- * (LOCAL-BUILD-001).
+ * The one place work that did not land is kept across a remount — a Save that
+ * failed, and words nobody has written down yet (LOCAL-BUILD-001/002).
  *
  * ── Why it exists ────────────────────────────────────────────────────────
  *
@@ -30,7 +30,7 @@
  *     it idempotent rather than a second version.
  */
 
-import type { PendingSave } from './buildStudioScope'
+import type { PendingNote, PendingSave } from './buildStudioScope'
 
 /** The owner a held payload belongs to. Not the live child — the work's own. */
 export interface PendingOwner {
@@ -56,14 +56,23 @@ const held = new Map<string, PendingSave>()
 const offered = new Map<string, Map<string, number>>()
 let offerSeq = 0
 
-function noteOffer(key: string, versionId: string): number {
-  const own = offered.get(key) ?? new Map<string, number>()
-  if (!own.has(versionId)) {
+/**
+ * Record (once) when an action id was first offered to a slot, and answer with
+ * that order. Shared by both slots below, off ONE counter, so "which of these
+ * is newer" has a single authority.
+ */
+function observeOffer(
+  bucket: Map<string, Map<string, number>>,
+  key: string,
+  actionId: string,
+): number {
+  const own = bucket.get(key) ?? new Map<string, number>()
+  if (!own.has(actionId)) {
     offerSeq += 1
-    own.set(versionId, offerSeq)
+    own.set(actionId, offerSeq)
   }
-  offered.set(key, own)
-  return own.get(versionId) as number
+  bucket.set(key, own)
+  return own.get(actionId) as number
 }
 
 /**
@@ -109,7 +118,7 @@ export function holdPendingSave(owner: PendingOwner, payload: PendingSave): bool
     return false
   }
   const key = ownerKey(owner)
-  const mine = noteOffer(key, payload.versionId)
+  const mine = observeOffer(offered, key, payload.versionId)
   const slot = held.get(key)
   if (slot && slot.versionId !== payload.versionId) {
     // BOTH halves, and both are needed. The stamp rule catches a payload the
@@ -144,8 +153,78 @@ export function clearPendingSave(owner: PendingOwner, versionId: string): void {
   held.delete(key)
 }
 
-/** Test seam: drop everything. Never called by the app. */
+// ── Words that have not been written down ───────────────────────────────────
+//
+// The same primitive, for the one thing in this feature that genuinely cannot
+// be read again. A game can always be captured from the editor once more; a
+// sentence a child said once cannot. Verification found accepted words, an edit
+// to them, a tap on *Today* — and nothing left, with no warning.
+//
+// So an accepted draft lives HERE for its owner as well as in the component's
+// state: leaving and coming back offers the exact words back, and only an
+// explicit *Save my words* writes anything down. Memory only, same as above —
+// a reload loses it, which is honest, and is why the departure guard still
+// treats unsaved words as work at risk rather than relying on this.
+
+/** One set of words per owner. The newest offered words own the slot. */
+const heldNotes = new Map<string, PendingNote>()
+const noteOffers = new Map<string, Map<string, number>>()
+
+/**
+ * Keep this owner's unsaved words.
+ *
+ * Returns whether they took the slot. Refused when the payload's own target
+ * names a different owner — words must never be offered back to another child —
+ * and when the slot already holds a NEWER save action's words, by observed
+ * offer order, the same rule the payload slot uses.
+ *
+ * The SAME action's words may always replace their own entry: a typed
+ * correction is still that action's words, and the newest wording is what the
+ * person is looking at.
+ */
+export function holdPendingNote(owner: PendingOwner, payload: PendingNote): boolean {
+  if (
+    payload.target.familyId !== owner.familyId ||
+    payload.target.childId !== owner.childId ||
+    payload.target.projectId !== owner.projectId
+  ) {
+    return false
+  }
+  const key = ownerKey(owner)
+  const mine = observeOffer(noteOffers, key, payload.target.noteActionId)
+  const slot = heldNotes.get(key)
+  if (slot && slot.target.noteActionId !== payload.target.noteActionId) {
+    const theirs = noteOffers.get(key)?.get(slot.target.noteActionId) ?? 0
+    if (theirs > mine) return false
+  }
+  heldNotes.set(key, payload)
+  return true
+}
+
+/** This owner's unsaved words, if there are any. */
+export function readPendingNote(owner: PendingOwner): PendingNote | null {
+  return heldNotes.get(ownerKey(owner)) ?? null
+}
+
+/**
+ * Forget ONE note action's words — the ones that were filed, or the ones a
+ * person deliberately discarded.
+ *
+ * `noteActionId` is required for the reason it is required above: a late
+ * acknowledgment of an older set of words may finish its own action and may
+ * never clear a newer one's slot.
+ */
+export function clearPendingNote(owner: PendingOwner, noteActionId: string): void {
+  const key = ownerKey(owner)
+  const slot = heldNotes.get(key)
+  if (!slot || slot.target.noteActionId !== noteActionId) return
+  heldNotes.delete(key)
+}
+
+/** Test seam: drop everything, both slots. Never called by the app. */
 export function resetPendingSaveStore(): void {
   held.clear()
   offered.clear()
+  heldNotes.clear()
+  noteOffers.clear()
 }

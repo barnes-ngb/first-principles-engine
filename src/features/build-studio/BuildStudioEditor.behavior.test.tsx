@@ -236,20 +236,62 @@ async function attemptDeparture() {
 
 const selectProfile = vi.fn()
 let registeredGuard: ((next: string) => boolean) | null = null
-vi.mock('../../core/profile/useProfile', () => ({
-  useProfile: () => ({
-    selectProfile,
-    registerProfileChangeGuard: (g: (next: string) => boolean) => {
-      registeredGuard = g
-      return () => {
-        registeredGuard = null
-      }
-    },
-  }),
-}))
+
+/**
+ * STABLE identities, because the real provider's are stable.
+ *
+ * This was the driver bug behind five profile failures. `ProfileProvider`
+ * builds `registerProfileChangeGuard` with `useCallback` and publishes it in a
+ * memoised value, so the editor's registration effect runs ONCE. The mock
+ * returned a fresh closure on every render, so `setHeldProfile` re-rendered,
+ * the effect's dependency changed, and its cleanup — whose job is to retire an
+ * ask on unmount or a visit change — cancelled the ask the component had just
+ * opened. The product code was right; the driver re-registered a guard the real
+ * app never re-registers. Nothing about the delayed-capture, Stay-is-final or
+ * late-result assertions is relaxed to accommodate it.
+ */
+const registerProfileChangeGuard = (g: (next: string) => boolean) => {
+  registeredGuard = g
+  return () => {
+    // Only its own registration, as the provider's filter does.
+    if (registeredGuard === g) registeredGuard = null
+  }
+}
+const profileValue = { selectProfile, registerProfileChangeGuard }
+vi.mock('../../core/profile/useProfile', () => ({ useProfile: () => profileValue }))
 
 vi.mock('../../core/hooks/useTTS', () => ({ useTTS: () => ({ speak: vi.fn() }) }))
-vi.mock('../../components/VoiceInput', () => ({ default: () => null }))
+
+/**
+ * A mic that hands over a transcript when it is tapped.
+ *
+ * The reflection is the one thing in this feature that cannot be captured
+ * again, so its loss has to be reproducible: this fake lets a test accept words
+ * the way `VoiceInput` does — text plus the voice event they came from — and
+ * records the props it was given, so ownership and surface are checked too.
+ */
+const voiceScript = { text: 'I made the apples fall faster', eventId: 'voice-ev-1' }
+const voiceProps: Array<{ profile?: { id?: string }; sourceSurface?: string }> = []
+vi.mock('../../components/VoiceInput', async () => {
+  const React = await import('react')
+  return {
+    default: (props: {
+      profile?: { id?: string }
+      sourceSurface?: string
+      onTranscript: (text: string, meta?: { eventId?: string }) => void
+    }) => {
+      voiceProps.push({ profile: props.profile, sourceSurface: props.sourceSurface })
+      return React.createElement(
+        'button',
+        {
+          type: 'button',
+          onClick: () => props.onTranscript(voiceScript.text, { eventId: voiceScript.eventId }),
+        },
+        'Pretend mic',
+      )
+    },
+  }
+})
 vi.mock('./BuildStudioVersionShelf', () => ({ default: () => null }))
 // Reached only for the pure `versionBelongsTo` predicate; stubbed so this
 // suite initialises no Firebase app.
@@ -259,7 +301,13 @@ vi.mock('../../core/firebase/firestore', () => ({
 }))
 
 import { serializeBuildStudioSource } from '../../core/types/buildStudio'
-import { resetPendingSaveStore, readPendingSave } from './buildStudioPendingStore'
+import {
+  clearPendingNote,
+  holdPendingNote,
+  readPendingNote,
+  readPendingSave,
+  resetPendingSaveStore,
+} from './buildStudioPendingStore'
 import { starterSourceFiles } from './buildStudioStarter'
 import { VersionsStatus } from './useBuildStudioVersions'
 
@@ -328,8 +376,41 @@ beforeEach(() => {
   }))
   saveNote.mockReset()
   saveNote.mockResolvedValue({ id: 'note-1', alreadySaved: false })
+  voiceProps.length = 0
   resetPendingSaveStore()
 })
+
+// ── Shared steps for the reflection ──────────────────────────────────────
+
+/** Save a version, so there is something the words can be about. */
+async function saveAVersion(bridge: FakeBridgeStub, files = editedFiles(4)) {
+  bridge.nextCapture = files
+  await act(async () => {
+    bridge.announce(files)
+  })
+  await tapSave()
+  await waitFor(() =>
+    expect(screen.getByText('Saved. Your game is on your shelf.')).toBeInTheDocument(),
+  )
+}
+
+/** Accept a transcript, as the mic's callback does. */
+async function sayWords() {
+  await act(async () => {
+    screen.getByText('Pretend mic').click()
+  })
+  await waitFor(() =>
+    expect(screen.getByLabelText('What you were trying')).toHaveValue(voiceScript.text),
+  )
+}
+
+/** Type a correction into the accepted words. */
+async function editWords(text: string) {
+  const box = screen.getByLabelText('What you were trying')
+  await act(async () => {
+    fireEvent.change(box, { target: { value: text } })
+  })
+}
 
 // ── 1. Clean versus newer edits ──────────────────────────────────────────
 
@@ -466,7 +547,16 @@ describe('a held departure is checked before anybody is warned', () => {
     bridge.nextCapture = starterFiles()
     await attemptDeparture()
     await waitFor(() => expect(proceedSpy).toHaveBeenCalled())
-    expect(screen.queryByText('Keep your game first?')).not.toBeInTheDocument()
+    // The dialog is MUI's, and MUI keeps a closing dialog mounted for its exit
+    // transition — so the question is whether it GOES, not whether it has
+    // already gone by the next line. Nothing about the clean release is
+    // weakened: `proceed` above is the real assertion, and the departure was
+    // never answered by a person.
+    await waitFor(() =>
+      expect(screen.queryByText('Keep your game first?')).not.toBeInTheDocument(),
+    )
+    expect(resetSpy).not.toHaveBeenCalled()
+    expect(screen.queryByText('Leave and lose it')).not.toBeInTheDocument()
   })
 
   it('captures an UNANNOUNCED edit and offers the real choice', async () => {

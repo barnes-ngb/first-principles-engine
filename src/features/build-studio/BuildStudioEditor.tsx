@@ -34,6 +34,17 @@
  * on unmount and on every visit change — so a late completion can never land in
  * a new visit.
  *
+ * ── Words are the one thing that cannot be read again ───────────────────
+ *
+ * A game can always be captured from the editor once more. A sentence a child
+ * said once cannot, and verification found it being lost: accepted words, an
+ * edit to them, a tap on *Today*, no warning, gone. So unsaved words are work
+ * at risk — every departure, profile switch, shelf Open and recovery stops and
+ * says so — and the exact words are held for their owner (family + child +
+ * project) in `buildStudioPendingStore`, offered back on return with the save
+ * they were about named. Holding is not saving: nothing is written down until
+ * *Save my words*, and discarding is a button somebody has to press.
+ *
  * ── Nothing here is scored ──────────────────────────────────────────────
  *
  * No streak, no level, no meter, no reward, no completion. Hints are counted as
@@ -98,9 +109,12 @@ import {
   type OpenLifeValue,
 } from './buildStudioHints'
 import {
+  clearPendingNote,
   clearPendingSave,
+  holdPendingNote,
   holdPendingSave,
   pendingSlotAccepts,
+  readPendingNote,
   readPendingSave,
   type PendingOwner,
 } from './buildStudioPendingStore'
@@ -110,11 +124,13 @@ import {
   newVersionId,
   newVisitId,
   noteTargetKey,
+  sameNotePayload,
   sameNoteTarget,
   scopeToken,
   sourceSignature,
   type BuildStudioNoteTarget,
   type BuildStudioScope,
+  type PendingNote,
   type PendingSave,
 } from './buildStudioScope'
 import {
@@ -325,15 +341,28 @@ export default function BuildStudioEditor({
   const noteLatchRef = useRef<string | null>(null)
 
   const [hintsOffered, setHintsOffered] = useState(0)
-  const [noteDraft, setNoteDraft] = useState<
-    {
-      text: string
-      capture: 'voice' | 'typed'
-      /** Preserved even after a typed correction — see the handler. */
-      voiceEventId?: string
-      target: BuildStudioNoteTarget
-    } | null
-  >(null)
+  /**
+   * The words on screen, editable, about the save that is acknowledged NOW.
+   *
+   * It is a {@link PendingNote} — the same shape the store holds and the same
+   * shape the write sends — so the words, their frozen target, how they were
+   * given and how many times they have been sent never drift apart.
+   */
+  const [noteDraft, setNoteDraft] = useState<PendingNote | null>(null)
+  /**
+   * Words that are NOT about what is acknowledged on screen now: restored for
+   * this owner after a remount, or a draft whose save was acknowledged in the
+   * meantime. They keep their own target, so they can still be saved with the
+   * version they were actually about — or discarded, on purpose.
+   *
+   * The store keeps ONE set of words per owner, the newest offered, the same
+   * rule the payload slot uses. So if two sets are unsaved at once, both stay
+   * visible here for as long as the page does, and the newest is the one a
+   * return offers back. Neither is ever written without a tap.
+   */
+  const [heldNote, setHeldNote] = useState<PendingNote | null>(() =>
+    readPendingNote({ familyId, childId, projectId }),
+  )
   const [noteState, setNoteState] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle')
   const [noteMessage, setNoteMessage] = useState<string | null>(null)
 
@@ -370,6 +399,27 @@ export default function BuildStudioEditor({
   }, [writeInFlight])
 
   /**
+   * Are there words nobody has written down?
+   *
+   * Kept SEPARATE from `atRiskRef` because the two say different true things: a
+   * dirty editor is a game that is not on the shelf, and this is a sentence that
+   * exists nowhere but this page. The departure and the profile guard both block
+   * on it, and the dialogs say which of the two it is rather than guessing.
+   *
+   * Written in an effect AND synchronously by the handlers that accept or edit
+   * words — a transcript that lands in the same gesture as a tap on *Today*
+   * would otherwise be read at the previous render's value, which is the whole
+   * class of defect the departure refs exist for.
+   */
+  const wordsAtRiskRef = useRef(false)
+  const hasWords = (note: PendingNote | null): boolean =>
+    note !== null && note.text.trim().length > 0
+  const wordsAtRisk = hasWords(noteDraft) || hasWords(heldNote)
+  useEffect(() => {
+    wordsAtRiskRef.current = wordsAtRisk
+  }, [wordsAtRisk])
+
+  /**
    * An edit can exist that the app has not been told about: a child types 4
    * into the blocks and taps Today before MakeCode emits `workspacesave`. The
    * app has NO signal for that, so while the editor is live "nothing at risk"
@@ -386,9 +436,17 @@ export default function BuildStudioEditor({
     editorLiveRef.current = phase === EditorPhase.Ready && projectReady
   }, [phase, projectReady])
 
-  const hasWorkAtRisk = useCallback(
-    () => atRiskRef.current || (editorLiveRef.current && !cleanConfirmedRef.current),
+  /**
+   * Work that is KNOWN to be at risk, answered synchronously: a game that is
+   * not on the shelf, a Save that did not finish, or words nobody saved.
+   */
+  const workAtRiskNow = useCallback(
+    () => atRiskRef.current || wordsAtRiskRef.current,
     [],
+  )
+  const hasWorkAtRisk = useCallback(
+    () => workAtRiskNow() || (editorLiveRef.current && !cleanConfirmedRef.current),
+    [workAtRiskNow],
   )
   const writeIsInFlight = useCallback(() => inFlightRef.current, [])
   const departure = useBuildStudioDepartureGuard({
@@ -493,13 +551,18 @@ export default function BuildStudioEditor({
       if (departureRunRef.current !== runId) return
       if (liveTokenRef.current !== ownToken) return
       setDepartureCheck(result)
-      if (result === 'clean') {
-        // Verified clean while the editor was still intact, so the person is
-        // not asked a question about nothing — the departure they already
-        // chose simply continues.
-        cleanConfirmedRef.current = true
+      // Clean is still recorded when it is true — it is an observation about
+      // the SOURCE, made while the editor was intact, and the guard's own
+      // release effect needs it the moment the last thing at risk is dealt
+      // with. What it no longer does by itself is leave.
+      if (result === 'clean') cleanConfirmedRef.current = true
+      if (result === 'clean' && !wordsAtRiskRef.current) {
+        // Nothing at all is at risk, so the person is not asked a question
+        // about nothing — the departure they already chose simply continues.
         departure.leaveAnyway()
       }
+      // Clean source, unsaved WORDS: the dialog stays, because a sentence he
+      // said is work, and leaving is still allowed — deliberately.
     })
   }, [departure, token, checkSourceNow])
 
@@ -543,6 +606,9 @@ export default function BuildStudioEditor({
         if (liveTokenRef.current !== ownToken) return
         setProfileCheck(result)
         if (result !== 'clean') return
+        // A clean GAME is not an empty page: words he said are only here. The
+        // ask stays open, with Save my words, Discard and Stay on it.
+        if (wordsAtRiskRef.current) return
         // Verified clean while the editor was still here, so the change the
         // person already asked for simply happens.
         profileAskRef.current = null
@@ -617,6 +683,13 @@ export default function BuildStudioEditor({
     setEditorDirty(false)
     setPlaying(false)
     setOpenLives(null)
+    // A RECEIPT belongs to the visit it was earned in. The words themselves are
+    // deliberately NOT cleared here: a new visit retires the draft's target,
+    // and the effect that owns that transition keeps the words by holding them
+    // for their owner. Clearing them here would be the loss this run exists to
+    // fix, dressed up as housekeeping.
+    setNoteState('idle')
+    setNoteMessage(null)
     settledSignatureRef.current = null
     announcedSignatureRef.current = null
     window.addEventListener('message', bridge.handleMessage)
@@ -1113,7 +1186,10 @@ export default function BuildStudioEditor({
       setSaveState(SaveState.Idle)
       setSaveMessage(null)
       setLastSaved(null)
-      setNoteDraft(null)
+      // The DRAFT is not thrown away here. It used to be, which is how an Open
+      // or a recovery silently deleted a sentence he had already said: the new
+      // visit retires its target, and the effect that notices that keeps the
+      // words for their owner instead. Only the receipt is visit-scoped.
       setNoteState('idle')
       setNoteMessage(null)
       setHintsOffered(0)
@@ -1155,7 +1231,10 @@ export default function BuildStudioEditor({
       replaceRunRef.current = runId
       setProspect(next)
       // A failed save's exact retry is work, and its loss has to be deliberate.
-      if (pending) {
+      // So are words he has not saved: a replacement keeps them (they are held
+      // for their owner), but it also ENDS the save they were about, so it is
+      // said out loud first rather than discovered afterwards.
+      if (pending || wordsAtRiskRef.current) {
         setProspectCheck('dirty')
         return
       }
@@ -1288,66 +1367,310 @@ export default function BuildStudioEditor({
   /** A draft whose target is no longer the live one is retired, not written. */
   const draftIsStale = noteDraft !== null && !sameNoteTarget(noteDraft.target, noteTarget)
 
-  const handleSaveNote = useCallback(async () => {
-    if (noteLatchRef.current) return
+  /**
+   * The words on screen, readable synchronously.
+   *
+   * An acknowledgment that arrives after a tap has to compare itself against
+   * what is in the box NOW — including a correction typed in the same tick —
+   * and a render-time copy would answer with the previous render's words.
+   */
+  const noteDraftRef = useRef<PendingNote | null>(null)
+
+  /**
+   * Put words on screen, and update what the guards read, together.
+   *
+   * One door, so there is no state in which the box holds a sentence and the
+   * departure guard believes the page is empty. It only ever raises the
+   * at-risk flag: lowering it is the settling effect's job, because held words
+   * may still exist after the draft is cleared.
+   */
+  const putDraft = useCallback((next: PendingNote | null) => {
+    noteDraftRef.current = next
+    if (next && next.text.trim()) wordsAtRiskRef.current = true
+    setNoteDraft(next)
+  }, [])
+
+  /**
+   * Keep unsaved words for their owner — and, when the save they were about is
+   * no longer the one on screen, move them to the held panel instead of
+   * dropping them.
+   *
+   * This is the repair. The words used to live only in this component's state,
+   * so a tap on *Today*, a profile switch, an Open from the shelf or a recovery
+   * file ended them with no warning and nothing to come back to. They are now
+   * held for family + child + project, in memory, and offered back on return.
+   * Holding is NOT saving: nothing durable is written until *Save my words*.
+   */
+  useEffect(() => {
     if (!noteDraft) return
-    // Before the await: the captured target must still be the live one. A draft
-    // about V1 is never written against V2.
-    if (!sameNoteTarget(noteDraft.target, noteTarget)) {
-      setNoteState('failed')
-      setNoteMessage(
-        'Those words were about an earlier save, so they were not filed. Say them again for this one.',
-      )
+    if (!noteDraft.text.trim()) {
+      // He cleared the box himself. The screen is the truth, so the held copy
+      // of these words goes with it — but only this action's copy.
+      clearPendingNote(owner, noteDraft.target.noteActionId)
+      if (draftIsStale) putDraft(null)
       return
     }
-    const target = noteDraft.target
-    const draftText = noteDraft.text
-    const ownToken = token
+    holdPendingNote(owner, noteDraft)
+    if (!draftIsStale) return
+    // The save these words were accepted for is not the acknowledged one any
+    // more — a newer save, a reopened version, a recovery, a fresh visit. They
+    // keep their OWN target, so they are still his words about that version.
+    setHeldNote(noteDraft)
+    putDraft(null)
+    setNoteState('idle')
+    setNoteMessage(null)
+  }, [noteDraft, draftIsStale, owner, putDraft])
+
+  /**
+   * Send ONE set of words, once.
+   *
+   * PROVENANCE is the payload's and is never rebound: its target names the
+   * version, that version's document, the visit the words were given in, the
+   * help that had been offered and the single `noteActionId` the writer is
+   * idempotent on. So a retry after a remount still files his sentence against
+   * the save it was actually about.
+   *
+   * The SCREEN is only touched while this act still owns the note latch and the
+   * visit it started in — a late acknowledgment may not clear newer words, and
+   * may not land in another visit's panel.
+   *
+   * There is no automatic retry and no automatic write: a note is sent when a
+   * person taps, and never otherwise.
+   */
+  const commitNote = useCallback(
+    async (payload: PendingNote, invocation: { token: string; opId: string }) => {
+      const ownOwner: PendingOwner = {
+        familyId: payload.target.familyId,
+        childId: payload.target.childId,
+        projectId: payload.target.projectId,
+      }
+      const sending: PendingNote = { ...payload, attempts: payload.attempts + 1 }
+      // Held BEFORE the write and bound to the payload's own owner, so a
+      // departure or a remount mid-write still has the exact words and the
+      // exact action to try again.
+      holdPendingNote(ownOwner, sending)
+      const uiLive = () =>
+        liveTokenRef.current === invocation.token &&
+        noteLatchRef.current === invocation.opId
+      if (uiLive()) {
+        setNoteState('saving')
+        setNoteMessage(null)
+      }
+      try {
+        await saveBuildStudioNote({
+          familyId: sending.target.familyId,
+          childId: sending.target.childId,
+          projectId: sending.target.projectId,
+          versionId: sending.target.versionId,
+          versionDocId: sending.target.versionDocId,
+          noteActionId: sending.target.noteActionId,
+          text: sending.text,
+          capture: sending.capture,
+          help: sending.target.help,
+          hintsOffered: sending.target.hintsOffered,
+          voiceEventId: sending.voiceEventId,
+        })
+        // Filed now, whatever the screen is showing. This action releases ITS
+        // OWN held words by action id and no others.
+        clearPendingNote(ownOwner, sending.target.noteActionId)
+        setHeldNote((current) =>
+          current && current.target.noteActionId === sending.target.noteActionId
+            ? null
+            : current,
+        )
+        if (!uiLive()) return
+        const live = noteDraftRef.current
+        // Only THIS action's words may be cleared by this acknowledgment. A
+        // draft about another save is another scope and is left alone.
+        const sameAction =
+          live !== null && live.target.noteActionId === sending.target.noteActionId
+        if (sameAction && !sameNotePayload(live, sending)) {
+          // The wording changed at the SAME save while this was in flight. What
+          // is filed is what was sent; the newer wording is still here and
+          // still unsaved, and this does not clear it or call it saved.
+          setNoteState('saved')
+          setNoteMessage(
+            'Your words were filed as you sent them. What is in the box now is different, and that part is not saved.',
+          )
+          return
+        }
+        if (sameAction) putDraft(null)
+        setNoteState('saved')
+        setNoteMessage('Saved with your game.')
+      } catch (err) {
+        if (!uiLive()) return
+        setNoteState('failed')
+        setNoteMessage(
+          err instanceof BuildStudioNoteRefused || err instanceof Error
+            ? err.message
+            : 'Your words did not save. Try again — your game is safe either way.',
+        )
+        // The words are deliberately kept, with their attempt count, so the
+        // retry sends the SAME action rather than a second different note.
+        const live = noteDraftRef.current
+        if (sameNotePayload(live, sending)) putDraft(sending)
+        else {
+          setHeldNote((current) =>
+            current && current.target.noteActionId === sending.target.noteActionId
+              ? sending
+              : current,
+          )
+        }
+      }
+    },
+    [putDraft],
+  )
+
+  /** Save the words on screen, about the save they were accepted for. */
+  const handleSaveNote = useCallback(async () => {
+    // Synchronous, before anything can await: two taps are one send.
+    if (noteLatchRef.current) return
+    const draft = noteDraftRef.current
+    if (!draft || !draft.text.trim()) return
+    if (!sameNoteTarget(draft.target, noteTarget)) {
+      // A draft about V1 is never written against V2 — and never dropped for
+      // it either. The words move to the held panel with their own target,
+      // where they can be saved with that save or discarded on purpose.
+      holdPendingNote(owner, draft)
+      setHeldNote(draft)
+      putDraft(null)
+      setNoteState('idle')
+      setNoteMessage(null)
+      return
+    }
     const opId = newNoteActionId(Date.now(), Math.random())
     noteLatchRef.current = opId
-    setNoteState('saving')
-    setNoteMessage(null)
     try {
-      await saveBuildStudioNote({
-        familyId: target.familyId,
-        childId: target.childId,
-        projectId: target.projectId,
-        versionId: target.versionId,
-        versionDocId: target.versionDocId,
-        noteActionId: target.noteActionId,
-        text: draftText,
-        capture: noteDraft.capture,
-        help: target.help,
-        hintsOffered: target.hintsOffered,
-        voiceEventId: noteDraft.voiceEventId,
-      })
-      // After the await: a late result may not clear a draft that now belongs
-      // to another target or another visit.
-      if (liveTokenRef.current !== ownToken) return
-      setNoteDraft((current) =>
-        current && sameNoteTarget(current.target, target) ? null : current,
-      )
-      setNoteState('saved')
-      setNoteMessage('Saved with your game.')
-    } catch (err) {
-      if (liveTokenRef.current !== ownToken) return
-      setNoteState('failed')
-      // The draft is deliberately NOT cleared on a failure, including the
-      // refusal a second different note under one action id gets.
-      setNoteMessage(
-        err instanceof BuildStudioNoteRefused || err instanceof Error
-          ? err.message
-          : 'Your words did not save. Try again — your game is safe either way.',
-      )
+      await commitNote(draft, { token, opId })
     } finally {
       if (noteLatchRef.current === opId) noteLatchRef.current = null
     }
-  }, [noteDraft, noteTarget, token])
+  }, [noteTarget, owner, token, commitNote, putDraft])
+
+  /**
+   * Save words that are about an EARLIER save: the exact held payload, with its
+   * own version, action id and voice provenance. Not re-bound to what is open.
+   */
+  const handleSaveHeldNote = useCallback(async () => {
+    if (noteLatchRef.current) return
+    if (!heldNote || !heldNote.text.trim()) return
+    const opId = newNoteActionId(Date.now(), Math.random())
+    noteLatchRef.current = opId
+    try {
+      await commitNote(heldNote, { token, opId })
+    } finally {
+      if (noteLatchRef.current === opId) noteLatchRef.current = null
+    }
+  }, [heldNote, token, commitNote])
+
+  /** Throw the words on screen away, on purpose. Nothing else does this. */
+  const discardDraft = useCallback(() => {
+    if (noteLatchRef.current) return
+    const draft = noteDraftRef.current
+    if (draft) clearPendingNote(owner, draft.target.noteActionId)
+    putDraft(null)
+    setNoteState('idle')
+    setNoteMessage(null)
+  }, [owner, putDraft])
+
+  /** Throw the earlier words away, on purpose, so they are not offered again. */
+  const discardHeldNote = useCallback(() => {
+    if (noteLatchRef.current) return
+    if (!heldNote) return
+    clearPendingNote(owner, heldNote.target.noteActionId)
+    setHeldNote(null)
+  }, [owner, heldNote])
+
+  /**
+   * The deliberate way out of a dialog: every unsaved thing he said, gone
+   * because somebody chose that. Named exactly that on the button.
+   */
+  const discardAllWords = useCallback(() => {
+    discardDraft()
+    discardHeldNote()
+  }, [discardDraft, discardHeldNote])
+
+  /** Save, from a dialog: the words on screen first, then any earlier ones. */
+  const handleSaveWordsAtRisk = useCallback(async () => {
+    if (noteDraftRef.current?.text.trim()) {
+      await handleSaveNote()
+      return
+    }
+    await handleSaveHeldNote()
+  }, [handleSaveNote, handleSaveHeldNote])
+
+  /** True while a note write owns the words. Corrections are closed then. */
+  const noteBusy = noteState === 'saving'
 
   // ── Render ────────────────────────────────────────────────────────────
 
   const gated = phase !== EditorPhase.Ready || !projectReady
   const canSave = phase === EditorPhase.Ready && projectReady && !writeInFlight
+
+  /**
+   * What is true about unsaved words, said once and used by both doors.
+   *
+   * It does not claim they are about to be destroyed — they are held for this
+   * page session — and it does not claim they are kept, either. It says the
+   * only thing that is certainly true: nothing has written them down.
+   */
+  const wordsRiskLine = wordsAtRisk
+    ? 'Your words are not saved yet. They stay on this page until you save or discard them, and closing the app loses them.'
+    : null
+
+  /**
+   * Save or discard the words, from a dialog.
+   *
+   * *Save my words* sends the ones on screen first and the earlier ones after,
+   * so a second set is still asked about rather than swept up. *Discard my
+   * words* is the deliberate loss, and discards exactly what the line above
+   * describes: everything unsaved he said.
+   */
+  const wordsDialogActions = wordsAtRisk ? (
+    <>
+      <Button
+        disabled={noteBusy}
+        onClick={() => void handleSaveWordsAtRisk()}
+        sx={{ textTransform: 'none', minHeight: 48 }}
+      >
+        Save my words
+      </Button>
+      <Button
+        color="error"
+        disabled={noteBusy}
+        onClick={discardAllWords}
+        sx={{ textTransform: 'none', minHeight: 48 }}
+      >
+        Discard my words
+      </Button>
+    </>
+  ) : null
+
+  /** Is there anything true to ASK about this departure? */
+  const departureHasAsk =
+    departureCheck === 'checking' ||
+    departureCheck === 'dirty' ||
+    departureCheck === 'unknown' ||
+    wordsAtRisk
+
+  /**
+   * What is at risk about the GAME, or `null` when the answer is "nothing".
+   *
+   * Separated from the words so neither door ever says "your game has changes
+   * that are not on your shelf" about a clean editor and an unsaved sentence.
+   */
+  const departureGameLine =
+    departureCheck === 'checking'
+      ? null
+      : departure.reason === 'in-flight'
+        ? 'Your game is being saved right now. Give it a moment — it will carry on by itself.'
+        : pending
+          ? `A save called “${pending.label}” did not finish. If you leave now it is gone.`
+          : departureCheck === 'unknown'
+            ? 'This page could not read the editor just now, so it cannot tell whether your changes are saved. Leaving might lose them.'
+            : departureCheck === 'dirty' || editorDirty
+              ? 'Your game has changes that are not on your shelf yet. If you leave now they are gone.'
+              : null
 
   return (
     <Stack spacing={2}>
@@ -1650,18 +1973,56 @@ export default function BuildStudioEditor({
         <Typography variant="caption" color="text.secondary">
           This is optional. You can make and save games without it.
         </Typography>
-        {!noteTarget && (
+        {!noteTarget && !heldNote && (
           <Typography variant="body2" color="text.secondary">
             Save a version first, then your words can go with it.
           </Typography>
         )}
-        {noteTarget && draftIsStale && (
-          <Alert severity="info">
-            You saved again, so those earlier words were about the save before this
-            one. Say them again for “{lastSaved?.label}” if you still want to.
+        {/* Words that are about an EARLIER save: offered back after a return, a
+            reopen, a recovery or a newer save — exactly as he said them, with
+            the save they belong to named, and never filed by themselves. */}
+        {heldNote && (
+          <Alert
+            severity="warning"
+            action={
+              <Stack direction="row" spacing={1} flexWrap="wrap" rowGap={1}>
+                <Button
+                  size="small"
+                  disabled={noteBusy}
+                  onClick={() => void handleSaveHeldNote()}
+                  sx={{ textTransform: 'none', fontWeight: 700 }}
+                >
+                  Save these words
+                </Button>
+                <Button
+                  size="small"
+                  color="error"
+                  disabled={noteBusy}
+                  onClick={discardHeldNote}
+                  sx={{ textTransform: 'none' }}
+                >
+                  Discard these words
+                </Button>
+              </Stack>
+            }
+          >
+            <AlertTitle>
+              {heldNote.attempts > 0
+                ? 'These words did not save'
+                : 'These words are not saved yet'}
+            </AlertTitle>
+            <Typography variant="body2" sx={{ fontStyle: 'italic' }}>
+              “{heldNote.text}”
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              {heldNote.versionLabel
+                ? `They are about your save “${heldNote.versionLabel}”. `
+                : 'They are about an earlier save. '}
+              Nothing is written down until you tap Save these words.
+            </Typography>
           </Alert>
         )}
-        {noteTarget && (!noteDraft || draftIsStale) && (
+        {noteTarget && !noteDraft && (
           <VoiceInput
             // Keyed by the TARGET. A change of acknowledged version or of visit
             // remounts the mic, so a recording started about one save is retired
@@ -1670,12 +2031,15 @@ export default function BuildStudioEditor({
             profile={{ id: childId }}
             sourceSurface="build-studio-reflection"
             onTranscript={(text, meta) =>
-              setNoteDraft({
+              putDraft({
                 text,
                 capture: 'voice',
                 voiceEventId: meta?.eventId,
                 // Frozen here, at accepted-draft creation.
                 target: noteTarget,
+                // Display only, so the held panel can name the save later.
+                versionLabel: lastSaved?.label,
+                attempts: 0,
               })
             }
             placeholder="Tell me what you changed and what you expected."
@@ -1691,12 +2055,19 @@ export default function BuildStudioEditor({
             </Typography>
             <TextField
               value={noteDraft.text}
-              onChange={(e) =>
+              // Closed while the write owns these words. A correction typed
+              // mid-flight produced a filed sentence and a different one on
+              // screen, with nothing saying which was which; the latch is
+              // claimed synchronously, so this is shut before the first await.
+              disabled={noteBusy}
+              onChange={(e) => {
+                if (noteLatchRef.current) return
                 // A typed correction keeps the ORIGINAL capture and event id:
                 // the words began as speech, and relabelling them as typed
-                // would misreport how they were given.
-                setNoteDraft({ ...noteDraft, text: e.target.value })
-              }
+                // would misreport how they were given. A changed sentence is a
+                // fresh send, so the attempt count starts again.
+                putDraft({ ...noteDraft, text: e.target.value, attempts: 0 })
+              }}
               multiline
               minRows={2}
               fullWidth
@@ -1706,20 +2077,19 @@ export default function BuildStudioEditor({
               <Button
                 variant="contained"
                 size="large"
-                disabled={noteState === 'saving' || !noteDraft.text.trim()}
+                disabled={noteBusy || !noteDraft.text.trim()}
                 onClick={() => void handleSaveNote()}
                 sx={{ textTransform: 'none', fontWeight: 600, minHeight: 48 }}
               >
-                {noteState === 'saving' ? 'Saving…' : 'Save my words'}
+                {noteBusy ? 'Saving…' : 'Save my words'}
               </Button>
               <Button
                 variant="text"
                 size="large"
-                onClick={() => {
-                  setNoteDraft(null)
-                  setNoteState('idle')
-                  setNoteMessage(null)
-                }}
+                // Also closed mid-write: a tap here used to clear the exact
+                // words a write was carrying, leaving nothing to retry.
+                disabled={noteBusy}
+                onClick={discardDraft}
                 sx={{ textTransform: 'none', minHeight: 48 }}
               >
                 Start over
@@ -1727,6 +2097,7 @@ export default function BuildStudioEditor({
             </Stack>
             <Typography variant="caption" color="text.secondary">
               Nothing is saved until you press Save my words.
+              {noteBusy ? ' Keeping your words — one moment.' : ''}
             </Typography>
           </Stack>
         )}
@@ -1782,7 +2153,12 @@ export default function BuildStudioEditor({
                 ? 'This page could not read the editor just now, so it cannot tell whether your changes are saved. Opening something else might lose them.'
                 : pending
                   ? `A save called “${pending.label}” did not finish. Opening something else leaves it behind.`
-                  : 'You have work that is not on your shelf. Opening something else will lose it.'}
+                  : editorDirty
+                    ? 'You have work that is not on your shelf. Opening something else will lose it.'
+                    : // Clean game, unsaved words: the honest reason this
+                      // stopped. The words are kept below either way — what
+                      // opening something else ends is the save they go with.
+                      'Your words are not saved yet. Opening something else keeps them here to save or discard, but it does not save them.'}
           </Alert>
         )}
         <BuildStudioVersionShelf
@@ -1824,24 +2200,26 @@ export default function BuildStudioEditor({
           Shown only once the pre-departure capture has an answer, so a clean
           exit never flashes a warning it is about to withdraw. */}
       <Dialog
-        open={departure.held && departureCheck !== 'idle' && departureCheck !== 'clean'}
+        open={departure.held && departureCheck !== 'idle' && departureHasAsk}
         onClose={departure.stay}
       >
         <DialogTitle>
-          {departureCheck === 'checking' ? 'Checking your game…' : 'Keep your game first?'}
+          {departureCheck === 'checking'
+            ? 'Checking your game…'
+            : departureGameLine
+              ? 'Keep your game first?'
+              : 'Keep your words first?'}
         </DialogTitle>
         <DialogContent>
           <DialogContentText>
             {departureCheck === 'checking'
               ? 'One moment — looking at what is in the editor.'
-              : departure.reason === 'in-flight'
-                ? 'Your game is being saved right now. Give it a moment — it will carry on by itself.'
-                : pending
-                  ? `A save called “${pending.label}” did not finish. If you leave now it is gone.`
-                  : departureCheck === 'unknown'
-                    ? 'This page could not read the editor just now, so it cannot tell whether your changes are saved. Leaving might lose them.'
-                    : 'Your game has changes that are not on your shelf yet. If you leave now they are gone.'}
+              : (departureGameLine ?? wordsRiskLine)}
           </DialogContentText>
+          {/* Both, when both are true — never one standing in for the other. */}
+          {departureCheck !== 'checking' && departureGameLine && wordsRiskLine && (
+            <DialogContentText sx={{ mt: 1 }}>{wordsRiskLine}</DialogContentText>
+          )}
         </DialogContent>
         {departureCheck !== 'checking' && (
           <DialogActions sx={{ flexWrap: 'wrap', gap: 1 }}>
@@ -1882,12 +2260,14 @@ export default function BuildStudioEditor({
             >
               Download a copy
             </Button>
+            {wordsDialogActions}
+            {/* The way out is always here, and it says which loss it is. */}
             <Button
               color="error"
               onClick={departure.leaveAnyway}
               sx={{ textTransform: 'none', minHeight: 48 }}
             >
-              Leave and lose it
+              {departureGameLine ? 'Leave and lose it' : 'Leave without saving them'}
             </Button>
           </DialogActions>
         )}
@@ -1906,8 +2286,18 @@ export default function BuildStudioEditor({
                 ? `A save called “${pending.label}” did not finish. Switching now leaves it behind.`
                 : profileCheck === 'unknown'
                   ? 'This page could not read the editor just now, so it cannot tell whether your changes are saved. Switching might lose them.'
-                  : 'Your game has changes that are not on your shelf yet. Switching closes the editor.'}
+                  : profileCheck === 'dirty' || editorDirty
+                    ? 'Your game has changes that are not on your shelf yet. Switching closes the editor.'
+                    : // A clean game is not an empty page. And when the words
+                      // have been dealt with too, this says so rather than
+                      // warning about nothing.
+                      (wordsRiskLine ?? 'Your game and your words are saved. You can switch now.')}
           </DialogContentText>
+          {profileCheck !== 'checking' &&
+            (profileCheck === 'dirty' || editorDirty || pending) &&
+            wordsRiskLine && (
+              <DialogContentText sx={{ mt: 1 }}>{wordsRiskLine}</DialogContentText>
+            )}
         </DialogContent>
         <DialogActions sx={{ flexWrap: 'wrap', gap: 1 }}>
           <Button
@@ -1933,6 +2323,7 @@ export default function BuildStudioEditor({
           >
             Download a copy
           </Button>
+          {profileCheck !== 'checking' && wordsDialogActions}
           {/* Disabled until the capture has an answer: a destructive choice
               offered while the app does not yet know what it would discard is
               a choice nobody can make. Stay here is always available. */}
