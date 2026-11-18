@@ -213,7 +213,16 @@ const OVERSIZED_DOWNLOAD_LINE =
  * of what is open would be a lie about which game it is.
  */
 const OVERSIZED_NO_DOWNLOAD_LINE =
-  'Your game is too big for this page to save or to download right now, and the only copy it still has is an older one — so nothing was downloaded rather than giving you the wrong game. It is all still open in the editor; a grown-up can take some of it out, or save it from MakeCode itself.'
+  'Your game is too big for this page to save or to download right now, and the only copies it still has are older ones — so nothing was downloaded rather than giving you the wrong game. It is all still open in the editor; a grown-up can take some of it out, or save it from MakeCode itself.'
+/**
+ * The unfinished save, named, when the refusal above is shown beside one.
+ *
+ * Disclosure rather than substitution: that payload is a DIFFERENT game from
+ * the one on screen, its own *Try again* is what sends it, and this says so
+ * instead of handing its bytes over as a copy of the current game.
+ */
+const unfinishedSaveAside = (label: string) =>
+  `The save called “${label}” that did not finish is still here — Try again sends that earlier game, which is not the one open now.`
 
 /**
  * The live UI an explicit save act belongs to — separate from the payload's own
@@ -1315,24 +1324,31 @@ export default function BuildStudioEditor({
   }, [owner, pending])
 
   /**
-   * Get the EDITED bytes out.
+   * Get the game that is OPEN out — or say truthfully that it cannot.
    *
-   * The pending payload first, because that is the exact source a failed save
-   * was carrying. Never the starter — substituting the starter for failed work
-   * would replace what he made with what he began from.
+   * ── Why the current source is asked about FIRST ───────────────────────
    *
-   * ── And never an older game dressed as this one ───────────────────────
+   * This button means "a copy of what I am looking at". Every other source
+   * here is older than that by construction, so the newest confirmed reading
+   * of the frame is what decides, and it is read before anything stored:
    *
-   * The last door here was `editorSaveSeen()`, the newest source the EDITOR
-   * announced and this app accepted. That is the right fallback when a capture
-   * merely failed — it really is the latest thing the app ever read. It is the
-   * WRONG one when the editor has since handed over a game the caps refused:
-   * the app then holds an older accepted source, and offering it silently
-   * downloaded a previous game as though it were the one on screen (PR #1974
-   * round 1). So the bridge is asked first, and the two true answers are said
-   * out loud: here is the current game, which is too big to go on your shelf;
-   * or this page cannot get the current game out at all. Neither is a stored
-   * version and neither is offered as one.
+   *   • `sourceOverCaps()` is true only while a refused-for-size capture of
+   *     OURS is the newest thing the bridge has seen — an acceptable project
+   *     clears it, and a successful capture goes through the same acceptance.
+   *     So when it is true, every held copy is provably a previous game.
+   *   • then a pre-departure capture, then the exact payload of a save that
+   *     did not finish, then the last source the editor announced. Never the
+   *     starter — substituting what he began from for what he made is the
+   *     original defect this path exists to avoid.
+   *
+   * The ordering is the repair. With the stored copies first, a child whose
+   * blocks had just gone over the cap tapped *Download a copy* and got his
+   * PREVIOUS game, byte for byte, with nothing said (PR #1974 round 1, and
+   * again on independent browser verification with a retained four-life
+   * payload). An unfinished save is still work and is still offered — by its
+   * own *Try again*, with its own payload, version and action id untouched.
+   * These are two different intents and this one may not quietly serve the
+   * other's bytes.
    */
   const handleDownloadCurrent = useCallback(async () => {
     const give = (files: BuildStudioSourceFiles, label: string) => {
@@ -1340,30 +1356,34 @@ export default function BuildStudioEditor({
         downloadTextFile(download)
       }
     }
-    // The LATEST source this app captured, never a stale template: a
-    // pre-departure capture read the newest bytes, then a failed save's exact
-    // payload.
+    const bridge = bridgeRef.current
+    if (bridge?.sourceOverCaps()) {
+      // The current source, when the only thing wrong with it is its size and
+      // it is bounded enough to hand back. A full source export — not a
+      // version, and the file name says so.
+      const oversized = bridge.oversizedSourceForDownload()
+      if (oversized) {
+        give(oversized, OVERSIZED_DOWNLOAD_LABEL)
+        setSaveState(SaveState.Failed)
+        setSaveMessage(OVERSIZED_DOWNLOAD_LINE)
+        return
+      }
+      // Too big to hand back at all. NOTHING older is substituted for it —
+      // not a departure capture, not a pending payload, not the last
+      // announced save — and the page says which game it would have been.
+      setSaveState(SaveState.Failed)
+      setSaveMessage(
+        pending
+          ? `${OVERSIZED_NO_DOWNLOAD_LINE} ${unfinishedSaveAside(pending.label)}`
+          : OVERSIZED_NO_DOWNLOAD_LINE,
+      )
+      return
+    }
+    // The latest source this app itself captured: a pre-departure read, then a
+    // failed save's exact bytes.
     const captured = departureFilesRef.current ?? pending?.files ?? null
     if (captured) {
       give(captured, pending?.label ?? 'my-game')
-      return
-    }
-    const bridge = bridgeRef.current
-    // The current source, when it is ours and readable and the only thing
-    // wrong with it is its size. A full source export — not a version, and the
-    // file name says which.
-    const oversized = bridge?.oversizedSourceForDownload() ?? null
-    if (oversized) {
-      give(oversized, OVERSIZED_DOWNLOAD_LABEL)
-      setSaveState(SaveState.Failed)
-      setSaveMessage(OVERSIZED_DOWNLOAD_LINE)
-      return
-    }
-    // Too big to hand back at all. An older accepted game is NOT offered in its
-    // place; the page says what it cannot do instead of pretending otherwise.
-    if (bridge?.sourceOverCaps()) {
-      setSaveState(SaveState.Failed)
-      setSaveMessage(OVERSIZED_NO_DOWNLOAD_LINE)
       return
     }
     const announced = bridge?.editorSaveSeen()?.files ?? null

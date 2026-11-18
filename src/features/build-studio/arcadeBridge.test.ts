@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 
+import type { BuildStudioSourceFiles } from '../../core/types/buildStudio'
 import {
   ARCADE_ORIGIN,
   ARCADE_TOO_BIG_TO_SAVE,
@@ -1199,12 +1200,18 @@ describe('a source that is too big to save is not an older source', () => {
     expect(archive.overFileCapOnly).toBe(false)
 
     // And it is the same answer `payloadWithinCaps` gives, by construction.
-    for (const files of [
+    //
+    // Typed as the real file-map type rather than left to inference: a
+    // heterogeneous inline array infers a union whose keys are optional, which
+    // is not a `Record<string, string>` — and the fix for that is the right
+    // type here, never a cast that would let a non-string into the validator.
+    const cases: BuildStudioSourceFiles[] = [
       { 'pxt.json': '{}', 'main.ts': 'x' },
       { 'pxt.json': '{}', 'main.blocks': 'b'.repeat(400_001) },
       { 'pxt.json': '{}', ...overArchiveCap() },
       {},
-    ]) {
+    ]
+    for (const files of cases) {
       expect(payloadWithinCaps(files)).toBe(readPayloadCaps(files).withinCaps)
     }
   })

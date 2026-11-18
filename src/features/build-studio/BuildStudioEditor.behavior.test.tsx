@@ -2081,19 +2081,100 @@ describe('a download is the CURRENT game or an honest refusal', () => {
     expect(screen.queryByText(/NOT on your shelf/)).not.toBeInTheDocument()
   })
 
-  it('prefers the exact bytes of a failed save over anything the bridge holds', async () => {
+  /**
+   * Sol's independent browser blocker, which an earlier draft of this suite
+   * wrongly endorsed.
+   *
+   * A four-life capture failed both writes, so its exact payload is held; the
+   * child then built past the cap and Save was refused. *Download a copy*
+   * returned the retained FOUR-life bytes, byte for byte, with nothing said —
+   * the same defect in a second costume. The current source is now read before
+   * any held copy, and the unfinished save stays exactly where it is, for its
+   * own explicit Retry.
+   *
+   * POSITIVE CONTROL: move the `departureFilesRef.current ?? pending?.files`
+   * branch back above the `sourceOverCaps()` check and this case downloads
+   * `info.setLife(4)`.
+   */
+  it('exports the CURRENT over-cap source even while an unfinished save is held', async () => {
     const bridge = await openEditor()
-    bridge.nextCapture = editedFiles(7)
+    // The four-life capture, which failed both writes.
+    bridge.nextCapture = editedFiles(4)
     saveVersion.mockRejectedValue(new Error('offline'))
     await tapSave()
     await waitFor(() => expect(screen.getByText('offline')).toBeInTheDocument())
-    // Even with an over-cap source arriving afterwards, the retry's own payload
-    // is what a download is for: it is this app's capture, and it is current.
+    const idA = readPendingSave(OWNER)?.versionId
+    expect(readPendingSave(OWNER)?.files['main.ts']).toBe(editedFiles(4)['main.ts'])
+
+    // He keeps building. The blocks are now over the cap, so Save is refused.
+    bridge.refuseTooBig(tooBigFiles(5))
+    bridge.captureError = new Error('Your game is now too big for this app to keep')
+    await tapSave()
+    await waitFor(() =>
+      expect(screen.getByText(/too big for this app to keep/)).toBeInTheDocument(),
+    )
+
+    // Download a copy is a copy of what is OPEN.
+    downloads.length = 0
+    await tapDownload()
+    expect(archive()!.text).toContain('info.setLife(5)')
+    expect(archive()!.text).not.toContain('info.setLife(4)')
+    expect(archive()!.filename).toContain('too-big-to-save')
+    expect(screen.getByText(/NOT on your shelf/)).toBeInTheDocument()
+
+    // And the unfinished save is untouched — same bytes, same version id, sent
+    // only by its own Try again, which is a different intent.
+    expect(readPendingSave(OWNER)?.versionId).toBe(idA)
+    saveVersion.mockReset()
+    saveVersion.mockImplementation(async (args: { versionId: string }) => ({
+      outcome: 'created',
+      version: { id: `doc-${args.versionId}` },
+    }))
+    await act(async () => {
+      screen.getByText('Try again').click()
+    })
+    await waitFor(() => expect(saveVersion).toHaveBeenCalled())
+    expect(saveVersion.mock.calls[0][0].versionId).toBe(idA)
+    expect(saveVersion.mock.calls[0][0].files['main.ts']).toBe(editedFiles(4)['main.ts'])
+  })
+
+  it('exports the CURRENT over-cap source rather than an older departure capture', async () => {
+    const bridge = await openEditor()
+    // A pre-departure capture read the four-life source…
+    bridge.nextCapture = editedFiles(4)
+    await attemptDeparture()
+    await waitFor(() => expect(screen.getByText('Save it now')).toBeInTheDocument())
+    // …and then the blocks went over the cap while the dialog was open.
     bridge.refuseTooBig(tooBigFiles(5))
     downloads.length = 0
     await tapDownload()
-    expect(archive()!.text).toContain('info.setLife(7)')
-    expect(archive()!.filename).not.toContain('too-big-to-save')
+    expect(archive()!.text).toContain('info.setLife(5)')
+    expect(archive()!.text).not.toContain('info.setLife(4)')
+    expect(archive()!.filename).toContain('too-big-to-save')
+  })
+
+  it('refuses, and NAMES the older save, when the current source is too large to hold', async () => {
+    const bridge = await openEditor()
+    bridge.nextCapture = editedFiles(4)
+    saveVersion.mockRejectedValue(new Error('offline'))
+    await tapSave()
+    await waitFor(() => expect(screen.getByText('offline')).toBeInTheDocument())
+    const idA = readPendingSave(OWNER)?.versionId
+
+    // Over the ARCHIVE cap: there is nothing to hand back at all.
+    bridge.refuseTooBig(null)
+    downloads.length = 0
+    await tapDownload()
+    // Nothing was downloaded, and in particular not the held four-life save.
+    expect(downloads).toHaveLength(0)
+    expect(
+      screen.getByText(/nothing was downloaded rather than giving you the wrong game/),
+    ).toBeInTheDocument()
+    // That save is disclosed rather than substituted, and is still retriable
+    // with its own payload.
+    expect(screen.getByText(/Try again sends that earlier game/)).toBeInTheDocument()
+    expect(readPendingSave(OWNER)?.versionId).toBe(idA)
+    expect(readPendingSave(OWNER)?.files['main.ts']).toBe(editedFiles(4)['main.ts'])
   })
 })
 
