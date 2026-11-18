@@ -52,7 +52,14 @@
  * evidence a child listened.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react'
 import Alert from '@mui/material/Alert'
 import AlertTitle from '@mui/material/AlertTitle'
 import Box from '@mui/material/Box'
@@ -109,13 +116,19 @@ import {
   type OpenLifeValue,
 } from './buildStudioHints'
 import {
+  claimNoteSend,
   clearPendingNote,
+  noteSendInFlight,
   clearPendingSave,
+  discardPendingNote,
+  failPendingNote,
   holdPendingNote,
   holdPendingSave,
   pendingSlotAccepts,
   readPendingNote,
   readPendingSave,
+  releaseNoteSend,
+  subscribePendingNote,
   type PendingOwner,
 } from './buildStudioPendingStore'
 import {
@@ -343,6 +356,15 @@ export default function BuildStudioEditor({
 
   const [hintsOffered, setHintsOffered] = useState(0)
   /**
+   * The same count, readable synchronously — because a note records the help
+   * that had been OFFERED when the words were accepted, and an accept can
+   * follow a Hint in the same tick.
+   */
+  const hintsOfferedRef = useRef(0)
+  useEffect(() => {
+    hintsOfferedRef.current = hintsOffered
+  }, [hintsOffered])
+  /**
    * The words on screen, editable, about the save that is acknowledged NOW.
    *
    * It is a {@link PendingNote} — the same shape the store holds and the same
@@ -351,19 +373,42 @@ export default function BuildStudioEditor({
    */
   const [noteDraft, setNoteDraft] = useState<PendingNote | null>(null)
   /**
-   * Words that are NOT about what is acknowledged on screen now: restored for
-   * this owner after a remount, or a draft whose save was acknowledged in the
-   * meantime. They keep their own target, so they can still be saved with the
-   * version they were actually about — or discarded, on purpose.
+   * This owner's unresolved note, READ FROM THE STORE — not mirrored into
+   * state.
    *
-   * The store keeps ONE set of words per owner, the newest offered, the same
-   * rule the payload slot uses. So if two sets are unsaved at once, both stay
-   * visible here for as long as the page does, and the newest is the one a
-   * return offers back. Neither is ever written without a tap.
+   * The store is the single current answer, and that is load-bearing: a copy
+   * kept here went stale exactly when it mattered. A write started, the child
+   * left, the write landed and released the slot, and the page he came back to
+   * still offered words that were already filed — and refused him the mic for
+   * a note that no longer existed. Subscribing means an acknowledgment from a
+   * mount that is gone reaches this screen.
    */
-  const [heldNote, setHeldNote] = useState<PendingNote | null>(() =>
-    readPendingNote({ familyId, childId, projectId }),
+  const storedNote = useSyncExternalStore(
+    useCallback(
+      (onChange: () => void) =>
+        subscribePendingNote({ familyId, childId, projectId }, onChange),
+      [familyId, childId, projectId],
+    ),
+    useCallback(
+      () => readPendingNote({ familyId, childId, projectId }),
+      [familyId, childId, projectId],
+    ),
   )
+  /**
+   * The unresolved note the held panel is for: this owner's, when it is not
+   * the words currently in the box. Derived, so it cannot disagree with the
+   * store about whether it still exists.
+   */
+  const heldNote =
+    storedNote && storedNote.target.noteActionId !== noteDraft?.target.noteActionId
+      ? storedNote
+      : null
+  /**
+   * Is a write for this owner's words running right now — including one a
+   * previous mount started? This, not a local flag, is what decides whether a
+   * retry or a discard may be offered.
+   */
+  const wordsSending = storedNote?.state === 'sending'
   const [noteState, setNoteState] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle')
   const [noteMessage, setNoteMessage] = useState<string | null>(null)
 
@@ -1194,6 +1239,7 @@ export default function BuildStudioEditor({
       setNoteState('idle')
       setNoteMessage(null)
       setHintsOffered(0)
+      hintsOfferedRef.current = 0
       departureFilesRef.current = null
       setLoadedToken(null)
       // A brand new visit: a new id, so nothing from the previous one can act
@@ -1338,6 +1384,9 @@ export default function BuildStudioEditor({
       tts.speak(BUILD_STUDIO_HINTS_DONE)
       return
     }
+    // Synchronously too: a Hint and an accepted transcript can land in one
+    // tick, and the note must record the help that really had been offered.
+    hintsOfferedRef.current = hint.rung
     setHintsOffered(hint.rung)
     tts.speak(hint.text)
   }, [hintsOffered, openLives, tts])
@@ -1365,12 +1414,14 @@ export default function BuildStudioEditor({
       versionId: lastSaved.versionId,
       versionDocId: lastSaved.versionDocId,
       visitId: visit.visitId,
-      help: hintsOffered > 0 ? 'hints-offered' : 'none-offered',
-      hintsOffered: hintsOffered > 0 ? hintsOffered : undefined,
+      // Placeholders only. The help a NOTE records is read when the words are
+      // accepted, in `newNoteFor` — these fields exist because the slot shares
+      // a shape with the target, and nothing writes them.
+      help: 'unknown',
     }
-    // `hintsOffered` is deliberately NOT a dependency: the help offered is
-    // frozen when the save is acknowledged, and a hint offered afterwards
-    // describes what came next, not what he was doing when he said this.
+    // `hintsOffered` is deliberately NOT a dependency: the identity of the save
+    // these words are about must not change because help state changed, or an
+    // accepted draft would be retargeted by a hint.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastSaved, familyId, childId, projectId, visit.visitId])
 
@@ -1381,12 +1432,24 @@ export default function BuildStudioEditor({
    * what makes a retry idempotent rather than a second document. A new sentence
    * about the same save gets a new id and is a new note, which is the whole
    * point of not minting it with the slot.
+   *
+   * The help is read HERE, at acceptance, for the same reason: it is how much
+   * authored help had been OFFERED before he spoke. Freezing it when the GAME
+   * was acknowledged recorded "none offered" for a child who had just tapped
+   * Hint and then said what he was trying. It is offered, never heard, and
+   * never anything about mastery — and a hint offered after these words are
+   * accepted does not rewrite them.
    */
   const newNoteFor = useCallback(
-    (slot: BuildStudioNoteSlot): BuildStudioNoteTarget => ({
-      ...slot,
-      noteActionId: newNoteActionId(Date.now(), Math.random()),
-    }),
+    (slot: BuildStudioNoteSlot): BuildStudioNoteTarget => {
+      const offered = hintsOfferedRef.current
+      return {
+        ...slot,
+        help: offered > 0 ? 'hints-offered' : 'none-offered',
+        hintsOffered: offered > 0 ? offered : undefined,
+        noteActionId: newNoteActionId(Date.now(), Math.random()),
+      }
+    },
     [],
   )
 
@@ -1439,9 +1502,9 @@ export default function BuildStudioEditor({
     holdPendingNote(owner, noteDraft)
     if (!draftIsStale) return
     // The save these words were accepted for is not the acknowledged one any
-    // more — a newer save, a reopened version, a recovery, a fresh visit. They
-    // keep their OWN target, so they are still his words about that version.
-    setHeldNote(noteDraft)
+    // more — a newer save, a reopened version, a recovery, a fresh visit. The
+    // store already holds them with their OWN target, so dropping the draft is
+    // all this takes: they reappear in the held panel, from the store.
     putDraft(null)
     setNoteState('idle')
     setNoteMessage(null)
@@ -1480,7 +1543,22 @@ export default function BuildStudioEditor({
       // Held BEFORE the write and bound to the payload's own owner, so a
       // departure or a remount mid-write still has the exact words and the
       // exact action to try again.
-      holdPendingNote(ownOwner, sending)
+      if (!holdPendingNote(ownOwner, sending)) {
+        // The slot refused it: another action is unresolved, or these exact
+        // words were deliberately discarded. Either way nothing is sent.
+        setNoteState('idle')
+        setNoteMessage(null)
+        return
+      }
+      // One send per owner, claimed in the module so it outlives this mount.
+      // Without it two mounts could retry one action at once and either could
+      // contradict the other's result.
+      const claimId = claimNoteSend(ownOwner, sending.target.noteActionId)
+      if (!claimId) {
+        setNoteState('saving')
+        setNoteMessage('Those words are already being saved — one moment.')
+        return
+      }
       const uiLive = () =>
         liveTokenRef.current === invocation.token &&
         noteLatchRef.current === invocation.opId
@@ -1507,13 +1585,9 @@ export default function BuildStudioEditor({
           createdAt: sending.createdAt,
         })
         // Filed now, whatever the screen is showing. This action releases ITS
-        // OWN held words by action id and no others.
+        // OWN held words by action id and no others — and the store tells every
+        // mounted editor, including the one he came back to.
         clearPendingNote(ownOwner, sending.target.noteActionId)
-        setHeldNote((current) =>
-          current && current.target.noteActionId === sending.target.noteActionId
-            ? null
-            : current,
-        )
         if (!uiLive()) return
         const live = noteDraftRef.current
         // Only THIS action's words may be cleared by this acknowledgment. A
@@ -1543,13 +1617,21 @@ export default function BuildStudioEditor({
         setNoteState('saved')
         setNoteMessage('Saved with your game.')
       } catch (err) {
-        // What the MODULE knows, whatever the screen is doing: this attempt
-        // came back and did not land. Recorded on the payload so a remount can
-        // say "that did not save" as a fact instead of inferring it from a
-        // count that cannot tell failure from still running.
+        // What the MODULE knows, whatever the screen is doing: THIS claimed
+        // attempt came back and did not land. Conditional on every count —
+        // the live claim, its own action, and the slot still holding it — so a
+        // failure cannot resurrect discarded words, cannot overwrite another
+        // action, and cannot contradict an acknowledgment that already landed.
         const failed: PendingNote = { ...sending, state: 'failed' }
-        holdPendingNote(ownOwner, failed)
+        const stillOurs = failPendingNote(ownOwner, claimId, failed)
         if (!uiLive()) return
+        if (!stillOurs) {
+          // Somebody dealt with these words while the write was out. The store
+          // is the answer, so nothing here overrides it.
+          setNoteState('idle')
+          setNoteMessage(null)
+          return
+        }
         setNoteState('failed')
         setNoteMessage(
           err instanceof BuildStudioNoteRefused || err instanceof Error
@@ -1558,15 +1640,10 @@ export default function BuildStudioEditor({
         )
         // The words are deliberately kept, with their action, stamp and attempt
         // count, so the retry re-sends THEM rather than a second note.
-        const live = noteDraftRef.current
-        if (sameNotePayload(live, failed)) putDraft(failed)
-        else {
-          setHeldNote((current) =>
-            current && current.target.noteActionId === failed.target.noteActionId
-              ? failed
-              : current,
-          )
-        }
+        if (sameNotePayload(noteDraftRef.current, failed)) putDraft(failed)
+      } finally {
+        // The next deliberate tap may claim it. Only this claim is released.
+        releaseNoteSend(ownOwner, claimId)
       }
     },
     [putDraft, newNoteFor],
@@ -1583,7 +1660,6 @@ export default function BuildStudioEditor({
       // it either. The words move to the held panel with their own target,
       // where they can be saved with that save or discarded on purpose.
       holdPendingNote(owner, draft)
-      setHeldNote(draft)
       putDraft(null)
       setNoteState('idle')
       setNoteMessage(null)
@@ -1605,6 +1681,9 @@ export default function BuildStudioEditor({
   const handleSaveHeldNote = useCallback(async () => {
     if (noteLatchRef.current) return
     if (!heldNote || !heldNote.text.trim()) return
+    // Not while a write for these words is actually running, whoever started
+    // it. The claim below would refuse anyway; this keeps the page honest.
+    if (heldNote.state === 'sending') return
     const opId = newNoteActionId(Date.now(), Math.random())
     noteLatchRef.current = opId
     try {
@@ -1614,11 +1693,21 @@ export default function BuildStudioEditor({
     }
   }, [heldNote, token, commitNote])
 
-  /** Throw the words on screen away, on purpose. Nothing else does this. */
+  /**
+   * Throw the words on screen away, on purpose. Nothing else does this.
+   *
+   * Tombstoned by action id, so a failure that arrives afterwards cannot put
+   * them back. Refused while a write for them is running: an accepted write
+   * cannot be called back, and offering a cancel that is not one would be a
+   * lie — the departure dialog's Stay and Leave are still both there.
+   */
   const discardDraft = useCallback(() => {
     if (noteLatchRef.current) return
+    // The module's answer, not this mount's: a write started before a remount
+    // is still a write, and these words are still in it.
+    if (noteSendInFlight(owner)) return
     const draft = noteDraftRef.current
-    if (draft) clearPendingNote(owner, draft.target.noteActionId)
+    if (draft) discardPendingNote(owner, draft.target.noteActionId)
     putDraft(null)
     setNoteState('idle')
     setNoteMessage(null)
@@ -1628,8 +1717,8 @@ export default function BuildStudioEditor({
   const discardHeldNote = useCallback(() => {
     if (noteLatchRef.current) return
     if (!heldNote) return
-    clearPendingNote(owner, heldNote.target.noteActionId)
-    setHeldNote(null)
+    if (heldNote.state === 'sending' || noteSendInFlight(owner)) return
+    discardPendingNote(owner, heldNote.target.noteActionId)
   }, [owner, heldNote])
 
   /**
@@ -1650,8 +1739,25 @@ export default function BuildStudioEditor({
     await handleSaveHeldNote()
   }, [handleSaveNote, handleSaveHeldNote])
 
-  /** True while a note write owns the words. Corrections are closed then. */
-  const noteBusy = noteState === 'saving'
+  /**
+   * True while a write owns this owner's words — including one a previous
+   * mount started. Corrections, Start over, Retry and Discard are all closed
+   * then, because none of them is true while an accepted write is out.
+   */
+  const noteBusy = noteState === 'saving' || wordsSending
+
+  /**
+   * A local "Saving…" cannot outlive the send it was about.
+   *
+   * The store knows when the write for this owner ended, including one this
+   * mount only watched. Without this, a mount that was refused the claim —
+   * because another mount held it — would show Saving… forever.
+   */
+  useEffect(() => {
+    if (wordsSending) return
+    if (noteLatchRef.current) return
+    if (noteState === 'saving') setNoteState('idle')
+  }, [wordsSending, noteState])
 
   // ── Render ────────────────────────────────────────────────────────────
 
@@ -1665,9 +1771,11 @@ export default function BuildStudioEditor({
    * page session — and it does not claim they are kept, either. It says the
    * only thing that is certainly true: nothing has written them down.
    */
-  const wordsRiskLine = wordsAtRisk
-    ? 'Your words are not saved yet. They stay on this page until you save or discard them, and closing the app loses them.'
-    : null
+  const wordsRiskLine = !wordsAtRisk
+    ? null
+    : wordsSending
+      ? 'Your words are being saved right now. Leaving will not undo that, and nothing is written down until it finishes.'
+      : 'Your words are not saved yet. They stay on this page until you save or discard them, and closing the app loses them.'
 
   /**
    * Save or discard the words, from a dialog.
@@ -2076,7 +2184,7 @@ export default function BuildStudioEditor({
                 ? `They are about your save “${heldNote.versionLabel}”. `
                 : 'They are about an earlier save. '}
               {heldNote.state === 'sending'
-                ? 'A save of these exact words was started and this page did not see it finish. Save these words sends the same ones again — if the first one landed, it stays one note.'
+                ? 'A save of these exact words is running now, so it cannot be called back or thrown away. They stay here until it finishes — you can wait, or leave and come back.'
                 : 'Nothing is written down until you tap Save these words.'}
             </Typography>
           </Alert>
@@ -2088,7 +2196,9 @@ export default function BuildStudioEditor({
             either way: save them, or discard them. */}
         {noteSlot && !noteDraft && heldNote && (
           <Typography variant="body2" color="text.secondary">
-            Save or discard the words above, and then you can say something new.
+            {heldNote.state === 'sending'
+              ? 'Those words are being saved. When that finishes you can say something new.'
+              : 'Save or discard the words above, and then you can say something new.'}
           </Typography>
         )}
         {noteSlot && !noteDraft && !heldNote && (

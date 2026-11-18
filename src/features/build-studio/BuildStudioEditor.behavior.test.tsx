@@ -302,11 +302,17 @@ vi.mock('../../core/firebase/firestore', () => ({
 
 import { serializeBuildStudioSource } from '../../core/types/buildStudio'
 import {
+  claimNoteSend,
   clearPendingNote,
+  discardPendingNote,
+  failPendingNote,
   holdPendingNote,
+  noteSendInFlight,
   readPendingNote,
   readPendingSave,
+  releaseNoteSend,
   resetPendingSaveStore,
+  subscribePendingNote,
 } from './buildStudioPendingStore'
 import type { PendingNote } from './buildStudioScope'
 import { starterSourceFiles } from './buildStudioStarter'
@@ -1576,5 +1582,223 @@ describe('the held-words slot keeps one note until it is resolved', () => {
     const a = noteFor('n-a', 'mine')
     expect(holdPendingNote({ ...OWNER, childId: 'c2' }, a)).toBe(false)
     expect(readPendingNote({ ...OWNER, childId: 'c2' })).toBeNull()
+  })
+
+  /**
+   * The send claim and the discard mark, directly.
+   *
+   * These are what make Retry and Discard conditional rather than a guess: a
+   * failure may only be reported by the live claim for its own action, and
+   * words somebody deliberately threw away may not come back.
+   */
+  it('lets only the live claim report a failure, for its own action', () => {
+    const a = noteFor('n-a', 'the apples were too slow')
+    const b = noteFor('n-b', 'I made the bomb bigger')
+    holdPendingNote(OWNER, a)
+    const claim = claimNoteSend(OWNER, 'n-a')
+    expect(claim).toBeTruthy()
+    expect(noteSendInFlight(OWNER)).toBe(true)
+    // The slot says what is actually happening, for every mount.
+    expect(readPendingNote(OWNER)?.state).toBe('sending')
+    // A second mount cannot start the same send again.
+    expect(claimNoteSend(OWNER, 'n-a')).toBeNull()
+    // Nobody else's failure may land.
+    expect(failPendingNote(OWNER, 'claim-nonsense', a)).toBe(false)
+    expect(failPendingNote(OWNER, claim as string, b)).toBe(false)
+    expect(readPendingNote(OWNER)?.state).toBe('sending')
+    // Its own may, and that unlocks a real retry.
+    expect(failPendingNote(OWNER, claim as string, a)).toBe(true)
+    expect(readPendingNote(OWNER)?.state).toBe('failed')
+    releaseNoteSend(OWNER, claim as string)
+    expect(noteSendInFlight(OWNER)).toBe(false)
+  })
+
+  it('does not resurrect words somebody deliberately discarded', () => {
+    const a = noteFor('n-a', 'the apples were too slow')
+    holdPendingNote(OWNER, a)
+    const claim = claimNoteSend(OWNER, 'n-a') as string
+    discardPendingNote(OWNER, 'n-a')
+    expect(readPendingNote(OWNER)).toBeNull()
+    // A failure arriving afterwards changes nothing, and neither does a
+    // re-hold of the same action.
+    expect(failPendingNote(OWNER, claim, a)).toBe(false)
+    expect(holdPendingNote(OWNER, a)).toBe(false)
+    expect(readPendingNote(OWNER)).toBeNull()
+    releaseNoteSend(OWNER, claim)
+    // A NEW note is still allowed — only that action is gone.
+    expect(holdPendingNote(OWNER, noteFor('n-b', 'second try'))).toBe(true)
+  })
+
+  it('tells subscribers when the slot changes', () => {
+    const seen: Array<string | null> = []
+    const stop = subscribePendingNote(OWNER, () => {
+      seen.push(readPendingNote(OWNER)?.state ?? null)
+    })
+    const a = noteFor('n-a', 'said once')
+    holdPendingNote(OWNER, a)
+    const claim = claimNoteSend(OWNER, 'n-a') as string
+    clearPendingNote(OWNER, 'n-a')
+    releaseNoteSend(OWNER, claim)
+    stop()
+    holdPendingNote(OWNER, noteFor('n-c', 'after unsubscribe'))
+    expect(seen).toEqual(['unsent', 'sending', null, null])
+  })
+})
+
+/**
+ * The three C2 defects, through the component.
+ *
+ * 1. a copy of the slot went stale, so an acknowledgment from a mount that had
+ *    gone away left the panel up and the mic shut;
+ * 2. Retry and Discard were enabled by a LOCAL flag, so a child could discard
+ *    words a write was carrying and a late failure could resurrect them;
+ * 3. the help was frozen when the GAME was acknowledged, so Hint → speak →
+ *    Save recorded "none offered".
+ */
+describe('the store is the one current answer about a note', () => {
+  it('clears the returned panel when the earlier write lands, and reopens the mic', async () => {
+    const bridge = await openEditor()
+    await saveAVersion(bridge)
+    await sayWords()
+    let release: (() => void) | null = null
+    saveNote.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve({ id: 'note-1', alreadySaved: false })
+        }),
+    )
+    await act(async () => {
+      screen.getByRole('button', { name: 'Save my words' }).click()
+    })
+    await waitFor(() => expect(readPendingNote(OWNER)?.state).toBe('sending'))
+
+    // He leaves while it is out, and comes back.
+    cleanup()
+    const second = await openEditor()
+    expect(screen.getByText('These words may still be saving')).toBeInTheDocument()
+    // While it really is sending, neither a retry nor a discard is offered as
+    // though it had failed.
+    expect(screen.getByRole('button', { name: 'Save these words' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Discard these words' })).toBeDisabled()
+
+    // The earlier write lands. The page he is looking at is told.
+    await act(async () => {
+      release?.()
+    })
+    await waitFor(() =>
+      expect(screen.queryByText('These words may still be saving')).not.toBeInTheDocument(),
+    )
+    expect(readPendingNote(OWNER)).toBeNull()
+    // And the mic is available again for a new note about the same game.
+    await saveAVersion(second, editedFiles(5))
+    await waitFor(() => expect(screen.getByText('Pretend mic')).toBeInTheDocument())
+    expect(saveNote).toHaveBeenCalledTimes(1)
+  })
+
+  it('a late failure cannot revive words that were discarded', async () => {
+    const bridge = await openEditor()
+    await saveAVersion(bridge)
+    await sayWords()
+    let fail: (() => void) | null = null
+    saveNote.mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          fail = () => reject(new Error('offline'))
+        }),
+    )
+    await act(async () => {
+      screen.getByRole('button', { name: 'Save my words' }).click()
+    })
+    await waitFor(() => expect(readPendingNote(OWNER)?.state).toBe('sending'))
+    // Mid-write, a discard is NOT offered: the write cannot be called back.
+    expect(screen.getByRole('button', { name: 'Start over' })).toBeDisabled()
+
+    // It fails, which unlocks a real retry…
+    await act(async () => {
+      fail?.()
+    })
+    await waitFor(() => expect(screen.getByText('offline')).toBeInTheDocument())
+    expect(screen.getByRole('button', { name: 'Start over' })).toBeEnabled()
+    const discardedId = readPendingNote(OWNER)?.target.noteActionId
+
+    // …and now he deliberately throws them away.
+    await act(async () => {
+      screen.getByRole('button', { name: 'Start over' }).click()
+    })
+    expect(readPendingNote(OWNER)).toBeNull()
+    // A stale re-hold of that exact action is refused, so nothing resurrects.
+    const ghost: PendingNote = {
+      target: {
+        familyId: OWNER.familyId,
+        childId: OWNER.childId,
+        projectId: OWNER.projectId,
+        versionId: 'v',
+        versionDocId: 'doc',
+        visitId: 's',
+        noteActionId: discardedId as string,
+        help: 'none-offered',
+      },
+      text: voiceScript.text,
+      capture: 'voice',
+      createdAt: '2026-11-17T12:00:00.000Z',
+      attempts: 1,
+      state: 'failed',
+    }
+    expect(holdPendingNote(OWNER, ghost)).toBe(false)
+    cleanup()
+    await openEditor()
+    expect(screen.queryByText(new RegExp(voiceScript.text))).not.toBeInTheDocument()
+  })
+})
+
+describe('a note records the help that had been OFFERED when he spoke', () => {
+  it('records a hint offered after the save and before the words', async () => {
+    const bridge = await openEditor()
+    await saveAVersion(bridge)
+    // Save the game, THEN ask for a hint, THEN say what he was trying.
+    await act(async () => {
+      screen.getByRole('button', { name: /Hint/ }).click()
+    })
+    await sayWords()
+    await act(async () => {
+      screen.getByRole('button', { name: 'Save my words' }).click()
+    })
+    await waitFor(() => expect(saveNote).toHaveBeenCalled())
+    const args = saveNote.mock.calls[0][0]
+    expect(args.help).toBe('hints-offered')
+    expect(args.hintsOffered).toBe(1)
+  })
+
+  it('a hint offered AFTER the words changes nothing about them', async () => {
+    const bridge = await openEditor()
+    await saveAVersion(bridge)
+    await sayWords()
+    // The hint comes after the sentence was accepted.
+    await act(async () => {
+      screen.getByRole('button', { name: /Hint/ }).click()
+    })
+    // The draft was not retargeted or invalidated by the help changing.
+    expect(screen.getByLabelText('What you were trying')).toHaveValue(voiceScript.text)
+    saveNote.mockRejectedValueOnce(new Error('offline'))
+    await act(async () => {
+      screen.getByRole('button', { name: 'Save my words' }).click()
+    })
+    await waitFor(() => expect(screen.getByText('offline')).toBeInTheDocument())
+    const first = saveNote.mock.calls[0][0]
+    expect(first.help).toBe('none-offered')
+    expect(first.hintsOffered).toBeUndefined()
+
+    // And the retry carries the ORIGINAL metadata, not the newer help.
+    saveNote.mockResolvedValue({ id: 'note-1', alreadySaved: false })
+    await act(async () => {
+      screen.getByRole('button', { name: 'Save my words' }).click()
+    })
+    await waitFor(() => expect(saveNote).toHaveBeenCalledTimes(2))
+    const retry = saveNote.mock.calls[1][0]
+    expect(retry.help).toBe('none-offered')
+    expect(retry.hintsOffered).toBeUndefined()
+    expect(retry.noteActionId).toBe(first.noteActionId)
+    expect(retry.createdAt).toBe(first.createdAt)
+    expect(retry.voiceEventId).toBe(first.voiceEventId)
   })
 })

@@ -190,11 +190,17 @@ export function sameNoteSlot(
 /**
  * The same question asked of two full targets: do they name the same save?
  *
- * Kept as its own name because that is what the editor is asking, and the
- * action id is deliberately NOT part of the answer — two different notes about
- * one save have the same slot and different ids.
+ * Its own signature rather than an alias, so a caller may pass a complete
+ * target — action id included — and still be type-checked. The action id is
+ * deliberately NOT part of the answer: two different notes about one save have
+ * the same slot and different ids, and a retry keeps both.
  */
-export const sameNoteTarget = sameNoteSlot
+export function sameNoteTarget(
+  a: BuildStudioNoteTarget | null,
+  b: BuildStudioNoteTarget | null,
+): boolean {
+  return sameNoteSlot(a, b)
+}
 
 /**
  * The key a `VoiceInput` instance is mounted under.
@@ -204,7 +210,11 @@ export const sameNoteTarget = sameNoteSlot
  * the target, so there is no state in which the mic belongs to one save and the
  * draft to another.
  */
-export const noteTargetKey = (target: BuildStudioNoteSlot | null): string =>
+export const noteTargetKey = (
+  // Either shape: the save on screen, or a note's complete frozen target. The
+  // action id is not part of the key — the recorder belongs to the SAVE.
+  target: BuildStudioNoteSlot | BuildStudioNoteTarget | null,
+): string =>
   target
     ? [
         target.familyId,
