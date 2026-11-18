@@ -1,0 +1,52 @@
+<xml xmlns="https://developers.google.com/blockly/xml"><variables><variable type="KIND_SpriteKind" id="#d)|q+y*)0P_amGPN-lJ">Player</variable><variable type="KIND_SpriteKind" id="YQFR%G.B3eqJY!tGr/a!">Projectile</variable><variable type="KIND_SpriteKind" id=":oSoV!-RclW^9/}9hu`x">Food</variable><variable type="KIND_SpriteKind" id="8*#^NrwPkI@QT_)EgWFm">Enemy</variable><variable id=":QMXZ5atCqqE[j^]yTz9">apple</variable><variable id="f%1GeTRFf|XGG:(ihL(W">rock</variable><variable id="^43MAt/X!FD-gk!-V8QV">hero</variable></variables><block type="pxt-on-start" x="20" y="20"><statement name="HANDLER"><block type="gamesetbackgroundcolor"><value name="color"><shadow type="colorindexpicker"><field name="index">9</field></shadow></value><next><block type="hudSetLife"><value name="value"><shadow type="math_number"><field name="NUM">3</field></shadow></value><next><block type="hudsetScore"><value name="value"><shadow type="math_number"><field name="NUM">0</field></shadow></value><next><block type="gamecountdown"><value name="duration"><shadow type="math_number"><field name="NUM">45</field></shadow></value><next><block type="variables_set"><field name="VAR" id="^43MAt/X!FD-gk!-V8QV">hero</field><value name="VALUE"><shadow type="math_number"><field name="NUM">0</field></shadow><block type="spritescreate"><value name="img"><shadow type="screen_image_picker"><field name="img">img`
+. . . . . . . . . . . . . . . .
+. . . . . . f f f f . . . . . .
+. . . . . f d d d d f . . . . .
+. . . . . f d f d f d . . . . .
+. . . . . f d d d d d . . . . .
+. . . . . . f d d d f . . . . .
+. . . . . . . f f f . . . . . .
+. . . . . . 8 8 8 8 8 . . . . .
+. . . . . 8 8 8 8 8 8 8 . . . .
+. . . . 5 8 8 8 8 8 8 8 5 . . .
+. . . . . . 8 8 8 8 8 . . . . .
+. . . . . . 8 8 . 8 8 . . . . .
+. . . . . . 1 1 . 1 1 . . . . .
+. . . . . . 1 1 . 1 1 . . . . .
+. . . . . f f f . f f f . . . .
+. . . . . . . . . . . . . . . .
+`</field><data>{"commentRefs":[],"fieldData":{"img":null}}</data></shadow></value><value name="kind"><shadow type="spritekind"><field name="MEMBER">Player</field></shadow></value></block></value><next><block type="spritesetpos"><value name="sprite"><block type="variables_get"><field name="VAR" id="^43MAt/X!FD-gk!-V8QV">hero</field></block></value><value name="x"><shadow type="positionPicker"><field name="index">80</field></shadow></value><value name="y"><shadow type="positionPicker"><field name="index">104</field></shadow></value><next><block type="spritesetsetstayinscreen"><value name="sprite"><block type="variables_get"><field name="VAR" id="^43MAt/X!FD-gk!-V8QV">hero</field></block></value><value name="on"><shadow type="toggleOnOff"><field name="on">true</field></shadow></value><next><block type="game_control_sprite"><mutation xmlns="http://www.w3.org/1999/xhtml" _expanded="2" _input_init="true"></mutation><value name="sprite"><block type="variables_get"><field name="VAR" id="^43MAt/X!FD-gk!-V8QV">hero</field></block></value><value name="vx"><shadow type="spriteSpeedPicker"><field name="speed">90</field></shadow></value><value name="vy"><shadow type="spriteSpeedPicker"><field name="speed">0</field></shadow></value></block></next></block></next></block></next></block></next></block></next></block></next></block></next></block></statement></block><block type="gameinterval" x="20" y="547"><value name="period"><shadow type="timePicker"><field name="ms">1200</field></shadow></value><statement name="HANDLER"><block type="variables_set"><field name="VAR" id=":QMXZ5atCqqE[j^]yTz9">apple</field><value name="VALUE"><shadow type="math_number"><field name="NUM">0</field></shadow><block type="spritescreate"><value name="img"><shadow type="screen_image_picker"><field name="img">img`
+. . . . . . . . . . . . . . . .
+. . . . . . . 7 7 . . . . . . .
+. . . . . . 7 7 . . . . . . . .
+. . . . 2 2 2 2 2 2 . . . . . .
+. . . 2 2 2 2 2 2 2 2 . . . . .
+. . 2 2 2 2 2 2 2 2 2 2 . . . .
+. . 2 2 1 2 2 2 2 2 2 2 . . . .
+. . 2 2 2 2 2 2 2 2 2 2 . . . .
+. . 2 2 2 2 2 2 2 2 2 2 . . . .
+. . . 2 2 2 2 2 2 2 2 . . . . .
+. . . . 2 2 2 2 2 2 . . . . . .
+. . . . . 2 2 2 2 . . . . . . .
+. . . . . . . . . . . . . . . .
+. . . . . . . . . . . . . . . .
+. . . . . . . . . . . . . . . .
+. . . . . . . . . . . . . . . .
+`</field><data>{"commentRefs":[],"fieldData":{"img":null}}</data></shadow></value><value name="kind"><shadow type="spritekind"><field name="MEMBER">Food</field></shadow></value></block></value><next><block type="spritesetpos"><value name="sprite"><block type="variables_get"><field name="VAR" id=":QMXZ5atCqqE[j^]yTz9">apple</field></block></value><value name="x"><shadow type="positionPicker"><field name="index">0</field></shadow><block type="device_random"><value name="min"><shadow type="math_number"><field name="NUM">8</field></shadow></value><value name="limit"><shadow type="math_number"><field name="NUM">152</field></shadow></value></block></value><value name="y"><shadow type="positionPicker"><field name="index">2</field></shadow></value><next><block type="spritesetsetflag"><field name="flag">SpriteFlag.AutoDestroy</field><value name="sprite"><block type="variables_get"><field name="VAR" id=":QMXZ5atCqqE[j^]yTz9">apple</field></block></value><value name="on"><shadow type="toggleOnOff"><field name="on">true</field></shadow></value><next><block type="Sprite_blockCombine_set"><field name="property">Sprite.vy@set</field><value name="mySprite"><block type="variables_get"><field name="VAR" id=":QMXZ5atCqqE[j^]yTz9">apple</field></block></value><value name="value"><shadow type="math_number"><field name="NUM">45</field></shadow></value></block></next></block></next></block></next></block></statement></block><block type="gameinterval" x="20" y="882"><value name="period"><shadow type="timePicker"><field name="ms">2000</field></shadow></value><statement name="HANDLER"><block type="variables_set"><field name="VAR" id="f%1GeTRFf|XGG:(ihL(W">rock</field><value name="VALUE"><shadow type="math_number"><field name="NUM">0</field></shadow><block type="spritescreate"><value name="img"><shadow type="screen_image_picker"><field name="img">img`
+. . . . . . . . . . . . . . . .
+. . . . . . . . . . . . . . . .
+. . . . . . . . . . . . . . . .
+. . . . . . . . . . . . . . . .
+. . . . . e e e e . . . . . . .
+. . . . e e e e e e . . . . . .
+. . . e e e e e e e e . . . . .
+. . e e e d e e e e e e . . . .
+. . e e e e e e e e e e . . . .
+. . e e e e e e d e e e . . . .
+. . . e e e e e e e e . . . . .
+. . . . e e e e e e . . . . . .
+. . . . . . . . . . . . . . . .
+. . . . . . . . . . . . . . . .
+. . . . . . . . . . . . . . . .
+. . . . . . . . . . . . . . . .
+`</field><data>{"commentRefs":[],"fieldData":{"img":null}}</data></shadow></value><value name="kind"><shadow type="spritekind"><field name="MEMBER">Enemy</field></shadow></value></block></value><next><block type="spritesetpos"><value name="sprite"><block type="variables_get"><field name="VAR" id="f%1GeTRFf|XGG:(ihL(W">rock</field></block></value><value name="x"><shadow type="positionPicker"><field name="index">0</field></shadow><block type="device_random"><value name="min"><shadow type="math_number"><field name="NUM">8</field></shadow></value><value name="limit"><shadow type="math_number"><field name="NUM">152</field></shadow></value></block></value><value name="y"><shadow type="positionPicker"><field name="index">2</field></shadow></value><next><block type="spritesetsetflag"><field name="flag">SpriteFlag.AutoDestroy</field><value name="sprite"><block type="variables_get"><field name="VAR" id="f%1GeTRFf|XGG:(ihL(W">rock</field></block></value><value name="on"><shadow type="toggleOnOff"><field name="on">true</field></shadow></value><next><block type="Sprite_blockCombine_set"><field name="property">Sprite.vy@set</field><value name="mySprite"><block type="variables_get"><field name="VAR" id="f%1GeTRFf|XGG:(ihL(W">rock</field></block></value><value name="value"><shadow type="math_number"><field name="NUM">60</field></shadow></value></block></next></block></next></block></next></block></statement></block><block type="spritesoverlap" x="20" y="1217"><value name="HANDLER_DRAG_PARAM_sprite"><block type="argument_reporter_custom" deletable="false"><mutation typename="Sprite"></mutation><field name="VALUE">sprite</field></block></value><value name="kind"><shadow type="spritekind"><field name="MEMBER">Player</field></shadow></value><value name="HANDLER_DRAG_PARAM_otherSprite"><block type="argument_reporter_custom" deletable="false"><mutation typename="Sprite"></mutation><field name="VALUE">otherSprite</field></block></value><value name="otherKind"><shadow type="spritekind"><field name="MEMBER">Food</field></shadow></value><statement name="HANDLER"><block type="spritedestroy"><mutation xmlns="http://www.w3.org/1999/xhtml" _expanded="0" _input_init="true"></mutation><field name="effect">effects.spray</field><value name="sprite"><block type="argument_reporter_custom"><mutation typename="Sprite"></mutation><field name="VALUE">otherSprite</field></block></value><next><block type="hudChangeScoreBy"><value name="value"><shadow type="math_number"><field name="NUM">1</field></shadow></value></block></next></block></statement></block><block type="spritesoverlap" x="20" y="1446"><value name="HANDLER_DRAG_PARAM_sprite"><block type="argument_reporter_custom" deletable="false"><mutation typename="Sprite"></mutation><field name="VALUE">sprite</field></block></value><value name="kind"><shadow type="spritekind"><field name="MEMBER">Player</field></shadow></value><value name="HANDLER_DRAG_PARAM_otherSprite"><block type="argument_reporter_custom" deletable="false"><mutation typename="Sprite"></mutation><field name="VALUE">otherSprite</field></block></value><value name="otherKind"><shadow type="spritekind"><field name="MEMBER">Enemy</field></shadow></value><statement name="HANDLER"><block type="spritedestroy"><mutation xmlns="http://www.w3.org/1999/xhtml" _expanded="0" _input_init="true"></mutation><field name="effect">effects.spray</field><value name="sprite"><block type="argument_reporter_custom"><mutation typename="Sprite"></mutation><field name="VALUE">otherSprite</field></block></value><next><block type="hudChangeLifeBy"><value name="value"><shadow type="math_number"><field name="NUM">-1</field></shadow></value></block></next></block></statement></block></xml>

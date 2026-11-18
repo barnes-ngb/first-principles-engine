@@ -19,6 +19,17 @@ import { describe, expect, it } from 'vitest'
  * It is deliberately separate from `hostingCacheHeaders.invariant.test.ts`,
  * whose own header says changing the CSP does not require touching its cache
  * assertions. Nothing here reads a cache rule.
+ *
+ * ── Why the HEADER alone was not the policy ────────────────────────────────
+ *
+ * A browser enforces every CSP it is delivered, and a frame has to satisfy ALL
+ * of them — the effective `frame-src` is the INTERSECTION, not the union. The
+ * served header named `arcade.makecode.com`; `index.html` shipped a SECOND
+ * policy as a `<meta http-equiv>` that still named only `'self'` and YouTube,
+ * so the intersection blocked the editor and the Build Studio sat waiting for a
+ * frame that could never load — a production timeout with a console CSP
+ * violation and a header that looked correct. So the two lists are asserted to
+ * be the same list, and a missing meta fails by name rather than by absence.
  */
 
 type HostingHeader = { key: string; value: string }
@@ -38,6 +49,28 @@ const ALLOWED = [
   'https://www.youtube-nocookie.com',
   'https://arcade.makecode.com',
 ]
+
+/** The static document, which delivers a policy of its very own. */
+const INDEX_HTML = readFileSync(resolve(__dirname, '..', '..', 'index.html'), 'utf8')
+
+/**
+ * Every `<meta http-equiv="Content-Security-Policy">` in it, in document order.
+ *
+ * Read with the jsdom test environment's own `DOMParser` rather than a regex:
+ * the policy contains `'self'`, and a pattern matching `["']` either side of an
+ * attribute stops at that apostrophe inside a double-quoted value. The parser
+ * is the thing a browser actually does.
+ */
+const metaPolicies = Array.from(
+  new DOMParser()
+    .parseFromString(INDEX_HTML, 'text/html')
+    .querySelectorAll('meta[http-equiv]'),
+).filter(
+  (meta) => meta.getAttribute('http-equiv')?.toLowerCase() === 'content-security-policy',
+)
+
+/** One policy, with wrapping and runs of whitespace normalised away. */
+const oneLine = (policy: string): string => policy.trim().replace(/\s+/g, ' ')
 
 describe('the app frame-src names exactly the origins we embed', () => {
   it('reads a real app hosting target and a real CSP (guards itself)', () => {
@@ -103,5 +136,30 @@ describe('the app frame-src names exactly the origins we embed', () => {
 
   it('puts the CSP on the broad rule, where every request picks it up', () => {
     expect(broadRule?.source).toBe('**')
+  })
+})
+
+describe('index.html delivers the SAME policy, because browsers intersect them', () => {
+  it('declares exactly ONE Content-Security-Policy meta', () => {
+    // Zero is the failure that hid this: the served header alone is not what a
+    // browser enforces. More than one is the same bug twice, since each is
+    // enforced and the effective list is their intersection.
+    expect(
+      metaPolicies.length,
+      metaPolicies.length === 0
+        ? 'index.html declares no <meta http-equiv="Content-Security-Policy">; one must ' +
+          'carry the authorised frame-src, because the browser enforces it alongside ' +
+          'the served header and frames only what BOTH allow'
+        : `index.html declares ${metaPolicies.length} CSP metas; a second list silently ` +
+          'narrows the first',
+    ).toBe(1)
+  })
+
+  it('carries the authorised header’s list, exactly', () => {
+    // The whole repair: one list, written in two places, asserted to be one
+    // list. The origins themselves are checked against ALLOWED above.
+    const content = metaPolicies[0]?.getAttribute('content')
+    expect(content, 'the CSP meta has no content attribute to read').toBeTruthy()
+    expect(oneLine(content!)).toBe(oneLine(csp!))
   })
 })
