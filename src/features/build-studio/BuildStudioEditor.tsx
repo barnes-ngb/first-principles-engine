@@ -11,6 +11,16 @@
  * is captured in a {@link BuildStudioScope} when the editor mounts, carried on
  * the pending payload, and used by the write. **BIND.**
  *
+ * ── Which game this mount opens is decided BEFORE it mounts ─────────────
+ *
+ * `initialVersion` is the saved version an explicit choice picked on the way in
+ * (`BuildStudioChildEntry`), or absent for the prepared starter. It is read
+ * once, in the first visit's initializer, so one click decides what this mount
+ * has open and no later snapshot can swap it. Everything after that is the
+ * existing path — the version's own archive, the same import, the same startup
+ * readback — and because the version is in the FIRST visit there is no prior
+ * game to protect, so no replacement check runs for it.
+ *
  * ── An editor save is not an app save ───────────────────────────────────
  *
  * MakeCode saves constantly; those arrive as `workspacesave` and all they do
@@ -375,6 +385,22 @@ export interface BuildStudioEditorProps {
    * so nothing about an unconfigured child changes.
    */
   childVoiceInputEnhanced?: boolean
+  /**
+   * The saved version this studio OPENS on, chosen explicitly before this
+   * editor was mounted — `null`/absent means the prepared starter.
+   *
+   * Read ONCE, when the first visit is built, and never again: the choice is
+   * frozen by the click that made it, so a later snapshot cannot swap which
+   * game this mount has open. It goes through {@link versionBelongsTo} — the
+   * same identity the shelf's Open uses — and a row that is not this child's in
+   * this project is refused out loud rather than quietly opened.
+   *
+   * It changes nothing else. The import is the existing one (the version's own
+   * archive, parsed), the readback is the existing one, and because the version
+   * is in the FIRST visit there is no prior game to ask about, so no
+   * replacement confirmation is involved.
+   */
+  initialVersion?: BuildStudioVersion | null
   versions: BuildStudioVersionsRead
   /**
    * Told when a write completed for a scope that is no longer on screen, so
@@ -389,6 +415,7 @@ export default function BuildStudioEditor({
   childName,
   projectId,
   childVoiceInputEnhanced,
+  initialVersion,
   versions,
   onOutOfScopeSave,
 }: BuildStudioEditorProps) {
@@ -415,10 +442,30 @@ export default function BuildStudioEditor({
     [childId, childVoiceInputEnhanced],
   )
 
+  /**
+   * An initial version this editor will NOT open, because it is not this
+   * child's in this project.
+   *
+   * The caller validates before it launches, so this is defence in depth — and
+   * it is said on screen rather than swallowed, because an editor that quietly
+   * opened the starter after a person chose a saved game would be the silent
+   * swap the whole entry exists to prevent. Derived from props, so it cannot go
+   * stale against the visit built below.
+   */
+  const initialVersionRefused =
+    initialVersion != null && !versionBelongsTo(initialVersion, childId, projectId)
+
   // ── The visit ────────────────────────────────────────────────────────────
   const [visit, setVisit] = useState(() => ({
     visitId: newVisitId(Date.now(), Math.random()),
-    version: null as BuildStudioVersion | null,
+    /**
+     * The explicitly chosen saved version, or `null` for the starter. Captured
+     * in the initializer, so this mount's game is decided once.
+     */
+    version:
+      initialVersion && versionBelongsTo(initialVersion, childId, projectId)
+        ? initialVersion
+        : (null as BuildStudioVersion | null),
     /**
      * Validated files from a downloaded archive, when this visit is a recovery.
      *
@@ -2311,9 +2358,17 @@ export default function BuildStudioEditor({
           {childName}&apos;s Build Studio
         </Typography>
         <Typography variant="body1">{BUILD_STUDIO_GOAL_LINE}</Typography>
+        {/* Which game this is, said plainly — because "reopened my own save"
+            and "started the prepared starter" are two different things, and a
+            page that says starter about a reopened version invites a child to
+            believe his work is gone. It follows the VISIT, so a reopen from the
+            shelf and a recovery change it too. */}
         <Typography variant="caption" color="text.secondary">
-          This is a prepared starter game. Change it however you like — every save
-          keeps the one before it.
+          {visit.recovery
+            ? 'This is the game file you opened. It is not on your shelf until you save it.'
+            : visit.version
+              ? `You are back in your saved game “${visit.version.label}”. Change it however you like — saving keeps a new version and the one before it stays on your shelf.`
+              : 'This is a prepared starter game. Change it however you like — every save keeps the one before it.'}
         </Typography>
       </Stack>
 
@@ -2368,6 +2423,16 @@ export default function BuildStudioEditor({
       {currentHint && (
         <Alert severity="info" icon={false}>
           {currentHint.text}
+        </Alert>
+      )}
+
+      {/* A chosen version this editor would not open, named rather than
+          silently replaced by the starter. */}
+      {initialVersionRefused && (
+        <Alert severity="warning">
+          That saved game is not part of this one, so it was not opened. The
+          starter is open instead — your saved games are still on your shelf
+          below.
         </Alert>
       )}
 

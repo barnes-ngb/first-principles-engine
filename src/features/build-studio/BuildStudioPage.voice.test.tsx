@@ -1,4 +1,4 @@
-import { cleanup, render } from '@testing-library/react'
+import { act, cleanup, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 /**
@@ -15,6 +15,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
  * resolved child's own, it follows a switch, and it is never another child's.
  * What the flag then selects is `VoiceInput`'s own contract and is asserted in
  * that component's suite.
+ *
+ * They now go through the REAL saved-game entry, because that is what mounts
+ * the editor: the threading has to survive the door the child walks through,
+ * and a case that mocked the door away would stop measuring the product.
  */
 
 // ── The shell, as the page reads it ──────────────────────────────────────
@@ -63,6 +67,9 @@ vi.mock('./useBuildStudioOptIn', () => ({
 
 vi.mock('./useBuildStudioVersions', () => ({
   VersionsStatus: { Loading: 'loading', Ready: 'ready', Failed: 'failed' },
+  // The real predicate's answer for a row that belongs here. The entry asks it
+  // before it opens anything; these cases never offer a foreign row.
+  versionBelongsTo: () => true,
   useBuildStudioVersions: (
     _familyId: string | null,
     childId: string | null,
@@ -96,6 +103,21 @@ const { default: BuildStudioPage } = await import('./BuildStudioPage')
 
 const lastEditor = () => editorProps.at(-1)
 
+/**
+ * Mount the page and take the child's explicit entry choice.
+ *
+ * The REAL entry is used rather than mocked away, because it is now what mounts
+ * the editor: the threading these cases are about has to survive the door the
+ * child actually walks through. The shelf read here is settled and empty, so
+ * the one choice on screen is the starter.
+ */
+async function openStudio() {
+  render(<BuildStudioPage />)
+  await act(async () => {
+    screen.getByText('🍎 Start Apple Dash').click()
+  })
+}
+
 beforeEach(() => {
   editorProps.length = 0
   activeChildState.activeChildId = 'c-lincoln'
@@ -112,27 +134,27 @@ describe('the page threads the resolved child’s voice setting to the studio', 
    * `BuildStudioPage` and this case reads `undefined`, which is the defect —
    * `VoiceInput` requires an explicit `true`.
    */
-  it('passes TRUE for a child configured for enhanced input', () => {
-    render(<BuildStudioPage />)
+  it('passes TRUE for a child configured for enhanced input', async () => {
+    await openStudio()
     expect(lastEditor()).toEqual({
       childId: 'c-lincoln',
       childVoiceInputEnhanced: true,
     })
   })
 
-  it('passes FALSE for a child configured off', () => {
+  it('passes FALSE for a child configured off', async () => {
     activeChildState.activeChild = {
       id: 'c-lincoln',
       name: 'Lincoln',
       voiceInputEnhanced: false,
     }
-    render(<BuildStudioPage />)
+    await openStudio()
     expect(lastEditor()?.childVoiceInputEnhanced).toBe(false)
   })
 
-  it('passes FALSE when the child has no setting at all', () => {
+  it('passes FALSE when the child has no setting at all', async () => {
     activeChildState.activeChild = { id: 'c-lincoln', name: 'Lincoln' }
-    render(<BuildStudioPage />)
+    await openStudio()
     expect(lastEditor()?.childVoiceInputEnhanced).toBe(false)
   })
 
@@ -140,8 +162,8 @@ describe('the page threads the resolved child’s voice setting to the studio', 
    * A switch mounts a new editor for whoever the shell now resolves, and the
    * setting must arrive with the id rather than lagging a child behind.
    */
-  it('follows a child switch, with that child’s own setting', () => {
-    render(<BuildStudioPage />)
+  it('follows a child switch, with that child’s own setting', async () => {
+    await openStudio()
     expect(lastEditor()).toEqual({
       childId: 'c-lincoln',
       childVoiceInputEnhanced: true,
@@ -153,7 +175,9 @@ describe('the page threads the resolved child’s voice setting to the studio', 
       name: 'London',
       voiceInputEnhanced: false,
     }
-    render(<BuildStudioPage />)
+    // The entry retires with the child, so the next studio is opened by its
+    // own explicit choice rather than inheriting the previous one's.
+    await openStudio()
     expect(lastEditor()).toEqual({
       childId: 'c-london',
       childVoiceInputEnhanced: false,
