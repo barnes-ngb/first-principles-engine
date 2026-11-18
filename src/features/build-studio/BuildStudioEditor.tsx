@@ -125,9 +125,10 @@ import {
   newVisitId,
   noteTargetKey,
   sameNotePayload,
-  sameNoteTarget,
+  sameNoteSlot,
   scopeToken,
   sourceSignature,
+  type BuildStudioNoteSlot,
   type BuildStudioNoteTarget,
   type BuildStudioScope,
   type PendingNote,
@@ -375,7 +376,7 @@ export default function BuildStudioEditor({
     { version: BuildStudioVersion } | { recovery: BuildStudioSourceFiles } | null
   >(null)
   const [prospectCheck, setProspectCheck] = useState<
-    'idle' | 'checking' | 'dirty' | 'unknown'
+    'idle' | 'checking' | 'dirty' | 'unknown' | 'words'
   >('idle')
   const replaceRunRef = useRef<number | null>(null)
   const replaceSeqRef = useRef(0)
@@ -1231,24 +1232,32 @@ export default function BuildStudioEditor({
       replaceRunRef.current = runId
       setProspect(next)
       // A failed save's exact retry is work, and its loss has to be deliberate.
-      // So are words he has not saved: a replacement keeps them (they are held
-      // for their owner), but it also ENDS the save they were about, so it is
-      // said out loud first rather than discovered afterwards.
-      if (pending || wordsAtRiskRef.current) {
+      if (pending) {
         setProspectCheck('dirty')
         return
       }
+      // Unsaved WORDS do not answer the question about the game, and must never
+      // stand in for it: stopping here on the words alone skipped the capture,
+      // so an edit MakeCode had not announced read as clean and an Open
+      // destroyed it while the warning talked only about the sentence. The
+      // capture runs either way, while the editor is still intact, and the two
+      // facts are reported separately.
       setProspectCheck('checking')
       void checkSourceNow().then((result) => {
         if (replaceRunRef.current !== runId) return
-        if (result === 'clean') {
+        if (result === 'clean' && !wordsAtRiskRef.current) {
           replaceRunRef.current = null
           setProspect(null)
           setProspectCheck('idle')
           applyReplace(next)
           return
         }
-        setProspectCheck(result === 'dirty' ? 'dirty' : 'unknown')
+        // `words` means exactly that: the game was READ and is clean, and the
+        // only thing unsaved is what he said. `unknown` stays unknown — an
+        // unavailable capture is never reported as clean.
+        setProspectCheck(
+          result === 'dirty' ? 'dirty' : result === 'unknown' ? 'unknown' : 'words',
+        )
       })
     },
     [writeInFlight, pending, checkSourceNow, applyReplace],
@@ -1338,14 +1347,16 @@ export default function BuildStudioEditor({
   // ── The reflection ────────────────────────────────────────────────────
 
   /**
-   * What a reflection recorded right now would be ABOUT.
+   * What a reflection recorded right now would be ABOUT — the SAVE, not the
+   * note.
    *
    * `null` until a version has been acknowledged in THIS visit, which is what
-   * makes the target unambiguous. `noteActionId` is minted with the target, so
-   * the words, the save they are about and the id the write is idempotent on
-   * are all decided at the same moment.
+   * makes the slot unambiguous. It deliberately carries no `noteActionId`: the
+   * id used to be minted here, so every sentence said about one save reused one
+   * id and the writer — correctly — refused the second genuinely different note
+   * as already saved. The id is minted when words are ACCEPTED, below.
    */
-  const noteTarget: BuildStudioNoteTarget | null = useMemo(() => {
+  const noteSlot: BuildStudioNoteSlot | null = useMemo(() => {
     if (!lastSaved) return null
     return {
       familyId,
@@ -1354,18 +1365,33 @@ export default function BuildStudioEditor({
       versionId: lastSaved.versionId,
       versionDocId: lastSaved.versionDocId,
       visitId: visit.visitId,
-      noteActionId: newNoteActionId(Date.now(), Math.random()),
       help: hintsOffered > 0 ? 'hints-offered' : 'none-offered',
       hintsOffered: hintsOffered > 0 ? hintsOffered : undefined,
     }
-    // `hintsOffered` is deliberately NOT a dependency: the target is frozen
-    // when the save is acknowledged, and a hint offered afterwards describes
-    // what came next, not what he was doing when he said this.
+    // `hintsOffered` is deliberately NOT a dependency: the help offered is
+    // frozen when the save is acknowledged, and a hint offered afterwards
+    // describes what came next, not what he was doing when he said this.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastSaved, familyId, childId, projectId, visit.visitId])
 
-  /** A draft whose target is no longer the live one is retired, not written. */
-  const draftIsStale = noteDraft !== null && !sameNoteTarget(noteDraft.target, noteTarget)
+  /**
+   * ONE note action, minted when a person's words are accepted.
+   *
+   * Frozen with the words and reused by every attempt of THOSE words — which is
+   * what makes a retry idempotent rather than a second document. A new sentence
+   * about the same save gets a new id and is a new note, which is the whole
+   * point of not minting it with the slot.
+   */
+  const newNoteFor = useCallback(
+    (slot: BuildStudioNoteSlot): BuildStudioNoteTarget => ({
+      ...slot,
+      noteActionId: newNoteActionId(Date.now(), Math.random()),
+    }),
+    [],
+  )
+
+  /** A draft whose save is no longer the live one is retired, not written. */
+  const draftIsStale = noteDraft !== null && !sameNoteSlot(noteDraft.target, noteSlot)
 
   /**
    * The words on screen, readable synchronously.
@@ -1444,7 +1470,13 @@ export default function BuildStudioEditor({
         childId: payload.target.childId,
         projectId: payload.target.projectId,
       }
-      const sending: PendingNote = { ...payload, attempts: payload.attempts + 1 }
+      // Same words, same action, same frozen stamp — one more attempt of it,
+      // and `sending` as the module's honest answer while it is out.
+      const sending: PendingNote = {
+        ...payload,
+        attempts: payload.attempts + 1,
+        state: 'sending',
+      }
       // Held BEFORE the write and bound to the payload's own owner, so a
       // departure or a remount mid-write still has the exact words and the
       // exact action to try again.
@@ -1469,6 +1501,10 @@ export default function BuildStudioEditor({
           help: sending.target.help,
           hintsOffered: sending.target.hintsOffered,
           voiceEventId: sending.voiceEventId,
+          // Frozen when the words were accepted, so every attempt — including
+          // one after a remount — writes the same document rather than a
+          // second one stamped with the time the retry happened to occur.
+          createdAt: sending.createdAt,
         })
         // Filed now, whatever the screen is showing. This action releases ITS
         // OWN held words by action id and no others.
@@ -1486,11 +1522,20 @@ export default function BuildStudioEditor({
           live !== null && live.target.noteActionId === sending.target.noteActionId
         if (sameAction && !sameNotePayload(live, sending)) {
           // The wording changed at the SAME save while this was in flight. What
-          // is filed is what was sent; the newer wording is still here and
-          // still unsaved, and this does not clear it or call it saved.
+          // is filed is what was sent. The newer sentence is not that note and
+          // is not a retry of it, so it becomes its OWN note — a fresh action
+          // id and a fresh stamp — rather than being refused forever as
+          // already saved, or quietly thrown away.
+          putDraft({
+            ...live,
+            target: newNoteFor(live.target),
+            createdAt: new Date().toISOString(),
+            attempts: 0,
+            state: 'unsent',
+          })
           setNoteState('saved')
           setNoteMessage(
-            'Your words were filed as you sent them. What is in the box now is different, and that part is not saved.',
+            'Your words were filed as you sent them. What is in the box now is different and is not saved — tap Save my words to keep that as well.',
           )
           return
         }
@@ -1498,6 +1543,12 @@ export default function BuildStudioEditor({
         setNoteState('saved')
         setNoteMessage('Saved with your game.')
       } catch (err) {
+        // What the MODULE knows, whatever the screen is doing: this attempt
+        // came back and did not land. Recorded on the payload so a remount can
+        // say "that did not save" as a fact instead of inferring it from a
+        // count that cannot tell failure from still running.
+        const failed: PendingNote = { ...sending, state: 'failed' }
+        holdPendingNote(ownOwner, failed)
         if (!uiLive()) return
         setNoteState('failed')
         setNoteMessage(
@@ -1505,20 +1556,20 @@ export default function BuildStudioEditor({
             ? err.message
             : 'Your words did not save. Try again — your game is safe either way.',
         )
-        // The words are deliberately kept, with their attempt count, so the
-        // retry sends the SAME action rather than a second different note.
+        // The words are deliberately kept, with their action, stamp and attempt
+        // count, so the retry re-sends THEM rather than a second note.
         const live = noteDraftRef.current
-        if (sameNotePayload(live, sending)) putDraft(sending)
+        if (sameNotePayload(live, failed)) putDraft(failed)
         else {
           setHeldNote((current) =>
-            current && current.target.noteActionId === sending.target.noteActionId
-              ? sending
+            current && current.target.noteActionId === failed.target.noteActionId
+              ? failed
               : current,
           )
         }
       }
     },
-    [putDraft],
+    [putDraft, newNoteFor],
   )
 
   /** Save the words on screen, about the save they were accepted for. */
@@ -1527,7 +1578,7 @@ export default function BuildStudioEditor({
     if (noteLatchRef.current) return
     const draft = noteDraftRef.current
     if (!draft || !draft.text.trim()) return
-    if (!sameNoteTarget(draft.target, noteTarget)) {
+    if (!sameNoteSlot(draft.target, noteSlot)) {
       // A draft about V1 is never written against V2 — and never dropped for
       // it either. The words move to the held panel with their own target,
       // where they can be saved with that save or discarded on purpose.
@@ -1545,7 +1596,7 @@ export default function BuildStudioEditor({
     } finally {
       if (noteLatchRef.current === opId) noteLatchRef.current = null
     }
-  }, [noteTarget, owner, token, commitNote, putDraft])
+  }, [noteSlot, owner, token, commitNote, putDraft])
 
   /**
    * Save words that are about an EARLIER save: the exact held payload, with its
@@ -1973,7 +2024,7 @@ export default function BuildStudioEditor({
         <Typography variant="caption" color="text.secondary">
           This is optional. You can make and save games without it.
         </Typography>
-        {!noteTarget && !heldNote && (
+        {!noteSlot && !heldNote && (
           <Typography variant="body2" color="text.secondary">
             Save a version first, then your words can go with it.
           </Typography>
@@ -2006,10 +2057,16 @@ export default function BuildStudioEditor({
               </Stack>
             }
           >
+            {/* The title is the module's own answer about this action, never
+                an inference from an attempt count: a count cannot tell a
+                refusal from a write that is still running, and a page that
+                says "did not save" about a live write invites a second one. */}
             <AlertTitle>
-              {heldNote.attempts > 0
+              {heldNote.state === 'failed'
                 ? 'These words did not save'
-                : 'These words are not saved yet'}
+                : heldNote.state === 'sending'
+                  ? 'These words may still be saving'
+                  : 'These words are not saved yet'}
             </AlertTitle>
             <Typography variant="body2" sx={{ fontStyle: 'italic' }}>
               “{heldNote.text}”
@@ -2018,16 +2075,28 @@ export default function BuildStudioEditor({
               {heldNote.versionLabel
                 ? `They are about your save “${heldNote.versionLabel}”. `
                 : 'They are about an earlier save. '}
-              Nothing is written down until you tap Save these words.
+              {heldNote.state === 'sending'
+                ? 'A save of these exact words was started and this page did not see it finish. Save these words sends the same ones again — if the first one landed, it stays one note.'
+                : 'Nothing is written down until you tap Save these words.'}
             </Typography>
           </Alert>
         )}
-        {noteTarget && !noteDraft && (
+        {/* The mic is closed while an earlier note is still unresolved. Two
+            notes are two different sentences, and the recovery slot holds one
+            — so rather than quietly letting a new one displace words nobody
+            dealt with, the page asks for that decision first. It is one tap
+            either way: save them, or discard them. */}
+        {noteSlot && !noteDraft && heldNote && (
+          <Typography variant="body2" color="text.secondary">
+            Save or discard the words above, and then you can say something new.
+          </Typography>
+        )}
+        {noteSlot && !noteDraft && !heldNote && (
           <VoiceInput
-            // Keyed by the TARGET. A change of acknowledged version or of visit
+            // Keyed by the SAVE. A change of acknowledged version or of visit
             // remounts the mic, so a recording started about one save is retired
             // rather than carried into the next.
-            key={noteTargetKey(noteTarget)}
+            key={noteTargetKey(noteSlot)}
             profile={{ id: childId }}
             sourceSurface="build-studio-reflection"
             onTranscript={(text, meta) =>
@@ -2035,11 +2104,15 @@ export default function BuildStudioEditor({
                 text,
                 capture: 'voice',
                 voiceEventId: meta?.eventId,
-                // Frozen here, at accepted-draft creation.
-                target: noteTarget,
+                // The note's own identity, minted HERE with the words — one
+                // action id and one stamp per accepted sentence, so a retry is
+                // the same note and a second sentence is a second note.
+                target: newNoteFor(noteSlot),
+                createdAt: new Date().toISOString(),
                 // Display only, so the held panel can name the save later.
                 versionLabel: lastSaved?.label,
                 attempts: 0,
+                state: 'unsent',
               })
             }
             placeholder="Tell me what you changed and what you expected."
@@ -2064,9 +2137,15 @@ export default function BuildStudioEditor({
                 if (noteLatchRef.current) return
                 // A typed correction keeps the ORIGINAL capture and event id:
                 // the words began as speech, and relabelling them as typed
-                // would misreport how they were given. A changed sentence is a
-                // fresh send, so the attempt count starts again.
-                putDraft({ ...noteDraft, text: e.target.value, attempts: 0 })
+                // would misreport how they were given, and it keeps the frozen
+                // help and stamp. A changed sentence is a fresh send of the
+                // same note action, so the attempt count starts again.
+                putDraft({
+                  ...noteDraft,
+                  text: e.target.value,
+                  attempts: 0,
+                  state: 'unsent',
+                })
               }}
               multiline
               minRows={2}
@@ -2147,18 +2226,23 @@ export default function BuildStudioEditor({
             {/* The loss is named BEFORE the tap, not reported after it — and the
                 capture that decides runs while the old editor is still intact,
                 so an edit MakeCode has not announced yet still counts. */}
+            {/* Two separate facts, never one standing in for the other: what
+                is true about the GAME, then what is true about the words. */}
             {prospectCheck === 'checking'
               ? 'Checking what is in the editor first…'
               : prospectCheck === 'unknown'
                 ? 'This page could not read the editor just now, so it cannot tell whether your changes are saved. Opening something else might lose them.'
                 : pending
                   ? `A save called “${pending.label}” did not finish. Opening something else leaves it behind.`
-                  : editorDirty
-                    ? 'You have work that is not on your shelf. Opening something else will lose it.'
-                    : // Clean game, unsaved words: the honest reason this
-                      // stopped. The words are kept below either way — what
-                      // opening something else ends is the save they go with.
-                      'Your words are not saved yet. Opening something else keeps them here to save or discard, but it does not save them.'}
+                  : prospectCheck === 'words'
+                    ? 'Your game is saved. Your words are not — opening something else keeps them here to save or discard, but it does not save them.'
+                    : 'You have work that is not on your shelf. Opening something else will lose it.'}
+            {prospectCheck === 'dirty' && wordsAtRisk
+              ? ' Your words are not saved either.'
+              : ''}
+            {prospectCheck === 'unknown' && wordsAtRisk
+              ? ' Your words are not saved yet either.'
+              : ''}
           </Alert>
         )}
         <BuildStudioVersionShelf
@@ -2238,7 +2322,11 @@ export default function BuildStudioEditor({
                 Try saving again
               </Button>
             )}
-            {!pending && departureFilesRef.current && (
+            {/* Saving the GAME is offered only when the game is what is at
+                risk. A words-only dialog used to show it, so the one obvious
+                button saved a version nobody asked for and left the words
+                exactly as unsaved as before. */}
+            {!pending && departureGameLine && departureFilesRef.current && (
               <Button
                 onClick={() => void handleSaveCaptured()}
                 sx={{ textTransform: 'none', minHeight: 48 }}
@@ -2246,7 +2334,7 @@ export default function BuildStudioEditor({
                 Save it now
               </Button>
             )}
-            {!pending && !departureFilesRef.current && canSave && (
+            {!pending && departureGameLine && !departureFilesRef.current && canSave && (
               <Button
                 onClick={() => void handleSave()}
                 sx={{ textTransform: 'none', minHeight: 48 }}

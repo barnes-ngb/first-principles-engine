@@ -159,10 +159,22 @@ export interface BuildStudioNoteTarget {
   hintsOffered?: number
 }
 
-/** Do these two targets name the same acknowledged save, in the same visit? */
-export function sameNoteTarget(
-  a: BuildStudioNoteTarget | null,
-  b: BuildStudioNoteTarget | null,
+/**
+ * The save a note is about, WITHOUT the action id.
+ *
+ * The two are deliberately separate things. The slot is "which save is
+ * acknowledged on screen", which the editor derives; the action id is "which
+ * note this is", which is minted when a person's words are accepted. Minting
+ * the id with the slot made every transcript about one save reuse one id, and
+ * the writer — correctly — refused the second genuinely different note as
+ * already saved.
+ */
+export type BuildStudioNoteSlot = Omit<BuildStudioNoteTarget, 'noteActionId'>
+
+/** Do these two name the same acknowledged save, in the same visit? */
+export function sameNoteSlot(
+  a: BuildStudioNoteSlot | null,
+  b: BuildStudioNoteSlot | null,
 ): boolean {
   if (!a || !b) return false
   return (
@@ -176,6 +188,15 @@ export function sameNoteTarget(
 }
 
 /**
+ * The same question asked of two full targets: do they name the same save?
+ *
+ * Kept as its own name because that is what the editor is asking, and the
+ * action id is deliberately NOT part of the answer — two different notes about
+ * one save have the same slot and different ids.
+ */
+export const sameNoteTarget = sameNoteSlot
+
+/**
  * The key a `VoiceInput` instance is mounted under.
  *
  * Changing it REMOUNTS the component, which is how a recorder that was started
@@ -183,7 +204,7 @@ export function sameNoteTarget(
  * the target, so there is no state in which the mic belongs to one save and the
  * draft to another.
  */
-export const noteTargetKey = (target: BuildStudioNoteTarget | null): string =>
+export const noteTargetKey = (target: BuildStudioNoteSlot | null): string =>
   target
     ? [
         target.familyId,
@@ -208,8 +229,11 @@ export const noteTargetKey = (target: BuildStudioNoteTarget | null): string =>
  *     the one `noteActionId` the write is idempotent on;
  *   • how they were given (`capture`) and the voice event they came from, so a
  *     typed correction never relabels speech as typing;
- *   • `attempts`, so the page can say "not saved yet" and "that did not save"
- *     as two different, true things.
+ *   • `createdAt`, frozen when the words were accepted, so every attempt sends
+ *     the SAME stamp — a retry that let the writer stamp its own time wrote a
+ *     different document on paper, which is not a retry;
+ *   • `state`, which is what the module actually knows about this action, so a
+ *     panel never says "that did not save" about a write that is still running.
  *
  * It is a PAYLOAD, not a record: nothing is durable until *Save my words*.
  */
@@ -224,11 +248,35 @@ export interface PendingNote {
    * Display only: the write uses the target's ids.
    */
   versionLabel?: string
+  /**
+   * The stamp these words were accepted at, UTC ISO. Sent on every attempt,
+   * including one after a remount, so a retry is the same document and not a
+   * second one wearing a later time.
+   */
+  createdAt: string
   /** How many times these exact words have been sent. `0` means never. */
   attempts: number
+  /**
+   * What is actually known about this action, not what a count implies:
+   *
+   *   • `unsent` — accepted, nobody has tapped Save my words;
+   *   • `sending` — a write is running, or was running in a mount that has
+   *     gone away, so whether it landed is genuinely unknown;
+   *   • `failed` — a write came back and refused or errored.
+   *
+   * Lives on the payload because it must survive the mount that started the
+   * write. A successful write removes the payload entirely.
+   */
+  state: 'unsent' | 'sending' | 'failed'
 }
 
-/** Are these two note payloads the same words of the same save action? */
+/**
+ * Are these two note payloads the same words of the same note action?
+ *
+ * Ignores `attempts` and `state`, which are about the sending, and `createdAt`,
+ * which is frozen per action — the identity is the action, the save it is about
+ * and the exact sentence.
+ */
 export function sameNotePayload(
   a: PendingNote | null,
   b: PendingNote | null,
@@ -236,7 +284,7 @@ export function sameNotePayload(
   if (!a || !b) return false
   return (
     a.target.noteActionId === b.target.noteActionId &&
-    sameNoteTarget(a.target, b.target) &&
+    sameNoteSlot(a.target, b.target) &&
     a.text === b.text
   )
 }

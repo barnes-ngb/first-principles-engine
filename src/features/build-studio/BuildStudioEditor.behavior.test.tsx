@@ -308,6 +308,7 @@ import {
   readPendingSave,
   resetPendingSaveStore,
 } from './buildStudioPendingStore'
+import type { PendingNote } from './buildStudioScope'
 import { starterSourceFiles } from './buildStudioStarter'
 import { VersionsStatus } from './useBuildStudioVersions'
 
@@ -707,7 +708,12 @@ describe('a profile change is held while the work is still intact', () => {
     await act(async () => {
       screen.getByText('Stay here').click()
     })
-    expect(screen.queryByText('Switch profile?')).not.toBeInTheDocument()
+    // MUI keeps a closing dialog mounted for its exit transition, so the
+    // question is whether the ask GOES — not whether it has already gone on
+    // the next line. The assertion that matters is below and is unchanged.
+    await waitFor(() =>
+      expect(screen.queryByText('Switch profile?')).not.toBeInTheDocument(),
+    )
 
     // The capture now comes back CLEAN — which, before the fix, switched.
     await act(async () => {
@@ -1185,5 +1191,390 @@ describe('a frame that never hands shakes is not left Opening forever', () => {
     const bridge = await openEditor()
     const frame = document.querySelector('iframe')
     expect(frame?.getAttribute('src')).toContain(bridge.frameId)
+  })
+})
+
+// ── 6. The reflection: words are work, and cannot be said again ─────────
+
+/**
+ * The reported loss, through the real component: save a game, accept the
+ * transcript, change its visible words, do NOT tap *Save my words*, tap
+ * *Today*. There was no warning and the sentence was gone, with the saved
+ * version intact — so the editor treated a game as work and a child's words as
+ * nothing.
+ */
+describe('accepted words are work at risk', () => {
+  it('holds an ordinary departure and says the WORDS are what is unsaved', async () => {
+    const bridge = await openEditor()
+    await saveAVersion(bridge)
+    await sayWords()
+    // Nothing has been written down, and nothing is written by leaving.
+    expect(saveNote).not.toHaveBeenCalled()
+    // The mic belongs to THIS child and this surface, not the live profile.
+    expect(voiceProps.at(-1)?.profile?.id).toBe(OWNER.childId)
+    expect(voiceProps.at(-1)?.sourceSurface).toBe('build-studio-reflection')
+
+    // The game is exactly what was saved, so the capture reads clean.
+    bridge.nextCapture = editedFiles(4)
+    await attemptDeparture()
+    await waitFor(() =>
+      expect(screen.getByText('Keep your words first?')).toBeInTheDocument(),
+    )
+    expect(proceedSpy).not.toHaveBeenCalled()
+    // It does not invent a game problem…
+    expect(screen.queryByText('Keep your game first?')).not.toBeInTheDocument()
+    expect(screen.queryByText(/changes that are not on your shelf/)).not.toBeInTheDocument()
+    // …and it does not offer a GAME save as the fix for unsaved words.
+    expect(screen.queryByText('Save it now')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Save my words' })).toBeInTheDocument()
+
+    await act(async () => {
+      screen.getByText('Stay here').click()
+    })
+    // Stay keeps the exact words, to the character.
+    expect(screen.getByLabelText('What you were trying')).toHaveValue(voiceScript.text)
+    expect(saveNote).not.toHaveBeenCalled()
+  })
+
+  it('offers the exact words back after leaving and returning', async () => {
+    const bridge = await openEditor()
+    await saveAVersion(bridge)
+    await sayWords()
+    await editWords('I wanted three lives')
+    const slot = readPendingNote(OWNER)
+    expect(slot?.text).toBe('I wanted three lives')
+    // Held, not written: holding is not saving.
+    expect(slot?.state).toBe('unsent')
+    expect(saveNote).not.toHaveBeenCalled()
+    // Owner-bound: a sibling's editor cannot see them.
+    expect(readPendingNote({ ...OWNER, childId: 'c2' })).toBeNull()
+
+    cleanup()
+    await openEditor()
+    expect(screen.getByText(/I wanted three lives/)).toBeInTheDocument()
+    expect(screen.getByText('These words are not saved yet')).toBeInTheDocument()
+    expect(saveNote).not.toHaveBeenCalled()
+
+    await act(async () => {
+      screen.getByText('Save these words').click()
+    })
+    await waitFor(() => expect(saveNote).toHaveBeenCalled())
+    const args = saveNote.mock.calls[0][0]
+    // The whole payload, not just the sentence: owner, version, action, stamp,
+    // how the words were given and the help that had been offered.
+    expect(args.text).toBe('I wanted three lives')
+    expect(args.familyId).toBe(OWNER.familyId)
+    expect(args.childId).toBe(OWNER.childId)
+    expect(args.projectId).toBe(OWNER.projectId)
+    expect(args.versionId).toBe(slot?.target.versionId)
+    expect(args.versionDocId).toBe(slot?.target.versionDocId)
+    expect(args.noteActionId).toBe(slot?.target.noteActionId)
+    expect(args.createdAt).toBe(slot?.createdAt)
+    // A typed correction does not relabel speech as typing.
+    expect(args.capture).toBe('voice')
+    expect(args.voiceEventId).toBe(voiceScript.eventId)
+    expect(args.help).toBe('none-offered')
+    await waitFor(() => expect(readPendingNote(OWNER)).toBeNull())
+  })
+
+  it('a game Save never claims it saved the words', async () => {
+    const bridge = await openEditor()
+    await saveAVersion(bridge)
+    await sayWords()
+    // He changes the game again and saves again, without saving his words.
+    await saveAVersion(bridge, editedFiles(7))
+    expect(saveNote).not.toHaveBeenCalled()
+    // The sentence is still his, still unsaved, still about the earlier save.
+    await waitFor(() =>
+      expect(screen.getByText('These words are not saved yet')).toBeInTheDocument(),
+    )
+    expect(screen.getByText(new RegExp(voiceScript.text))).toBeInTheDocument()
+    expect(readPendingNote(OWNER)?.text).toBe(voiceScript.text)
+  })
+
+  /**
+   * The baseline refusal: a second genuinely different sentence about one saved
+   * game came back as "already saved", because the action id was minted with
+   * the SAVE and reused by every transcript. It is minted with the WORDS now.
+   */
+  it('a second, different note about the same save is its own note', async () => {
+    const bridge = await openEditor()
+    await saveAVersion(bridge)
+    await sayWords()
+    await act(async () => {
+      screen.getByRole('button', { name: 'Save my words' }).click()
+    })
+    await waitFor(() =>
+      expect(screen.getByText('Saved with your game.')).toBeInTheDocument(),
+    )
+    const first = saveNote.mock.calls[0][0]
+
+    // The mic comes back, because that note is resolved.
+    await sayWords()
+    await editWords('and then I made them slower')
+    await act(async () => {
+      screen.getByRole('button', { name: 'Save my words' }).click()
+    })
+    await waitFor(() => expect(saveNote).toHaveBeenCalledTimes(2))
+    const second = saveNote.mock.calls[1][0]
+    expect(second.versionId).toBe(first.versionId)
+    expect(second.noteActionId).not.toBe(first.noteActionId)
+    expect(second.text).toBe('and then I made them slower')
+    // The first note is untouched: same id, same words.
+    expect(saveNote.mock.calls[0][0].text).toBe(voiceScript.text)
+  })
+
+  it('keeps a failed note’s exact payload and retries THAT note', async () => {
+    const bridge = await openEditor()
+    await saveAVersion(bridge)
+    await sayWords()
+    saveNote.mockRejectedValue(new Error('offline'))
+    await act(async () => {
+      screen.getByRole('button', { name: 'Save my words' }).click()
+    })
+    await waitFor(() => expect(screen.getByText('offline')).toBeInTheDocument())
+    const sent = saveNote.mock.calls[0][0]
+    expect(readPendingNote(OWNER)?.state).toBe('failed')
+    expect(readPendingNote(OWNER)?.attempts).toBe(1)
+
+    // A normal leave and return, which was not a discard.
+    cleanup()
+    await openEditor()
+    expect(screen.getByText('These words did not save')).toBeInTheDocument()
+    saveNote.mockReset()
+    saveNote.mockResolvedValue({ id: 'note-1', alreadySaved: false })
+    await act(async () => {
+      screen.getByText('Save these words').click()
+    })
+    await waitFor(() => expect(saveNote).toHaveBeenCalled())
+    const retry = saveNote.mock.calls[0][0]
+    // The SAME note: one document, not a second one wearing a later stamp.
+    expect(retry.noteActionId).toBe(sent.noteActionId)
+    expect(retry.createdAt).toBe(sent.createdAt)
+    expect(retry.text).toBe(sent.text)
+    expect(retry.versionId).toBe(sent.versionId)
+    expect(retry.versionDocId).toBe(sent.versionDocId)
+    expect(retry.voiceEventId).toBe(sent.voiceEventId)
+    expect(retry.help).toBe(sent.help)
+    expect(retry.childId).toBe(OWNER.childId)
+    await waitFor(() => expect(readPendingNote(OWNER)).toBeNull())
+  })
+
+  it('locks corrections while a note write is running, and says what it knows', async () => {
+    const bridge = await openEditor()
+    await saveAVersion(bridge)
+    await sayWords()
+    let release: (() => void) | null = null
+    saveNote.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve({ id: 'note-1', alreadySaved: false })
+        }),
+    )
+    await act(async () => {
+      screen.getByRole('button', { name: 'Save my words' }).click()
+    })
+    // The words a write is carrying cannot be edited away or started over.
+    await waitFor(() =>
+      expect(screen.getByLabelText('What you were trying')).toBeDisabled(),
+    )
+    expect(screen.getByRole('button', { name: 'Start over' })).toBeDisabled()
+    expect(readPendingNote(OWNER)?.state).toBe('sending')
+
+    // A remount while it is still out says so, rather than calling it failed
+    // and inviting a second write.
+    cleanup()
+    await openEditor()
+    expect(screen.getByText('These words may still be saving')).toBeInTheDocument()
+    expect(screen.queryByText('These words did not save')).not.toBeInTheDocument()
+
+    // And the late acknowledgment still releases its OWN words.
+    await act(async () => {
+      release?.()
+    })
+    await waitFor(() => expect(readPendingNote(OWNER)).toBeNull())
+    expect(saveNote).toHaveBeenCalledTimes(1)
+  })
+
+  it('discards words only when somebody says so, and then they stay gone', async () => {
+    const bridge = await openEditor()
+    await saveAVersion(bridge)
+    await sayWords()
+    bridge.nextCapture = editedFiles(4)
+    await attemptDeparture()
+    await waitFor(() =>
+      expect(screen.getByText('Keep your words first?')).toBeInTheDocument(),
+    )
+    await act(async () => {
+      screen.getByRole('button', { name: 'Discard my words' }).click()
+    })
+    // Deliberate, and nothing was written on the way out.
+    expect(readPendingNote(OWNER)).toBeNull()
+    expect(saveNote).not.toHaveBeenCalled()
+    // Nothing is at risk now, so the departure he already chose continues.
+    await waitFor(() => expect(proceedSpy).toHaveBeenCalled())
+
+    cleanup()
+    await openEditor()
+    expect(screen.queryByText(new RegExp(voiceScript.text))).not.toBeInTheDocument()
+  })
+
+  it('holds a profile switch for unsaved words, with a clean game', async () => {
+    const bridge = await openEditor()
+    await saveAVersion(bridge)
+    await sayWords()
+    bridge.nextCapture = editedFiles(4)
+    await act(async () => {
+      expect(registeredGuard!('london')).toBe(false)
+    })
+    await waitFor(() => expect(screen.getByText('Switch profile?')).toBeInTheDocument())
+    expect(screen.getByText(/Your words are not saved yet/)).toBeInTheDocument()
+    expect(selectProfile).not.toHaveBeenCalled()
+
+    await act(async () => {
+      screen.getByText('Stay here').click()
+    })
+    expect(screen.getByLabelText('What you were trying')).toHaveValue(voiceScript.text)
+    expect(selectProfile).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * The defect unsaved words introduced, and the one this guards against: a
+ * guard about WORDS must never answer the question about the GAME.
+ *
+ * `requestReplace` returned early on unsaved words and skipped the capture, so
+ * an edit MakeCode had not announced yet read as clean, the warning talked only
+ * about the sentence — and Open destroyed the game edit.
+ */
+describe('words never stand in for the game', () => {
+  function archiveFile(body: string, name = 'my-game-source.json'): File {
+    const file = new File([body], name, { type: 'application/json' })
+    if (typeof file.text !== 'function') {
+      Object.defineProperty(file, 'text', { value: async () => body })
+    }
+    return file
+  }
+
+  async function pickFile(file: File) {
+    const input = screen.getByLabelText('Open a downloaded game file')
+    await act(async () => {
+      fireEvent.change(input, { target: { files: [file] } })
+    })
+  }
+
+  it('still captures the editor on a replacement when words are unsaved', async () => {
+    const bridge = await openEditor()
+    await saveAVersion(bridge)
+    await sayWords()
+    // He then types 9 into the blocks. MakeCode has announced nothing.
+    bridge.nextCapture = editedFiles(9)
+    const before = bridge.captures
+    const bridgeCount = bridges.length
+
+    await pickFile(archiveFile(serializeBuildStudioSource(editedFiles(2))))
+    // The capture ran while the editor was intact…
+    await waitFor(() => expect(bridge.captures).toBeGreaterThan(before))
+    // …so the warning is about the GAME, with the words named as well.
+    await waitFor(() =>
+      expect(screen.getByText(/work that is not on your shelf/)).toBeInTheDocument(),
+    )
+    expect(screen.getByText(/words are not saved either/)).toBeInTheDocument()
+    // Nothing was replaced, so the unannounced edit is still in the editor.
+    expect(bridges.length).toBe(bridgeCount)
+    expect(bridge.disposed).toBe(false)
+
+    await act(async () => {
+      screen.getByText('Keep working').click()
+    })
+    expect(screen.getByLabelText('What you were trying')).toHaveValue(voiceScript.text)
+  })
+
+  it('says the game is saved and only the words are not, when that is true', async () => {
+    const bridge = await openEditor()
+    await saveAVersion(bridge)
+    await sayWords()
+    // The editor holds exactly what was saved.
+    bridge.nextCapture = editedFiles(4)
+    await pickFile(archiveFile(serializeBuildStudioSource(editedFiles(2))))
+    await waitFor(() =>
+      expect(screen.getByText(/Your game is saved\. Your words are not/)).toBeInTheDocument(),
+    )
+    expect(screen.queryByText(/work that is not on your shelf/)).not.toBeInTheDocument()
+  })
+
+  it('warns about BOTH the game and the words on a departure', async () => {
+    const bridge = await openEditor()
+    await saveAVersion(bridge)
+    await sayWords()
+    bridge.nextCapture = editedFiles(9)
+    await attemptDeparture()
+    await waitFor(() =>
+      expect(screen.getByText('Keep your game first?')).toBeInTheDocument(),
+    )
+    expect(screen.getByText(/changes that are not on your shelf/)).toBeInTheDocument()
+    expect(screen.getByText(/Your words are not saved yet/)).toBeInTheDocument()
+    // And a deliberate way out is on the dialog.
+    expect(screen.getByRole('button', { name: 'Leave and lose it' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Stay here' })).toBeInTheDocument()
+  })
+})
+
+/**
+ * The slot rule, directly — because this is where two notes were lost.
+ *
+ * Unlike two captures of a game, two notes are two different sentences about
+ * two different saves. Neither supersedes the other, and a lost one cannot be
+ * said again, so the slot holds ONE unresolved note until it is written or
+ * deliberately discarded.
+ */
+describe('the held-words slot keeps one note until it is resolved', () => {
+  const noteFor = (id: string, text: string): PendingNote => ({
+    target: {
+      familyId: OWNER.familyId,
+      childId: OWNER.childId,
+      projectId: OWNER.projectId,
+      versionId: `ver-${id}`,
+      versionDocId: `doc-${id}`,
+      visitId: 's-1',
+      noteActionId: id,
+      help: 'none-offered',
+    },
+    text,
+    capture: 'voice',
+    voiceEventId: `ev-${id}`,
+    createdAt: '2026-11-17T12:00:00.000Z',
+    attempts: 0,
+    state: 'unsent',
+  })
+
+  it('refuses a different note, and clears only the one that resolved', () => {
+    const a = noteFor('n-a', 'the apples were too slow')
+    const b = noteFor('n-b', 'I made the bomb bigger')
+    expect(holdPendingNote(OWNER, a)).toBe(true)
+    // B does not get to take A's recovery slot.
+    expect(holdPendingNote(OWNER, b)).toBe(false)
+    expect(readPendingNote(OWNER)?.text).toBe(a.text)
+
+    // An acknowledgment of another note may not clear this one.
+    clearPendingNote(OWNER, 'n-b')
+    expect(readPendingNote(OWNER)?.text).toBe(a.text)
+
+    // The same note always updates itself: a correction, an attempt, a state.
+    expect(
+      holdPendingNote(OWNER, { ...a, text: 'the apples were slow', state: 'failed' }),
+    ).toBe(true)
+    expect(readPendingNote(OWNER)?.state).toBe('failed')
+
+    // Resolved, and the slot is free for the next sentence.
+    clearPendingNote(OWNER, 'n-a')
+    expect(readPendingNote(OWNER)).toBeNull()
+    expect(holdPendingNote(OWNER, b)).toBe(true)
+  })
+
+  it('never files one child’s words under another', () => {
+    const a = noteFor('n-a', 'mine')
+    expect(holdPendingNote({ ...OWNER, childId: 'c2' }, a)).toBe(false)
+    expect(readPendingNote({ ...OWNER, childId: 'c2' })).toBeNull()
   })
 })

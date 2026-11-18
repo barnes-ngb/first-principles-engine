@@ -166,21 +166,32 @@ export function clearPendingSave(owner: PendingOwner, versionId: string): void {
 // a reload loses it, which is honest, and is why the departure guard still
 // treats unsaved words as work at risk rather than relying on this.
 
-/** One set of words per owner. The newest offered words own the slot. */
+/**
+ * ONE unresolved note per owner, and a newer one may NOT take the slot.
+ *
+ * This is the one place the words rule differs from the game rule above, and
+ * the difference is real. Two captures of a game are two versions of the same
+ * thing, so the newest supersedes the older and the older can be captured
+ * again. Two notes are two different sentences about two different saves —
+ * neither supersedes anything, and a lost one cannot be said again. Verification
+ * walked straight into it: A held, leave, return, B said, leave — and B took
+ * the only slot, so A's retry was gone without anybody discarding it.
+ *
+ * So the slot is first-come, and only a resolution frees it: the write landing,
+ * or a person deliberately discarding. The editor reads the same answer and
+ * does not offer the mic again until then, which is why that is not a trap.
+ */
 const heldNotes = new Map<string, PendingNote>()
-const noteOffers = new Map<string, Map<string, number>>()
 
 /**
  * Keep this owner's unsaved words.
  *
  * Returns whether they took the slot. Refused when the payload's own target
  * names a different owner — words must never be offered back to another child —
- * and when the slot already holds a NEWER save action's words, by observed
- * offer order, the same rule the payload slot uses.
+ * and refused when a DIFFERENT note action is still unresolved here.
  *
- * The SAME action's words may always replace their own entry: a typed
- * correction is still that action's words, and the newest wording is what the
- * person is looking at.
+ * The same action's words may always replace their own entry: a typed
+ * correction, an attempt count and a state change are all still that action.
  */
 export function holdPendingNote(owner: PendingOwner, payload: PendingNote): boolean {
   if (
@@ -191,12 +202,8 @@ export function holdPendingNote(owner: PendingOwner, payload: PendingNote): bool
     return false
   }
   const key = ownerKey(owner)
-  const mine = observeOffer(noteOffers, key, payload.target.noteActionId)
   const slot = heldNotes.get(key)
-  if (slot && slot.target.noteActionId !== payload.target.noteActionId) {
-    const theirs = noteOffers.get(key)?.get(slot.target.noteActionId) ?? 0
-    if (theirs > mine) return false
-  }
+  if (slot && slot.target.noteActionId !== payload.target.noteActionId) return false
   heldNotes.set(key, payload)
   return true
 }
@@ -226,5 +233,4 @@ export function resetPendingSaveStore(): void {
   held.clear()
   offered.clear()
   heldNotes.clear()
-  noteOffers.clear()
 }
