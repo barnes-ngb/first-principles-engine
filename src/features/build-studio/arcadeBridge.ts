@@ -137,11 +137,32 @@ export type ArcadeBridgeFailure =
 export class ArcadeBridgeError extends Error {
   readonly kind: ArcadeBridgeFailure
   readonly action: string
+  /**
+   * Did THIS capture read a payload of OURS that the caps refused?
+   *
+   * The only honest answer to "is the source in the editor over the caps right
+   * now", and it is stamped on the failure rather than read afterwards from
+   * {@link ArcadeBridge.sourceOverCaps}: that flag outlives the capture it was
+   * set by, so a LATER capture that merely timed out or found the bridge busy
+   * would have the previous over-cap reading — and its bytes — handed over as
+   * the current game. Which is the stale-substitution defect this feature has
+   * already been bitten by twice, in a third costume (UX-498).
+   *
+   * `false` on every other failure, including a timeout, a busy bridge and an
+   * ACK that carried nothing.
+   */
+  readonly tooBig: boolean
 
-  constructor(kind: ArcadeBridgeFailure, action: string, message: string) {
+  constructor(
+    kind: ArcadeBridgeFailure,
+    action: string,
+    message: string,
+    tooBig = false,
+  ) {
     super(message)
     this.kind = kind
     this.action = action
+    this.tooBig = tooBig
   }
 }
 
@@ -922,6 +943,10 @@ export class ArcadeBridge {
           state.refusedTooBig
             ? ARCADE_TOO_BIG_TO_SAVE
             : 'The editor said it saved but did not hand the game over. Nothing was saved — try Save again.',
+          // Stamped from THIS capture's own reading, so a caller can tell "the
+          // game in front of him is too big" from "this capture failed" without
+          // consulting a flag that may predate it.
+          state.refusedTooBig,
         )
       }
       if (!this.options.isScopeLive()) {

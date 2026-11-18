@@ -55,6 +55,28 @@ const editedFiles = (lives: number): Record<string, string> => {
 /** Every fake bridge the component built, newest last. */
 const bridges: FakeBridgeStub[] = []
 
+/**
+ * The real bridge's own size refusal, stamped the way the real one stamps it.
+ *
+ * `tooBig` is the bridge's answer to "did THIS capture read a payload the caps
+ * refused", and it is the only thing a caller may read as that: the over-cap
+ * flag outlives the capture that set it. A fake that threw a plain `Error` here
+ * would let a download pass by consulting the flag instead.
+ */
+const sizeRefusal = () =>
+  Object.assign(
+    new Error(
+      'Your game is now too big for this app to keep, so nothing was saved. It is still open in the editor exactly as it was.',
+    ),
+    { kind: 'bad-project', tooBig: true },
+  )
+const isSizeRefusal = (err: Error | null): boolean =>
+  (err as { tooBig?: boolean } | null)?.tooBig === true
+
+/** A capture that fails for any OTHER reason. Never stamped. */
+const captureFailure = (message: string) =>
+  Object.assign(new Error(message), { kind: 'bad-project', tooBig: false })
+
 class FakeBridgeStub {
   readonly frameId: string
   onEditorLoaded: () => void
@@ -162,6 +184,9 @@ class FakeBridgeStub {
     this.lastSave = { ...files }
     this.overCaps = false
     this.overCapsFiles = null
+    // A source the caps accept is also the end of the size refusal a capture
+    // was going to report, which is the real bridge's own coupling.
+    if (isSizeRefusal(this.captureError)) this.captureError = null
     this.onEditorSave({
       header: { id: 'h1', name: 'Apple Dash starter' },
       files: { ...files },
@@ -175,10 +200,19 @@ class FakeBridgeStub {
    * accepted editor-save answer keeps pointing at the older project, and the
    * refused source is available for a download only when it is bounded enough
    * to hold (`files`) — `null` reproduces the too-big-to-hold case.
+   *
+   * It also arms the CAPTURE failure, because in the real bridge the two are one
+   * event: `acceptProject` refuses the payload, invalidates whatever the capture
+   * had collected, and the capture then throws its size refusal with `tooBig`
+   * stamped on it. Tests used to set a plain `captureError` beside this call,
+   * which let them describe a state the bridge cannot be in — an over-cap flag
+   * standing while a capture hands a project back — and that fiction is what let
+   * a download decide "current" from the flag (UX-498).
    */
   refuseTooBig(files: Record<string, string> | null) {
     this.overCaps = true
     this.overCapsFiles = files ? { ...files } : null
+    this.captureError = sizeRefusal()
   }
   /** Pretend the handshake completed. */
   ready() {
@@ -395,8 +429,13 @@ interface EditorOptions {
   childVoiceInputEnhanced?: boolean
 }
 
-function renderEditor({ childId, childVoiceInputEnhanced }: EditorOptions = {}) {
-  return render(
+/**
+ * The element, apart from the render, so a test can hand the SAME editor a
+ * different child — which is what the app bar's chip does — and watch what an
+ * in-flight answer does about it.
+ */
+function editorElement({ childId, childVoiceInputEnhanced }: EditorOptions = {}) {
+  return (
     <BuildStudioEditor
       familyId={OWNER.familyId}
       childId={childId ?? OWNER.childId}
@@ -413,8 +452,12 @@ function renderEditor({ childId, childVoiceInputEnhanced }: EditorOptions = {}) 
         error: null,
         retry: vi.fn(),
       }}
-    />,
+    />
   )
+}
+
+function renderEditor(options: EditorOptions = {}) {
+  return render(editorElement(options))
 }
 
 /** Mount, complete the handshake, and settle the import round trip. */
@@ -1973,13 +2016,14 @@ describe('a note records the help that had been OFFERED when he spoke', () => {
 })
 
 /**
- * A game too big to SAVE is never swapped for an older one (PR #1974 round 1).
+ * *Download a copy* is the game that is OPEN, or an honest refusal.
  *
- * The reproduced hole: an edited `main.blocks` past the per-file cap is refused
- * by the bridge, so the app's newest ACCEPTED source stays the previous
- * project — and *Download a copy* handed that previous game over, named like
- * the current one, with nothing said. The child's 5-life source was over the
- * limit and the file he got held the 4-life bytes.
+ * Two rounds of the same defect are pinned here. An over-cap source, which the
+ * bridge refuses, used to be answered with the last game that FITTED (PR #1974
+ * round 1); and an ordinary in-cap edit used to be answered with a held
+ * payload, because the held copies were consulted and the editor was not
+ * (UX-498). So the current copy is a capture taken at the tap, and every held
+ * copy is reachable only through its own labelled door.
  *
  * POSITIVE CONTROLS are named per case.
  */
@@ -2006,8 +2050,8 @@ describe('a download is the CURRENT game or an honest refusal', () => {
   }
 
   /**
-   * POSITIVE CONTROL: put `bridgeRef.current?.editorSaveSeen()?.files` back as
-   * the next fallback in `handleDownloadCurrent` and this case downloads
+   * POSITIVE CONTROL: export `bridge.editorSaveSeen()?.files` from
+   * `handleDownloadCurrent`'s failure path and this case downloads
    * `info.setLife(4)` — the older game — exactly as the reviewer saw.
    */
   it('hands over the over-cap CURRENT source, not the older accepted game', async () => {
@@ -2019,7 +2063,6 @@ describe('a download is the CURRENT game or an honest refusal', () => {
     // Now his blocks go past the cap. The bridge refuses it as a save and
     // keeps it for a download; the capture therefore comes back with nothing.
     bridge.refuseTooBig(tooBigFiles(5))
-    bridge.captureError = new Error('Your game is now too big for this app to keep')
     await tapSave()
     await waitFor(() => expect(screen.getByText(/too big for this app to keep/)).toBeInTheDocument())
 
@@ -2044,7 +2087,6 @@ describe('a download is the CURRENT game or an honest refusal', () => {
     })
     // Over the ARCHIVE cap: nothing is held, so there is nothing to give.
     bridge.refuseTooBig(null)
-    bridge.captureError = new Error('Your game is now too big for this app to keep')
     await tapSave()
     await waitFor(() => expect(screen.getByText(/too big for this app to keep/)).toBeInTheDocument())
 
@@ -2058,16 +2100,18 @@ describe('a download is the CURRENT game or an honest refusal', () => {
   })
 
   /**
-   * The fallback that is still RIGHT, pinned so the fix above does not take it
-   * away: when a capture merely failed, the last source the editor announced is
-   * genuinely the newest thing this app has read.
+   * What this case used to assert is the stale precedence itself: a failed
+   * capture quietly exported the last announced source as "a copy", under the
+   * current game's name. Those bytes are still reachable and still useful —
+   * through their own door, named as what they are, after the refusal.
    */
-  it('still downloads the last announced source when a capture merely failed', async () => {
+  it('refuses the current copy on a failed capture, and offers the earlier copy as itself', async () => {
     const bridge = await openEditor()
     await act(async () => {
       bridge.announce(editedFiles(4))
     })
-    bridge.captureError = new Error('The editor did not hand the game over.')
+    bridge.captureError = captureFailure('The editor did not hand the game over.')
+    // The Save that failed is what puts the download door on screen.
     await tapSave()
     await waitFor(() =>
       expect(screen.getByText(/did not hand the game over/)).toBeInTheDocument(),
@@ -2075,10 +2119,31 @@ describe('a download is the CURRENT game or an honest refusal', () => {
 
     downloads.length = 0
     await tapDownload()
-    const file = archive()
-    expect(file!.text).toContain('info.setLife(4)')
-    expect(file!.filename).not.toContain('too-big-to-save')
-    expect(screen.queryByText(/NOT on your shelf/)).not.toBeInTheDocument()
+    // Nothing went out under the open game's name.
+    expect(downloads).toHaveLength(0)
+    expect(
+      screen.getByText(/could not get your game out of the editor just now/),
+    ).toBeInTheDocument()
+    // What it does hold is named BEFORE the tap that exports it.
+    expect(
+      screen.getByText(/last one the editor itself handed over/),
+    ).toBeInTheDocument()
+
+    // The deliberate second act hands over exactly those bytes, in a file whose
+    // name says it is not the game that was open.
+    await act(async () => {
+      screen.getByText('Download the earlier copy').click()
+    })
+    expect(archive()!.text).toContain('info.setLife(4)')
+    expect(archive()!.filename).toBe(
+      'my-game-earlier-copy-not-the-one-open-source.json',
+    )
+    expect(
+      screen.getByText(/the earlier copy, not the game that is open now/),
+    ).toBeInTheDocument()
+    // A download writes nothing, either way.
+    expect(saveVersion).not.toHaveBeenCalled()
+    expect(saveNote).not.toHaveBeenCalled()
   })
 
   /**
@@ -2088,13 +2153,11 @@ describe('a download is the CURRENT game or an honest refusal', () => {
    * A four-life capture failed both writes, so its exact payload is held; the
    * child then built past the cap and Save was refused. *Download a copy*
    * returned the retained FOUR-life bytes, byte for byte, with nothing said —
-   * the same defect in a second costume. The current source is now read before
-   * any held copy, and the unfinished save stays exactly where it is, for its
-   * own explicit Retry.
+   * the same defect in a second costume. The unfinished save stays exactly
+   * where it is, for its own explicit Retry.
    *
-   * POSITIVE CONTROL: move the `departureFilesRef.current ?? pending?.files`
-   * branch back above the `sourceOverCaps()` check and this case downloads
-   * `info.setLife(4)`.
+   * POSITIVE CONTROL: export `pending?.files` from `handleDownloadCurrent`'s
+   * size-refusal path and this case downloads `info.setLife(4)`.
    */
   it('exports the CURRENT over-cap source even while an unfinished save is held', async () => {
     const bridge = await openEditor()
@@ -2108,7 +2171,6 @@ describe('a download is the CURRENT game or an honest refusal', () => {
 
     // He keeps building. The blocks are now over the cap, so Save is refused.
     bridge.refuseTooBig(tooBigFiles(5))
-    bridge.captureError = new Error('Your game is now too big for this app to keep')
     await tapSave()
     await waitFor(() =>
       expect(screen.getByText(/too big for this app to keep/)).toBeInTheDocument(),
@@ -2175,6 +2237,203 @@ describe('a download is the CURRENT game or an honest refusal', () => {
     expect(screen.getByText(/Try again sends that earlier game/)).toBeInTheDocument()
     expect(readPendingSave(OWNER)?.versionId).toBe(idA)
     expect(readPendingSave(OWNER)?.files['main.ts']).toBe(editedFiles(4)['main.ts'])
+  })
+
+  // ── The ORDINARY in-cap hole (UX-498) ─────────────────────────────────
+  //
+  // Nothing above is over a cap. A four-life capture whose write failed is held
+  // for its own Retry, the child builds an ordinary five-life game, and the
+  // retained payload was handed over as "a copy" of it — announced or not. Sol
+  // reproduced all four shapes of it in the real app before this run.
+  //
+  // POSITIVE CONTROL for the three cases below: put
+  // `departureFilesRef.current ?? pending?.files` back at the top of
+  // `handleDownloadCurrent` and each one downloads `info.setLife(4)`.
+
+  /** A four-life capture whose write failed, held for its own Retry. */
+  async function heldFourLifeSave(bridge: FakeBridgeStub) {
+    bridge.nextCapture = editedFiles(4)
+    saveVersion.mockRejectedValue(new Error('offline'))
+    await tapSave()
+    await waitFor(() => expect(screen.getByText('offline')).toBeInTheDocument())
+    const held = readPendingSave(OWNER)
+    expect(held?.files['main.ts']).toBe(editedFiles(4)['main.ts'])
+    return held!
+  }
+
+  it('downloads the ANNOUNCED five-life game, not the held four-life payload', async () => {
+    const bridge = await openEditor()
+    const held = await heldFourLifeSave(bridge)
+    const writes = saveVersion.mock.calls.length
+
+    // He carries on building and MakeCode announces the five-life game.
+    const five = editedFiles(5)
+    bridge.nextCapture = five
+    await act(async () => {
+      bridge.announce(five)
+    })
+
+    const captures = bridge.captures
+    downloads.length = 0
+    await tapDownload()
+    // The editor was ASKED for the source, now…
+    expect(bridge.captures).toBe(captures + 1)
+    // …and the file is exactly what it answered with.
+    expect(archive()!.text).toContain('info.setLife(5)')
+    expect(archive()!.text).not.toContain('info.setLife(4)')
+    expect(archive()!.filename).toBe('my-game-source.json')
+    expect(screen.getByText(/handed it over just now/)).toBeInTheDocument()
+
+    // A download writes nothing: no version, no words, nothing.
+    expect(saveVersion.mock.calls.length).toBe(writes)
+    expect(saveNote).not.toHaveBeenCalled()
+    // And the unfinished save is untouched — same id, same bytes, same count.
+    const after = readPendingSave(OWNER)
+    expect(after?.versionId).toBe(held.versionId)
+    expect(after?.files['main.ts']).toBe(editedFiles(4)['main.ts'])
+    expect(after?.attempts).toBe(held.attempts)
+  })
+
+  it('captures an UNANNOUNCED five-life edit rather than the held payload', async () => {
+    const bridge = await openEditor()
+    const held = await heldFourLifeSave(bridge)
+    // He typed 5 into the blocks and MakeCode has announced nothing, so asking
+    // is the only way to see it.
+    bridge.nextCapture = editedFiles(5)
+
+    downloads.length = 0
+    await tapDownload()
+    expect(archive()!.text).toContain('info.setLife(5)')
+    expect(archive()!.text).not.toContain('info.setLife(4)')
+    expect(archive()!.filename).toBe('my-game-source.json')
+
+    // The original Retry still sends ITS four-life bytes, under its own id.
+    saveVersion.mockReset()
+    saveVersion.mockImplementation(async (args: { versionId: string }) => ({
+      outcome: 'created',
+      version: { id: `doc-${args.versionId}` },
+    }))
+    await act(async () => {
+      screen.getByText('Try again').click()
+    })
+    await waitFor(() => expect(saveVersion).toHaveBeenCalled())
+    expect(saveVersion.mock.calls[0][0].versionId).toBe(held.versionId)
+    expect(saveVersion.mock.calls[0][0].files['main.ts']).toBe(editedFiles(4)['main.ts'])
+  })
+
+  it('downloads the newer source from the leaving dialog, not the older departure capture', async () => {
+    const bridge = await openEditor()
+    // The pre-departure capture read four lives, and the dialog is open on it.
+    bridge.nextCapture = editedFiles(4)
+    await attemptDeparture()
+    await waitFor(() => expect(screen.getByText('Save it now')).toBeInTheDocument())
+
+    // The blocks move on to five while the dialog is still open.
+    bridge.nextCapture = editedFiles(5)
+    downloads.length = 0
+    await tapDownload()
+    expect(archive()!.text).toContain('info.setLife(5)')
+    expect(archive()!.text).not.toContain('info.setLife(4)')
+    // Reported inside the dialog the tap happened in, and the hold stands.
+    expect(screen.getByText(/handed it over just now/)).toBeInTheDocument()
+    expect(screen.getByText('Keep your game first?')).toBeInTheDocument()
+    expect(proceedSpy).not.toHaveBeenCalled()
+
+    // And *Save it now* still stores the bytes the WARNING was about: the
+    // download did not take the departure's own capture over.
+    await act(async () => {
+      screen.getByText('Save it now').click()
+    })
+    await waitFor(() => expect(saveVersion).toHaveBeenCalled())
+    expect(saveVersion.mock.calls[0][0].files['main.ts']).toBe(editedFiles(4)['main.ts'])
+  })
+
+  /**
+   * `sourceOverCaps()` is visit history, not freshness.
+   *
+   * It outlives the capture that set it, so a LATER capture that merely failed
+   * must not inherit it — the size answer comes from the rejection this tap
+   * provoked and from nothing else.
+   */
+  it('does not read a PREVIOUS over-cap reading as the game that is open', async () => {
+    const bridge = await openEditor()
+    // Earlier in the visit the blocks went over the per-file cap, and the
+    // honest oversized copy of the open game was handed over.
+    bridge.refuseTooBig(tooBigFiles(5))
+    await tapSave()
+    await waitFor(() =>
+      expect(screen.getByText(/too big for this app to keep/)).toBeInTheDocument(),
+    )
+    await tapDownload()
+    expect(archive()!.filename).toContain('too-big-to-save')
+
+    // Later a capture simply does not answer. The over-cap flag still stands.
+    downloads.length = 0
+    bridge.captureError = captureFailure('The editor did not answer in time.')
+    await tapDownload()
+    expect(downloads).toHaveLength(0)
+    expect(
+      screen.getByText(/could not get your game out of the editor just now/),
+    ).toBeInTheDocument()
+    // Nor were the stale over-cap bytes dressed up as an earlier copy.
+    expect(screen.queryByText('Download the earlier copy')).not.toBeInTheDocument()
+  })
+
+  it('ignores a download capture that answers after the child changed', async () => {
+    const view = renderEditor()
+    const bridge = bridges[bridges.length - 1]
+    await act(async () => {
+      bridge.ready()
+    })
+    await waitFor(() => expect(screen.getByText('💾 Save my version')).toBeEnabled())
+    // A failed save, so the download door is on screen.
+    await heldFourLifeSave(bridge)
+
+    let release: ((files: Record<string, string>) => void) | null = null
+    bridge.captureGate = (resolveCapture) => {
+      release = resolveCapture
+    }
+    downloads.length = 0
+    await tapDownload()
+    // The chip moves to the other boy while the answer is still out.
+    await act(async () => {
+      view.rerender(editorElement({ childId: 'c2' }))
+    })
+    await act(async () => {
+      release!(editedFiles(5))
+    })
+    // Nothing was exported, and nothing was claimed on the new child's screen.
+    expect(downloads).toHaveLength(0)
+    expect(screen.queryByText(/handed it over just now/)).not.toBeInTheDocument()
+  })
+
+  it('settles a double tap with ONE capture, and opens the door again after', async () => {
+    const bridge = await openEditor()
+    await heldFourLifeSave(bridge)
+    let release: ((files: Record<string, string>) => void) | null = null
+    bridge.captureGate = (resolveCapture) => {
+      release = resolveCapture
+    }
+    const captures = bridge.captures
+    downloads.length = 0
+    // Both taps in one tick, before a re-render could disable the button —
+    // which is the case the latch exists for.
+    await act(async () => {
+      const button = screen.getAllByText('Download a copy')[0]
+      button.click()
+      button.click()
+    })
+    expect(bridge.captures).toBe(captures + 1)
+    expect(screen.getAllByText('Download a copy')[0]).toBeDisabled()
+
+    await act(async () => {
+      release!(editedFiles(5))
+    })
+    // One answer, one archive, and the door is usable again — the latch is
+    // released on every path.
+    expect(downloads.filter((d) => d.filename.endsWith('-source.json'))).toHaveLength(1)
+    expect(archive()!.text).toContain('info.setLife(5)')
+    expect(screen.getAllByText('Download a copy')[0]).toBeEnabled()
   })
 })
 
@@ -2510,7 +2769,6 @@ describe('a capture refused for size stores nothing at all', () => {
     // He builds past the cap. The bridge refuses the capture outright rather
     // than handing back the older four-life payload it had collected.
     bridge.refuseTooBig(tooBigFiles(5))
-    bridge.captureError = new Error('Your game is now too big for this app to keep')
     await tapSave()
     await waitFor(() =>
       expect(screen.getByText(/too big for this app to keep/)).toBeInTheDocument(),

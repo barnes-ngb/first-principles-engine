@@ -86,13 +86,30 @@ function slice(from: string, to: string): string {
 
 describe('the starter is never offered as recovery of edited work', () => {
   it('keeps the edited-source download off the starter entirely', () => {
-    // The download handler ONLY, bounded by the next declaration after it.
+    // Both download handlers, bounded by the next declaration after them.
     const download = slice('const handleDownloadCurrent =', 'const applyReplace =')
     expect(download).not.toContain('starterSourceFiles')
     expect(download).not.toContain('STARTER_PROJECT_PNG_URL')
-    // And it reaches for the latest real bytes rather than a template.
-    expect(download).toContain('departureFilesRef.current')
-    expect(download).toContain('pending?.files')
+  })
+
+  /**
+   * UX-498 replaced what this scan used to pin.
+   *
+   * It asserted `departureFilesRef.current` and `pending?.files` INSIDE the
+   * current-copy handler — the stale precedence itself, written down as a
+   * requirement. Those bytes are still reachable, but only through the separate
+   * earlier-copy door, so the claim worth scanning is the one thing a behaviour
+   * test cannot see from outside: that the current copy is a capture, scope-
+   * checked after its await, and that the size answer comes from the rejection
+   * rather than from a flag that may predate the tap.
+   */
+  it('captures for the current copy, and scope-checks after the await', () => {
+    const download = slice('const handleDownloadCurrent =', 'const handleDownloadEarlier =')
+    expect(download).toContain('await bridge.requestSnapshot()')
+    expect(download).toContain('liveTokenRef.current !== ownToken')
+    expect(download).toContain('captureRefusedForSize(err)')
+    // The over-cap FLAG is never what the current copy is decided on.
+    expect(download).not.toContain('sourceOverCaps()')
   })
 
   it('says plainly that the project file is not a copy of saved work', () => {

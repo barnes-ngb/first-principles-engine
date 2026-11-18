@@ -17,13 +17,25 @@
  * here is light the "not saved yet" mark and bump a source revision. **Saved**
  * appears only after `saveBuildStudioVersion` resolves.
  *
- * ── Three latches, and why each one exists ──────────────────────────────
+ * ── Four latches, and why each one exists ───────────────────────────────
  *
  *   1. `saveLatchRef` — claimed SYNCHRONOUSLY before the first await, so two
  *      taps in one tick cannot both start a capture.
  *   2. the bridge's own capture serialization, so one `saveproject` is in
  *      flight at a time and its payload cannot be overwritten by another.
  *   3. `noteLatchRef` — the same, for *Save my words*.
+ *   4. `downloadLatchRef` — the same, for *Download a copy*, which captures
+ *      too (see below) and so has an await of its own.
+ *
+ * ── A copy of the open game is CAPTURED, not assembled ──────────────────
+ *
+ * *Download a copy* asks the live scoped editor for the source when it is
+ * tapped and exports exactly that, because every copy this page is holding is
+ * older than the tap by construction — and no ordering of older copies is a
+ * substitute, which two rounds of the same defect proved. When the capture
+ * cannot answer, the page says so and keeps the editor intact; the held copy is
+ * offered as its own labelled *earlier copy*, with its own button, sentence and
+ * file name. The starter is never either of them.
  *
  * ── An old acknowledgment cannot clear newer work ───────────────────────
  *
@@ -97,6 +109,9 @@ import {
   ARCADE_OPENING_TIMEOUT_MS,
   ArcadeBridge,
   type AcceptedProject,
+  // TYPE only, deliberately: it is read off a rejection with no runtime import,
+  // so the size stamp stays type-checked against the bridge that sets it.
+  type ArcadeBridgeError,
 } from './arcadeBridge'
 import {
   ARCADE_PLAIN_EDITOR_URL,
@@ -223,6 +238,90 @@ const OVERSIZED_NO_DOWNLOAD_LINE =
  */
 const unfinishedSaveAside = (label: string) =>
   `The save called “${label}” that did not finish is still here — Try again sends that earlier game, which is not the one open now.`
+
+/**
+ * The name on a download of the game that is OPEN.
+ *
+ * Earned, not assumed: it is used only after a capture this tap started has
+ * handed the bytes over, which is the one reading that can see an edit MakeCode
+ * has not announced. Deliberately NOT the unfinished save's label, which named
+ * a file after a DIFFERENT game (UX-498).
+ */
+const CURRENT_DOWNLOAD_LABEL = 'my game'
+/** What that file is, said as it happens. It is a copy, not a save. */
+const CURRENT_DOWNLOAD_LINE =
+  'That file is your game exactly as it is in the editor right now — the editor handed it over just now for this copy. Keeping it on your shelf is still the Save button.'
+/**
+ * The name on a copy this page was already holding.
+ *
+ * Every word of it is the point: a person who finds this file next week must be
+ * able to tell from the NAME that it is not the game that was open. Kept inside
+ * `exportSlug`'s 40-character budget, so the sentence is not truncated
+ * mid-word in the file name that has to carry it.
+ */
+const EARLIER_DOWNLOAD_LABEL = 'my game earlier copy not the one open'
+/** What THAT file is, said as it happens. */
+const EARLIER_DOWNLOAD_LINE =
+  'That file is the earlier copy, not the game that is open now. Nothing in the editor changed and nothing was saved to your shelf.'
+/**
+ * The honest refusal of a CURRENT copy.
+ *
+ * Said instead of quietly exporting a held copy: this page could not get the
+ * open game out, and a file of an older game under the name of the current one
+ * is the defect this path exists to prevent. The earlier copy is still offered
+ * — as its own labelled choice, below this sentence, never as this one's bytes.
+ */
+const CURRENT_UNAVAILABLE_LINE =
+  'This page could not get your game out of the editor just now — it may still be busy keeping it — so nothing was downloaded. Your game is all still open exactly as it was; tap Download a copy again in a moment.'
+
+/**
+ * A copy this page is holding that is NOT provably the open game.
+ *
+ * It exists so recovery survives a failed capture without the current-copy
+ * action ever serving its bytes: it is offered by its own button, after its own
+ * sentence, and exported under its own file name.
+ */
+interface EarlierCopy {
+  files: BuildStudioSourceFiles
+  /** Which moment these bytes are from. Said before the tap. */
+  origin: 'announced' | 'departure' | 'pending'
+  /** The unfinished save's own label, when that is where they come from. */
+  saveLabel: string | null
+}
+
+/**
+ * What an earlier copy IS, named before anybody taps.
+ *
+ * One sentence per origin, because "an earlier copy" is not enough to choose
+ * by — the question a person is actually answering is *which moment is this
+ * from, and is it worth keeping*.
+ */
+function earlierCopyLine(earlier: EarlierCopy): string {
+  if (earlier.origin === 'pending') {
+    return `The copy this page still holds is the game from the save called “${earlier.saveLabel ?? 'that save'}” that did not finish. Downloading it keeps those bytes in a file named as an earlier copy; it does not send that save.`
+  }
+  if (earlier.origin === 'departure') {
+    return 'The copy this page still holds is the one it read when you last tried to leave this page. It is an earlier copy and may not have your newest changes in it.'
+  }
+  return 'The copy this page still holds is the last one the editor itself handed over. It is an earlier copy and may not have your newest changes in it.'
+}
+
+/**
+ * What one tap on a download door produced.
+ *
+ * Kept apart from `saveMessage` on purpose: a download writes nothing, and
+ * reporting it through the save's own alert made a download look like a save
+ * and could hide the unfinished save's row. `token` is the visit it was made
+ * in, so a receipt — and the earlier copy's bytes with it — belongs to the
+ * visit that asked and is never rendered or exported into another one.
+ */
+interface DownloadOutcome {
+  token: string
+  tone: 'done' | 'refused'
+  line: string
+  /** The separate, explicit earlier-copy choice, when one is possible. */
+  earlier: EarlierCopy | null
+}
 
 /**
  * The live UI an explicit save act belongs to — separate from the payload's own
@@ -427,6 +526,21 @@ export default function BuildStudioEditor({
    */
   const saveLatchRef = useRef<string | null>(null)
   const noteLatchRef = useRef<string | null>(null)
+  /**
+   * The download act that owns the door, claimed synchronously.
+   *
+   * A download captures now, so it has an await and therefore needs the same
+   * treatment the Save latch gets: two taps in one tick must not both start a
+   * capture (the bridge would refuse the second as busy and the page would have
+   * to report "cannot tell" about a game it is perfectly able to read). It
+   * holds the act's own id so a finished act releases only its own claim, and
+   * it is released on every path — a download can never leave the door shut.
+   */
+  const downloadLatchRef = useRef<string | null>(null)
+  /** Is a download capture running? The button says so and ignores a retap. */
+  const [downloadBusy, setDownloadBusy] = useState(false)
+  /** What the last tap on a download door produced. Never a save message. */
+  const [downloadOutcome, setDownloadOutcome] = useState<DownloadOutcome | null>(null)
 
   const [hintsOffered, setHintsOffered] = useState(0)
   /**
@@ -864,6 +978,10 @@ export default function BuildStudioEditor({
     // fix, dressed up as housekeeping.
     setNoteState('idle')
     setNoteMessage(null)
+    // A download receipt is a receipt for a visit, and the earlier copy it may
+    // be holding is that visit's bytes. Both go with it — the render is fenced
+    // on the token as well, so this is housekeeping rather than the guard.
+    setDownloadOutcome(null)
     settledSignatureRef.current = null
     announcedSignatureRef.current = null
     window.addEventListener('message', bridge.handleMessage)
@@ -1324,75 +1442,174 @@ export default function BuildStudioEditor({
   }, [owner, pending])
 
   /**
-   * Get the game that is OPEN out — or say truthfully that it cannot.
+   * Get the game that is OPEN out — or say truthfully that it could not.
    *
-   * ── Why the current source is asked about FIRST ───────────────────────
+   * ── The current copy is CAPTURED, never assembled from what is held ─────
    *
-   * This button means "a copy of what I am looking at". Every other source
-   * here is older than that by construction, so the newest confirmed reading
-   * of the frame is what decides, and it is read before anything stored:
+   * This button means "a copy of what I am looking at", so it asks the live
+   * scoped editor for the source at the moment of the tap, and exports exactly
+   * what comes back. That is the only reading that can contain an edit MakeCode
+   * has not announced yet, and the only one that is the open game by
+   * construction rather than by argument.
    *
-   *   • `sourceOverCaps()` is true only while a refused-for-size capture of
-   *     OURS is the newest thing the bridge has seen — an acceptable project
-   *     clears it, and a successful capture goes through the same acceptance.
-   *     So when it is true, every held copy is provably a previous game.
-   *   • then a pre-departure capture, then the exact payload of a save that
-   *     did not finish, then the last source the editor announced. Never the
-   *     starter — substituting what he began from for what he made is the
-   *     original defect this path exists to avoid.
+   * Every stored copy here is older than that by construction — a pre-departure
+   * read, a failed save's exact payload, the last source the editor announced —
+   * and ordering them cleverly is not a fix. It was tried twice. First the
+   * stored copies came first, so a child whose blocks had gone over the cap got
+   * his PREVIOUS game byte for byte with nothing said (PR #1974 round 1). Then
+   * the over-cap reading came first, which caught only the oversized case: an
+   * ORDINARY in-cap five-life edit, announced or not, still exported the
+   * retained four-life payload of a save that had failed (PR #1975 promotion
+   * review, UX-498). The hole was the premise, not the order.
    *
-   * The ordering is the repair. With the stored copies first, a child whose
-   * blocks had just gone over the cap tapped *Download a copy* and got his
-   * PREVIOUS game, byte for byte, with nothing said (PR #1974 round 1, and
-   * again on independent browser verification with a retained four-life
-   * payload). An unfinished save is still work and is still offered — by its
-   * own *Try again*, with its own payload, version and action id untouched.
-   * These are two different intents and this one may not quietly serve the
-   * other's bytes.
+   * So on a failure nothing is substituted. The page says it could not read the
+   * game, and the copy it does hold is offered as its own explicitly labelled
+   * choice — {@link handleDownloadEarlier}, named for what it is, exported under
+   * {@link EARLIER_DOWNLOAD_LABEL}. Never the starter, which is what he began
+   * from and not what he made.
+   *
+   * The one export that is still handed over on a failure is the CURRENT source
+   * the caps refused, and only when this capture is what refused it: the bytes
+   * are then provably the open game, bounded by the archive cap, and the file
+   * name and the sentence both say they are not on the shelf.
+   *
+   * It writes nothing — no version, no note, no record of any kind — and it
+   * never touches the unfinished save, whose own *Try again* keeps its exact
+   * payload, version id and action.
    */
   const handleDownloadCurrent = useCallback(async () => {
-    const give = (files: BuildStudioSourceFiles, label: string) => {
-      for (const download of buildStudioDownloads(files, label)) {
+    // ── One download at a time, claimed before the first await ───────────
+    //
+    // A second tap is ignored rather than queued, and the latch holds this
+    // act's own id so a finished act can only ever release its own claim. It
+    // is released in `finally` on every path, so no failure can leave the door
+    // shut.
+    if (downloadLatchRef.current) return
+    const opId = newVersionId(Date.now(), Math.random())
+    downloadLatchRef.current = opId
+    const ownToken = token
+    const bridge = bridgeRef.current
+    const give = (files: BuildStudioSourceFiles, fileLabel: string) => {
+      for (const download of buildStudioDownloads(files, fileLabel)) {
         downloadTextFile(download)
       }
     }
-    const bridge = bridgeRef.current
-    if (bridge?.sourceOverCaps()) {
-      // The current source, when the only thing wrong with it is its size and
-      // it is bounded enough to hand back. A full source export — not a
-      // version, and the file name says so.
-      const oversized = bridge.oversizedSourceForDownload()
-      if (oversized) {
-        give(oversized, OVERSIZED_DOWNLOAD_LABEL)
-        setSaveState(SaveState.Failed)
-        setSaveMessage(OVERSIZED_DOWNLOAD_LINE)
+    /**
+     * The newest copy this page is still holding, or `null`.
+     *
+     * Newest first, and each one knows which moment it is from so the offer can
+     * say so. The editor's own last announcement comes first because a capture
+     * announces the bytes it collects, so it is at least as new as the
+     * pre-departure read that produced it.
+     */
+    const earlierCopy = (): EarlierCopy | null => {
+      const announced = bridge?.editorSaveSeen()?.files ?? null
+      if (announced) return { files: announced, origin: 'announced', saveLabel: null }
+      const departed = departureFilesRef.current
+      if (departed) return { files: departed, origin: 'departure', saveLabel: null }
+      if (pending) return { files: pending.files, origin: 'pending', saveLabel: pending.label }
+      return null
+    }
+    /** Report, only into the visit that asked. */
+    const settle = (
+      tone: 'done' | 'refused',
+      line: string,
+      earlier: EarlierCopy | null,
+    ) => {
+      if (liveTokenRef.current !== ownToken) return
+      setDownloadOutcome({ token: ownToken, tone, line, earlier })
+    }
+    setDownloadBusy(true)
+    try {
+      if (!bridge) {
+        // There is no editor to ask — the frame never came up, or this visit
+        // has none. Said plainly, with the held copy offered as itself.
+        settle('refused', CURRENT_UNAVAILABLE_LINE, earlierCopy())
         return
       }
-      // Too big to hand back at all. NOTHING older is substituted for it —
-      // not a departure capture, not a pending payload, not the last
-      // announced save — and the page says which game it would have been.
-      setSaveState(SaveState.Failed)
-      setSaveMessage(
-        pending
-          ? `${OVERSIZED_NO_DOWNLOAD_LINE} ${unfinishedSaveAside(pending.label)}`
-          : OVERSIZED_NO_DOWNLOAD_LINE,
-      )
+      // Deliberately NOT gated on `projectReady`. A project this page could not
+      // read BACK is exactly the case the advisory sends a person here for, and
+      // the bridge answers for itself: an unfinished handshake is its own
+      // `not-ready` refusal, which lands on the honest-refusal path below.
+      let snapshot: AcceptedProject
+      try {
+        snapshot = await bridge.requestSnapshot()
+      } catch (err) {
+        // ── Scope, before anything is read or written ──────────────────
+        //
+        // A refusal that lands after the child, the version or the visit
+        // changed belongs to the visit that asked for it. It may not download,
+        // relabel or report into the one on screen now.
+        if (liveTokenRef.current !== ownToken || bridgeRef.current !== bridge) return
+        if (captureRefusedForSize(err)) {
+          // THIS capture read the open source and the caps refused it, so the
+          // over-cap reading below is the game in front of him.
+          const oversized = bridge.oversizedSourceForDownload()
+          if (oversized) {
+            give(oversized, OVERSIZED_DOWNLOAD_LABEL)
+            settle('refused', OVERSIZED_DOWNLOAD_LINE, null)
+            return
+          }
+          // Too big to hand back at all. Nothing older is substituted for it,
+          // and the page names the save it is not giving him.
+          settle(
+            'refused',
+            pending
+              ? `${OVERSIZED_NO_DOWNLOAD_LINE} ${unfinishedSaveAside(pending.label)}`
+              : OVERSIZED_NO_DOWNLOAD_LINE,
+            earlierCopy(),
+          )
+          return
+        }
+        // Timed out, busy with a Save or a departure read, not ready, or the
+        // editor handed nothing over. Every one of those means the same thing:
+        // this page does not know what is in the editor, so it does not claim
+        // to. The bridge's own serialization is what refuses a capture while
+        // another one is running, which is how a download cannot steal a
+        // Save's or a departure's.
+        settle('refused', CURRENT_UNAVAILABLE_LINE, earlierCopy())
+        return
+      }
+      if (liveTokenRef.current !== ownToken || bridgeRef.current !== bridge) return
+      give(snapshot.files, CURRENT_DOWNLOAD_LABEL)
+      settle('done', CURRENT_DOWNLOAD_LINE, null)
+    } finally {
+      if (downloadLatchRef.current === opId) downloadLatchRef.current = null
+      setDownloadBusy(false)
+    }
+  }, [token, pending])
+
+  /**
+   * Export the earlier copy, as the earlier copy.
+   *
+   * A deliberate second act, offered only after a current copy has already been
+   * refused out loud, named before the tap by {@link earlierCopyLine}, and
+   * written to a file whose name says what it is. It saves nothing, sends
+   * nothing, and leaves an unfinished save exactly where it is.
+   */
+  const handleDownloadEarlier = useCallback(() => {
+    const outcome = downloadOutcome
+    const earlier = outcome?.earlier
+    if (!outcome || !earlier) return
+    // The offer belongs to the visit it was made in. A child, version or visit
+    // change retires it rather than letting another visit's bytes out under
+    // this screen's name.
+    if (outcome.token !== liveTokenRef.current) {
+      setDownloadOutcome(null)
       return
     }
-    // The latest source this app itself captured: a pre-departure read, then a
-    // failed save's exact bytes.
-    const captured = departureFilesRef.current ?? pending?.files ?? null
-    if (captured) {
-      give(captured, pending?.label ?? 'my-game')
-      return
+    for (const download of buildStudioDownloads(earlier.files, EARLIER_DOWNLOAD_LABEL)) {
+      downloadTextFile(download)
     }
-    const announced = bridge?.editorSaveSeen()?.files ?? null
-    if (!announced) {
-      setSaveMessage('There was nothing to download yet.')
-      return
-    }
-    give(announced, pending?.label ?? 'my-game')
-  }, [pending])
+    // The offer is consumed, so a second tap cannot quietly produce a second
+    // file; tapping Download a copy again is how a person asks once more.
+    setDownloadOutcome({
+      token: outcome.token,
+      tone: 'done',
+      line: EARLIER_DOWNLOAD_LINE,
+      earlier: null,
+    })
+  }, [downloadOutcome])
 
   // ── Reopen ─────────────────────────────────────────────────────────────
 
@@ -2023,6 +2240,40 @@ export default function BuildStudioEditor({
     </>
   ) : null
 
+  /**
+   * The download receipt, and the earlier copy's own door when there is one.
+   *
+   * ONE node, rendered in exactly one place at a time — inside whichever dialog
+   * is open, and otherwise beside the Save. A receipt rendered only under the
+   * Save would sit behind the departure and profile dialogs, which both offer
+   * *Download a copy*: the refusal would be invisible and the earlier copy's
+   * explicit choice would be unreachable, so the honest refusal would read as a
+   * tap that did nothing.
+   *
+   * Fenced on the token, so a receipt and the bytes it holds belong to the
+   * visit that earned them.
+   */
+  const downloadReceipt =
+    downloadOutcome && downloadOutcome.token === token ? (
+      <Alert
+        severity={downloadOutcome.tone === 'done' ? 'success' : 'warning'}
+        action={
+          downloadOutcome.earlier ? (
+            <Button
+              size="small"
+              onClick={handleDownloadEarlier}
+              sx={{ textTransform: 'none' }}
+            >
+              Download the earlier copy
+            </Button>
+          ) : undefined
+        }
+      >
+        {downloadOutcome.line}
+        {downloadOutcome.earlier ? ` ${earlierCopyLine(downloadOutcome.earlier)}` : ''}
+      </Alert>
+    ) : null
+
   /** Is there anything true to ASK about this departure? */
   const departureHasAsk =
     departureCheck === 'checking' ||
@@ -2048,6 +2299,10 @@ export default function BuildStudioEditor({
             : departureCheck === 'dirty' || editorDirty
               ? 'Your game has changes that are not on your shelf yet. If you leave now they are gone.'
               : null
+
+  /** The one condition the leaving dialog opens on, named so it can be read. */
+  const departureDialogOpen =
+    departure.held && departureCheck !== 'idle' && departureHasAsk
 
   return (
     <Stack spacing={2}>
@@ -2271,6 +2526,7 @@ export default function BuildStudioEditor({
                   )}
                   <Button
                     size="small"
+                    disabled={downloadBusy}
                     onClick={() => void handleDownloadCurrent()}
                     sx={{ textTransform: 'none' }}
                   >
@@ -2283,6 +2539,11 @@ export default function BuildStudioEditor({
             {saveMessage}
           </Alert>
         )}
+
+        {/* What a download did, in its own alert: a download is not a save and
+            must not be reported through the save's. Shown here only while no
+            dialog is holding the same receipt. */}
+        {!departureDialogOpen && heldProfile === null && downloadReceipt}
 
         {/* The held payload, offered back after a remount or a return. */}
         {pending && saveState !== SaveState.Failed && !writeInFlight && (
@@ -2299,6 +2560,7 @@ export default function BuildStudioEditor({
                 </Button>
                 <Button
                   size="small"
+                  disabled={downloadBusy}
                   onClick={() => void handleDownloadCurrent()}
                   sx={{ textTransform: 'none' }}
                 >
@@ -2552,6 +2814,7 @@ export default function BuildStudioEditor({
                   </Button>
                   <Button
                     size="small"
+                    disabled={downloadBusy}
                     onClick={() => void handleDownloadCurrent()}
                     sx={{ textTransform: 'none' }}
                   >
@@ -2629,10 +2892,7 @@ export default function BuildStudioEditor({
       {/* ── Leaving ───────────────────────────────────────────────────
           Shown only once the pre-departure capture has an answer, so a clean
           exit never flashes a warning it is about to withdraw. */}
-      <Dialog
-        open={departure.held && departureCheck !== 'idle' && departureHasAsk}
-        onClose={departure.stay}
-      >
+      <Dialog open={departureDialogOpen} onClose={departure.stay}>
         <DialogTitle>
           {departureCheck === 'checking'
             ? 'Checking your game…'
@@ -2649,6 +2909,11 @@ export default function BuildStudioEditor({
           {/* Both, when both are true — never one standing in for the other. */}
           {departureCheck !== 'checking' && departureGameLine && wordsRiskLine && (
             <DialogContentText sx={{ mt: 1 }}>{wordsRiskLine}</DialogContentText>
+          )}
+          {/* A download tapped from this dialog reports INTO this dialog, so a
+              refusal is seen and the earlier copy's choice can be reached. */}
+          {heldProfile === null && downloadReceipt && (
+            <Box sx={{ mt: 1.5 }}>{downloadReceipt}</Box>
           )}
         </DialogContent>
         {departureCheck !== 'checking' && (
@@ -2689,6 +2954,7 @@ export default function BuildStudioEditor({
               </Button>
             )}
             <Button
+              disabled={downloadBusy}
               onClick={() => void handleDownloadCurrent()}
               sx={{ textTransform: 'none', minHeight: 48 }}
             >
@@ -2732,6 +2998,9 @@ export default function BuildStudioEditor({
             wordsRiskLine && (
               <DialogContentText sx={{ mt: 1 }}>{wordsRiskLine}</DialogContentText>
             )}
+          {/* Same reason as the leaving dialog: the receipt belongs where the
+              tap happened. */}
+          {downloadReceipt && <Box sx={{ mt: 1.5 }}>{downloadReceipt}</Box>}
         </DialogContent>
         <DialogActions sx={{ flexWrap: 'wrap', gap: 1 }}>
           <Button
@@ -2751,7 +3020,7 @@ export default function BuildStudioEditor({
             </Button>
           )}
           <Button
-            disabled={profileCheck === 'checking'}
+            disabled={profileCheck === 'checking' || downloadBusy}
             onClick={() => void handleDownloadCurrent()}
             sx={{ textTransform: 'none', minHeight: 48 }}
           >
@@ -2778,4 +3047,16 @@ export default function BuildStudioEditor({
 /** A name for a save the child did not name. Never a score, just a count. */
 function defaultLabel(n: number): string {
   return `My version ${n}`
+}
+
+/**
+ * Did the capture that just failed prove the OPEN source is over the caps?
+ *
+ * Read from the rejection the bridge stamped, never from `sourceOverCaps()`:
+ * that flag can be older than this tap, and treating it as this capture's
+ * answer is how a timeout would hand over a previous over-cap reading as the
+ * current game (UX-498).
+ */
+function captureRefusedForSize(err: unknown): boolean {
+  return (err as Partial<ArcadeBridgeError> | null | undefined)?.tooBig === true
 }
