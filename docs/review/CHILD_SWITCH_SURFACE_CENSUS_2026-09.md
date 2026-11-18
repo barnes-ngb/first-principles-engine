@@ -552,6 +552,59 @@ edited in place for exactly the three things §4 allows — the affected surface
 recovery identity, and the evidence for each — and **no row is added or removed**, so the derived
 tallies above are still expected to be unchanged.
 
+### Not re-derived 2026-11-17 (LOCAL-BUILD-001 — the first private Build Studio)
+
+**Three rows are added, and which three is the derived answer rather than a judgement.** The new
+feature is the files under `src/features/build-studio/` plus `core/types/buildStudio.ts` and two
+writers under `src/core/firebase/`. Every one of them is **named** below rather than counted, which
+is this document's own rule for a short list, and each was read against the heuristic exactly as
+written. Three derive:
+
+- `BuildStudioEditor.tsx` — holds `useState`, declares a `childId: string` prop and names a child id
+  in argument position, and is a `.tsx`, so the **prop** arm derives it. **BIND.**
+- `BuildStudioPage.tsx` — holds `useState`, reads the shell's active child, and hands `childId:` to a
+  call, so the **hook** arm derives it. **GATE.**
+- `useBuildStudioOptIn.ts` — holds `useState`, declares `childId: string | null | undefined` and
+  calls `setDoc`, so the **prop** arm derives it even though it is a `.ts` file. **GATE.**
+
+The rest derive to nothing, each for a reason the heuristic can state rather than one that has
+to be trusted: `arcadeBridge.ts`, `buildStudioAccess.ts`, `buildStudioExport.ts`,
+`buildStudioHints.ts`, `buildStudioScope.ts`, `buildStudioStarter.ts`,
+`buildStudioPendingStore.ts`, `useBuildStudioDepartureGuard.ts`,
+`core/types/buildStudio.ts`, `core/firebase/buildStudioVersionWrites.ts` and
+`core/firebase/buildStudioNoteWrites.ts` declare **no `useState`**, so `classifyCandidate` returns
+before either arm is considered; `BuildStudioVersionShelf.tsx` and `RequireBuildStudioAccess.tsx`
+hold no state either (the shelf is presentational and the guard renders or redirects);
+`BuildStudioSettingsSection.tsx` holds state but reads no active child and declares no `childId`
+prop — it is handed a whole `Child`, and its one additive prop is `onlyChildId`, which `\bchildId`
+cannot match; and `useBuildStudioVersions.ts` holds state and declares the prop but performs **no
+Firestore write**, which is the `.ts` prop arm's own requirement. A row for a file the script does
+not derive is what the invariant test rejects as `not-a-candidate`, so none of them gets one.
+
+**The C1 repair pass (2026-11-17, same day) moved no verdict and added no row.** Three things in it
+touch this rail and each is written into the rows that already exist rather than creating new ones:
+the live scope token is now **retired on unmount and on every visit change** (a `RETIRED` sentinel,
+set in the same effect's cleanup, so a retired visit's token never reads as live); an unfinished
+Save is held in `buildStudioPendingStore` **keyed by family + child + project**, in memory only, so
+the exact retry is offered back to its own owner and is invisible to a sibling's editor — which is
+BIND carried across a remount rather than a new verdict; and the departure guard is the data
+router's `useBlocker`, the `useUnsavedBookGuard` (UX-473) shape, so an in-app exit is held with a
+visible Stay / retry / explicit-leave choice instead of being lost to an unmount. The two new files
+that implement those hold no `useState` and derive to nothing.
+
+`AppShell.tsx`'s existing row is **unchanged and still correct**: the nav gate this run added is a
+read-only subscribe to one settings document, so *"no datastore write"* still holds and the **SAFE**
+verdict does not move. What the gate does is refuse to draw the entry on anything but an affirmative
+answer, which is the row's own rule about the shell not deciding ownership.
+
+The run had no shell authorisation to execute checks, so `npm run census:child-switch` was **not
+run** and no number in the blocks above was re-derived. Per `CLAUDE.md`'s derived-numbers rule the
+qualifier is written instead of the figure: **three rows are added and none is removed**, so
+`candidates` and `census rows` are each expected to rise by exactly three, the `BIND` tally by one
+and the `GATE` tally by two, with `census problems` unchanged at whatever it last reported. The
+invariant test is the thing that settles it — it reads the derived candidate set against the table,
+not against these blocks.
+
 ## 5. The registry
 
 | Surface (file) | Child-scoped state it holds | What it writes, and to which collection | Reachable by a switch today? | Verdict | Severity |
@@ -583,6 +636,9 @@ tallies above are still expected to be unchanged.
 | `src/features/books/useBook.ts` | the open book, save state, and whether this host emits editing hours | `books`, `hours`, `artifacts` | Shell only | **SAFE** — every write reads `book.childId` from the loaded document; `useBookshelf`'s `createBook` takes the `childId` it was called with. Still SAFE after the reader repair, and for a reason: `suppressEditingHours` is captured at MOUNT, so it is a property of the HOST rather than of a render and no child change can reach it; the `books.totalMinutes` + `updatedAt` merge it keeps in BOTH modes is the book's own cumulative figure and stays book-owned (it is not reader-attributed and not week-scoped); and the single thing a reader opts out of is the `(page editing)` hours claim there is no editing behind | — |
 | `src/features/books/useBookGenerateChat.ts` | chat history, current story, level stretch, theme | `books/{bookId}` | Shell only | **SAFE** — a draft book is persisted as soon as a story exists and `bookId` pins every later write; the resume path reads the document's `childId` (FEAT-188) | — |
 | `src/features/books/useSightWordProgress.ts` | the child's word progress map | `sightWordProgress/{childId}_{word}` | Selector (Books, Progress) | **SAFE** — the document id is built from the `childId` the hook was called with at the moment of the write, and the map is re-read on a prop change | — |
+| `src/features/build-studio/BuildStudioEditor.tsx` | a whole editing visit: the imported project, the editor-dirty mark, a pending Save payload, the last saved version, the hint rung and a draft reflection | `buildStudioVersions` (through `buildStudioVersionWrites`) and one `artifacts` Note (through `buildStudioNoteWrites`) | Shell only — a child profile cannot change child, so the crossing is a profile change | **BIND** — `childId` is a PROP, never the live active child: the `BuildStudioScope` captured at mount travels on the pending payload and the write reads `attempt.scope.childId` after every await, so a save that lands late lands on its own owner's shelf. The scope includes a fresh `visitId`, which is what makes a same-child `A → B → A` a different scope rather than the same one, and the bridge re-reads `isScopeLive()` at callback time so a late editor reply is refused instead of applied. A completed write whose scope has retired is reported through `onOutOfScopeSave` rather than dropped, and unsaved EDITOR work that cannot cross is named before the tap (the reopen confirm) and in the page's notice after a profile change | — |
+| `src/features/build-studio/BuildStudioPage.tsx` | only the out-of-scope save notice; it mounts the editor and holds no game state itself | nothing — every write is the editor's, through its own captured scope | Shell (the header chip reaches it for a parent) and a profile change | **GATE** — the page is not editable at all until `resolveBuildStudioAccess` returns an affirmative verdict: an unsettled read renders a spinner, a FAILED read is `Closed` rather than an empty answer, and a children list from another family or a child id that resolves to no child is refused. The editor is keyed by family and child so it can never be reused across identities, and a versions read that is still about the previous child is passed as `Loading` rather than rendered under this child's heading | — |
+| `src/features/build-studio/useBuildStudioOptIn.ts` | the opt-in read for one child, plus the parent control's saving and error flags | `settings/buildStudio_{childId}` — a parent's confirmed enable, one document, create-or-replace | Settings (the parent lists every child) and the shell's own nav gate | **GATE** — the read is keyed on `familyId\u0000childId` and returns `Loading` the instant either changes, so a previous child's `enabled: true` cannot authorise the next one for a frame; a rejected read answers `Failed`, which the access rule treats as closed and the UI says is unreadable rather than off; a document whose own `childId` disagrees with the path it was read from counts as not enabled; and `setBuildStudioOptIn` takes its child explicitly rather than reading one | — |
 | `src/features/business/GoalBuilder.tsx` | a dirty milestone stack the parent is editing | `businessGoals/{childId}` | Shell only (Business has no selector) | **RESET** — a child change wins over `dirty`: re-seed, clear `dirty` (which disables Save), and say the unsaved changes weren't kept (UX-324 rounds 3–4) | — |
 | `src/features/business/KitBuilderForm.tsx` | a typed kit roster — vault, hero, defenders, invaders, verbatim | `kitRosters` — one new roster per save | Shell only | **BIND**, quota included — `boundChildId` captured at mount, the save stamps it, and the form says *"This kit will be saved for …"* first; `KitBuilderSection` now reads `useArtQuota` from the **roster's** owner, since art generated onto one boy's kit was spending his brother's weekly allowance (Codex round 3). Fixed here (UX-329) | — |
 | `src/features/business/SaleEntryForm.tsx` | a picked preset, an amount, a date, a note | `businessLog` via `onLogSale`, which feeds the goal thermometer | Shell only | **RESET** — a pending sale is an intent; the form clears, the Log button goes dead, and the notice names whose sale was dropped — including when the only thing changed was the **date**, which the reset also puts back (Codex round 2). Fixed here (UX-329) | — |
