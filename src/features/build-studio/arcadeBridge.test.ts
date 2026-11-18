@@ -1306,12 +1306,48 @@ describe('a source that is too big to save is not an older source', () => {
         success: true,
       }),
     )
-    // The KIND is unchanged — nothing was captured and nothing was stored.
+    // The KIND is unchanged — nothing was captured and nothing was stored —
+    // and the failure carries the size answer for THIS capture, which is what
+    // lets a download tell "the open game is too big" from "this capture
+    // failed" without consulting a flag that may predate the tap (UX-498).
     await expect(pending).rejects.toMatchObject({
       kind: ArcadeBridgeFailure.BadProject,
       message: ARCADE_TOO_BIG_TO_SAVE,
+      tooBig: true,
     })
     expect(ARCADE_TOO_BIG_TO_SAVE).not.toMatch(/Save again/)
+  })
+
+  /**
+   * The same stamp, the other way round: an over-cap reading already taken does
+   * not make the NEXT capture's failure a size failure.
+   *
+   * POSITIVE CONTROL: stamp the throw with `this.overCaps !== null` instead of
+   * `state.refusedTooBig` and this case reports `tooBig: true` for a capture
+   * that read nothing at all.
+   */
+  it('does not stamp a later empty capture with an EARLIER size refusal', async () => {
+    const made = readyBridge()
+    // An over-cap payload arrives outside any capture, so the flag stands.
+    announce(made, overFileCapOnly())
+    expect(made.bridge.sourceOverCaps()).toBe(true)
+    // A fresh capture that collects nothing is not a size failure.
+    const pending = made.bridge.requestSnapshot()
+    const id = made.frame.posted.at(-1)!.message.id
+    made.bridge.handleMessage(
+      event(made.frame, {
+        type: 'pxteditor',
+        action: 'saveproject',
+        id,
+        frameId: made.bridge.frameId,
+        success: true,
+      }),
+    )
+    await expect(pending).rejects.toMatchObject({
+      kind: ArcadeBridgeFailure.BadProject,
+      message: expect.stringContaining('try Save again'),
+      tooBig: false,
+    })
   })
 
   it('still says "try Save again" when nothing was handed over at all', async () => {
