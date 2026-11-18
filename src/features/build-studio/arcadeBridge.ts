@@ -75,6 +75,18 @@ export const ARCADE_IMPORT_TIMEOUT_MS = 30_000
 export const ARCADE_SNAPSHOT_TIMEOUT_MS = 20_000
 export const ARCADE_SWITCH_TIMEOUT_MS = 10_000
 
+/**
+ * What a capture says when the game itself is over this app's caps.
+ *
+ * It promises nothing about a download, because whether the bytes can be handed
+ * back depends on how far over the caps they are, and the page answers that at
+ * the moment somebody taps. What it does say is the one thing that is certainly
+ * true: nothing was stored, nothing in the editor changed, and tapping Save
+ * again will do exactly this again.
+ */
+export const ARCADE_TOO_BIG_TO_SAVE =
+  'Your game is now too big for this app to keep, so nothing was saved. It is still open in the editor exactly as it was — making it a bit smaller is what lets it save again.'
+
 /** The host actions this bridge answers. Anything else is ignored. */
 const HOST_ACTIONS = ['workspacesync', 'workspacesave', 'workspaceloaded'] as const
 type HostAction = (typeof HOST_ACTIONS)[number]
@@ -207,6 +219,31 @@ interface CaptureState {
   latest: AcceptedProject | null
   /** Set once the matching ACK has arrived, so a later event cannot overwrite. */
   acked: boolean
+  /**
+   * A payload of OURS arrived during this capture and the caps refused it.
+   *
+   * Recorded so the failure this capture reports is the true one: "nothing was
+   * handed over, try again" is wrong advice for a game that is simply too big,
+   * and a retry of it fails identically for ever.
+   */
+  refusedTooBig: boolean
+}
+
+/**
+ * The newest capture of OUR project that the caps refused.
+ *
+ * `files` is present only when {@link PayloadCapReading.overFileCapOnly} held —
+ * a map bounded by the archive cap, which one download may hand back. Anything
+ * bigger keeps the FACT and not the bytes, which is what lets the page refuse a
+ * stale download out loud instead of quietly substituting an older game.
+ *
+ * It is never a save candidate: it is not `lastEditorSave`, it is not collected
+ * into a capture, and nothing here can write it.
+ */
+interface OverCapsCapture {
+  files: BuildStudioSourceFiles | null
+  /** The reading that refused it. Diagnostics and the page's wording. */
+  reading: PayloadCapReading
 }
 
 /** The project body on a reply, whichever key this editor version used. */
@@ -217,21 +254,69 @@ function msgProject(msg: Record<string, unknown>): ArcadeProject | undefined {
 }
 
 /**
- * Is this payload small enough to hold at all?
+ * How a payload measures against the caps — and, when it is over them, WHICH
+ * cap it broke.
  *
  * The same counts and UTF-8 byte caps the writer enforces, read from the same
- * constants so the two can never disagree.
+ * constants so the two can never disagree. {@link payloadWithinCaps} is this
+ * reading's own boolean, computed from it rather than beside it.
+ *
+ * The extra answers exist for one reason. A `workspacesave` that is OURS and
+ * readable but over the per-file cap is still the child's CURRENT game, and
+ * refusing to store it is not a reason to hand him an OLDER one instead — which
+ * is exactly what the download fallback did (PR #1974 round 1). So the bridge
+ * needs to tell "too big to save, and here it is for a download" apart from
+ * "too big to even hold", and `overFileCapOnly` is that line.
  */
-export function payloadWithinCaps(files: BuildStudioSourceFiles): boolean {
+export interface PayloadCapReading {
+  /** The writer's own answer: may this be stored at all? */
+  withinCaps: boolean
+  /** How many files count towards the cap (`_history` and friends excluded). */
+  fileCount: number
+  /** Those files together, in UTF-8 bytes. */
+  totalBytes: number
+  /** The largest single one of them, in UTF-8 bytes. */
+  largestFileBytes: number
+  /**
+   * True when the ONLY cap broken is the per-file one: the file count is
+   * workable and the whole map is still inside the archive cap.
+   *
+   * That is a payload one download may safely hold — it is bounded by the same
+   * archive ceiling an accepted project is. A map over the ARCHIVE cap, or with
+   * too many files, is not held at all.
+   */
+  overFileCapOnly: boolean
+}
+
+export function readPayloadCaps(files: BuildStudioSourceFiles): PayloadCapReading {
   const keys = buildStudioSourceKeys(files)
-  if (keys.length === 0 || keys.length > BUILD_STUDIO_MAX_FILES) return false
   let total = 0
+  let largest = 0
   for (const key of keys) {
     const bytes = utf8ByteLength(files[key])
-    if (bytes > BUILD_STUDIO_MAX_FILE_BYTES) return false
     total += bytes
+    if (bytes > largest) largest = bytes
   }
-  return total <= BUILD_STUDIO_MAX_ARCHIVE_BYTES
+  const countOk = keys.length > 0 && keys.length <= BUILD_STUDIO_MAX_FILES
+  const archiveOk = total <= BUILD_STUDIO_MAX_ARCHIVE_BYTES
+  const perFileOk = largest <= BUILD_STUDIO_MAX_FILE_BYTES
+  return {
+    withinCaps: countOk && archiveOk && perFileOk,
+    fileCount: keys.length,
+    totalBytes: total,
+    largestFileBytes: largest,
+    overFileCapOnly: countOk && archiveOk && !perFileOk,
+  }
+}
+
+/**
+ * Is this payload small enough to hold at all?
+ *
+ * Unchanged in meaning and in strictness; it is now one field of
+ * {@link readPayloadCaps}.
+ */
+export function payloadWithinCaps(files: BuildStudioSourceFiles): boolean {
+  return readPayloadCaps(files).withinCaps
 }
 
 /**
@@ -273,6 +358,11 @@ export class ArcadeBridge {
   private disposed = false
   /** The last project the EDITOR saved. Not a durable save; see `onEditorSave`. */
   private lastEditorSave: AcceptedProject | null = null
+  /**
+   * The newest capture of ours the caps refused, if one is newer than
+   * `lastEditorSave`. Cleared the moment an acceptable project arrives.
+   */
+  private overCaps: OverCapsCapture | null = null
   /** From the editor's own `info` reply, or null. Never inferred. */
   private runtime: ArcadeRuntimeVersions | null = null
 
@@ -308,6 +398,34 @@ export class ArcadeBridge {
   /** The most recent EDITOR save, which is not an app save. */
   editorSaveSeen(): AcceptedProject | null {
     return this.lastEditorSave
+  }
+
+  /**
+   * Is the source the editor last handed over too big for this app to store?
+   *
+   * True only while a refused-for-size capture of OURS is the newest thing this
+   * bridge has seen — an acceptable project clears it. A foreign project, a
+   * published one or an unreadable one never sets it: those are refused earlier,
+   * by identity, and they say nothing about the child's own game.
+   *
+   * What it is FOR: it makes `editorSaveSeen()` a provably older source, so a
+   * caller can refuse to offer it as "your game" instead of handing over a
+   * stale one with no indication it was stale.
+   */
+  sourceOverCaps(): boolean {
+    return this.overCaps !== null
+  }
+
+  /**
+   * The current, over-cap source — when it is bounded enough to hand back.
+   *
+   * For a DOWNLOAD and nothing else. It is deliberately not an
+   * {@link AcceptedProject}: it was not accepted, it cannot be saved, and the
+   * caps that refused it are untouched. `null` both when the newest capture is
+   * fine and when it is too big to hold at all.
+   */
+  oversizedSourceForDownload(): BuildStudioSourceFiles | null {
+    return this.overCaps?.files ?? null
   }
 
   /**
@@ -457,14 +575,27 @@ export class ArcadeBridge {
       this.options.onRejected?.({ reason: 'foreign-project' })
       return null
     }
-    // The caps are enforced HERE, before the payload is held as bridge state —
-    // not only before a Firestore write. An oversized project kept in memory
-    // and offered to Save would be refused later, after the child was told it
-    // was being saved.
-    if (!payloadWithinCaps(files)) {
+    // The caps are enforced HERE, before the payload is accepted as bridge
+    // state — not only before a Firestore write. An oversized project accepted
+    // in memory and offered to Save would be refused later, after the child was
+    // told it was being saved.
+    //
+    // What a refusal now ALSO does is say so. It used to be silent, so
+    // `editorSaveSeen()` went on answering with the last project that fitted —
+    // and the page offered that older game as "Download a copy" of the one in
+    // front of him (PR #1974 round 1). The bytes are kept for a download only
+    // when they are bounded by the archive cap; past that only the fact is, and
+    // neither is a save candidate.
+    const reading = readPayloadCaps(files)
+    if (!reading.withinCaps) {
+      this.overCaps = { files: reading.overFileCapOnly ? files : null, reading }
+      if (this.capture && !this.capture.acked) this.capture.refusedTooBig = true
       this.options.onRejected?.({ reason: 'payload-too-big' })
       return null
     }
+    // An acceptable project is the newest source there is, so the refusal it
+    // replaces is no longer true about the editor.
+    this.overCaps = null
     this.ourHeaderId = header.id
     return { header, files }
   }
@@ -702,7 +833,13 @@ export class ArcadeBridge {
     // Claimed synchronously, before the first await, so two taps in one tick
     // cannot both get past the check above.
     const requestId = this.options.newId()
-    this.capture = { requestId, startedAt: this.now(), latest: null, acked: false }
+    this.capture = {
+      requestId,
+      startedAt: this.now(),
+      latest: null,
+      acked: false,
+      refusedTooBig: false,
+    }
     this.freezeInput(true)
 
     try {
@@ -735,10 +872,16 @@ export class ArcadeBridge {
       const inReply = body ? this.acceptProject(body) : null
       const collected = inReply ?? state.latest
       if (!collected) {
+        // Same failure KIND either way — nothing was captured, nothing was
+        // stored, and the ACK/retry contract is unchanged. Only the sentence
+        // differs, because "try Save again" is wrong advice for a game that is
+        // over the caps: that retry fails identically every time.
         throw new ArcadeBridgeError(
           ArcadeBridgeFailure.BadProject,
           'saveproject',
-          'The editor said it saved but did not hand the game over. Nothing was saved — try Save again.',
+          state.refusedTooBig
+            ? ARCADE_TOO_BIG_TO_SAVE
+            : 'The editor said it saved but did not hand the game over. Nothing was saved — try Save again.',
         )
       }
       if (!this.options.isScopeLive()) {
@@ -777,6 +920,10 @@ export class ArcadeBridge {
     // already rejected by the pending-request loop; clearing the state is what
     // stops a late `workspacesave` being collected into a dead capture.
     this.capture = null
+    // The download-only copy goes with the visit it was read in: a retired
+    // bridge's source is nobody's current game, and holding those bytes after
+    // the frame is gone would be a leak with no reader.
+    this.overCaps = null
     this.freezeInput(false)
     this.iframe = null
   }

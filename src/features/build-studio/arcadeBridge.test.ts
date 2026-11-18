@@ -2,10 +2,12 @@ import { beforeEach, describe, expect, it } from 'vitest'
 
 import {
   ARCADE_ORIGIN,
+  ARCADE_TOO_BIG_TO_SAVE,
   ArcadeBridge,
   ArcadeBridgeError,
   ArcadeBridgeFailure,
   payloadWithinCaps,
+  readPayloadCaps,
   readProjectFiles,
   type RejectedMessage,
 } from './arcadeBridge'
@@ -1048,12 +1050,16 @@ describe('Play and Edit use the verified stock actions', () => {
 })
 
 /**
- * Counts and UTF-8 byte caps are enforced before a payload is held as bridge
- * state — not only before a Firestore write. An oversized project kept in
- * memory and offered to Save would be refused after the child was told it was
- * being saved.
+ * Counts and UTF-8 byte caps are enforced before a payload is accepted as
+ * bridge state — not only before a Firestore write. An oversized project
+ * accepted in memory and offered to Save would be refused after the child was
+ * told it was being saved.
+ *
+ * An oversized payload is therefore never an EDITOR SAVE and never a save
+ * candidate, which is what every case below pins. What it may be is a download,
+ * and the block after this one is where that is checked.
  */
-describe('an oversized payload is never held', () => {
+describe('an oversized payload is never held as a save', () => {
   it('refuses a project over the per-file byte cap', () => {
     const { bridge, frame, rejected } = makeBridge()
     bridge.handleMessage(
@@ -1118,6 +1124,215 @@ describe('an oversized payload is never held', () => {
     expect(
       payloadWithinCaps({ 'pxt.json': '{}', 'main.ts': '界'.repeat(150_000) }),
     ).toBe(false)
+  })
+})
+
+/**
+ * A game that is too big to SAVE is still the child's current game
+ * (PR #1974 round 1).
+ *
+ * The reported hole: an edited `main.blocks` over the per-file cap was refused
+ * in silence, so `editorSaveSeen()` went on answering with the last project
+ * that fitted — and the page's *Download a copy* handed over that OLDER game
+ * with nothing to say it was older. The bridge now answers two separate
+ * questions: is the newest source over the caps (`sourceOverCaps`), and are
+ * those bytes bounded enough to hand back for a download
+ * (`oversizedSourceForDownload`). Neither is a save candidate, and the caps are
+ * untouched.
+ *
+ * POSITIVE CONTROLS are named per case.
+ */
+describe('a source that is too big to save is not an older source', () => {
+  /** A handshaken bridge, so captures are allowed. */
+  function readyBridge() {
+    const made = makeBridge()
+    made.bridge.handleMessage(
+      event(made.frame, {
+        type: 'pxthost',
+        action: 'workspaceloaded',
+        id: 'l',
+        frameId: made.bridge.frameId,
+      }),
+    )
+    made.frame.posted.length = 0
+    return made
+  }
+
+  function announce(
+    made: ReturnType<typeof readyBridge>,
+    text: Record<string, unknown>,
+    header: Record<string, unknown> = {},
+  ) {
+    made.bridge.handleMessage(
+      event(made.frame, {
+        type: 'pxthost',
+        action: 'workspacesave',
+        frameId: made.bridge.frameId,
+        project: ourProject({ text, header }),
+      }),
+    )
+  }
+
+  /** Over the PER-FILE cap only: the whole map still fits the archive cap. */
+  const overFileCapOnly = () => ({ 'main.blocks': 'b'.repeat(400_001) })
+  /** Over the ARCHIVE cap: too big to hold at all. */
+  const overArchiveCap = () => ({
+    'main.blocks': 'b'.repeat(300_000),
+    'a.ts': 'a'.repeat(300_000),
+    'c.ts': 'c'.repeat(300_000),
+  })
+
+  it('reads WHICH cap a payload broke', () => {
+    const ok = readPayloadCaps({ 'pxt.json': '{}', 'main.ts': 'x' })
+    expect(ok.withinCaps).toBe(true)
+    expect(ok.overFileCapOnly).toBe(false)
+    expect(ok.fileCount).toBe(2)
+
+    const perFile = readPayloadCaps({ 'pxt.json': '{}', 'main.blocks': 'b'.repeat(400_001) })
+    expect(perFile.withinCaps).toBe(false)
+    expect(perFile.overFileCapOnly).toBe(true)
+    expect(perFile.largestFileBytes).toBe(400_001)
+
+    const archive = readPayloadCaps({ 'pxt.json': '{}', ...overArchiveCap() })
+    expect(archive.withinCaps).toBe(false)
+    // Too big to hold, so never offered for a download either.
+    expect(archive.overFileCapOnly).toBe(false)
+
+    // And it is the same answer `payloadWithinCaps` gives, by construction.
+    for (const files of [
+      { 'pxt.json': '{}', 'main.ts': 'x' },
+      { 'pxt.json': '{}', 'main.blocks': 'b'.repeat(400_001) },
+      { 'pxt.json': '{}', ...overArchiveCap() },
+      {},
+    ]) {
+      expect(payloadWithinCaps(files)).toBe(readPayloadCaps(files).withinCaps)
+    }
+  })
+
+  /**
+   * POSITIVE CONTROL: drop the `this.overCaps = …` assignment in
+   * `acceptProject` and this case sees the older game offered as the current
+   * one, which is the reported defect.
+   */
+  it('keeps the CURRENT over-cap source for a download, after an older accepted one', () => {
+    const made = readyBridge()
+    // An ordinary save first: this is the "older accepted game".
+    announce(made, { 'main.ts': 'info.setLife(3)' })
+    expect(made.bridge.editorSaveSeen()?.files['main.ts']).toBe('info.setLife(3)')
+    expect(made.bridge.sourceOverCaps()).toBe(false)
+    expect(made.bridge.oversizedSourceForDownload()).toBeNull()
+
+    // Now he fills the blocks past the per-file cap.
+    announce(made, { 'main.ts': 'info.setLife(9)', ...overFileCapOnly() })
+    expect(made.rejected.map((r) => r.reason)).toEqual(['payload-too-big'])
+    // NOT a save: the editor-save answer is still the older one, so nothing
+    // oversized can be stored or treated as clean.
+    expect(made.bridge.editorSaveSeen()?.files['main.ts']).toBe('info.setLife(3)')
+    // But the current source is available, as itself, for a download.
+    expect(made.bridge.sourceOverCaps()).toBe(true)
+    const out = made.bridge.oversizedSourceForDownload()
+    expect(out?.['main.ts']).toBe('info.setLife(9)')
+    expect(out?.['main.blocks']).toHaveLength(400_001)
+  })
+
+  it('keeps the FACT and not the bytes when it is too big to hold', () => {
+    const made = readyBridge()
+    announce(made, { 'main.ts': 'info.setLife(3)' })
+    announce(made, overArchiveCap())
+    expect(made.bridge.sourceOverCaps()).toBe(true)
+    // Nothing to hand back — and the older accepted source is still not it.
+    expect(made.bridge.oversizedSourceForDownload()).toBeNull()
+    expect(made.bridge.editorSaveSeen()?.files['main.ts']).toBe('info.setLife(3)')
+  })
+
+  it('stops being true the moment an acceptable project arrives', () => {
+    const made = readyBridge()
+    announce(made, overFileCapOnly())
+    expect(made.bridge.sourceOverCaps()).toBe(true)
+    // He deleted some of it again.
+    announce(made, { 'main.ts': 'info.setLife(4)' })
+    expect(made.bridge.sourceOverCaps()).toBe(false)
+    expect(made.bridge.oversizedSourceForDownload()).toBeNull()
+    expect(made.bridge.editorSaveSeen()?.files['main.ts']).toBe('info.setLife(4)')
+  })
+
+  /**
+   * The identity checks come FIRST and are not relaxed by any of this: a
+   * foreign, published or wrong-header project says nothing about the child's
+   * own game, so it may not become the thing a download hands over.
+   */
+  it('never keeps a project that is not ours, however big it is', () => {
+    for (const header of [{ name: 'Untitled' }, { pubId: 'pub-1' }, { id: '' }]) {
+      const made = readyBridge()
+      announce(made, overFileCapOnly(), header)
+      expect(made.bridge.sourceOverCaps()).toBe(false)
+      expect(made.bridge.oversizedSourceForDownload()).toBeNull()
+      expect(made.rejected.map((r) => r.reason)).toEqual(['foreign-project'])
+    }
+  })
+
+  it('refuses a SECOND, differently-headed project even when it is oversized', () => {
+    const made = readyBridge()
+    // Ours, so the header is pinned.
+    announce(made, { 'main.ts': 'info.setLife(3)' })
+    announce(made, overFileCapOnly(), { id: 'header-2' })
+    expect(made.rejected.map((r) => r.reason)).toEqual(['foreign-project'])
+    expect(made.bridge.sourceOverCaps()).toBe(false)
+  })
+
+  /**
+   * POSITIVE CONTROL: remove `state.refusedTooBig` from the throw in
+   * `requestSnapshot` and this case reports "try Save again" for a game that
+   * will be refused identically every time.
+   */
+  it('says WHY a capture came back with nothing, when the reason is size', async () => {
+    const made = readyBridge()
+    const pending = made.bridge.requestSnapshot()
+    const id = made.frame.posted.at(-1)!.message.id
+    announce(made, overFileCapOnly())
+    made.bridge.handleMessage(
+      event(made.frame, {
+        type: 'pxteditor',
+        action: 'saveproject',
+        id,
+        frameId: made.bridge.frameId,
+        success: true,
+      }),
+    )
+    // The KIND is unchanged — nothing was captured and nothing was stored.
+    await expect(pending).rejects.toMatchObject({
+      kind: ArcadeBridgeFailure.BadProject,
+      message: ARCADE_TOO_BIG_TO_SAVE,
+    })
+    expect(ARCADE_TOO_BIG_TO_SAVE).not.toMatch(/Save again/)
+  })
+
+  it('still says "try Save again" when nothing was handed over at all', async () => {
+    const made = readyBridge()
+    const pending = made.bridge.requestSnapshot()
+    const id = made.frame.posted.at(-1)!.message.id
+    made.bridge.handleMessage(
+      event(made.frame, {
+        type: 'pxteditor',
+        action: 'saveproject',
+        id,
+        frameId: made.bridge.frameId,
+        success: true,
+      }),
+    )
+    await expect(pending).rejects.toMatchObject({
+      kind: ArcadeBridgeFailure.BadProject,
+      message: expect.stringContaining('try Save again'),
+    })
+  })
+
+  it('lets the download copy go with the visit, on dispose', () => {
+    const made = readyBridge()
+    announce(made, overFileCapOnly())
+    expect(made.bridge.oversizedSourceForDownload()).not.toBeNull()
+    made.bridge.dispose()
+    expect(made.bridge.oversizedSourceForDownload()).toBeNull()
+    expect(made.bridge.sourceOverCaps()).toBe(false)
   })
 })
 

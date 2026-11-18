@@ -196,6 +196,26 @@ const SAVED_EARLIER_LINE =
   'Saved. That was the earlier game — it is on your shelf now. What is open here is separate.'
 
 /**
+ * The name on a download of a source the app could not store.
+ *
+ * Deliberately not the save's label and not `my-game`: the file it produces is
+ * a full source export of what is in the editor, and it must not be mistaken
+ * later for a version that is on the shelf. The name is the first thing a
+ * person reads, so it is where that is said.
+ */
+const OVERSIZED_DOWNLOAD_LABEL = 'my game full copy too big to save'
+/** What that download IS, said as it happens. */
+const OVERSIZED_DOWNLOAD_LINE =
+  'That file is your whole game exactly as it is in the editor right now. It is too big for this app to keep, so it is NOT on your shelf — keep the file somewhere safe, and making the game a bit smaller is what lets it save again.'
+/**
+ * The honest refusal. Said rather than quietly handing over an older game: the
+ * only copy this app still holds is a previous one, and offering it as "a copy"
+ * of what is open would be a lie about which game it is.
+ */
+const OVERSIZED_NO_DOWNLOAD_LINE =
+  'Your game is too big for this page to save or to download right now, and the only copy it still has is an older one — so nothing was downloaded rather than giving you the wrong game. It is all still open in the editor; a grown-up can take some of it out, or save it from MakeCode itself.'
+
+/**
  * The live UI an explicit save act belongs to — separate from the payload's own
  * provenance.
  *
@@ -212,12 +232,41 @@ interface SaveInvocation {
   projectId: string
 }
 
+/**
+ * A save that really landed, for the source the visit on screen has open.
+ *
+ * The ONE event that can make a held departure's earlier "there are unsaved
+ * changes" answer obsolete — and it is deliberately not a release: it carries
+ * the visit it landed in and the exact bytes it stored, so the hold is re-asked
+ * against the editor rather than let through on trust. A restored retry of an
+ * older visit's payload never produces one of these, which is what stops an old
+ * acknowledgment unlocking a departure it knows nothing about.
+ */
+interface SavedForDeparture {
+  token: string
+  signature: string
+}
+
 export interface BuildStudioEditorProps {
   familyId: string
   /** The child this studio is FOR. Captured; never re-read from the shell. */
   childId: string
   childName: string
   projectId: string
+  /**
+   * Is the enhanced (Whisper) voice path configured for THIS child?
+   *
+   * `children/{childId}.voiceInputEnhanced`, resolved by the page for the same
+   * child this editor is for and passed down — exactly as Today and the books
+   * chats do it. `VoiceInput` selects the existing Whisper recording only on
+   * `profile.voiceInputEnhanced === true`, so a mic handed nothing but an id
+   * silently fell back to Web Speech for a child whose settings say otherwise
+   * (PR #1974 round 1).
+   *
+   * Optional, defaulting to the same `false` an absent flag has always meant,
+   * so nothing about an unconfigured child changes.
+   */
+  childVoiceInputEnhanced?: boolean
   versions: BuildStudioVersionsRead
   /**
    * Told when a write completed for a scope that is no longer on screen, so
@@ -231,6 +280,7 @@ export default function BuildStudioEditor({
   childId,
   childName,
   projectId,
+  childVoiceInputEnhanced,
   versions,
   onOutOfScopeSave,
 }: BuildStudioEditorProps) {
@@ -240,6 +290,21 @@ export default function BuildStudioEditor({
   const owner: PendingOwner = useMemo(
     () => ({ familyId, childId, projectId }),
     [familyId, childId, projectId],
+  )
+
+  /**
+   * Whose voice this is, and which engine his settings ask for.
+   *
+   * The id is this editor's OWN captured `childId` and is never the shell's
+   * live one — the same rule the writes follow — and the flag is the value the
+   * page resolved for that same child. Built here rather than taken as an
+   * object so the two can never name different children, and memoised because
+   * `VoiceInput` is remounted by key and should not be remade by an unrelated
+   * render.
+   */
+  const voiceProfile = useMemo(
+    () => ({ id: childId, voiceInputEnhanced: childVoiceInputEnhanced === true }),
+    [childId, childVoiceInputEnhanced],
   )
 
   // ── The visit ────────────────────────────────────────────────────────────
@@ -572,13 +637,67 @@ export default function BuildStudioEditor({
   const departureRunRef = useRef<number | null>(null)
   const departureSeqRef = useRef(0)
 
+  /**
+   * ── A save that LANDED retires the answer a hold is standing on ──────────
+   *
+   * The defect this closes: navigate while dirty, the departure is held, the
+   * dialog's *Save it now* saves the game — and then nothing moved.
+   * `departureRunRef` still held the run that had answered "dirty", so the
+   * effect below early-returned for ever; `cleanConfirmedRef` was false and the
+   * editor was live, so `hasWorkAtRisk` stayed true and the guard's own release
+   * never fired. The navigation he asked for never happened, and the dialog
+   * went on warning that a game now safely on his shelf was about to be lost
+   * (PR #1974 round 1).
+   *
+   * What it is NOT. Not a release: this only retires the stale answer, so the
+   * run that replaces it CAPTURES the editor and compares the saved source
+   * against what is in it now — an edit made during the save keeps the hold and
+   * keeps its warning, and unsaved words keep the dialog on their own account.
+   * Not on STARTING a save: a write in flight is held deliberately. Not on an
+   * old acknowledgment: a restored retry's bytes are not what is open, so
+   * `commit` never marks one (`sourceIsCurrent`), and the two checks below
+   * refuse one that somehow arrives — the visit must still be the one the save
+   * landed in, and those exact bytes must still be what this app believes is on
+   * the shelf.
+   */
+  const savedForDepartureRef = useRef<SavedForDeparture | null>(null)
+  const [savedForDepartureSeq, setSavedForDepartureSeq] = useState(0)
+  const savedForDepartureSeenRef = useRef(0)
+  /** Record a save that landed for the open source. One pass acts on it. */
+  const noteSavedForDeparture = useCallback((saved: SavedForDeparture) => {
+    savedForDepartureRef.current = saved
+    setSavedForDepartureSeq((seq) => seq + 1)
+  }, [])
+
   useEffect(() => {
+    /**
+     * Read on the FIRST pass that sees it, whether or not anything is held: a
+     * marker left sitting would retire a later hold's run and then race its
+     * own capture, which the bridge would refuse as busy and this page would
+     * have to report as "cannot tell".
+     */
+    let savedRetiresRun = false
+    if (savedForDepartureSeq !== savedForDepartureSeenRef.current) {
+      savedForDepartureSeenRef.current = savedForDepartureSeq
+      const saved = savedForDepartureRef.current
+      savedForDepartureRef.current = null
+      savedRetiresRun =
+        saved !== null &&
+        saved.token === liveTokenRef.current &&
+        settledSignatureRef.current === saved.signature
+    }
     if (!departure.held) {
       // The hold ended: retire any run still in flight and reset for the next.
       departureRunRef.current = null
       cleanConfirmedRef.current = false
       setDepartureCheck('idle')
       return
+    }
+    if (savedRetiresRun) {
+      departureRunRef.current = null
+      // The next capture is what may set this again. A save does not get to
+      // declare the editor clean; it only gets the question re-asked.
+      cleanConfirmedRef.current = false
     }
     // One run per hold. `departureCheck` is deliberately NOT a dependency, and
     // this effect has NO cleanup, so its own state change cannot cancel it.
@@ -610,7 +729,7 @@ export default function BuildStudioEditor({
       // Clean source, unsaved WORDS: the dialog stays, because a sentence he
       // said is work, and leaving is still allowed — deliberately.
     })
-  }, [departure, token, checkSourceNow])
+  }, [departure, token, checkSourceNow, savedForDepartureSeq])
 
   // Real retirement: this visit is gone, so no departure callback may land.
   useEffect(
@@ -996,6 +1115,15 @@ export default function BuildStudioEditor({
               versionDocId: result.version.id,
               label: attempt.label,
             })
+            // The game this visit has open is now on the shelf, so a departure
+            // being held on the reading from BEFORE this save is being held on
+            // something that is no longer true. It is re-asked, not released:
+            // `stillCurrent` above is about the announcement, and the re-check
+            // captures the editor itself.
+            noteSavedForDeparture({
+              token: invocation.token,
+              signature: attempt.capturedSignature,
+            })
           } else {
             // A RESTORED retry: the version is safely on the shelf, and the
             // editor in front of him holds something else. So neither
@@ -1050,7 +1178,7 @@ export default function BuildStudioEditor({
         }
       }
     },
-    [onOutOfScopeSave],
+    [onOutOfScopeSave, noteSavedForDeparture],
   )
 
   const handleSave = useCallback(async () => {
@@ -1192,23 +1320,58 @@ export default function BuildStudioEditor({
    * The pending payload first, because that is the exact source a failed save
    * was carrying. Never the starter — substituting the starter for failed work
    * would replace what he made with what he began from.
+   *
+   * ── And never an older game dressed as this one ───────────────────────
+   *
+   * The last door here was `editorSaveSeen()`, the newest source the EDITOR
+   * announced and this app accepted. That is the right fallback when a capture
+   * merely failed — it really is the latest thing the app ever read. It is the
+   * WRONG one when the editor has since handed over a game the caps refused:
+   * the app then holds an older accepted source, and offering it silently
+   * downloaded a previous game as though it were the one on screen (PR #1974
+   * round 1). So the bridge is asked first, and the two true answers are said
+   * out loud: here is the current game, which is too big to go on your shelf;
+   * or this page cannot get the current game out at all. Neither is a stored
+   * version and neither is offered as one.
    */
   const handleDownloadCurrent = useCallback(async () => {
-    // The LATEST source first, never a stale template: a pre-departure capture
-    // read the newest bytes, then a failed save's exact payload, then whatever
-    // the editor last announced.
-    const files =
-      departureFilesRef.current ??
-      pending?.files ??
-      bridgeRef.current?.editorSaveSeen()?.files ??
-      null
-    if (!files) {
+    const give = (files: BuildStudioSourceFiles, label: string) => {
+      for (const download of buildStudioDownloads(files, label)) {
+        downloadTextFile(download)
+      }
+    }
+    // The LATEST source this app captured, never a stale template: a
+    // pre-departure capture read the newest bytes, then a failed save's exact
+    // payload.
+    const captured = departureFilesRef.current ?? pending?.files ?? null
+    if (captured) {
+      give(captured, pending?.label ?? 'my-game')
+      return
+    }
+    const bridge = bridgeRef.current
+    // The current source, when it is ours and readable and the only thing
+    // wrong with it is its size. A full source export — not a version, and the
+    // file name says which.
+    const oversized = bridge?.oversizedSourceForDownload() ?? null
+    if (oversized) {
+      give(oversized, OVERSIZED_DOWNLOAD_LABEL)
+      setSaveState(SaveState.Failed)
+      setSaveMessage(OVERSIZED_DOWNLOAD_LINE)
+      return
+    }
+    // Too big to hand back at all. An older accepted game is NOT offered in its
+    // place; the page says what it cannot do instead of pretending otherwise.
+    if (bridge?.sourceOverCaps()) {
+      setSaveState(SaveState.Failed)
+      setSaveMessage(OVERSIZED_NO_DOWNLOAD_LINE)
+      return
+    }
+    const announced = bridge?.editorSaveSeen()?.files ?? null
+    if (!announced) {
       setSaveMessage('There was nothing to download yet.')
       return
     }
-    for (const download of buildStudioDownloads(files, pending?.label ?? 'my-game')) {
-      downloadTextFile(download)
-    }
+    give(announced, pending?.label ?? 'my-game')
   }, [pending])
 
   // ── Reopen ─────────────────────────────────────────────────────────────
@@ -2242,7 +2405,11 @@ export default function BuildStudioEditor({
             // remounts the mic, so a recording started about one save is retired
             // rather than carried into the next.
             key={noteTargetKey(noteSlot)}
-            profile={{ id: childId }}
+            // This child's id AND the engine his settings configure. The mic
+            // itself is unchanged: the existing component picks the path, this
+            // page adds no recording of its own, and nothing here infers that
+            // anything was heard.
+            profile={voiceProfile}
             sourceSurface="build-studio-reflection"
             onTranscript={(text, meta) =>
               putDraft({

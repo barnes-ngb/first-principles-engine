@@ -77,6 +77,12 @@ class FakeBridgeStub {
   edited = 0
   imported: Record<string, string>[] = []
   runtime: { target?: string; pxt?: string } | null = null
+  /** The last project the EDITOR announced and this app ACCEPTED. */
+  lastSave: Record<string, string> | null = null
+  /** The current source the caps refused, when it is small enough to hand back. */
+  overCapsFiles: Record<string, string> | null = null
+  /** Is the newest source over the caps at all? */
+  overCaps = false
 
   constructor(options: {
     newId: () => string
@@ -100,7 +106,17 @@ class FakeBridgeStub {
     return true
   }
   editorSaveSeen() {
-    return null
+    if (!this.lastSave) return null
+    return {
+      header: { id: 'h1', name: 'Apple Dash starter' },
+      files: { ...this.lastSave },
+    }
+  }
+  sourceOverCaps() {
+    return this.overCaps
+  }
+  oversizedSourceForDownload() {
+    return this.overCapsFiles ? { ...this.overCapsFiles } : null
   }
   runtimeVersions() {
     return this.runtime
@@ -141,10 +157,28 @@ class FakeBridgeStub {
   }
   /** Pretend MakeCode announced a save, with whatever bytes. */
   announce(files: Record<string, string>) {
+    // Accepted, so it becomes the newest source this app has read — and it
+    // clears any over-cap refusal, exactly as `acceptProject` does.
+    this.lastSave = { ...files }
+    this.overCaps = false
+    this.overCapsFiles = null
     this.onEditorSave({
       header: { id: 'h1', name: 'Apple Dash starter' },
       files: { ...files },
     })
+  }
+
+  /**
+   * Pretend MakeCode announced a save the CAPS refused.
+   *
+   * The real bridge's behaviour, faithfully: `onEditorSave` is never called, the
+   * accepted editor-save answer keeps pointing at the older project, and the
+   * refused source is available for a download only when it is bounded enough
+   * to hold (`files`) — `null` reproduces the too-big-to-hold case.
+   */
+  refuseTooBig(files: Record<string, string> | null) {
+    this.overCaps = true
+    this.overCapsFiles = files ? { ...files } : null
   }
   /** Pretend the handshake completed. */
   ready() {
@@ -271,12 +305,16 @@ vi.mock('../../core/hooks/useTTS', () => ({ useTTS: () => ({ speak: vi.fn() }) }
  * records the props it was given, so ownership and surface are checked too.
  */
 const voiceScript = { text: 'I made the apples fall faster', eventId: 'voice-ev-1' }
-const voiceProps: Array<{ profile?: { id?: string }; sourceSurface?: string }> = []
+const voiceProps: Array<{
+  /** The whole profile, so the ENGINE choice is checked and not just the id. */
+  profile?: { id?: string; voiceInputEnhanced?: boolean }
+  sourceSurface?: string
+}> = []
 vi.mock('../../components/VoiceInput', async () => {
   const React = await import('react')
   return {
     default: (props: {
-      profile?: { id?: string }
+      profile?: { id?: string; voiceInputEnhanced?: boolean }
       sourceSurface?: string
       onTranscript: (text: string, meta?: { eventId?: string }) => void
     }) => {
@@ -289,6 +327,24 @@ vi.mock('../../components/VoiceInput', async () => {
         },
         'Pretend mic',
       )
+    },
+  }
+})
+/**
+ * The files a download really handed over.
+ *
+ * Only the DOM-touching half is replaced: `buildStudioDownloads` and the
+ * archive serializer stay real, so what these assertions read is the actual
+ * bytes a person would get — which is the whole question in "did it download
+ * the current game or an older one".
+ */
+const downloads: Array<{ filename: string; text: string }> = []
+vi.mock('./buildStudioExport', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./buildStudioExport')>()
+  return {
+    ...actual,
+    downloadTextFile: (download: { filename: string; text: string }) => {
+      downloads.push({ filename: download.filename, text: download.text })
     },
   }
 })
@@ -330,17 +386,29 @@ const { default: BuildStudioEditor } = await import('./BuildStudioEditor')
 
 const OWNER = { familyId: 'fam1', childId: 'c1', projectId: 'apple-dash-starter' }
 
-function renderEditor() {
+/**
+ * What the PAGE resolves and hands down, with the defaults every existing case
+ * was written against: this child, and no voice flag at all.
+ */
+interface EditorOptions {
+  childId?: string
+  childVoiceInputEnhanced?: boolean
+}
+
+function renderEditor({ childId, childVoiceInputEnhanced }: EditorOptions = {}) {
   return render(
     <BuildStudioEditor
       familyId={OWNER.familyId}
-      childId={OWNER.childId}
+      childId={childId ?? OWNER.childId}
       childName="Lincoln"
       projectId={OWNER.projectId}
+      childVoiceInputEnhanced={childVoiceInputEnhanced}
       versions={{
         status: VersionsStatus.Ready,
         versions: [],
-        childId: OWNER.childId,
+        // The shelf read is always the one for the child being rendered, as
+        // the page's own `shelfIsCurrent` guarantees.
+        childId: childId ?? OWNER.childId,
         projectId: OWNER.projectId,
         error: null,
         retry: vi.fn(),
@@ -350,8 +418,8 @@ function renderEditor() {
 }
 
 /** Mount, complete the handshake, and settle the import round trip. */
-async function openEditor() {
-  renderEditor()
+async function openEditor(options: EditorOptions = {}) {
+  renderEditor(options)
   const bridge = bridges[bridges.length - 1]
   await act(async () => {
     bridge.ready()
@@ -384,6 +452,7 @@ beforeEach(() => {
   saveNote.mockReset()
   saveNote.mockResolvedValue({ id: 'note-1', alreadySaved: false })
   voiceProps.length = 0
+  downloads.length = 0
   resetPendingSaveStore()
 })
 
@@ -1900,5 +1969,431 @@ describe('a note records the help that had been OFFERED when he spoke', () => {
     expect(retry.noteActionId).toBe(first.noteActionId)
     expect(retry.createdAt).toBe(first.createdAt)
     expect(retry.voiceEventId).toBe(first.voiceEventId)
+  })
+})
+
+/**
+ * A game too big to SAVE is never swapped for an older one (PR #1974 round 1).
+ *
+ * The reproduced hole: an edited `main.blocks` past the per-file cap is refused
+ * by the bridge, so the app's newest ACCEPTED source stays the previous
+ * project — and *Download a copy* handed that previous game over, named like
+ * the current one, with nothing said. The child's 5-life source was over the
+ * limit and the file he got held the 4-life bytes.
+ *
+ * POSITIVE CONTROLS are named per case.
+ */
+describe('a download is the CURRENT game or an honest refusal', () => {
+  /** The archive — the recovery file — out of what the browser was handed. */
+  const archive = () => downloads.find((d) => d.filename.endsWith('-source.json'))
+
+  async function tapDownload() {
+    await act(async () => {
+      screen.getAllByText('Download a copy')[0].click()
+    })
+  }
+
+  /**
+   * The current source, over the per-file cap: the real shape of it, which is
+   * the child's own edited blocks with far too much in them.
+   */
+  const tooBigFiles = (lives: number) => {
+    const files = editedFiles(lives)
+    return {
+      ...files,
+      'main.blocks': `${files['main.blocks']}<!--${'b'.repeat(400_001)}-->`,
+    }
+  }
+
+  /**
+   * POSITIVE CONTROL: put `bridgeRef.current?.editorSaveSeen()?.files` back as
+   * the next fallback in `handleDownloadCurrent` and this case downloads
+   * `info.setLife(4)` — the older game — exactly as the reviewer saw.
+   */
+  it('hands over the over-cap CURRENT source, not the older accepted game', async () => {
+    const bridge = await openEditor()
+    // The older game, accepted and announced.
+    await act(async () => {
+      bridge.announce(editedFiles(4))
+    })
+    // Now his blocks go past the cap. The bridge refuses it as a save and
+    // keeps it for a download; the capture therefore comes back with nothing.
+    bridge.refuseTooBig(tooBigFiles(5))
+    bridge.captureError = new Error('Your game is now too big for this app to keep')
+    await tapSave()
+    await waitFor(() => expect(screen.getByText(/too big for this app to keep/)).toBeInTheDocument())
+
+    downloads.length = 0
+    await tapDownload()
+    const file = archive()
+    expect(file).toBeTruthy()
+    // The bytes are the ones in front of him…
+    expect(file!.text).toContain('info.setLife(5)')
+    // …and not the older accepted game, which is the whole defect.
+    expect(file!.text).not.toContain('info.setLife(4)')
+    // The file says what it is, so it cannot be taken later for a version that
+    // is on the shelf.
+    expect(file!.filename).toContain('too-big-to-save')
+    expect(screen.getByText(/NOT on your shelf/)).toBeInTheDocument()
+  })
+
+  it('refuses out loud when the current source is too big to hand back', async () => {
+    const bridge = await openEditor()
+    await act(async () => {
+      bridge.announce(editedFiles(4))
+    })
+    // Over the ARCHIVE cap: nothing is held, so there is nothing to give.
+    bridge.refuseTooBig(null)
+    bridge.captureError = new Error('Your game is now too big for this app to keep')
+    await tapSave()
+    await waitFor(() => expect(screen.getByText(/too big for this app to keep/)).toBeInTheDocument())
+
+    downloads.length = 0
+    await tapDownload()
+    // Nothing was downloaded — and in particular not the older game.
+    expect(downloads).toHaveLength(0)
+    expect(
+      screen.getByText(/nothing was downloaded rather than giving you the wrong game/),
+    ).toBeInTheDocument()
+  })
+
+  /**
+   * The fallback that is still RIGHT, pinned so the fix above does not take it
+   * away: when a capture merely failed, the last source the editor announced is
+   * genuinely the newest thing this app has read.
+   */
+  it('still downloads the last announced source when a capture merely failed', async () => {
+    const bridge = await openEditor()
+    await act(async () => {
+      bridge.announce(editedFiles(4))
+    })
+    bridge.captureError = new Error('The editor did not hand the game over.')
+    await tapSave()
+    await waitFor(() =>
+      expect(screen.getByText(/did not hand the game over/)).toBeInTheDocument(),
+    )
+
+    downloads.length = 0
+    await tapDownload()
+    const file = archive()
+    expect(file!.text).toContain('info.setLife(4)')
+    expect(file!.filename).not.toContain('too-big-to-save')
+    expect(screen.queryByText(/NOT on your shelf/)).not.toBeInTheDocument()
+  })
+
+  it('prefers the exact bytes of a failed save over anything the bridge holds', async () => {
+    const bridge = await openEditor()
+    bridge.nextCapture = editedFiles(7)
+    saveVersion.mockRejectedValue(new Error('offline'))
+    await tapSave()
+    await waitFor(() => expect(screen.getByText('offline')).toBeInTheDocument())
+    // Even with an over-cap source arriving afterwards, the retry's own payload
+    // is what a download is for: it is this app's capture, and it is current.
+    bridge.refuseTooBig(tooBigFiles(5))
+    downloads.length = 0
+    await tapDownload()
+    expect(archive()!.text).toContain('info.setLife(7)')
+    expect(archive()!.filename).not.toContain('too-big-to-save')
+  })
+})
+
+/**
+ * A save that LANDS retires the held departure (PR #1974 round 1).
+ *
+ * Reproduced in a browser both ways round — Today then *Save it now*, and Save
+ * then Today while the acknowledgment was still out: the game reached the
+ * shelf and the navigation stayed blocked, with a dialog warning that a saved
+ * game was about to be lost. `departureRunRef` still held the run that had
+ * answered "dirty", and `hasWorkAtRisk` stayed true because the editor was
+ * live and nothing had re-confirmed it clean.
+ *
+ * POSITIVE CONTROL for the whole block: remove the `savedRetiresRun` branch
+ * from the departure effect and every release case here hangs with
+ * `proceedSpy` never called.
+ */
+describe('a save that lands releases the departure it was asked for', () => {
+  it('releases after Save it now on an UNANNOUNCED edit', async () => {
+    const bridge = await openEditor()
+    const edited = editedFiles(4)
+    // He typed 4 into the blocks; MakeCode has announced nothing.
+    bridge.nextCapture = edited
+    await attemptDeparture()
+    await waitFor(() => expect(screen.getByText('Keep your game first?')).toBeInTheDocument())
+    expect(proceedSpy).not.toHaveBeenCalled()
+
+    await act(async () => {
+      screen.getByText('Save it now').click()
+    })
+    // The captured bytes were stored, and the navigation he asked for happened.
+    await waitFor(() => expect(proceedSpy).toHaveBeenCalled())
+    expect(saveVersion.mock.calls[0][0].files['main.ts']).toBe(edited['main.ts'])
+    await waitFor(() =>
+      expect(screen.queryByText('Keep your game first?')).not.toBeInTheDocument(),
+    )
+  })
+
+  it('releases after Save it now on an ANNOUNCED edit', async () => {
+    const bridge = await openEditor()
+    const edited = editedFiles(4)
+    bridge.nextCapture = edited
+    await act(async () => {
+      bridge.announce(edited)
+    })
+    await attemptDeparture()
+    // Known dirty, so the hold is answered without a capture…
+    await waitFor(() => expect(screen.getByText('Keep your game first?')).toBeInTheDocument())
+    await act(async () => {
+      screen.getByText('Save it now').click()
+    })
+    // …and the save's own re-check is what releases it.
+    await waitFor(() => expect(proceedSpy).toHaveBeenCalled())
+  })
+
+  it('releases when the write lands AFTER the person tapped Today', async () => {
+    const bridge = await openEditor()
+    const edited = editedFiles(4)
+    bridge.nextCapture = edited
+    await act(async () => {
+      bridge.announce(edited)
+    })
+    let releaseWrite: (() => void) | null = null
+    saveVersion.mockImplementation(
+      (args: { versionId: string }) =>
+        new Promise((resolveWrite) => {
+          releaseWrite = () =>
+            resolveWrite({ outcome: 'created', version: { id: `doc-${args.versionId}` } })
+        }),
+    )
+    await tapSave()
+    // He taps Today while the acknowledgment is still out. Held, deliberately.
+    await attemptDeparture()
+    expect(proceedSpy).not.toHaveBeenCalled()
+    await act(async () => {
+      releaseWrite?.()
+    })
+    await waitFor(() => expect(proceedSpy).toHaveBeenCalled())
+  })
+
+  /**
+   * Sol's case: the re-check must CAPTURE, not trust. An edit made while the
+   * write was out may never have been announced.
+   *
+   * POSITIVE CONTROL: release the hold in `commit` instead of retiring the run
+   * and this case leaves with an unsaved edit in the editor.
+   */
+  it('keeps the hold for an UNANNOUNCED edit made while the save was running', async () => {
+    const bridge = await openEditor()
+    bridge.nextCapture = editedFiles(4)
+    await attemptDeparture()
+    await waitFor(() => expect(screen.getByText('Save it now')).toBeInTheDocument())
+    saveVersion.mockImplementation(async (args: { versionId: string }) => {
+      // He changes the blocks again mid-write. MakeCode says nothing about it;
+      // only a fresh capture can see it.
+      bridge.nextCapture = editedFiles(7)
+      return { outcome: 'created', version: { id: `doc-${args.versionId}` } }
+    })
+    await act(async () => {
+      screen.getByText('Save it now').click()
+    })
+    // The game that was captured is on the shelf; what is open is NOT, and the
+    // departure is still held and still honest about why.
+    await waitFor(() =>
+      expect(screen.getByText(/changes that are not on your shelf yet/)).toBeInTheDocument(),
+    )
+    expect(proceedSpy).not.toHaveBeenCalled()
+    expect(screen.getByText('Keep your game first?')).toBeInTheDocument()
+  })
+
+  it('keeps the hold for an ANNOUNCED edit made while the save was running', async () => {
+    const bridge = await openEditor()
+    const edited = editedFiles(4)
+    bridge.nextCapture = edited
+    await act(async () => {
+      bridge.announce(edited)
+    })
+    await attemptDeparture()
+    await waitFor(() => expect(screen.getByText('Save it now')).toBeInTheDocument())
+    saveVersion.mockImplementation(async (args: { versionId: string }) => {
+      bridge.announce(editedFiles(7))
+      bridge.nextCapture = editedFiles(7)
+      return { outcome: 'created', version: { id: `doc-${args.versionId}` } }
+    })
+    await act(async () => {
+      screen.getByText('Save it now').click()
+    })
+    await waitFor(() =>
+      expect(screen.getByText(/tap Save again to keep those too/)).toBeInTheDocument(),
+    )
+    expect(proceedSpy).not.toHaveBeenCalled()
+  })
+
+  /**
+   * Accepted words keep their own guard. A saved game is not a saved sentence,
+   * and the dialog must stop talking about the game and start talking about the
+   * words — with the words still there to save.
+   */
+  it('keeps the hold for unsaved WORDS once the game is safely saved', async () => {
+    const bridge = await openEditor()
+    await saveAVersion(bridge, editedFiles(4))
+    await sayWords()
+    // Then he edits the game again and leaves.
+    const newer = editedFiles(7)
+    bridge.nextCapture = newer
+    await act(async () => {
+      bridge.announce(newer)
+    })
+    await attemptDeparture()
+    await waitFor(() => expect(screen.getByText('Keep your game first?')).toBeInTheDocument())
+
+    await act(async () => {
+      screen.getByText('Save it now').click()
+    })
+    // The game is on the shelf, so the question is now only about the words…
+    await waitFor(() => expect(screen.getByText('Keep your words first?')).toBeInTheDocument())
+    expect(proceedSpy).not.toHaveBeenCalled()
+    // …and the exact sentence is still held for their owner, offered back.
+    expect(readPendingNote(OWNER)?.text).toBe(voiceScript.text)
+    expect(screen.getByText(new RegExp(voiceScript.text))).toBeInTheDocument()
+  })
+
+  /**
+   * An old acknowledgment is not an answer about the open game.
+   *
+   * POSITIVE CONTROL: mark the departure from the `else` branch of
+   * `sourceIsCurrent` in `commit` and this case leaves with the live editor's
+   * edit unsaved.
+   */
+  it('does NOT release on a restored retry of an older visit’s save', async () => {
+    const first = await openEditor()
+    first.nextCapture = editedFiles(4)
+    saveVersion.mockRejectedValue(new Error('offline'))
+    await tapSave()
+    await waitFor(() => expect(screen.getByText('offline')).toBeInTheDocument())
+
+    // He leaves and comes back; the editor now holds something else.
+    cleanup()
+    const second = await openEditor()
+    second.nextCapture = editedFiles(7)
+    await act(async () => {
+      second.announce(editedFiles(7))
+    })
+    saveVersion.mockReset()
+    saveVersion.mockImplementation(async (args: { versionId: string }) => ({
+      outcome: 'created',
+      version: { id: `doc-${args.versionId}` },
+    }))
+
+    await attemptDeparture()
+    await waitFor(() => expect(screen.getByText('Keep your game first?')).toBeInTheDocument())
+    await act(async () => {
+      screen.getByText('Try saving again').click()
+    })
+    // That earlier version is on the shelf — and the hold stands, because what
+    // is open is still unsaved.
+    await waitFor(() => expect(screen.getByText(/it is on your shelf now/)).toBeInTheDocument())
+    expect(proceedSpy).not.toHaveBeenCalled()
+    expect(screen.getByText('Keep your game first?')).toBeInTheDocument()
+  })
+
+  it('does not release merely because a save STARTED', async () => {
+    const bridge = await openEditor()
+    bridge.nextCapture = editedFiles(4)
+    await act(async () => {
+      bridge.announce(editedFiles(4))
+    })
+    saveVersion.mockImplementation(() => new Promise(() => {}))
+    await attemptDeparture()
+    await waitFor(() => expect(screen.getByText('Save it now')).toBeInTheDocument())
+    await act(async () => {
+      screen.getByText('Save it now').click()
+    })
+    await waitFor(() => expect(saveVersion).toHaveBeenCalled())
+    // The write never came back, so nothing was released.
+    expect(proceedSpy).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * The mic is handed the child's own configured engine (PR #1974 round 1).
+ *
+ * `VoiceInput` selects the existing Whisper recording only on
+ * `profile.voiceInputEnhanced === true`. This page passed nothing but an id, so
+ * a child configured for enhanced input got the Web Speech path — and on a
+ * device with no `SpeechRecognition`, a disabled microphone. Nothing about how
+ * a recording is made or stamped changes here: the component is the same one,
+ * and its surface and owner are asserted beside the flag.
+ */
+describe('the reflection mic gets the resolved child’s voice setting', () => {
+  const lastVoiceProfile = () => voiceProps.at(-1)?.profile
+
+  it('passes TRUE through for a child configured for enhanced input', async () => {
+    const bridge = await openEditor({ childVoiceInputEnhanced: true })
+    await saveAVersion(bridge)
+    expect(lastVoiceProfile()?.id).toBe(OWNER.childId)
+    expect(lastVoiceProfile()?.voiceInputEnhanced).toBe(true)
+    expect(voiceProps.at(-1)?.sourceSurface).toBe('build-studio-reflection')
+  })
+
+  it('passes FALSE through for a child configured off', async () => {
+    const bridge = await openEditor({ childVoiceInputEnhanced: false })
+    await saveAVersion(bridge)
+    expect(lastVoiceProfile()).toEqual({
+      id: OWNER.childId,
+      voiceInputEnhanced: false,
+    })
+  })
+
+  it('treats an ABSENT setting as off, which is what it has always meant', async () => {
+    const bridge = await openEditor()
+    await saveAVersion(bridge)
+    expect(lastVoiceProfile()).toEqual({
+      id: OWNER.childId,
+      voiceInputEnhanced: false,
+    })
+  })
+
+  /**
+   * A child switch remounts this editor under the new child (the page keys it
+   * by family + child), so the mic must be the NEW child's — his id and his
+   * own setting, never the previous one's.
+   */
+  it('follows a child switch, id and setting together', async () => {
+    const first = await openEditor({ childVoiceInputEnhanced: true })
+    await saveAVersion(first)
+    expect(lastVoiceProfile()?.voiceInputEnhanced).toBe(true)
+
+    cleanup()
+    const second = await openEditor({ childId: 'c2', childVoiceInputEnhanced: false })
+    await saveAVersion(second)
+    expect(lastVoiceProfile()).toEqual({ id: 'c2', voiceInputEnhanced: false })
+    // And the write that save made is still the switched-to child's own.
+    expect(saveVersion.mock.calls.at(-1)![0].childId).toBe('c2')
+  })
+
+  /**
+   * Provenance is untouched by any of this: the words a mic hands over keep
+   * their own voice event, and a retry re-sends THAT event under the same
+   * child and the same version.
+   */
+  it('keeps the voice event, child and version across a retry', async () => {
+    const bridge = await openEditor({ childVoiceInputEnhanced: true })
+    await saveAVersion(bridge)
+    await sayWords()
+    saveNote.mockRejectedValueOnce(new Error('offline'))
+    await act(async () => {
+      screen.getByRole('button', { name: 'Save my words' }).click()
+    })
+    await waitFor(() => expect(screen.getByText('offline')).toBeInTheDocument())
+    saveNote.mockResolvedValue({ id: 'note-1', alreadySaved: false })
+    await act(async () => {
+      screen.getByRole('button', { name: 'Try again with these words' }).click()
+    })
+    await waitFor(() => expect(saveNote).toHaveBeenCalledTimes(2))
+    const [first, retry] = saveNote.mock.calls.map((call) => call[0])
+    expect(first.voiceEventId).toBe(voiceScript.eventId)
+    expect(retry.voiceEventId).toBe(voiceScript.eventId)
+    expect(retry.childId).toBe(OWNER.childId)
+    expect(retry.versionId).toBe(first.versionId)
+    expect(retry.noteActionId).toBe(first.noteActionId)
   })
 })

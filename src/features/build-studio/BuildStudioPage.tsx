@@ -24,6 +24,14 @@
  *
  * ── The child-switch answer ──────────────────────────────────────────────
  *
+ * Because the editor is handed its child rather than reading the shell, every
+ * per-child SETTING it needs has to come the same way — including the voice
+ * engine his record configures (`childVoiceInputEnhanced`), which is resolved
+ * here for that exact child and passed down, as `TodayPage` and the books chats
+ * do. `VoiceInput` selects the existing Whisper recording only on an explicit
+ * `true`, so a mic handed nothing but an id silently gave a configured child
+ * the browser's own engine instead.
+ *
  * `BuildStudioEditor` is mounted with the resolved child as a PROP and keyed by
  * it, so a change of child or profile unmounts that editor and mounts a new one
  * for whoever the shell now resolves. Two things make that honest rather than
@@ -226,6 +234,16 @@ export default function BuildStudioPage() {
         childId={activeChildId}
         childName={activeChild?.name ?? 'Your'}
         projectId={BUILD_STUDIO_PROJECT_ID}
+        // The resolved child's own voice setting, as Today and the books
+        // chats pass it. The id is re-checked rather than assumed: this must
+        // be the configured value of the child the editor is FOR, and a read
+        // that has not settled is `false` — the same thing an unset flag has
+        // always meant — never another child's answer.
+        childVoiceInputEnhanced={
+          activeChild !== undefined &&
+          activeChild.id === activeChildId &&
+          activeChild.voiceInputEnhanced === true
+        }
         // A shelf read that is about another child or another project is
         // reported as still loading rather than shown.
         versions={

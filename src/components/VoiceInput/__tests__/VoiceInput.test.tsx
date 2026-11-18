@@ -385,3 +385,72 @@ describe('VoiceInput — Web Speech path', () => {
     expect(mockUseTranscription).not.toHaveBeenCalled()
   })
 })
+
+/**
+ * The engine is chosen by the CONFIGURED flag, not by what the browser offers.
+ *
+ * A device with no `SpeechRecognition` is the ordinary case on an Android
+ * tablet in a WebView, and it is exactly where a caller that passes only an id
+ * fails silently: the flag reads `undefined`, the component takes the Web
+ * Speech path, and that path's mic is disabled because the browser has no
+ * engine — a configured child gets a dead microphone and no explanation. These
+ * pin that the enhanced path does not consult `SpeechRecognition` at all.
+ */
+describe('VoiceInput — a configured child on a device with no SpeechRecognition', () => {
+  const unsupportedStt = () => {
+    mockUseSpeechRecognition.mockReturnValue({
+      transcript: '',
+      interimTranscript: '',
+      isListening: false,
+      isSupported: false,
+      start: mockSttStart,
+      stop: mockSttStop,
+      reset: mockSttReset,
+      error: null,
+    })
+  }
+
+  it('still records through Whisper when the flag is true', async () => {
+    unsupportedStt()
+    render(
+      <VoiceInput
+        profile={lincolnProfile}
+        sourceSurface="build-studio-reflection"
+        onTranscript={() => {}}
+      />,
+    )
+    const mic = screen.getByRole('button', { name: /start recording/i })
+    expect(mic).toBeEnabled()
+    await act(async () => {
+      fireEvent.click(mic)
+    })
+    // The existing recording path, unchanged — no second one is introduced.
+    expect(mockStartRecording).toHaveBeenCalled()
+    expect(mockSttStart).not.toHaveBeenCalled()
+  })
+
+  it('is honestly disabled for a child who is NOT configured for it', () => {
+    unsupportedStt()
+    render(
+      <VoiceInput
+        profile={londonProfile}
+        sourceSurface="build-studio-reflection"
+        onTranscript={() => {}}
+      />,
+    )
+    expect(screen.getByRole('button', { name: /start recording/i })).toBeDisabled()
+  })
+
+  it('treats an ABSENT flag as not configured, exactly as before', () => {
+    unsupportedStt()
+    render(
+      <VoiceInput
+        profile={{ id: 'child-no-flag' }}
+        sourceSurface="build-studio-reflection"
+        onTranscript={() => {}}
+      />,
+    )
+    expect(screen.getByRole('button', { name: /start recording/i })).toBeDisabled()
+    expect(mockUseAudioRecording).not.toHaveBeenCalled()
+  })
+})
