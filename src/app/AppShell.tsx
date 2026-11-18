@@ -22,6 +22,11 @@ import {
 import { useAvatarProfile } from '../features/avatar/useAvatarProfile'
 import { isArmorComplete } from '../features/avatar/armorGate'
 import { canAccessKnowledgeMine } from '../features/quest/knowledgeMineAccess'
+import {
+  buildStudioIsOpen,
+  resolveBuildStudioAccess,
+} from '../features/build-studio/buildStudioAccess'
+import { useBuildStudioOptIn } from '../features/build-studio/useBuildStudioOptIn'
 
 const navItems = [
   { label: 'Today', to: '/today' },
@@ -45,6 +50,11 @@ const navItems = [
   { label: 'Watch Library', to: '/watch', parentOnly: true },
   { label: 'Barnes Bros', to: '/business' },
   { label: 'Game Workshop', to: '/workshop' },
+  // The Build Studio (LOCAL-BUILD-001). Hidden until the selected child's own
+  // opt-in says yes — the `/quest` rule: nav and the route guard share ONE
+  // predicate, so the menu never advertises a link the guard will bounce. A
+  // parent's entry opens the read-only view of that child's saved versions.
+  { label: 'Build Studio', to: '/build-studio' },
   { label: 'Dad Lab', to: '/dad-lab' },
   { label: 'Settings', to: '/settings', parentOnly: true },
   { label: 'Ask AI', to: '/chat', parentOnly: true },
@@ -52,6 +62,10 @@ const navItems = [
 
 const kidNavItems = [
   { label: 'Today', to: '/today' },
+  // LOCAL-BUILD-001: the building-first pilot sits directly after Today so it
+  // is easy to find. It is the ONE new row, and every existing item keeps its
+  // relative order below it. Hidden until this child's own opt-in says yes.
+  { label: 'Build Studio', to: '/build-studio' },
   { label: 'Knowledge Mine', to: '/quest' },
   { label: 'My Books', to: '/books' },
   { label: 'Books About Me', to: '/books-about-me' },
@@ -86,6 +100,7 @@ function NavContent({
   avatarProfile,
   armorReady,
   showKnowledgeMine,
+  showBuildStudio,
   showChildChip = true,
 }: {
   isParent: boolean
@@ -94,6 +109,12 @@ function NavContent({
   avatarProfile?: import('../core/types').AvatarProfile | null
   armorReady?: boolean
   showKnowledgeMine?: boolean
+  /**
+   * LOCAL-BUILD-001 — whether the selected child's Build Studio opt-in has
+   * ANSWERED and said yes. Undefined or false hides the entry for both
+   * profiles, so an unsettled or failed read advertises nothing.
+   */
+  showBuildStudio?: boolean
   /**
    * `UX-425`: this component is BOTH the desktop sidebar and the mobile drawer,
    * and they do not have the same neighbours. On desktop the sidebar chip is
@@ -108,9 +129,12 @@ function NavContent({
   // Hide the Knowledge Mine item for kids without Mine calibration — the /quest
   // route guard would silently bounce them to Today, so nav shouldn't advertise
   // a link that goes nowhere. Same predicate as RequireKnowledgeMineAccess.
-  const items = (isParent ? navItems : kidNavItems).filter(
-    (item) => item.to !== '/quest' || isParent || showKnowledgeMine,
-  )
+  const items = (isParent ? navItems : kidNavItems)
+    .filter((item) => item.to !== '/quest' || isParent || showKnowledgeMine)
+    // Unlike the Mine's, this one hides for a PARENT too: the parent entry
+    // opens a read-only view of one child's saved versions, which is nothing
+    // at all until that child has been opted in.
+    .filter((item) => item.to !== '/build-studio' || showBuildStudio === true)
   return (
     <>
       <div className="app-shell__profile-row">
@@ -197,6 +221,9 @@ export function AppShell({ children }: AppShellProps) {
   const {
     activeChild,
     activeChildId,
+    isChildProfile,
+    childrenFamilyId,
+    profileChildResolved,
     isLoading: childrenLoading,
     loadFailed: childrenLoadFailed,
   } = useActiveChild()
@@ -222,6 +249,31 @@ export function AppShell({ children }: AppShellProps) {
     !isParent && kidSnapshotLoaded && canAccessKnowledgeMine(kidSnapshot)
 
   const armorReady = !isParent && avatarProfile ? isArmorComplete(avatarProfile) : undefined
+
+  // The Build Studio entry reads the SAME rule as its route guard and its page
+  // (LOCAL-BUILD-001), so the menu and the door can never disagree. It is one
+  // settings-document subscribe, and `buildStudioIsOpen` is false for BOTH
+  // refusals — a read that has not answered, or has failed, advertises nothing.
+  //
+  // A PARENT now sees the entry before enrolment, because her view is the
+  // read-only shelf plus the switch that grants it; gating her on `enabled`
+  // left no door to the thing that opens the door. A CHILD still needs the
+  // affirmative opt-in, and that is decided inside the rule.
+  const buildStudioOptIn = useBuildStudioOptIn(familyId, activeChildId || null)
+  const showBuildStudio = buildStudioIsOpen(
+    resolveBuildStudioAccess({
+      familyId,
+      profile,
+      isChildProfile,
+      childId: activeChildId,
+      resolvedChild: activeChild ?? null,
+      childrenLoading,
+      childrenLoadFailed,
+      childrenFamilyId,
+      profileChildResolved,
+      optIn: buildStudioOptIn,
+    }),
+  )
 
   // The Stonebridge → My Books journey outlives each page in it, so its route
   // transitions are watched HERE: the layout route is the one thing mounted
@@ -277,7 +329,7 @@ export function AppShell({ children }: AppShellProps) {
     <div className="app-shell">
       {/* Desktop sidebar (hidden on mobile via CSS) */}
       <aside className="app-shell__nav">
-        <NavContent isParent={isParent} activeChild={activeChild} avatarProfile={avatarProfile} armorReady={armorReady} showKnowledgeMine={showKnowledgeMine} />
+        <NavContent isParent={isParent} activeChild={activeChild} avatarProfile={avatarProfile} armorReady={armorReady} showKnowledgeMine={showKnowledgeMine} showBuildStudio={showBuildStudio} />
       </aside>
 
       {/* Mobile header + drawer (hidden on desktop via CSS) */}
@@ -350,6 +402,7 @@ export function AppShell({ children }: AppShellProps) {
           avatarProfile={avatarProfile}
           armorReady={armorReady}
           showKnowledgeMine={showKnowledgeMine}
+          showBuildStudio={showBuildStudio}
           showChildChip={false}
         />
       </Drawer>

@@ -65,6 +65,12 @@ vi.mock('../core/hooks/useActiveChild', () => ({
   useActiveChild: () => activeChildRef.current,
 }))
 vi.mock('../core/auth/useAuth', () => ({ useAuth: () => ({ familyId: 'family-1' }) }))
+// LOCAL-BUILD-001: the nav's Build Studio gate subscribes to one settings
+// document. Stubbed CLOSED here, like every other Firestore-touching hook in
+// this file, so these tests stay about the chip and reach no network.
+vi.mock('../features/build-studio/useBuildStudioOptIn', () => ({
+  useBuildStudioOptIn: () => ({ status: 'ready', enabled: false, childId: null }),
+}))
 vi.mock('../features/avatar/useAvatarProfile', () => ({ useAvatarProfile: () => null }))
 vi.mock('../core/hooks/useChildSkillSnapshot', () => ({
   useChildSkillSnapshot: () => ({ snapshot: null, loaded: true }),

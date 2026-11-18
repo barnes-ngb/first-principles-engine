@@ -144,6 +144,13 @@ export const PROBED_COLLECTIONS: readonly string[] = [
   'avatarProfiles',
   'bookProgress',
   'books',
+  // LOCAL-BUILD-001 — a child's own saved game source. The id is
+  // `{childId}__{projectId}__{versionId}`, so the doc-id PREFIX probe sees it,
+  // and each document also carries a `childId` field; both shapes matter here,
+  // which is why the collection is named rather than reasoned about. It holds
+  // the only copy of something a child made, so the duplicate-child survey
+  // must see it before offering any deletion.
+  'buildStudioVersions',
   'businessGoals',
   'businessLog',
   'catalogProducts',

@@ -29,6 +29,7 @@ import {
   AIFeatureFlagLabel,
   useAIFeatureFlags,
 } from '../../core/ai/featureFlags'
+import BuildStudioSettingsSection from '../build-studio/BuildStudioSettingsSection'
 import AccountSection from './AccountSection'
 import AIUsagePanel from './AIUsagePanel'
 import AvatarAdminTab from './AvatarAdminTab'
@@ -213,6 +214,13 @@ export default function SettingsPage() {
             {isParent && <Divider />}
 
             {isParent && <VoiceInputSection />}
+
+            {isParent && <Divider />}
+
+            {/* LOCAL-BUILD-001 — the per-child Build Studio opt-in. Parent
+                only, propose → confirm, and the ONLY thing that opens that
+                surface for a child. */}
+            {isParent && <BuildStudioSettingsSection />}
 
             {isParent && <Divider />}
 

@@ -97,6 +97,37 @@ export interface Artifact {
    * without the app overwriting her words. Additive and optional.
    */
   topic?: string
+  /**
+   * What a Build Studio reflection note is ABOUT (LOCAL-BUILD-001).
+   *
+   * Additive and **optional** — absent on every artifact that exists today and
+   * on every artifact captured anywhere else, so every reader must treat it as
+   * absent-able exactly as `watchVideoId` and `activityConfigId` are.
+   *
+   * It carries an EXACT version reference rather than "his latest game",
+   * because the point of a reflection is what he said about one particular
+   * save, and the versions are immutable so the reference stays true.
+   *
+   * `help` is deliberately a three-valued answer, not a boolean, and it says
+   * **offered** rather than *heard*: the app knows it asked the browser to
+   * speak a hint, not that a child listened, and the device may have been
+   * muted. A note saved in a visit whose hint history the app did not observe
+   * says **unknown** rather than reporting zero.
+   */
+  buildStudio?: {
+    projectId: string
+    versionId: string
+    /** The stored version document's own id. */
+    versionDocId: string
+    /** The confirmed-save action this note belongs to. */
+    noteActionId?: string
+    /** How the words were captured. */
+    capture: 'voice' | 'typed'
+    /** How much authored help was OFFERED before he said this. */
+    help: 'none-offered' | 'hints-offered' | 'unknown'
+    /** How many rungs, when `help` is `hints-offered`. Never a score. */
+    hintsOffered?: number
+  }
 }
 
 // ── Lincoln's Ladders (card-based) ──────────────────────────────
