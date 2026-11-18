@@ -1,6 +1,12 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 
-import type { BuildStudioSourceFiles } from '../../core/types/buildStudio'
+import {
+  BUILD_STUDIO_MAX_ARCHIVE_BYTES,
+  BUILD_STUDIO_MAX_FILE_BYTES,
+  serializeBuildStudioSource,
+  utf8ByteLength,
+  type BuildStudioSourceFiles,
+} from '../../core/types/buildStudio'
 import {
   ARCADE_ORIGIN,
   ARCADE_TOO_BIG_TO_SAVE,
@@ -8,10 +14,12 @@ import {
   ArcadeBridgeError,
   ArcadeBridgeFailure,
   payloadWithinCaps,
+  projectShapeComplete,
   readPayloadCaps,
   readProjectFiles,
   type RejectedMessage,
 } from './arcadeBridge'
+import { RecoveryRefused, readRecoveryArchive } from './buildStudioExport'
 import { BUILD_STUDIO_PROJECT_NAME } from './buildStudioStarter'
 
 /**
@@ -1092,7 +1100,9 @@ describe('an oversized payload is never held as a save', () => {
 
   it('refuses a project with too many files', () => {
     const { bridge, frame, rejected } = makeBridge()
-    const text: Record<string, string> = { 'pxt.json': '{}' }
+    // A COMPLETE project — manifest and program — so the only thing wrong with
+    // it is the count, and the refusal this asserts is the count's.
+    const text: Record<string, string> = { 'pxt.json': '{}', 'main.ts': 'info.setLife(3)' }
     for (let i = 0; i < 40; i += 1) text[`f${i}.ts`] = 'x'
     bridge.handleMessage(
       event(frame, {
@@ -1125,6 +1135,434 @@ describe('an oversized payload is never held as a save', () => {
     expect(
       payloadWithinCaps({ 'pxt.json': '{}', 'main.ts': '界'.repeat(150_000) }),
     ).toBe(false)
+  })
+})
+
+/**
+ * Admission is measured over the ARCHIVE, not the sum of the file contents.
+ *
+ * The witnessed hole: a payload whose contents summed to 600,002 bytes
+ * serialized to an 800,060-byte archive — admitted here, refused by the
+ * 700,000-byte writer, and written out as a "recovery" file the app's own reader
+ * will not open. Each case ties the bridge's answer to the real serializer's
+ * bytes and the real reader's refusal rather than to a copy of the arithmetic.
+ *
+ * POSITIVE CONTROL for the whole block: size the archive cap against
+ * `totalBytes` again in `readPayloadCaps` and the first three cases fail.
+ */
+describe('admission is the archive this app would store', () => {
+  /**
+   * The witnessed payload: 600,002 bytes of contents, an 800,060-byte archive.
+   * Half of each big file is `"`, which JSON escapes to `\"`. The count is 3 and
+   * the largest file is 299,991 bytes, so the ARCHIVE cap is the only one in
+   * play.
+   */
+  const escapeBomb = (): BuildStudioSourceFiles => ({
+    'pxt.json': '{"files":["main.ts"]}',
+    'main.ts': `${'"'.repeat(100_001)}${'m'.repeat(199_989)}`,
+    'a.ts': `${'"'.repeat(100_002)}${'a'.repeat(199_989)}`,
+  })
+
+  it('refuses the raw-600,002 / canonical-800,060 payload the reviewer found', () => {
+    const files = escapeBomb()
+    const reading = readPayloadCaps(files)
+    // The number the bridge USED to read, which is comfortably inside the cap…
+    expect(reading.totalBytes).toBe(600_002)
+    expect(reading.totalBytes).toBeLessThan(BUILD_STUDIO_MAX_ARCHIVE_BYTES)
+    // …and the archive that would actually be stored, which is not. Asserted
+    // against the serializer itself, so this cannot drift from the real format.
+    expect(reading.archiveBytes).toBe(800_060)
+    expect(reading.archiveBytes).toBe(utf8ByteLength(serializeBuildStudioSource(files)))
+    // Nothing else is wrong with it: the count and every single file fit.
+    expect(reading.fileCount).toBe(3)
+    expect(reading.largestFileBytes).toBeLessThanOrEqual(BUILD_STUDIO_MAX_FILE_BYTES)
+    expect(reading.withinCaps).toBe(false)
+    // And it is not a recovery copy either, because the file it would write is
+    // one this app refuses to open.
+    expect(reading.overFileCapOnly).toBe(false)
+    expect(() => readRecoveryArchive(serializeBuildStudioSource(files))).toThrow(
+      RecoveryRefused,
+    )
+  })
+
+  it('refuses it at the bridge, and keeps no bytes to hand back', () => {
+    const { bridge, frame, rejected } = makeBridge()
+    bridge.handleMessage(
+      event(frame, {
+        type: 'pxthost',
+        action: 'workspacesave',
+        frameId: bridge.frameId,
+        project: { header: ourProject().header, text: escapeBomb() },
+      }),
+    )
+    expect(rejected.map((r) => r.reason)).toEqual(['payload-too-big'])
+    // Not a save…
+    expect(bridge.editorSaveSeen()).toBeNull()
+    // …and the FACT without the bytes, so the page refuses a current download
+    // out loud instead of writing an unreadable one.
+    expect(bridge.sourceOverCaps()).toBe(true)
+    expect(bridge.oversizedSourceForDownload()).toBeNull()
+  })
+
+  /**
+   * An escaping-heavy project sized to an exact archive length.
+   *
+   * Sized BY the real serializer rather than by a formula: the padding file is
+   * plain ASCII, where one more character is one more archive byte, and the
+   * cases below check the result against `serializeBuildStudioSource` instead of
+   * trusting the sum. Everything else in it is deliberately awkward — quotes,
+   * backslashes, tabs, newlines, a three-byte character, a four-byte emoji, an
+   * editor-private journal and the simulator's scratch file.
+   */
+  const privateJournal = `${'h'.repeat(500_000)}"`
+  function boundaryFiles(archiveBytes: number): BuildStudioSourceFiles {
+    const base: Record<string, string> = {
+      'pxt.json': JSON.stringify({
+        name: 'Apple "Dash"',
+        files: ['main.ts', 'main.blocks', 'a.ts', 'b.ts'],
+      }),
+      'main.ts': '// "界" \\ \there\nlet s = "🎮\\n"\n'.repeat(400),
+      'main.blocks': '<block type="x" field="\\"界\\"">\n</block>\n'.repeat(1_000),
+      '.simstate.json': '{"S/#run":"1","S/#scope":"a"}',
+      // Editor-private, so the canonical archive leaves it out. A 500 KB undo
+      // journal may not decide whether the child's game fits.
+      _history: privateJournal,
+      'a.ts': 'a'.repeat(250_000),
+      'b.ts': '',
+    }
+    const short = archiveBytes - utf8ByteLength(serializeBuildStudioSource(base))
+    return { ...base, 'b.ts': 'b'.repeat(short) }
+  }
+
+  /**
+   * Typed as a tuple list rather than left to inference: a heterogeneous inline
+   * array infers `(string | number)[]`, which would make the size a
+   * `string | number` the helper cannot take.
+   */
+  const boundaryCases: Array<[string, number]> = [
+    ['just under', BUILD_STUDIO_MAX_ARCHIVE_BYTES - 1],
+    ['exactly at', BUILD_STUDIO_MAX_ARCHIVE_BYTES],
+  ]
+
+  it.each(boundaryCases)(
+    'accepts an escaping-heavy project %s the boundary, and reads it back byte-identically',
+    (_label, target) => {
+      const files = boundaryFiles(target)
+      const archive = serializeBuildStudioSource(files)
+      expect(utf8ByteLength(archive)).toBe(target)
+
+      const reading = readPayloadCaps(files)
+      expect(reading.archiveBytes).toBe(target)
+      expect(reading.withinCaps).toBe(true)
+      // The boundary under test is the ARCHIVE's: no file is near its own cap,
+      // so a per-file refusal cannot be what this case is reading.
+      expect(reading.largestFileBytes).toBeLessThanOrEqual(BUILD_STUDIO_MAX_FILE_BYTES)
+      // The private journal is outside the archive, so it is not what fits.
+      expect(archive).not.toContain('_history')
+      expect(utf8ByteLength(privateJournal)).toBeGreaterThan(BUILD_STUDIO_MAX_FILE_BYTES)
+
+      // The recovery really is one: this app opens its own file, and
+      // re-serializing what it read reproduces the same bytes exactly —
+      // escaping, file names, whitespace, unicode and all.
+      const read = readRecoveryArchive(archive)
+      expect(serializeBuildStudioSource(read)).toBe(archive)
+      expect(read['main.ts']).toBe(files['main.ts'])
+      expect(read['main.blocks']).toBe(files['main.blocks'])
+      expect(read['.simstate.json']).toBe(files['.simstate.json'])
+      expect(read['main.ts']).toContain('界')
+      expect(read['main.ts']).toContain('🎮')
+      expect(read['_history']).toBeUndefined()
+    },
+  )
+
+  it('refuses the same project one byte past the boundary', () => {
+    const files = boundaryFiles(BUILD_STUDIO_MAX_ARCHIVE_BYTES + 1)
+    const archive = serializeBuildStudioSource(files)
+    expect(utf8ByteLength(archive)).toBe(700_001)
+    const reading = readPayloadCaps(files)
+    expect(reading.withinCaps).toBe(false)
+    // Not a download copy either, for the reason the reader gives next.
+    expect(reading.overFileCapOnly).toBe(false)
+    expect(reading.largestFileBytes).toBeLessThanOrEqual(BUILD_STUDIO_MAX_FILE_BYTES)
+    expect(() => readRecoveryArchive(archive)).toThrow(RecoveryRefused)
+  })
+
+  /**
+   * The per-file-only case is unchanged, and now PROVABLY recoverable.
+   *
+   * `overFileCapOnly` is the page's licence to hand bytes back, so what it must
+   * guarantee is that the file written is one this app can open again. Measuring
+   * the archive is what makes that true rather than hoped for.
+   */
+  it('still holds a per-file-only oversize, and that copy really imports', () => {
+    const files: BuildStudioSourceFiles = {
+      'pxt.json': '{"files":["main.ts","main.blocks"]}',
+      'main.ts': 'info.setLife(9)',
+      'main.blocks': `<xml>${'b'.repeat(400_001)}</xml>`,
+    }
+    const reading = readPayloadCaps(files)
+    expect(reading.withinCaps).toBe(false)
+    expect(reading.largestFileBytes).toBeGreaterThan(BUILD_STUDIO_MAX_FILE_BYTES)
+    expect(reading.overFileCapOnly).toBe(true)
+    expect(reading.archiveBytes).toBeLessThanOrEqual(BUILD_STUDIO_MAX_ARCHIVE_BYTES)
+
+    const read = readRecoveryArchive(serializeBuildStudioSource(files))
+    expect(read['main.blocks']).toBe(files['main.blocks'])
+    expect(read['main.ts']).toBe('info.setLife(9)')
+  })
+
+  it('counts a unicode payload in bytes, in the archive too', () => {
+    // 240,000 CHARACTERS, which a character cap would wave through, and 720,002
+    // bytes. JSON does not escape these, so the archive is the contents plus
+    // the structure and nothing more — but it is still bytes, and still over.
+    const files: BuildStudioSourceFiles = {
+      'pxt.json': '{}',
+      'main.ts': '界'.repeat(120_000),
+      'a.ts': '界'.repeat(120_000),
+    }
+    const reading = readPayloadCaps(files)
+    expect(reading.totalBytes).toBe(720_002)
+    expect(reading.archiveBytes).toBe(utf8ByteLength(serializeBuildStudioSource(files)))
+    expect(reading.archiveBytes).toBeGreaterThan(reading.totalBytes)
+    // Every single file fits, so the archive cap is what refuses it.
+    expect(reading.largestFileBytes).toBeLessThanOrEqual(BUILD_STUDIO_MAX_FILE_BYTES)
+    expect(reading.withinCaps).toBe(false)
+    expect(reading.overFileCapOnly).toBe(false)
+  })
+})
+
+/**
+ * A project missing a required file is neither a save nor a recovery copy, and
+ * it is the NEWEST reading of the current source.
+ *
+ * Two witnessed holes. A same-header `pxt.json` + `main.blocks` map with no
+ * `main.ts` was accepted, saved and exported as a recovery archive the app's own
+ * reader refuses. And an incomplete map arriving after an over-cap one left the
+ * over-cap bytes standing as "current", so *Download a copy* exported a
+ * superseded game.
+ *
+ * So an own, readable, incomplete map is refused AND invalidates what the
+ * running capture holds — the conservative answer, "this page does not know what
+ * is in the editor", never "here is something older". Foreign, published and
+ * non-map traffic still only gets ignored.
+ *
+ * POSITIVE CONTROLS are named per case.
+ */
+describe('a project missing a required file is refused', () => {
+  const noMainTs = () => ({
+    'pxt.json': '{"files":["main.blocks"]}',
+    'main.blocks': '<xml/>',
+  })
+  /** The other half of the pair: a program with no manifest. */
+  const noPxtJson = () => ({ 'main.ts': 'info.setLife(3)', 'main.blocks': '<xml/>' })
+
+  function readyBridge() {
+    const made = makeBridge()
+    made.bridge.handleMessage(
+      event(made.frame, {
+        type: 'pxthost',
+        action: 'workspaceloaded',
+        id: 'l',
+        frameId: made.bridge.frameId,
+      }),
+    )
+    made.frame.posted.length = 0
+    return made
+  }
+
+  function announce(
+    made: ReturnType<typeof readyBridge>,
+    text: Record<string, unknown>,
+    header: Record<string, unknown> = {},
+  ) {
+    made.bridge.handleMessage(
+      event(made.frame, {
+        type: 'pxthost',
+        action: 'workspacesave',
+        frameId: made.bridge.frameId,
+        project: { header: { ...ourProject().header, ...header }, text },
+      }),
+    )
+  }
+
+  /** The ACK, optionally carrying a project body of its own. */
+  function ack(made: ReturnType<typeof readyBridge>, id: unknown, project?: unknown) {
+    made.bridge.handleMessage(
+      event(made.frame, {
+        type: 'pxteditor',
+        action: 'saveproject',
+        id,
+        frameId: made.bridge.frameId,
+        success: true,
+        ...(project ? { project } : {}),
+      }),
+    )
+  }
+
+  it('reads the same required pair the writer and the reader do', () => {
+    expect(projectShapeComplete({ 'pxt.json': '{}', 'main.ts': 'x' })).toBe(true)
+    expect(projectShapeComplete(noMainTs())).toBe(false)
+    expect(projectShapeComplete(noPxtJson())).toBe(false)
+    // Blank is absent: whitespace-only text is not a manifest and not a program.
+    expect(projectShapeComplete({ 'pxt.json': '{}', 'main.ts': '   \n' })).toBe(false)
+    expect(projectShapeComplete({ 'pxt.json': '  ', 'main.ts': 'x' })).toBe(false)
+  })
+
+  /** Typed as tuples so the map is a file map and not a `string | …` union. */
+  const incompleteCases: Array<[string, Record<string, string>]> = [
+    ['no main.ts', noMainTs()],
+    ['no pxt.json', noPxtJson()],
+    ['a blank main.ts', { 'pxt.json': '{}', 'main.ts': '   ' }],
+    ['a blank pxt.json', { 'pxt.json': ' \n ', 'main.ts': 'info.setLife(3)' }],
+  ]
+
+  it.each(incompleteCases)(
+    'refuses a same-header map with %s, as its own reason',
+    (_label, text) => {
+      const made = readyBridge()
+      announce(made, text)
+      // Not foreign — it is ours — and not too big. It is incomplete.
+      expect(made.rejected.map((r) => r.reason)).toEqual(['incomplete-project'])
+      expect(made.bridge.editorSaveSeen()).toBeNull()
+      // And it is not offered as a recoverable copy either.
+      expect(made.bridge.sourceOverCaps()).toBe(false)
+      expect(made.bridge.oversizedSourceForDownload()).toBeNull()
+    },
+  )
+
+  it('refuses what the recovery reader itself refuses', () => {
+    // The reason the bridge may not offer these as a copy: the archive each one
+    // would write is a file this app will not open again.
+    for (const text of [noMainTs(), noPxtJson()]) {
+      expect(() => readRecoveryArchive(serializeBuildStudioSource(text))).toThrow(
+        RecoveryRefused,
+      )
+    }
+  })
+
+  it('never keeps an incomplete project for a download, however it is sized', () => {
+    const made = readyBridge()
+    announce(made, { ...noMainTs(), 'main.blocks': 'b'.repeat(400_001) })
+    expect(made.rejected.map((r) => r.reason)).toEqual(['incomplete-project'])
+    expect(made.bridge.sourceOverCaps()).toBe(false)
+    expect(made.bridge.oversizedSourceForDownload()).toBeNull()
+  })
+
+  /**
+   * POSITIVE CONTROL: drop `this.capture.latest = null` from `refuseIncomplete`
+   * and this case resolves with the superseded four-life source, which is the
+   * witnessed defect.
+   */
+  it('refuses a capture whose last reading of ours was incomplete', async () => {
+    const made = readyBridge()
+    const pending = made.bridge.requestSnapshot()
+    const id = made.frame.posted.at(-1)!.message.id
+    announce(made, ourProject({ text: { 'main.ts': 'info.setLife(4)' } }).text)
+    announce(made, noMainTs())
+    ack(made, id)
+    await expect(pending).rejects.toMatchObject({
+      kind: ArcadeBridgeFailure.BadProject,
+      // Not a size failure, so not the size sentence and not the size stamp.
+      message: expect.stringContaining('try Save again'),
+      tooBig: false,
+    })
+    expect(made.rejected.map((r) => r.reason)).toEqual(['incomplete-project'])
+  })
+
+  it('refuses when the incomplete map is the ACK’s own body', async () => {
+    const made = readyBridge()
+    const pending = made.bridge.requestSnapshot()
+    const id = made.frame.posted.at(-1)!.message.id
+    announce(made, ourProject({ text: { 'main.ts': 'info.setLife(4)' } }).text)
+    ack(made, id, { header: ourProject().header, text: noPxtJson() })
+    await expect(pending).rejects.toMatchObject({
+      kind: ArcadeBridgeFailure.BadProject,
+      tooBig: false,
+    })
+    expect(made.rejected.map((r) => r.reason)).toEqual(['incomplete-project'])
+  })
+
+  /**
+   * POSITIVE CONTROL: leave `refusedTooBig` and `overCaps` alone in
+   * `refuseIncomplete` and this case reports the size refusal and exports the
+   * superseded over-cap bytes as the current game.
+   */
+  it('drops the over-cap bytes, and the size stamp, when a newer reading is incomplete', async () => {
+    const made = readyBridge()
+    const pending = made.bridge.requestSnapshot()
+    const id = made.frame.posted.at(-1)!.message.id
+    // Over the per-file cap only, so the bytes are held for a download…
+    announce(made, {
+      ...ourProject({ text: { 'main.ts': 'info.setLife(4)' } }).text,
+      'main.blocks': 'b'.repeat(400_001),
+    })
+    expect(made.bridge.sourceOverCaps()).toBe(true)
+    expect(made.bridge.oversizedSourceForDownload()).not.toBeNull()
+    // …and then a newer reading of ours says the source is not a project at all.
+    announce(made, noPxtJson())
+    expect(made.bridge.sourceOverCaps()).toBe(false)
+    expect(made.bridge.oversizedSourceForDownload()).toBeNull()
+    ack(made, id)
+    await expect(pending).rejects.toMatchObject({
+      kind: ArcadeBridgeFailure.BadProject,
+      tooBig: false,
+    })
+    expect(made.rejected.map((r) => r.reason)).toEqual([
+      'payload-too-big',
+      'incomplete-project',
+    ])
+  })
+
+  /**
+   * And a later VALID payload still recovers — the refusal is about the newest
+   * reading, not a latch.
+   *
+   * POSITIVE CONTROL: this is also the stock positive control for the whole
+   * block — an ordinary complete save, whatever came before it, succeeds.
+   */
+  it('lets a later complete payload recover the same capture', async () => {
+    const made = readyBridge()
+    const pending = made.bridge.requestSnapshot()
+    const id = made.frame.posted.at(-1)!.message.id
+    announce(made, noMainTs())
+    announce(made, ourProject({ text: { 'main.ts': 'info.setLife(5)' } }).text)
+    ack(made, id)
+    const captured = await pending
+    expect(captured.files['main.ts']).toBe('info.setLife(5)')
+    expect(made.bridge.editorSaveSeen()?.files['main.ts']).toBe('info.setLife(5)')
+  })
+
+  /**
+   * Not all bad traffic invalidates. A map that is not OURS, or not a map of
+   * text at all, says nothing about the child's source — so a capture that has
+   * collected a valid payload still answers with it.
+   *
+   * POSITIVE CONTROL: route the foreign and non-string refusals through
+   * `refuseIncomplete` and this case fails the save it should have made.
+   */
+  it('still answers a capture after foreign or malformed traffic', async () => {
+    const made = readyBridge()
+    const pending = made.bridge.requestSnapshot()
+    const id = made.frame.posted.at(-1)!.message.id
+    announce(made, ourProject({ text: { 'main.ts': 'info.setLife(6)' } }).text)
+    // A different project in the same frame…
+    announce(made, noMainTs(), { id: 'header-2' })
+    // …and a map whose values are not all text.
+    made.bridge.handleMessage(
+      event(made.frame, {
+        type: 'pxthost',
+        action: 'workspacesave',
+        frameId: made.bridge.frameId,
+        project: { header: ourProject().header, text: { 'pxt.json': '{}', 'main.ts': 7 } },
+      }),
+    )
+    ack(made, id)
+    const captured = await pending
+    expect(captured.files['main.ts']).toBe('info.setLife(6)')
+    expect(made.rejected.map((r) => r.reason)).toEqual([
+      'foreign-project',
+      'foreign-project',
+    ])
   })
 })
 

@@ -214,6 +214,22 @@ class FakeBridgeStub {
     this.overCapsFiles = files ? { ...files } : null
     this.captureError = sizeRefusal()
   }
+
+  /**
+   * Pretend MakeCode announced a map of OURS that is missing `pxt.json` or
+   * `main.ts`.
+   *
+   * The real bridge's `refuseIncomplete`, faithfully: not an editor save, and
+   * the newest reading of the source — so any over-cap bytes it was holding are
+   * dropped, the size stamp goes with them, and the capture fails UNSTAMPED.
+   */
+  announceIncomplete() {
+    this.overCaps = false
+    this.overCapsFiles = null
+    this.captureError = captureFailure(
+      'The editor said it saved but did not hand the game over. Nothing was saved — try Save again.',
+    )
+  }
   /** Pretend the handshake completed. */
   ready() {
     this.onEditorLoaded()
@@ -391,6 +407,9 @@ vi.mock('../../core/firebase/firestore', () => ({
 }))
 
 import { serializeBuildStudioSource } from '../../core/types/buildStudio'
+// The real reader, through the partially-mocked module: only `downloadTextFile`
+// is replaced above, so this is the same function a parent's re-import runs.
+import { readRecoveryArchive } from './buildStudioExport'
 import {
   claimNoteSend,
   clearPendingNote,
@@ -2078,6 +2097,90 @@ describe('a download is the CURRENT game or an honest refusal', () => {
     // is on the shelf.
     expect(file!.filename).toContain('too-big-to-save')
     expect(screen.getByText(/NOT on your shelf/)).toBeInTheDocument()
+  })
+
+  /**
+   * Whatever it hands over, it is a file this app can open again (UX-499).
+   *
+   * The bridge used to admit a payload by adding up its file CONTENTS while the
+   * archive — the file written here — is larger, so a "recovery" copy could be
+   * one `readRecoveryArchive` refuses. This drives the real page, the real
+   * serializer and the real reader end to end: what a person is handed is
+   * re-importable, and when it cannot be, nothing goes out at all.
+   *
+   * POSITIVE CONTROL: size the bridge's archive cap against the sum of the file
+   * contents again and the admitted-but-unreadable case this pins comes back.
+   */
+  it('hands over a copy its own recovery can open, or hands over nothing', async () => {
+    const bridge = await openEditor()
+    await act(async () => {
+      bridge.announce(editedFiles(4))
+    })
+    // Over the per-file cap only, so the archive is still bounded and the bytes
+    // are offered.
+    bridge.refuseTooBig(tooBigFiles(5))
+    await tapSave()
+    await waitFor(() =>
+      expect(screen.getByText(/too big for this app to keep/)).toBeInTheDocument(),
+    )
+    downloads.length = 0
+    await tapDownload()
+    const recovered = readRecoveryArchive(archive()!.text)
+    expect(recovered['main.ts']).toBe(tooBigFiles(5)['main.ts'])
+    expect(recovered['main.blocks']).toBe(tooBigFiles(5)['main.blocks'])
+
+    // And the other half of the contract: a current source too big to hand back
+    // writes NOTHING, rather than an unopenable file or the earlier game.
+    bridge.refuseTooBig(null)
+    downloads.length = 0
+    await tapDownload()
+    expect(downloads).toHaveLength(0)
+  })
+
+  /**
+   * The over-cap bytes are not the current game once a NEWER reading says the
+   * source is not a project (UX-499).
+   *
+   * Witnessed: an over-per-file-cap source was held for a download, the editor
+   * then announced a map of ours with no `pxt.json`, and *Download a copy*
+   * exported the superseded held bytes as "the game that is open". The bridge
+   * drops them; this pins what the page then does — refuses out loud, and offers
+   * the earlier copy only through its own labelled door.
+   *
+   * POSITIVE CONTROL: keep the over-cap bytes on an incomplete reading and this
+   * case exports `info.setLife(5)` as the current game.
+   */
+  it('refuses a current copy once the source stops being a project, and swaps nothing', async () => {
+    const bridge = await openEditor()
+    await act(async () => {
+      bridge.announce(editedFiles(4))
+    })
+    bridge.refuseTooBig(tooBigFiles(5))
+    await tapSave()
+    await waitFor(() =>
+      expect(screen.getByText(/too big for this app to keep/)).toBeInTheDocument(),
+    )
+    // The newer reading: ours, readable, and not a project.
+    bridge.announceIncomplete()
+
+    downloads.length = 0
+    await tapDownload()
+    // Nothing went out under the open game's name — in particular not the held
+    // over-cap bytes and not the older accepted game.
+    expect(downloads).toHaveLength(0)
+    expect(
+      screen.getByText(/could not get your game out of the editor just now/),
+    ).toBeInTheDocument()
+
+    // The earlier copy is still reachable, named as itself, by its own tap.
+    await act(async () => {
+      screen.getByText('Download the earlier copy').click()
+    })
+    expect(archive()!.text).toContain('info.setLife(4)')
+    expect(archive()!.text).not.toContain('info.setLife(5)')
+    expect(archive()!.filename).toContain('earlier-copy')
+    // And a download still writes nothing.
+    expect(saveVersion).not.toHaveBeenCalled()
   })
 
   it('refuses out loud when the current source is too big to hand back', async () => {

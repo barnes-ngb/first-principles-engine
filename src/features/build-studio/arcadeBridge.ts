@@ -38,6 +38,12 @@
  * same header id. That is what makes the editor's own auto-created *Untitled*
  * project, which really does appear, something this ignores rather than saves.
  *
+ * Being ours is not enough to be STORABLE or RECOVERABLE. Admission uses the
+ * writer's and the recovery reader's own rules: `pxt.json` and `main.ts` present
+ * and non-blank ({@link projectShapeComplete}), and the caps read against the
+ * canonical archive all three exchange ({@link readPayloadCaps}). So a project
+ * this bridge admits is one that can be saved and whose download can be reopened.
+ *
  * ── What it never sends ───────────────────────────────────────────────────
  *
  * Only editor-required project source leaves the app: the file map and the
@@ -53,6 +59,7 @@ import {
   BUILD_STUDIO_MAX_FILES,
   BUILD_STUDIO_MAX_FILE_BYTES,
   buildStudioSourceKeys,
+  serializeBuildStudioSource,
   utf8ByteLength,
   type BuildStudioSourceFiles,
 } from '../../core/types/buildStudio'
@@ -176,6 +183,8 @@ export interface RejectedMessage {
     | 'unsolicited'
     | 'scope'
     | 'foreign-project'
+    /** Ours and readable as text, but missing `pxt.json` or `main.ts`. */
+    | 'incomplete-project'
     | 'action'
     /** Too many files, or too many bytes, to hold as bridge state. */
     | 'payload-too-big'
@@ -240,20 +249,23 @@ interface CaptureState {
   /**
    * The last valid payload of ours collected since dispatch, or `null`.
    *
-   * Back to `null` when a NEWER payload of ours is refused for size: the thing
-   * collected before it is then a provably older version of the same project,
-   * and a capture must never answer with one (PR #1974 round 2). Only a later
-   * acceptable payload, still before this capture's ACK, puts one back.
+   * Back to `null` when a NEWER payload of ours is refused — for size, or for
+   * missing a required file: the thing collected before it is then a provably
+   * older version of the same project, and a capture must never answer with one.
+   * Only a later acceptable payload, still before this capture's ACK, puts one
+   * back.
    */
   latest: AcceptedProject | null
   /** Set once the matching ACK has arrived, so a later event cannot overwrite. */
   acked: boolean
   /**
-   * A payload of OURS arrived during this capture and the caps refused it.
+   * A payload of OURS arrived during this capture and the CAPS refused it.
    *
    * Recorded so the failure this capture reports is the true one: "nothing was
    * handed over, try again" is wrong advice for a game that is simply too big,
-   * and a retry of it fails identically for ever.
+   * and a retry of it fails identically for ever. Cleared again by a later
+   * refusal that is not about size, so the sentence always describes the newest
+   * reading of the source rather than an earlier one.
    */
   refusedTooBig: boolean
 }
@@ -269,7 +281,9 @@ interface CaptureState {
  * It is never a save candidate: it is not `lastEditorSave`, it is not collected
  * into a capture, and nothing here can write it. Seeing one also INVALIDATES
  * whatever the running capture had collected, because this is the newer source
- * of the same project — see {@link CaptureState.latest}.
+ * of the same project — see {@link CaptureState.latest}. It is dropped as soon
+ * as a newer reading of ours contradicts it, acceptable or incomplete, so these
+ * bytes can never be exported as a source they are older than.
  */
 interface OverCapsCapture {
   files: BuildStudioSourceFiles | null
@@ -288,9 +302,13 @@ function msgProject(msg: Record<string, unknown>): ArcadeProject | undefined {
  * How a payload measures against the caps — and, when it is over them, WHICH
  * cap it broke.
  *
- * The same counts and UTF-8 byte caps the writer enforces, read from the same
- * constants so the two can never disagree. {@link payloadWithinCaps} is this
- * reading's own boolean, computed from it rather than beside it.
+ * The same counts and UTF-8 byte caps the writer enforces, from the same
+ * constants — and, for the archive cap, over the same STRING. The writer and
+ * `readRecoveryArchive` both size `serializeBuildStudioSource(files)`, whose
+ * quoting, escaping, file names, commas and indentation make it larger than the
+ * sum of the raw file contents; sizing that sum here admitted payloads those two
+ * then refused. {@link payloadWithinCaps} is this reading's own boolean,
+ * computed from it rather than beside it.
  *
  * The extra answers exist for one reason. A `workspacesave` that is OURS and
  * readable but over the per-file cap is still the child's CURRENT game, and
@@ -304,17 +322,25 @@ export interface PayloadCapReading {
   withinCaps: boolean
   /** How many files count towards the cap (`_history` and friends excluded). */
   fileCount: number
-  /** Those files together, in UTF-8 bytes. */
+  /**
+   * The canonical archive's own UTF-8 byte length — the number the archive cap
+   * is read against, and the number the writer stores as `byteSize`.
+   */
+  archiveBytes: number
+  /**
+   * The raw file CONTENTS together, in UTF-8 bytes. Diagnostics only: **no cap
+   * is read against it**, because it is not what gets stored or written out.
+   */
   totalBytes: number
   /** The largest single one of them, in UTF-8 bytes. */
   largestFileBytes: number
   /**
    * True when the ONLY cap broken is the per-file one: the file count is
-   * workable and the whole map is still inside the archive cap.
+   * workable and the canonical archive is still inside the archive cap.
    *
-   * That is a payload one download may safely hold — it is bounded by the same
-   * archive ceiling an accepted project is. A map over the ARCHIVE cap, or with
-   * too many files, is not held at all.
+   * That is a payload one download may safely hold: the file it writes is the
+   * very string measured here, so `readRecoveryArchive` can open it again. A map
+   * whose ARCHIVE is over the cap, or with too many files, is not held at all.
    */
   overFileCapOnly: boolean
 }
@@ -328,12 +354,16 @@ export function readPayloadCaps(files: BuildStudioSourceFiles): PayloadCapReadin
     total += bytes
     if (bytes > largest) largest = bytes
   }
+  // The archive the writer would store and a download would hand back, from the
+  // same serializer those two use.
+  const archiveBytes = utf8ByteLength(serializeBuildStudioSource(files))
   const countOk = keys.length > 0 && keys.length <= BUILD_STUDIO_MAX_FILES
-  const archiveOk = total <= BUILD_STUDIO_MAX_ARCHIVE_BYTES
+  const archiveOk = archiveBytes <= BUILD_STUDIO_MAX_ARCHIVE_BYTES
   const perFileOk = largest <= BUILD_STUDIO_MAX_FILE_BYTES
   return {
     withinCaps: countOk && archiveOk && perFileOk,
     fileCount: keys.length,
+    archiveBytes,
     totalBytes: total,
     largestFileBytes: largest,
     overFileCapOnly: countOk && archiveOk && !perFileOk,
@@ -353,11 +383,13 @@ export function payloadWithinCaps(files: BuildStudioSourceFiles): boolean {
 /**
  * Is this a file map of nothing but text?
  *
- * The probe's own validator, kept: a project whose `text` holds a non-string
- * is not a project, and `pxt.json` is the one file without which nothing can
- * reopen it.
+ * Structure only, and no opinion about WHICH files are there: a project whose
+ * `text` holds a non-string, or no entries, is not a map at all. Separate from
+ * {@link projectShapeComplete} because the two refusals are different — a
+ * non-map is traffic this bridge cannot read, and a map missing a required file
+ * is the child's own source in a state nothing can store.
  */
-export function readProjectFiles(
+function readProjectTextMap(
   project: ArcadeProject | undefined,
 ): BuildStudioSourceFiles | null {
   const text = project?.text
@@ -365,8 +397,39 @@ export function readProjectFiles(
   const entries = Object.entries(text)
   if (entries.length === 0) return null
   if (!entries.every(([, value]) => typeof value === 'string')) return null
-  if (typeof (text as Record<string, unknown>)['pxt.json'] !== 'string') return null
   return Object.fromEntries(entries) as BuildStudioSourceFiles
+}
+
+/**
+ * Is this a file map of nothing but text, with a manifest in it?
+ *
+ * The probe's own validator, unchanged, and still the public one.
+ */
+export function readProjectFiles(
+  project: ArcadeProject | undefined,
+): BuildStudioSourceFiles | null {
+  const files = readProjectTextMap(project)
+  if (!files) return null
+  if (typeof files['pxt.json'] !== 'string') return null
+  return files
+}
+
+/** The pair the writer and `readRecoveryArchive` both require. */
+const REQUIRED_FILES: readonly string[] = ['pxt.json', 'main.ts']
+
+/**
+ * Does this map carry the required files, as non-blank text?
+ *
+ * Deliberately narrow — two names, present and non-blank — because a project
+ * stock MakeCode is happy with must not be refused on a guess. Nothing here
+ * parses `pxt.json`, matches its `files` list or validates Blocks. A map that
+ * fails this cannot be stored by the writer or reopened by the recovery reader,
+ * so the bridge may neither save it nor offer it as a copy.
+ */
+export function projectShapeComplete(files: BuildStudioSourceFiles): boolean {
+  return REQUIRED_FILES.every(
+    (name) => typeof files[name] === 'string' && files[name].trim() !== '',
+  )
 }
 
 /**
@@ -435,9 +498,10 @@ export class ArcadeBridge {
    * Is the source the editor last handed over too big for this app to store?
    *
    * True only while a refused-for-size capture of OURS is the newest thing this
-   * bridge has seen — an acceptable project clears it. A foreign project, a
-   * published one or an unreadable one never sets it: those are refused earlier,
-   * by identity, and they say nothing about the child's own game.
+   * bridge has seen — a newer acceptable or incomplete reading of ours clears
+   * it. A foreign project, a published one or an unreadable one never sets it:
+   * those are refused earlier, by identity, and they say nothing about the
+   * child's own game.
    *
    * What it is FOR: it makes `editorSaveSeen()` a provably older source, so a
    * caller can refuse to offer it as "your game" instead of handing over a
@@ -601,9 +665,20 @@ export class ArcadeBridge {
       this.options.onRejected?.({ reason: 'foreign-project' })
       return null
     }
-    const files = readProjectFiles(project)
+    // Structure only here, so a map of ours that is missing `pxt.json` reaches
+    // the incomplete path below rather than being dismissed as foreign.
+    const files = readProjectTextMap(project)
     if (!files) {
       this.options.onRejected?.({ reason: 'foreign-project' })
+      return null
+    }
+    // The required shape, BEFORE the caps, as the writer checks it first: a map
+    // with no `main.ts` or no `pxt.json` is neither a save candidate nor a
+    // recovery candidate, so it must not reach `this.overCaps` either. It is
+    // still OURS and still the newest reading of the current source, which is
+    // what `refuseIncomplete` acts on.
+    if (!projectShapeComplete(files)) {
+      this.refuseIncomplete()
       return null
     }
     // The caps are enforced HERE, before the payload is accepted as bridge
@@ -614,32 +689,24 @@ export class ArcadeBridge {
     // What a refusal now ALSO does is say so. It used to be silent, so
     // `editorSaveSeen()` went on answering with the last project that fitted —
     // and the page offered that older game as "Download a copy" of the one in
-    // front of him (PR #1974 round 1). The bytes are kept for a download only
-    // when they are bounded by the archive cap; past that only the fact is, and
-    // neither is a save candidate.
+    // front of him. The bytes are kept for a download only when they are
+    // bounded by the archive cap; past that only the fact is, and neither is a
+    // save candidate.
     const reading = readPayloadCaps(files)
     if (!reading.withinCaps) {
       this.overCaps = { files: reading.overFileCapOnly ? files : null, reading }
       // ── A refusal INVALIDATES what this capture had collected ─────────────
       //
-      // This payload is OURS — it passed every identity check above — and it is
-      // NEWER than anything the capture has collected, because collection and
-      // refusal both happen in postMessage order. So a payload collected
-      // earlier in this same capture is a strictly OLDER version of the same
-      // project, and handing it back on the ACK was the reported defect
-      // (PR #1974 round 2): `requestSnapshot` resolved with three-life bytes
-      // while the editor held the four-life game the caps had just refused, so
-      // Save stored the wrong version and a departure read that stale source as
-      // clean.
-      //
-      // Only a LATER acceptable payload of ours, arriving before this capture's
-      // own ACK, may replace it and succeed — `handleHostAction` collects it
-      // exactly as before.
+      // This payload is OURS and, in postMessage order, NEWER than anything the
+      // capture has collected — so what it collected earlier is a strictly older
+      // version of the same project, and answering the ACK with it stored the
+      // wrong version and read a stale source as clean (PR #1974 round 2). Only
+      // a LATER acceptable payload, before this capture's own ACK, may replace
+      // it and succeed.
       //
       // Deliberately NOT fenced by `acked`, unlike collection: invalidation can
-      // only ever turn a success into the refusal the caps had already decided
-      // on, never the other way round, and leaving it unfenced is also what
-      // covers an over-cap project body carried ON the ACK itself.
+      // only turn a success into the refusal the caps had already decided on,
+      // and leaving it unfenced is what covers an over-cap body on the ACK.
       if (this.capture) {
         this.capture.latest = null
         this.capture.refusedTooBig = true
@@ -652,6 +719,30 @@ export class ArcadeBridge {
     this.overCaps = null
     this.ourHeaderId = header.id
     return { header, files }
+  }
+
+  /**
+   * Refuse an own, readable map that is missing a required file.
+   *
+   * The same invalidation a cap refusal performs, for the same reason: this is
+   * the newest reading of the current source, so anything collected before it is
+   * provably older and may not be handed over as current. The difference is the
+   * STAMP — it is not a size failure, so an earlier `refusedTooBig` is cleared
+   * rather than reported about this one, and the over-cap bytes a previous
+   * payload left behind are dropped instead of being exported as the open game.
+   *
+   * Unfenced by `acked`, so an incomplete body carried ON the ACK counts too. A
+   * later valid payload before that ACK still recovers, through the ordinary
+   * collection path. Foreign, published, retired and non-map traffic never gets
+   * here: those say nothing about the child's own source and are ignored.
+   */
+  private refuseIncomplete(): void {
+    this.overCaps = null
+    if (this.capture) {
+      this.capture.latest = null
+      this.capture.refusedTooBig = false
+    }
+    this.options.onRejected?.({ reason: 'incomplete-project' })
   }
 
   /**
