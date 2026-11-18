@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 /**
@@ -51,6 +51,12 @@ class FakeBridgeStub {
   nextCapture: Record<string, string> = starterFiles()
   /** When set, the next capture rejects with it. */
   captureError: Error | null = null
+  /**
+   * When set, a capture HANGS and hands its resolver here — so a test can
+   * reproduce the real thing: MakeCode answers late, and whatever the app does
+   * in the meantime must not cancel the answer.
+   */
+  captureGate: ((release: (files: Record<string, string>) => void) => void) | null = null
   captures = 0
   disposed = false
   infoAsked = 0
@@ -107,10 +113,15 @@ class FakeBridgeStub {
   async requestSnapshot(): Promise<FakeProject> {
     this.captures += 1
     if (this.captureError) throw this.captureError
-    return {
-      header: { id: 'h1', name: 'Apple Dash starter', targetVersion: '0.0.0' },
-      files: { ...this.nextCapture },
+    const header = { id: 'h1', name: 'Apple Dash starter', targetVersion: '0.0.0' }
+    const gate = this.captureGate
+    if (gate) {
+      this.captureGate = null
+      return new Promise<FakeProject>((resolveCapture) => {
+        gate((files) => resolveCapture({ header, files: { ...files } }))
+      })
     }
+    return { header, files: { ...this.nextCapture } }
   }
   dispose() {
     this.disposed = true
@@ -411,6 +422,89 @@ describe('a held departure is checked before anybody is warned', () => {
     expect(screen.getByText('Save it now')).toBeInTheDocument()
   })
 
+  /**
+   * The C3 regression, which stranded EVERY ordinary Today departure.
+   *
+   * The effect set `departureCheck('checking')`, had `departureCheck` as a
+   * dependency, and its own cleanup then cancelled the in-flight capture — and
+   * the `!== 'idle'` early return meant nothing replaced it. The dialog sat on
+   * "Checking your game…" forever.
+   *
+   * POSITIVE CONTROL: put `departureCheck` back in the effect's dependencies
+   * with a `cancelled` cleanup and the first two cases here hang on
+   * "Checking your game…".
+   */
+  it('an ordinary Save then Today completes and releases the navigation', async () => {
+    const bridge = await openEditor()
+    const edited = { ...starterFiles(), 'main.ts': 'info.setLife(4)\nsprites.create(1)\n' }
+    bridge.nextCapture = edited
+    await act(async () => {
+      bridge.announce(edited)
+    })
+    await tapSave()
+    await waitFor(() =>
+      expect(screen.getByText('Saved. Your game is on your shelf.')).toBeInTheDocument(),
+    )
+
+    // Now he taps Today.
+    blocker.state = 'blocked'
+    await act(async () => {
+      bridge.announce(edited)
+    })
+    await waitFor(() => expect(blocker.proceed).toHaveBeenCalled())
+    // And it never stranded on the checking state.
+    expect(screen.queryByText('Checking your game…')).not.toBeInTheDocument()
+  })
+
+  it('completes a DELAYED capture rather than cancelling itself', async () => {
+    const bridge = await openEditor()
+    let releaseCapture: ((files: Record<string, string>) => void) | null = null
+    bridge.captureGate = (resolveCapture) => {
+      releaseCapture = resolveCapture
+    }
+    blocker.state = 'blocked'
+    await act(async () => {
+      bridge.announce(starterFiles())
+    })
+    // The dialog is honest while it waits…
+    await waitFor(() => expect(screen.getByText('Checking your game…')).toBeInTheDocument())
+    expect(blocker.proceed).not.toHaveBeenCalled()
+    // …and the late answer still lands.
+    await act(async () => {
+      releaseCapture!(starterFiles())
+    })
+    await waitFor(() => expect(blocker.proceed).toHaveBeenCalled())
+    expect(screen.queryByText('Checking your game…')).not.toBeInTheDocument()
+  })
+
+  it('edit then Today then Stay keeps the editor and the work', async () => {
+    const bridge = await openEditor()
+    const edited = { ...starterFiles(), 'main.ts': 'info.setLife(4)\nsprites.create(1)\n' }
+    bridge.nextCapture = edited
+    blocker.state = 'blocked'
+    await act(async () => {
+      bridge.announce(edited)
+    })
+    await waitFor(() => expect(screen.getByText('Keep your game first?')).toBeInTheDocument())
+    await act(async () => {
+      screen.getByText('Stay here').click()
+    })
+    expect(blocker.reset).toHaveBeenCalled()
+    expect(blocker.proceed).not.toHaveBeenCalled()
+
+    // The hold ends, so the next departure asks again rather than being stuck.
+    blocker.state = 'unblocked'
+    await act(async () => {
+      bridge.announce(edited)
+    })
+    expect(screen.queryByText('Keep your game first?')).not.toBeInTheDocument()
+    blocker.state = 'blocked'
+    await act(async () => {
+      bridge.announce(edited)
+    })
+    await waitFor(() => expect(screen.getByText('Keep your game first?')).toBeInTheDocument())
+  })
+
   it('says it cannot tell when the capture fails, rather than nothing', async () => {
     const bridge = await openEditor()
     bridge.captureError = new Error('no answer')
@@ -450,6 +544,75 @@ describe('a profile change is held while the work is still intact', () => {
     })
     await waitFor(() => expect(selectProfile).toHaveBeenCalledWith('london'))
     expect(screen.queryByText('Switch profile?')).not.toBeInTheDocument()
+  })
+
+  /**
+   * The C3 regression. The guard's capture resolved AFTER the person chose
+   * *Stay here* — which only nulled the dialog state — and then called
+   * `selectProfile(next)` anyway. An explicit Stay must be final.
+   *
+   * POSITIVE CONTROL: drop the `profileAskRef.current?.id !== askId` check and
+   * this case sees `selectProfile` called after Stay.
+   */
+  it('NEVER changes profile after the person chose Stay here', async () => {
+    const bridge = await openEditor()
+    let releaseCapture: ((files: Record<string, string>) => void) | null = null
+    bridge.captureGate = (resolveCapture) => {
+      releaseCapture = resolveCapture
+    }
+    await act(async () => {
+      expect(registeredGuard!('london')).toBe(false)
+    })
+    // The decision is not offered until the capture has an answer.
+    await waitFor(() => expect(screen.getByText('Checking your game…')).toBeInTheDocument())
+    expect(screen.getByText('Switch anyway')).toBeDisabled()
+
+    await act(async () => {
+      screen.getByText('Stay here').click()
+    })
+    expect(screen.queryByText('Switch profile?')).not.toBeInTheDocument()
+
+    // The capture now comes back CLEAN — which, before the fix, switched.
+    await act(async () => {
+      releaseCapture!(starterFiles())
+    })
+    expect(selectProfile).not.toHaveBeenCalled()
+  })
+
+  it('offers the decision only once the capture answered', async () => {
+    const bridge = await openEditor()
+    let releaseCapture: ((files: Record<string, string>) => void) | null = null
+    bridge.captureGate = (resolveCapture) => {
+      releaseCapture = resolveCapture
+    }
+    await act(async () => {
+      registeredGuard!('london')
+    })
+    await waitFor(() => expect(screen.getByText('Switch anyway')).toBeDisabled())
+    await act(async () => {
+      releaseCapture!({ ...starterFiles(), 'main.ts': 'info.setLife(4)\nsprites.create(1)\n' })
+    })
+    await waitFor(() => expect(screen.getByText('Switch anyway')).toBeEnabled())
+    expect(screen.getByText('Switch profile?')).toBeInTheDocument()
+  })
+
+  it('does not act on a late result after the editor unmounted', async () => {
+    const bridge = await openEditor()
+    let releaseCapture: ((files: Record<string, string>) => void) | null = null
+    bridge.captureGate = (resolveCapture) => {
+      releaseCapture = resolveCapture
+    }
+    const guard = registeredGuard!
+    await act(async () => {
+      guard('london')
+    })
+    await waitFor(() => expect(screen.getByText('Checking your game…')).toBeInTheDocument())
+    // The editor goes away while the capture is still out.
+    cleanup()
+    await act(async () => {
+      releaseCapture!(starterFiles())
+    })
+    expect(selectProfile).not.toHaveBeenCalled()
   })
 
   it('switches on the explicit choice, consuming the allowance once', async () => {
@@ -523,6 +686,62 @@ describe('a failed Save keeps its exact retry, and the latch is released', () =>
     })
     await waitFor(() => expect(saveVersion).toHaveBeenCalled())
     expect(saveVersion.mock.calls[0][0].versionId).toBe(firstId)
+  })
+
+  /**
+   * The reported interleaving, through the real component.
+   *
+   * A fails and is held; the child leaves and comes back (a remount re-seeds
+   * the held payload); B is captured and fails; A's write finally
+   * acknowledges. A may finish its own version and must not clear B's slot.
+   *
+   * POSITIVE CONTROL: drop the `versionId` argument from `clearPendingSave` and
+   * B's retry disappears here.
+   */
+  it('an old save’s acknowledgment leaves a newer pending save retriable', async () => {
+    // ── A ──
+    const first = await openEditor()
+    first.nextCapture = { ...starterFiles(), 'main.ts': 'info.setLife(4)\nsprites.create(1)\n' }
+    let releaseA: ((ok: boolean) => void) | null = null
+    saveVersion.mockImplementation(
+      (args: { versionId: string }) =>
+        new Promise((resolveWrite, rejectWrite) => {
+          releaseA = (ok) =>
+            ok
+              ? resolveWrite({ outcome: 'created', version: { id: `doc-${args.versionId}` } })
+              : rejectWrite(new Error('offline'))
+        }),
+    )
+    await tapSave()
+    await waitFor(() => expect(saveVersion).toHaveBeenCalled())
+    const idA = saveVersion.mock.calls[0][0].versionId
+
+    // ── Leave and come back ──
+    cleanup()
+    const second = await openEditor()
+    expect(readPendingSave(OWNER)?.versionId).toBe(idA)
+
+    // ── B, which fails ──
+    second.nextCapture = { ...starterFiles(), 'main.ts': 'info.setLife(7)\nsprites.create(1)\n' }
+    saveVersion.mockReset()
+    saveVersion.mockRejectedValue(new Error('offline'))
+    await tapSave()
+    await waitFor(() => expect(screen.getByText('offline')).toBeInTheDocument())
+    const idB = readPendingSave(OWNER)?.versionId
+    expect(idB).toBeTruthy()
+    expect(idB).not.toBe(idA)
+
+    // ── A's write finally lands ──
+    await act(async () => {
+      releaseA?.(true)
+    })
+
+    // B is still exactly there, with its own bytes.
+    const slot = readPendingSave(OWNER)
+    expect(slot?.versionId).toBe(idB)
+    expect(slot?.files['main.ts']).toBe('info.setLife(7)\nsprites.create(1)\n')
+    // …and its retry is still on screen.
+    expect(screen.getByText('Try again')).toBeInTheDocument()
   })
 
   it('releases the hold when the write finally lands', async () => {

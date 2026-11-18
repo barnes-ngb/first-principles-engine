@@ -100,6 +100,7 @@ import {
 import {
   clearPendingSave,
   holdPendingSave,
+  pendingSlotAccepts,
   readPendingSave,
   type PendingOwner,
 } from './buildStudioPendingStore'
@@ -356,6 +357,19 @@ export default function BuildStudioEditor({
   >('idle')
   /** A profile change a guard is holding, with its own dialog. */
   const [heldProfile, setHeldProfile] = useState<UserProfile | null>(null)
+  /** What the capture for THAT held change found. */
+  const [profileCheck, setProfileCheck] = useState<
+    'idle' | 'checking' | 'clean' | 'dirty' | 'unknown'
+  >('idle')
+  /**
+   * The ask that is live, with its own id.
+   *
+   * Identity-scoped so a capture that resolves after the person chose *Stay
+   * here* cannot still call `selectProfile`. Cleared by Stay, by closing the
+   * dialog, by a visit change and by unmount.
+   */
+  const profileAskRef = useRef<{ id: number; next: UserProfile } | null>(null)
+  const profileAskSeqRef = useRef(0)
   /** Consumed once by the guard, so "Switch anyway" is one explicit act. */
   const allowProfileOnceRef = useRef(false)
 
@@ -389,24 +403,50 @@ export default function BuildStudioEditor({
 
   /**
    * A held SPA departure is checked against the editor before anybody is
-   * warned. A clean exit releases itself — the guard's own effect proceeds once
-   * nothing is at risk — so an ordinary "Save, then Today" shows no dialog.
+   * warned. A clean exit releases itself, so an ordinary "Save, then Today"
+   * shows no dialog.
+   *
+   * ── Why the run is identified by a ref, not by the effect's cleanup ──────
+   *
+   * The first version cancelled itself. `setDepartureCheck('checking')` was its
+   * own dependency, so the state change re-ran the effect, the cleanup set
+   * `cancelled = true` on the still-pending capture, and the `!== 'idle'` early
+   * return meant nothing replaced it — every ordinary Today departure stranded
+   * on "Checking your game…" forever.
+   *
+   * So the run carries an identity (`departureRunRef`), and the callback
+   * applies only while that identity is still the live one. Retirement is the
+   * only thing that invalidates it: the departure ending, the visit's token
+   * changing, or unmount. A state change this effect caused is not retirement.
    */
+  /** The run that owns the current hold, or `null` when nothing is held. */
+  const departureRunRef = useRef<number | null>(null)
+  const departureSeqRef = useRef(0)
+
   useEffect(() => {
     if (!departure.held) {
+      // The hold ended: retire any run still in flight and reset for the next.
+      departureRunRef.current = null
       cleanConfirmedRef.current = false
       setDepartureCheck('idle')
       return
     }
-    if (departureCheck !== 'idle') return
+    // One run per hold. `departureCheck` is deliberately NOT a dependency, and
+    // this effect has NO cleanup, so its own state change cannot cancel it.
+    if (departureRunRef.current !== null) return
+    departureSeqRef.current += 1
+    const runId = departureSeqRef.current
+    departureRunRef.current = runId
     if (inFlightRef.current || atRiskRef.current) {
       setDepartureCheck('dirty')
       return
     }
+    const ownToken = token
     setDepartureCheck('checking')
-    let cancelled = false
     void checkSourceNow().then((result) => {
-      if (cancelled) return
+      // Still the live run, and still the same visit.
+      if (departureRunRef.current !== runId) return
+      if (liveTokenRef.current !== ownToken) return
       setDepartureCheck(result)
       if (result === 'clean') {
         // Verified clean while the editor was still intact, so the person is
@@ -416,10 +456,15 @@ export default function BuildStudioEditor({
         departure.leaveAnyway()
       }
     })
-    return () => {
-      cancelled = true
-    }
-  }, [departure, departureCheck, checkSourceNow])
+  }, [departure, token, checkSourceNow])
+
+  // Real retirement: this visit is gone, so no departure callback may land.
+  useEffect(
+    () => () => {
+      departureRunRef.current = null
+    },
+    [token],
+  )
 
   /**
    * The profile change, which is immediate and has no router hold.
@@ -431,26 +476,65 @@ export default function BuildStudioEditor({
    */
   useEffect(() => {
     if (!registerProfileChangeGuard) return
-    return registerProfileChangeGuard((next) => {
+    const unregister = registerProfileChangeGuard((next) => {
       if (allowProfileOnceRef.current) {
         allowProfileOnceRef.current = false
         return true
       }
       if (!inFlightRef.current && !hasWorkAtRisk()) return true
+
+      // Each refusal is its own ASK, with its own identity. A late result may
+      // only act while that exact ask is still the live one — so choosing
+      // *Stay here* can never be followed, seconds later, by the profile
+      // changing anyway.
+      profileAskSeqRef.current += 1
+      const askId = profileAskSeqRef.current
+      profileAskRef.current = { id: askId, next }
+      const ownToken = token
       setHeldProfile(next)
-      // Confirm it while the editor is still here. A clean answer lets the
-      // change straight through rather than making a person answer a question
-      // about nothing.
+      setProfileCheck('checking')
       void checkSourceNow().then((result) => {
-        if (result === 'clean') {
-          allowProfileOnceRef.current = true
-          setHeldProfile(null)
-          selectProfile(next)
-        }
+        if (profileAskRef.current?.id !== askId) return
+        if (liveTokenRef.current !== ownToken) return
+        setProfileCheck(result)
+        if (result !== 'clean') return
+        // Verified clean while the editor was still here, so the change the
+        // person already asked for simply happens.
+        profileAskRef.current = null
+        allowProfileOnceRef.current = true
+        setHeldProfile(null)
+        setProfileCheck('idle')
+        selectProfile(next)
       })
       return false
     })
-  }, [registerProfileChangeGuard, hasWorkAtRisk, checkSourceNow, selectProfile])
+    return () => {
+      // Unmount, or a visit change, retires any ask in flight — so a capture
+      // that answers afterwards changes nothing.
+      profileAskRef.current = null
+      setHeldProfile(null)
+      setProfileCheck('idle')
+      unregister()
+    }
+  }, [registerProfileChangeGuard, hasWorkAtRisk, checkSourceNow, selectProfile, token])
+
+  /** Abandon the held profile change. Nothing may act on it afterwards. */
+  const cancelProfileAsk = useCallback(() => {
+    profileAskRef.current = null
+    setHeldProfile(null)
+    setProfileCheck('idle')
+  }, [])
+
+  /** Make the held profile change, now, as one explicit act. */
+  const confirmProfileAsk = useCallback(() => {
+    const ask = profileAskRef.current
+    profileAskRef.current = null
+    setHeldProfile(null)
+    setProfileCheck('idle')
+    if (!ask) return
+    allowProfileOnceRef.current = true
+    selectProfile(ask.next)
+  }, [selectProfile])
 
   /**
    * Keep an unfinished Save for its owner across an unmount.
@@ -643,8 +727,12 @@ export default function BuildStudioEditor({
       }
       for (;;) {
         attempt = { ...attempt, attempts: attempt.attempts + 1 }
-        setPending(attempt)
-        holdPendingSave(ownOwner, attempt)
+        const sending = attempt
+        // Identity-conditional, through the SAME rule the store uses: an older
+        // save's retry may not take a newer save's recovery slot, and may not
+        // replace it on screen either.
+        setPending((current) => (pendingSlotAccepts(current, sending) ? sending : current))
+        holdPendingSave(ownOwner, sending)
         setSaveState(SaveState.Writing)
         try {
           const result = await saveBuildStudioVersion({
@@ -661,10 +749,10 @@ export default function BuildStudioEditor({
             goalId: attempt.goalId,
             visitId: attempt.scope.visitId,
           })
-          // Durable now, whatever the screen is showing. The held payload is
-          // released because it LANDED, for its own owner, not for whoever is
-          // on screen.
-          clearPendingSave(ownOwner)
+          // Durable now, whatever the screen is showing. This save releases
+          // ITS OWN recovery slot and no other — an owner-only clear let an old
+          // acknowledgment wipe a newer save's exact retry.
+          clearPendingSave(ownOwner, attempt.versionId)
           if (liveTokenRef.current !== ownToken) {
             // An accepted write bound to its owner finished after the page
             // moved on. Not undone, not silently dropped, and NOT applied to
@@ -697,7 +785,11 @@ export default function BuildStudioEditor({
             label: attempt.label,
           })
           setEditorDirty(!stillCurrent)
-          setPending(null)
+          // Only this save's own row leaves the screen. A newer pending save
+          // stays exactly where it is.
+          setPending((current) =>
+            current && current.versionId === attempt.versionId ? null : current,
+          )
           setLabel('')
           return
         } catch (err) {
@@ -845,11 +937,15 @@ export default function BuildStudioEditor({
   }, [commit, scope, label, versions.versions.length])
 
   const handleDiscardPending = useCallback(() => {
-    clearPendingSave(owner)
-    setPending(null)
+    // Discards exactly the payload that was shown, by its own id.
+    if (!pending) return
+    clearPendingSave(owner, pending.versionId)
+    setPending((current) =>
+      current && current.versionId === pending.versionId ? null : current,
+    )
     setSaveState(SaveState.Idle)
     setSaveMessage(null)
-  }, [owner])
+  }, [owner, pending])
 
   /**
    * Get the EDITED bytes out.
@@ -1614,25 +1710,32 @@ export default function BuildStudioEditor({
       </Dialog>
 
       {/* ── Changing who is signed in ───────────────────────────────── */}
-      <Dialog open={heldProfile !== null} onClose={() => setHeldProfile(null)}>
-        <DialogTitle>Switch profile?</DialogTitle>
+      <Dialog open={heldProfile !== null} onClose={cancelProfileAsk}>
+        <DialogTitle>
+          {profileCheck === 'checking' ? 'Checking your game…' : 'Switch profile?'}
+        </DialogTitle>
         <DialogContent>
           <DialogContentText>
-            {pending
-              ? `A save called “${pending.label}” did not finish. Switching now leaves it behind.`
-              : 'Your game may have changes that are not on your shelf yet. Switching closes the editor.'}
+            {profileCheck === 'checking'
+              ? 'One moment — looking at what is in the editor before anything closes.'
+              : pending
+                ? `A save called “${pending.label}” did not finish. Switching now leaves it behind.`
+                : profileCheck === 'unknown'
+                  ? 'This page could not read the editor just now, so it cannot tell whether your changes are saved. Switching might lose them.'
+                  : 'Your game has changes that are not on your shelf yet. Switching closes the editor.'}
           </DialogContentText>
         </DialogContent>
         <DialogActions sx={{ flexWrap: 'wrap', gap: 1 }}>
           <Button
             variant="contained"
-            onClick={() => setHeldProfile(null)}
+            onClick={cancelProfileAsk}
             sx={{ textTransform: 'none', fontWeight: 700, minHeight: 48 }}
           >
             Stay here
           </Button>
           {departureFilesRef.current && (
             <Button
+              disabled={profileCheck === 'checking'}
               onClick={() => void handleSaveCaptured()}
               sx={{ textTransform: 'none', minHeight: 48 }}
             >
@@ -1640,21 +1743,19 @@ export default function BuildStudioEditor({
             </Button>
           )}
           <Button
+            disabled={profileCheck === 'checking'}
             onClick={() => void handleDownloadCurrent()}
             sx={{ textTransform: 'none', minHeight: 48 }}
           >
             Download a copy
           </Button>
+          {/* Disabled until the capture has an answer: a destructive choice
+              offered while the app does not yet know what it would discard is
+              a choice nobody can make. Stay here is always available. */}
           <Button
             color="error"
-            onClick={() => {
-              const next = heldProfile
-              setHeldProfile(null)
-              if (!next) return
-              // One explicit act, consumed once by the guard.
-              allowProfileOnceRef.current = true
-              selectProfile(next)
-            }}
+            disabled={profileCheck === 'checking'}
+            onClick={confirmProfileAsk}
             sx={{ textTransform: 'none', minHeight: 48 }}
           >
             Switch anyway

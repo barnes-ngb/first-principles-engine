@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import {
   clearPendingSave,
   holdPendingSave,
+  pendingSlotAccepts,
   readPendingSave,
   resetPendingSaveStore,
 } from './buildStudioPendingStore'
@@ -217,13 +218,116 @@ describe('an unfinished Save is held for its own owner', () => {
 
   it('is released when it lands, and when it is discarded', () => {
     holdPendingSave(owner, payload)
-    clearPendingSave(owner)
+    clearPendingSave(owner, payload.versionId)
     expect(readPendingSave(owner)).toBeNull()
   })
 
-  it('keeps only the newest unfinished Save for one owner', () => {
+  it('keeps the newest unfinished Save for one owner', () => {
     holdPendingSave(owner, payload)
-    holdPendingSave(owner, { ...payload, versionId: 'v-newer', label: 'My version 2' })
+    holdPendingSave(owner, {
+      ...payload,
+      versionId: 'v-newer',
+      label: 'My version 2',
+      createdAt: '2026-11-17T21:05:00.000Z',
+    })
     expect(readPendingSave(owner)?.versionId).toBe('v-newer')
+  })
+})
+
+/**
+ * The interleaving regression. The reported sequence:
+ *
+ *   A is captured and its write fails, so A is held.
+ *   The child chooses *Leave and lose it*, then comes back.
+ *   B is captured and its write fails, so B is held.
+ *   A's write — still in flight from before — finally acknowledges.
+ *
+ * With an owner-only clear, A's acknowledgment wiped B's recovery slot and B
+ * was gone. With an owner-only hold, A's retry overwrote B with older bytes.
+ *
+ * POSITIVE CONTROLS: drop the `versionId` argument from `clearPendingSave` and
+ * the first case fails; return `true` unconditionally from
+ * `pendingSlotAccepts` and the second fails.
+ */
+describe('one save never clears or replaces another save’s recovery slot', () => {
+  const owner = {
+    familyId: SCOPE.familyId,
+    childId: SCOPE.childId,
+    projectId: SCOPE.projectId,
+  }
+  const base: PendingSave = {
+    scope: SCOPE,
+    versionId: 'v-A',
+    label: 'A',
+    createdAt: '2026-11-17T21:00:00.000Z',
+    files: { 'pxt.json': '{}', 'main.ts': 'info.setLife(4)' },
+    attempts: 1,
+    capturedSignature: 'sig-A',
+  }
+  const A = base
+  const B: PendingSave = {
+    ...base,
+    versionId: 'v-B',
+    label: 'B',
+    createdAt: '2026-11-17T21:10:00.000Z',
+    files: { 'pxt.json': '{}', 'main.ts': 'info.setLife(7)' },
+    capturedSignature: 'sig-B',
+  }
+
+  beforeEach(() => resetPendingSaveStore())
+
+  it('leaves B retriable when A acknowledges afterwards', () => {
+    holdPendingSave(owner, A)
+    // Leave, return, capture B.
+    expect(holdPendingSave(owner, B)).toBe(true)
+    expect(readPendingSave(owner)?.versionId).toBe('v-B')
+
+    // A's own write finally lands. It may finish its own version…
+    clearPendingSave(owner, A.versionId)
+
+    // …and B is still exactly there, with its own bytes and its own id.
+    const slot = readPendingSave(owner)
+    expect(slot?.versionId).toBe('v-B')
+    expect(slot?.files['main.ts']).toBe('info.setLife(7)')
+    expect(slot?.capturedSignature).toBe('sig-B')
+  })
+
+  it('refuses A’s retry once B owns the slot', () => {
+    holdPendingSave(owner, B)
+    const took = holdPendingSave(owner, { ...A, attempts: 2 })
+    expect(took).toBe(false)
+    expect(readPendingSave(owner)?.versionId).toBe('v-B')
+    expect(readPendingSave(owner)?.files['main.ts']).toBe('info.setLife(7)')
+  })
+
+  it('lets a save re-hold its OWN slot, which is what a retry does', () => {
+    holdPendingSave(owner, A)
+    expect(holdPendingSave(owner, { ...A, attempts: 2 })).toBe(true)
+    expect(readPendingSave(owner)?.attempts).toBe(2)
+  })
+
+  it('lets B clear its own slot when B lands', () => {
+    holdPendingSave(owner, A)
+    holdPendingSave(owner, B)
+    clearPendingSave(owner, B.versionId)
+    expect(readPendingSave(owner)).toBeNull()
+  })
+
+  it('answers the display question in one place, for the screen', () => {
+    expect(pendingSlotAccepts(null, A)).toBe(true)
+    expect(pendingSlotAccepts(A, A)).toBe(true)
+    expect(pendingSlotAccepts(A, B)).toBe(true)
+    expect(pendingSlotAccepts(B, A)).toBe(false)
+  })
+
+  it('decides a SAME-MILLISECOND tie by real offer order, not by the stamp', () => {
+    // Two save actions can share a timestamp; a tie decided the wrong way is
+    // the older payload overwriting the newer one's recovery slot.
+    const sameStamp = { ...B, createdAt: A.createdAt }
+    holdPendingSave(owner, A)
+    expect(holdPendingSave(owner, sameStamp)).toBe(true)
+    expect(holdPendingSave(owner, { ...A, attempts: 3 })).toBe(false)
+    expect(readPendingSave(owner)?.versionId).toBe('v-B')
+    expect(readPendingSave(owner)?.files['main.ts']).toBe('info.setLife(7)')
   })
 })
