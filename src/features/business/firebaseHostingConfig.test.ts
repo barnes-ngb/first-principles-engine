@@ -30,6 +30,15 @@ const read = (rel: string) => readFileSync(resolve(process.cwd(), rel), 'utf8')
 // so scripts/fonts/Firebase/connect stay unrestricted; the shop hosting target is
 // untouched (its own entry, no CSP). This snapshot is updated to match.
 //
+// LOCAL-BUILD-001: `frame-src` gains ONE more exact origin,
+// `https://arcade.makecode.com`, because the Build Studio embeds the stock
+// MakeCode Arcade editor and the authorised feature cannot load at all under
+// the previous two-origin header. Deliberate, and deliberately narrow: an exact
+// scheme + host, no wildcard, no bare scheme, no path. The directive is still
+// `frame-src`-only, every cache rule and its order are unchanged, and the shop
+// target still has no CSP. `src/test/hostingFrameSrc.invariant.test.ts` pins the
+// allowlist as a token list so a wildcard cannot be slipped in later.
+//
 // UX-264: the two header rules SWAPPED ORDER and the broad one gained
 // `Cache-Control: no-cache`. Also deliberate, and the order is the fix rather
 // than a side effect of it — with no Cache-Control on anything but `/assets/**`,
@@ -53,7 +62,8 @@ const PREVIOUS_APP_CONFIG = {
         { key: 'Cache-Control', value: 'no-cache' },
         {
           key: 'Content-Security-Policy',
-          value: "frame-src 'self' https://www.youtube-nocookie.com",
+          value:
+            "frame-src 'self' https://www.youtube-nocookie.com https://arcade.makecode.com",
         },
       ],
     },

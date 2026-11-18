@@ -158,6 +158,29 @@ const SAVED_LINE = 'Saved. Your game is on your shelf.'
 const SAVED_ALREADY_LINE = 'Saved — that one was already on your shelf.'
 const SAVED_BUT_NEWER_LINE =
   'Saved. You have made more changes since then — tap Save again to keep those too.'
+/**
+ * A restored retry landed: the earlier game is on the shelf, and what is open
+ * now is something else. Deliberately does not say the open game is saved.
+ */
+const SAVED_EARLIER_LINE =
+  'Saved. That was the earlier game — it is on your shelf now. What is open here is separate.'
+
+/**
+ * The live UI an explicit save act belongs to — separate from the payload's own
+ * provenance.
+ *
+ * `token` is the visit on screen when the person tapped, `opId` is the latch
+ * this act holds, and the owner fields are the child/project the screen is
+ * for. Every UI mutation is gated on all of them; the WRITE is gated on the
+ * payload instead, so a restored retry still lands under its own child.
+ */
+interface SaveInvocation {
+  token: string
+  opId: string
+  familyId: string
+  childId: string
+  projectId: string
+}
 
 export interface BuildStudioEditorProps {
   familyId: string
@@ -314,7 +337,19 @@ export default function BuildStudioEditor({
   const [noteState, setNoteState] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle')
   const [noteMessage, setNoteMessage] = useState<string | null>(null)
 
-  const [confirmReopen, setConfirmReopen] = useState<BuildStudioVersion | null>(null)
+  /**
+   * A replacement that has been asked for but not applied — a saved version or
+   * a recovered file — plus what the pre-replacement capture found. One pair
+   * for both doors, so neither can replace open work the other would protect.
+   */
+  const [prospect, setProspect] = useState<
+    { version: BuildStudioVersion } | { recovery: BuildStudioSourceFiles } | null
+  >(null)
+  const [prospectCheck, setProspectCheck] = useState<
+    'idle' | 'checking' | 'dirty' | 'unknown'
+  >('idle')
+  const replaceRunRef = useRef<number | null>(null)
+  const replaceSeqRef = useRef(0)
   const [openingVersionId, setOpeningVersionId] = useState<string | null>(null)
 
   const writeInFlight = saveState === SaveState.Snapshotting || saveState === SaveState.Writing
@@ -743,23 +778,54 @@ export default function BuildStudioEditor({
    * MANUAL retry continues the same action rather than restarting the count.
    */
   const commit = useCallback(
-    async (payload: PendingSave) => {
+    async (payload: PendingSave, invocation: SaveInvocation) => {
       let attempt: PendingSave = payload
-      const ownToken = scopeToken(payload.scope)
+      /**
+       * PROVENANCE — immutable, from the payload. Whose the work is, which
+       * version it is, which bytes, and the visit it was captured in. This is
+       * what the WRITE uses, so a restored retry still lands on its own
+       * document under its own child. Never rebound.
+       */
       const ownOwner: PendingOwner = {
         familyId: payload.scope.familyId,
         childId: payload.scope.childId,
         projectId: payload.scope.projectId,
       }
+      /**
+       * INVOCATION — the live UI this deliberate act belongs to. Separate from
+       * provenance, which is the whole repair: a restored Retry tapped after a
+       * remount has an OLD payload scope and a CURRENT invocation, and the old
+       * code compared the acknowledgment to the old scope and so never updated
+       * the screen — leaving "Saving…" forever with the version on the shelf.
+       */
+      const uiLive = () =>
+        liveTokenRef.current === invocation.token &&
+        saveLatchRef.current === invocation.opId &&
+        invocation.familyId === ownOwner.familyId &&
+        invocation.childId === ownOwner.childId &&
+        invocation.projectId === ownOwner.projectId
+      /**
+       * Were these bytes captured in the visit that is on screen NOW?
+       *
+       * A restored old-source Retry says no, and that answer is load-bearing:
+       * it may report Saved, but it may not declare the CURRENT editor contents
+       * clean, and it may not become the note target — the words would be filed
+       * against a version that is not what is open.
+       */
+      const sourceIsCurrent = scopeToken(payload.scope) === invocation.token
+
       for (;;) {
         attempt = { ...attempt, attempts: attempt.attempts + 1 }
         const sending = attempt
         // Identity-conditional, through the SAME rule the store uses: an older
         // save's retry may not take a newer save's recovery slot, and may not
-        // replace it on screen either.
-        setPending((current) => (pendingSlotAccepts(current, sending) ? sending : current))
+        // replace it on screen either. The HOLD is provenance-bound and always
+        // runs; the SCREEN is only touched while this invocation is live.
         holdPendingSave(ownOwner, sending)
-        setSaveState(SaveState.Writing)
+        if (uiLive()) {
+          setPending((current) => (pendingSlotAccepts(current, sending) ? sending : current))
+          setSaveState(SaveState.Writing)
+        }
         try {
           const result = await saveBuildStudioVersion({
             familyId: attempt.scope.familyId,
@@ -779,38 +845,48 @@ export default function BuildStudioEditor({
           // ITS OWN recovery slot and no other — an owner-only clear let an old
           // acknowledgment wipe a newer save's exact retry.
           clearPendingSave(ownOwner, attempt.versionId)
-          if (liveTokenRef.current !== ownToken) {
-            // An accepted write bound to its owner finished after the page
-            // moved on. Not undone, not silently dropped, and NOT applied to
-            // whatever visit is mounted now.
+          if (!uiLive()) {
+            // An accepted write bound to its owner finished for a screen that
+            // is no longer there, or was abandoned. Not undone, not silently
+            // dropped, and NOT applied to whatever visit is mounted now.
             onOutOfScopeSave?.(
               `A save started earlier finished and is on the shelf as “${attempt.label}”.`,
             )
             return
           }
-          // What is on the shelf is now these bytes, so that is what "clean"
-          // means from here on.
-          settledSignatureRef.current = attempt.capturedSignature
-          // Did a REAL new edit arrive while this was writing? Compared by
-          // content: the capture's own save events carry the captured bytes and
-          // read clean, and only different bytes read dirty. An editor that has
-          // announced nothing yet is also clean.
-          const announced = announcedSignatureRef.current
-          const stillCurrent = announced === null || announced === attempt.capturedSignature
+          if (sourceIsCurrent) {
+            // These bytes ARE what is open, so they are what "clean" means from
+            // here on, and they are a legitimate note target.
+            settledSignatureRef.current = attempt.capturedSignature
+            // Did a REAL new edit arrive while this was writing? Compared by
+            // content: the capture's own save events carry the captured bytes
+            // and read clean. An editor that has announced nothing is clean.
+            const announced = announcedSignatureRef.current
+            const stillCurrent =
+              announced === null || announced === attempt.capturedSignature
+            setEditorDirty(!stillCurrent)
+            setSaveMessage(
+              !stillCurrent
+                ? SAVED_BUT_NEWER_LINE
+                : result.outcome === 'alreadySaved'
+                  ? SAVED_ALREADY_LINE
+                  : SAVED_LINE,
+            )
+            setLastSaved({
+              versionId: attempt.versionId,
+              versionDocId: result.version.id,
+              label: attempt.label,
+            })
+          } else {
+            // A RESTORED retry: the version is safely on the shelf, and the
+            // editor in front of him holds something else. So neither
+            // `settledSignatureRef` nor `editorDirty` is touched — whatever is
+            // open stays as dirty as it actually is — and no note target is
+            // bound, because his words would be filed against bytes that are
+            // not what he is looking at.
+            setSaveMessage(SAVED_EARLIER_LINE)
+          }
           setSaveState(SaveState.Saved)
-          setSaveMessage(
-            !stillCurrent
-              ? SAVED_BUT_NEWER_LINE
-              : result.outcome === 'alreadySaved'
-                ? SAVED_ALREADY_LINE
-                : SAVED_LINE,
-          )
-          setLastSaved({
-            versionId: attempt.versionId,
-            versionDocId: result.version.id,
-            label: attempt.label,
-          })
-          setEditorDirty(!stillCurrent)
           // Only this save's own row leaves the screen. A newer pending save
           // stays exactly where it is.
           setPending((current) =>
@@ -824,11 +900,20 @@ export default function BuildStudioEditor({
           // ONE automatic retry of the EXACT payload and identity.
           const deterministic = err instanceof BuildStudioRefused
           if (!deterministic && attempt.attempts < MAX_AUTOMATIC_ATTEMPTS) {
+            // The auto-retry re-checks the invocation BEFORE looping, so an
+            // abandoned operation stops writing rather than quietly carrying on
+            // against a screen that has moved.
+            if (!uiLive()) {
+              onOutOfScopeSave?.(
+                'A save started earlier did not finish. It is still waiting to be tried again.',
+              )
+              return
+            }
             continue
           }
-          if (liveTokenRef.current !== ownToken) {
-            // Failed for a retired visit. The payload stays held for its owner
-            // so the retry is waiting when he comes back.
+          if (!uiLive()) {
+            // Failed for a retired visit or an abandoned operation. The payload
+            // stays held for its owner so the retry is waiting on return.
             onOutOfScopeSave?.(
               'A save started earlier did not finish. It is still waiting to be tried again.',
             )
@@ -901,7 +986,7 @@ export default function BuildStudioEditor({
         attempts: 0,
         capturedSignature: sourceSignature(snapshot.files),
       }
-      await commit(payload)
+      await commit(payload, { token, opId, ...owner })
     } finally {
       // Only if this operation still owns them.
       if (saveLatchRef.current === opId) {
@@ -909,8 +994,14 @@ export default function BuildStudioEditor({
         inFlightRef.current = false
       }
     }
-  }, [phase, projectReady, label, scope, token, versions.versions.length, commit])
+  }, [phase, projectReady, label, scope, token, owner, versions.versions.length, commit])
 
+  /**
+   * The deliberate Retry. The payload's provenance is untouched — same bytes,
+   * same version id, same child — but the INVOCATION is the current screen's,
+   * so its acknowledgment lands here instead of being reported as somebody
+   * else's finished save and leaving "Saving…" on the button forever.
+   */
   const handleRetrySave = useCallback(async () => {
     if (saveLatchRef.current) return
     if (!pending) return
@@ -918,14 +1009,14 @@ export default function BuildStudioEditor({
     saveLatchRef.current = opId
     inFlightRef.current = true
     try {
-      await commit(pending)
+      await commit(pending, { token, opId, ...owner })
     } finally {
       if (saveLatchRef.current === opId) {
         saveLatchRef.current = null
         inFlightRef.current = false
       }
     }
-  }, [pending, commit])
+  }, [pending, commit, token, owner])
 
   /**
    * Save the bytes a pre-departure capture already read.
@@ -941,18 +1032,21 @@ export default function BuildStudioEditor({
     inFlightRef.current = true
     try {
       const runtime = bridgeRef.current?.runtimeVersions() ?? null
-      await commit({
-        scope,
-        versionId: newVersionId(Date.now(), Math.random()),
-        label: label.trim() || defaultLabel(versions.versions.length + 1),
-        createdAt: new Date().toISOString(),
-        files,
-        editorTarget: runtime?.target ? 'arcade' : undefined,
-        editorTargetVersion: runtime?.target,
-        goalId: BUILD_STUDIO_GOAL.id,
-        attempts: 0,
-        capturedSignature: sourceSignature(files),
-      })
+      await commit(
+        {
+          scope,
+          versionId: newVersionId(Date.now(), Math.random()),
+          label: label.trim() || defaultLabel(versions.versions.length + 1),
+          createdAt: new Date().toISOString(),
+          files,
+          editorTarget: runtime?.target ? 'arcade' : undefined,
+          editorTargetVersion: runtime?.target,
+          goalId: BUILD_STUDIO_GOAL.id,
+          attempts: 0,
+          capturedSignature: sourceSignature(files),
+        },
+        { token, opId, ...owner },
+      )
       departureFilesRef.current = null
     } finally {
       if (saveLatchRef.current === opId) {
@@ -960,7 +1054,7 @@ export default function BuildStudioEditor({
         inFlightRef.current = false
       }
     }
-  }, [commit, scope, label, versions.versions.length])
+  }, [commit, scope, label, token, owner, versions.versions.length])
 
   const handleDiscardPending = useCallback(() => {
     // Discards exactly the payload that was shown, by its own id.
@@ -1000,18 +1094,22 @@ export default function BuildStudioEditor({
 
   // ── Reopen ─────────────────────────────────────────────────────────────
 
-  const openVersion = useCallback(
-    (version: BuildStudioVersion) => {
+  /** Replace what is open. Called only after the check or an explicit choice. */
+  const applyReplace = useCallback(
+    (next: { version: BuildStudioVersion } | { recovery: BuildStudioSourceFiles }) => {
+      const version = 'version' in next ? next.version : null
       // Checked AGAIN here, not only on the shelf: this is the action that
       // imports bytes, and a row for another project under the same child must
       // never load as this project.
-      if (!versionBelongsTo(version, childId, projectId)) {
-        setConfirmReopen(null)
+      if (version && !versionBelongsTo(version, childId, projectId)) {
+        setProspect(null)
+        setProspectCheck('idle')
         setSaveMessage('That saved game is not part of this one, so it was not opened.')
         return
       }
-      setOpeningVersionId(version.versionId)
-      setConfirmReopen(null)
+      if (version) setOpeningVersionId(version.versionId)
+      setProspect(null)
+      setProspectCheck('idle')
       setSaveState(SaveState.Idle)
       setSaveMessage(null)
       setLastSaved(null)
@@ -1019,13 +1117,14 @@ export default function BuildStudioEditor({
       setNoteState('idle')
       setNoteMessage(null)
       setHintsOffered(0)
+      departureFilesRef.current = null
       setLoadedToken(null)
       // A brand new visit: a new id, so nothing from the previous one can act
       // here even on an `A → B → A`.
       setVisit({
         visitId: newVisitId(Date.now(), Math.random()),
         version,
-        recovery: null,
+        recovery: 'recovery' in next ? next.recovery : null,
       })
     },
     [childId, projectId],
@@ -1037,36 +1136,81 @@ export default function BuildStudioEditor({
     }
   }, [phase])
 
-  const requestOpen = useCallback(
-    (version: BuildStudioVersion) => {
-      if (writeInFlight) return
-      if (editorDirty || pending) {
-        setConfirmReopen(version)
+  /**
+   * Ask to replace what is open — with a saved version, or with a recovered
+   * file — and don't replace anything until the open source has been looked at.
+   *
+   * ONE path for both doors. The shelf's Open used to consult only
+   * `editorDirty`, which is the ANNOUNCED state, so an in-frame edit MakeCode
+   * had not reported yet was replaced and lost; the recovery door replaced
+   * regardless. A capture runs while the old editor is still intact: a verified
+   * clean one proceeds by itself, and dirty or uncertain stops for Stay or an
+   * explicit Replace. Nothing is privately saved either way.
+   */
+  const requestReplace = useCallback(
+    (next: { version: BuildStudioVersion } | { recovery: BuildStudioSourceFiles }) => {
+      if (writeInFlight || saveLatchRef.current) return
+      replaceSeqRef.current += 1
+      const runId = replaceSeqRef.current
+      replaceRunRef.current = runId
+      setProspect(next)
+      // A failed save's exact retry is work, and its loss has to be deliberate.
+      if (pending) {
+        setProspectCheck('dirty')
         return
       }
-      openVersion(version)
+      setProspectCheck('checking')
+      void checkSourceNow().then((result) => {
+        if (replaceRunRef.current !== runId) return
+        if (result === 'clean') {
+          replaceRunRef.current = null
+          setProspect(null)
+          setProspectCheck('idle')
+          applyReplace(next)
+          return
+        }
+        setProspectCheck(result === 'dirty' ? 'dirty' : 'unknown')
+      })
     },
-    [writeInFlight, editorDirty, pending, openVersion],
+    [writeInFlight, pending, checkSourceNow, applyReplace],
   )
 
+  /** Abandon the replacement. Current edits and any pending retry stay. */
+  const cancelReplace = useCallback(() => {
+    replaceRunRef.current = null
+    setProspect(null)
+    setProspectCheck('idle')
+  }, [])
+
   /**
-   * Put a previously downloaded archive back into the open editor.
+   * Put a previously downloaded archive back in, as its own fresh visit.
    *
    * The route back in, so the download really is a recovery. An explicit
-   * action, bounded and checked by `readRecoveryArchive`, and it imports into
-   * the CURRENT visit rather than inventing one — so the scope, the frame and
-   * the gating are the ones already in force. It writes nothing: the child saves
-   * it himself afterwards, which is the only way it becomes a version.
+   * action, bounded and checked by `readRecoveryArchive`. It does NOT import
+   * into the current visit: stock assigns a new header per import, and a
+   * recovered project pushed into the starter's bridge opened fine and then
+   * could never be saved. It writes nothing — the child saves it himself, which
+   * is the only way it becomes a version.
    */
   const handleRecoveryFile = useCallback(
     async (file: File | null | undefined) => {
       if (!file) return
       const ownToken = token
+      /**
+       * Reading a file is slow, and an ordinary Save can start while it is in
+       * flight. So the visit AND the write latch are re-read after the await,
+       * on both paths — a recovery must never retire an active save or
+       * overwrite its state.
+       */
+      const stillOurs = () =>
+        liveTokenRef.current === ownToken &&
+        !saveLatchRef.current &&
+        !inFlightRef.current
       let files: BuildStudioSourceFiles
       try {
         files = readRecoveryArchive(await file.text())
       } catch (err) {
-        if (liveTokenRef.current !== ownToken) return
+        if (!stillOurs()) return
         setSaveMessage(
           err instanceof RecoveryRefused || err instanceof Error
             ? err.message
@@ -1075,29 +1219,10 @@ export default function BuildStudioEditor({
         setSaveState(SaveState.Failed)
         return
       }
-      if (liveTokenRef.current !== ownToken) return
-      // A whole new visit, carrying the validated files. Not an import into the
-      // open editor: stock assigns a new header per import, and a recovered
-      // project pushed into the starter's bridge opened fine and then could
-      // never be saved. A fresh visit gets a fresh frame, a fresh header and
-      // the same startup readback, and retires this visit's callbacks, note
-      // target and pre-departure capture.
-      setSaveState(SaveState.Idle)
-      setSaveMessage(null)
-      setLastSaved(null)
-      setNoteDraft(null)
-      setNoteState('idle')
-      setNoteMessage(null)
-      setHintsOffered(0)
-      departureFilesRef.current = null
-      setLoadedToken(null)
-      setVisit({
-        visitId: newVisitId(Date.now(), Math.random()),
-        version: null,
-        recovery: files,
-      })
+      if (!stillOurs()) return
+      requestReplace({ recovery: files })
     },
-    [token],
+    [token, requestReplace],
   )
 
   const handleDownloadVersion = useCallback((version: BuildStudioVersion) => {
@@ -1616,37 +1741,54 @@ export default function BuildStudioEditor({
         <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
           Your saved games
         </Typography>
-        {confirmReopen && (
+        {prospect && (
           <Alert
-            severity="warning"
+            severity={prospectCheck === 'checking' ? 'info' : 'warning'}
             action={
-              <Stack direction="row" spacing={1}>
-                <Button
-                  size="small"
-                  onClick={() => openVersion(confirmReopen)}
-                  sx={{ textTransform: 'none' }}
-                >
-                  Open it anyway
-                </Button>
-                <Button
-                  size="small"
-                  onClick={() => setConfirmReopen(null)}
-                  sx={{ textTransform: 'none' }}
-                >
-                  Keep working
-                </Button>
-              </Stack>
+              prospectCheck === 'checking' ? undefined : (
+                <Stack direction="row" spacing={1} flexWrap="wrap" rowGap={1}>
+                  <Button
+                    size="small"
+                    onClick={cancelReplace}
+                    sx={{ textTransform: 'none', fontWeight: 700 }}
+                  >
+                    Keep working
+                  </Button>
+                  <Button
+                    size="small"
+                    onClick={() => void handleDownloadCurrent()}
+                    sx={{ textTransform: 'none' }}
+                  >
+                    Download a copy
+                  </Button>
+                  <Button
+                    size="small"
+                    color="error"
+                    onClick={() => applyReplace(prospect)}
+                    sx={{ textTransform: 'none' }}
+                  >
+                    {'version' in prospect ? 'Open it anyway' : 'Replace it anyway'}
+                  </Button>
+                </Stack>
+              )
             }
           >
-            {/* The loss is named BEFORE the tap, not reported after it. */}
-            You have work that is not on your shelf. Opening “{confirmReopen.label}”
-            will lose it.
+            {/* The loss is named BEFORE the tap, not reported after it — and the
+                capture that decides runs while the old editor is still intact,
+                so an edit MakeCode has not announced yet still counts. */}
+            {prospectCheck === 'checking'
+              ? 'Checking what is in the editor first…'
+              : prospectCheck === 'unknown'
+                ? 'This page could not read the editor just now, so it cannot tell whether your changes are saved. Opening something else might lose them.'
+                : pending
+                  ? `A save called “${pending.label}” did not finish. Opening something else leaves it behind.`
+                  : 'You have work that is not on your shelf. Opening something else will lose it.'}
           </Alert>
         )}
         <BuildStudioVersionShelf
           read={versions}
           canOpen={!writeInFlight}
-          onOpen={requestOpen}
+          onOpen={(version) => requestReplace({ version })}
           onDownload={handleDownloadVersion}
           onRetryRead={versions.retry}
           currentVersionId={visit.version?.versionId ?? null}

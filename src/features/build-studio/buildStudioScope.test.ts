@@ -325,12 +325,25 @@ describe('one save never clears or replaces another save’s recovery slot', () 
     expect(slot?.capturedSignature).toBe('sig-B')
   })
 
-  it('refuses A’s retry once B owns the slot', () => {
-    holdPendingSave(owner, B)
+  it('refuses A’s GENUINE retry once B owns the slot', () => {
+    // The real order: A is offered FIRST (its write failed), then B replaces it
+    // after the child returns, and only then does A's retry arrive. Offering B
+    // first would not have modelled a retry at all.
+    expect(holdPendingSave(owner, A)).toBe(true)
+    expect(holdPendingSave(owner, B)).toBe(true)
     const took = holdPendingSave(owner, { ...A, attempts: 2 })
     expect(took).toBe(false)
     expect(readPendingSave(owner)?.versionId).toBe('v-B')
     expect(readPendingSave(owner)?.files['main.ts']).toBe('info.setLife(7)')
+  })
+
+  it('refuses A’s retry even when A was never offered before B', () => {
+    // A payload the store has not seen takes the next sequence number, so it
+    // would look "newer" by order alone. Its own stamp is still older, and the
+    // display rule refuses it — both halves are needed.
+    expect(holdPendingSave(owner, B)).toBe(true)
+    expect(holdPendingSave(owner, { ...A, attempts: 2 })).toBe(false)
+    expect(readPendingSave(owner)?.versionId).toBe('v-B')
   })
 
   it('lets a save re-hold its OWN slot, which is what a retry does', () => {

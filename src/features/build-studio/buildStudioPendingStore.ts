@@ -112,7 +112,11 @@ export function holdPendingSave(owner: PendingOwner, payload: PendingSave): bool
   const mine = noteOffer(key, payload.versionId)
   const slot = held.get(key)
   if (slot && slot.versionId !== payload.versionId) {
-    // Observed offer order decides it, so a shared timestamp cannot.
+    // BOTH halves, and both are needed. The stamp rule catches a payload the
+    // store has never seen — a retry arriving first would otherwise take the
+    // next sequence number and look newer by order alone. The observed order
+    // catches a shared timestamp, which the stamp rule reads as a tie.
+    if (!pendingSlotAccepts(slot, payload)) return false
     const theirs = offered.get(key)?.get(slot.versionId) ?? 0
     if (theirs > mine) return false
   }

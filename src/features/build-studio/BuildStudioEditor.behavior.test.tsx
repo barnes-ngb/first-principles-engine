@@ -173,14 +173,66 @@ vi.mock('../../core/firebase/buildStudioNoteWrites', () => ({
 
 // ── The shell deps ───────────────────────────────────────────────────────
 
-const blocker = { state: 'unblocked' as 'unblocked' | 'blocked', proceed: vi.fn(), reset: vi.fn() }
-let blockPredicate: (() => boolean) | null = null
-vi.mock('react-router-dom', () => ({
-  useBlocker: (arg: () => boolean) => {
-    blockPredicate = arg
-    return blocker
+/**
+ * A SUBSCRIBED router stand-in, not a plain mutable object.
+ *
+ * The previous mock returned `{ state }` from a module-level object, so a test
+ * that set `blocker.state = 'blocked'` and then emitted the same editor bytes
+ * produced no re-render — React saw an identical dirty value — and the
+ * component never saw the hold. Eleven held-departure and profile cases failed
+ * against working product code, which is the test driver lying about the
+ * router rather than a defect.
+ *
+ * This store notifies its subscribers on every transition, and `proceed` /
+ * `reset` perform the real transition back to `unblocked` the way the data
+ * router does.
+ */
+const routerStore = {
+  state: 'unblocked' as 'unblocked' | 'blocked',
+  listeners: new Set<() => void>(),
+  set(next: 'unblocked' | 'blocked') {
+    if (routerStore.state === next) return
+    routerStore.state = next
+    for (const listener of [...routerStore.listeners]) listener()
   },
-}))
+}
+const proceedSpy = vi.fn()
+const resetSpy = vi.fn()
+let blockPredicate: (() => boolean) | null = null
+
+vi.mock('react-router-dom', async () => {
+  const React = await import('react')
+  return {
+    useBlocker: (arg: () => boolean) => {
+      blockPredicate = arg
+      const [, bump] = React.useReducer((count: number) => count + 1, 0)
+      React.useEffect(() => {
+        routerStore.listeners.add(bump)
+        return () => {
+          routerStore.listeners.delete(bump)
+        }
+      }, [])
+      return {
+        state: routerStore.state,
+        proceed: () => {
+          proceedSpy()
+          routerStore.set('unblocked')
+        },
+        reset: () => {
+          resetSpy()
+          routerStore.set('unblocked')
+        },
+      }
+    },
+  }
+})
+
+/** Tap a nav link: the router holds the departure and asks the component. */
+async function attemptDeparture() {
+  await act(async () => {
+    routerStore.set('blocked')
+  })
+}
 
 const selectProfile = vi.fn()
 let registeredGuard: ((next: string) => boolean) | null = null
@@ -262,11 +314,12 @@ async function tapSave() {
 
 beforeEach(() => {
   bridges.length = 0
-  blocker.state = 'unblocked'
+  routerStore.state = 'unblocked'
+  routerStore.listeners.clear()
   blockPredicate = null
   registeredGuard = null
-  vi.mocked(blocker.proceed).mockClear()
-  vi.mocked(blocker.reset).mockClear()
+  proceedSpy.mockClear()
+  resetSpy.mockClear()
   selectProfile.mockClear()
   saveVersion.mockReset()
   saveVersion.mockImplementation(async (args: { versionId: string }) => ({
@@ -411,12 +464,8 @@ describe('a held departure is checked before anybody is warned', () => {
   it('releases a genuinely clean exit with no warning', async () => {
     const bridge = await openEditor()
     bridge.nextCapture = starterFiles()
-    blocker.state = 'blocked'
-    // Any state change re-renders, which is how the held departure is noticed.
-    await act(async () => {
-      bridge.announce(starterFiles())
-    })
-    await waitFor(() => expect(blocker.proceed).toHaveBeenCalled())
+    await attemptDeparture()
+    await waitFor(() => expect(proceedSpy).toHaveBeenCalled())
     expect(screen.queryByText('Keep your game first?')).not.toBeInTheDocument()
   })
 
@@ -425,10 +474,7 @@ describe('a held departure is checked before anybody is warned', () => {
     // He typed 4 into the blocks; MakeCode has said nothing.
     bridge.nextCapture = editedFiles(4)
     const before = bridge.captures
-    blocker.state = 'blocked'
-    await act(async () => {
-      bridge.announce(starterFiles())
-    })
+    await attemptDeparture()
     await waitFor(() => expect(bridge.captures).toBeGreaterThan(before))
     await waitFor(() => expect(screen.getByText('Keep your game first?')).toBeInTheDocument())
     expect(screen.getByText('Stay here')).toBeInTheDocument()
@@ -462,11 +508,8 @@ describe('a held departure is checked before anybody is warned', () => {
     )
 
     // Now he taps Today.
-    blocker.state = 'blocked'
-    await act(async () => {
-      bridge.announce(edited)
-    })
-    await waitFor(() => expect(blocker.proceed).toHaveBeenCalled())
+    await attemptDeparture()
+    await waitFor(() => expect(proceedSpy).toHaveBeenCalled())
     // And it never stranded on the checking state.
     expect(screen.queryByText('Checking your game…')).not.toBeInTheDocument()
   })
@@ -477,18 +520,15 @@ describe('a held departure is checked before anybody is warned', () => {
     bridge.captureGate = (resolveCapture) => {
       releaseCapture = resolveCapture
     }
-    blocker.state = 'blocked'
-    await act(async () => {
-      bridge.announce(starterFiles())
-    })
+    await attemptDeparture()
     // The dialog is honest while it waits…
     await waitFor(() => expect(screen.getByText('Checking your game…')).toBeInTheDocument())
-    expect(blocker.proceed).not.toHaveBeenCalled()
+    expect(proceedSpy).not.toHaveBeenCalled()
     // …and the late answer still lands.
     await act(async () => {
       releaseCapture!(starterFiles())
     })
-    await waitFor(() => expect(blocker.proceed).toHaveBeenCalled())
+    await waitFor(() => expect(proceedSpy).toHaveBeenCalled())
     expect(screen.queryByText('Checking your game…')).not.toBeInTheDocument()
   })
 
@@ -496,37 +536,29 @@ describe('a held departure is checked before anybody is warned', () => {
     const bridge = await openEditor()
     const edited = editedFiles(4)
     bridge.nextCapture = edited
-    blocker.state = 'blocked'
-    await act(async () => {
-      bridge.announce(edited)
-    })
+    await attemptDeparture()
     await waitFor(() => expect(screen.getByText('Keep your game first?')).toBeInTheDocument())
     await act(async () => {
       screen.getByText('Stay here').click()
     })
-    expect(blocker.reset).toHaveBeenCalled()
-    expect(blocker.proceed).not.toHaveBeenCalled()
+    // `reset` performs the real transition back to unblocked, as the data
+    // router does — so the dialog closes and nothing is lost.
+    expect(resetSpy).toHaveBeenCalled()
+    expect(proceedSpy).not.toHaveBeenCalled()
+    await waitFor(() =>
+      expect(screen.queryByText('Keep your game first?')).not.toBeInTheDocument(),
+    )
 
-    // The hold ends, so the next departure asks again rather than being stuck.
-    blocker.state = 'unblocked'
-    await act(async () => {
-      bridge.announce(edited)
-    })
-    expect(screen.queryByText('Keep your game first?')).not.toBeInTheDocument()
-    blocker.state = 'blocked'
-    await act(async () => {
-      bridge.announce(edited)
-    })
+    // A SECOND departure asks again rather than being stuck.
+    await attemptDeparture()
     await waitFor(() => expect(screen.getByText('Keep your game first?')).toBeInTheDocument())
+    expect(proceedSpy).not.toHaveBeenCalled()
   })
 
   it('says it cannot tell when the capture fails, rather than nothing', async () => {
     const bridge = await openEditor()
     bridge.captureError = new Error('no answer')
-    blocker.state = 'blocked'
-    await act(async () => {
-      bridge.announce(starterFiles())
-    })
+    await attemptDeparture()
     await waitFor(() =>
       expect(screen.getByText(/could not read the editor just now/)).toBeInTheDocument(),
     )
@@ -759,6 +791,63 @@ describe('a failed Save keeps its exact retry, and the latch is released', () =>
     expect(screen.getByText('Try again')).toBeInTheDocument()
   })
 
+  /**
+   * The verified stuck receipt: a restored Retry committed the version — the
+   * shelf showed it — but the UI stayed on "Saving…", showed *About an earlier
+   * save*, and offered no Open. `commit` compared the acknowledgment to the
+   * payload's ORIGINAL capture visit, which a remount had retired, so it took
+   * the out-of-scope branch and never touched the screen.
+   *
+   * POSITIVE CONTROL: compute the liveness check from `payload.scope` again and
+   * this case stays on "Saving…".
+   */
+  it('a restored Retry acknowledges on the CURRENT visit', async () => {
+    // A fails and is held.
+    const first = await openEditor()
+    first.nextCapture = editedFiles(4)
+    saveVersion.mockRejectedValue(new Error('offline'))
+    await tapSave()
+    await waitFor(() => expect(screen.getByText('offline')).toBeInTheDocument())
+    const idA = readPendingSave(OWNER)?.versionId
+    expect(idA).toBeTruthy()
+
+    // He leaves and comes back; the editor now holds something ELSE.
+    cleanup()
+    const second = await openEditor()
+    second.nextCapture = editedFiles(7)
+    await act(async () => {
+      second.announce(editedFiles(7))
+    })
+    expect(screen.getByText(/not saved to your shelf yet/)).toBeInTheDocument()
+
+    // The deliberate Retry, on the restored payload.
+    saveVersion.mockReset()
+    saveVersion.mockImplementation(async (args: { versionId: string }) => ({
+      outcome: 'created',
+      version: { id: `doc-${args.versionId}` },
+    }))
+    await act(async () => {
+      screen.getByText('Try again').click()
+    })
+
+    // It acknowledged HERE: the receipt is on screen and the controls are
+    // usable again, rather than stuck on "Saving…".
+    await waitFor(() => expect(screen.getByText(/it is on your shelf now/)).toBeInTheDocument())
+    expect(screen.getByText('💾 Save my version')).toBeEnabled()
+    expect(screen.queryByText('Saving…')).not.toBeInTheDocument()
+
+    // Provenance was preserved: same action id, same bytes, same child.
+    expect(saveVersion.mock.calls[0][0].versionId).toBe(idA)
+    expect(saveVersion.mock.calls[0][0].files['main.ts']).toBe(editedFiles(4)['main.ts'])
+    expect(saveVersion.mock.calls[0][0].childId).toBe(OWNER.childId)
+
+    // And it did NOT declare the live editor clean — that source is different
+    // and is still unsaved.
+    expect(screen.getByText(/not saved to your shelf yet/)).toBeInTheDocument()
+    // Nor did it claim the open game is on the shelf.
+    expect(screen.queryByText('Saved. Your game is on your shelf.')).not.toBeInTheDocument()
+  })
+
   it('releases the hold when the write finally lands', async () => {
     const bridge = await openEditor()
     bridge.nextCapture = starterFiles()
@@ -786,14 +875,41 @@ describe('a failed Save keeps its exact retry, and the latch is released', () =>
  * the first case sees one bridge rather than two.
  */
 describe('opening a downloaded copy starts a fresh visit', () => {
-  async function openRecoveryFile(files: Record<string, string>) {
+  /**
+   * A File with an honest async `text()`.
+   *
+   * jsdom does not reliably implement `Blob.prototype.text`, and the product
+   * must NOT carry a fallback for that — a missing reader would be reported as
+   * an invalid archive, which is a lie about the family's file. So the seam is
+   * here, in the test, and it behaves exactly as the browser's does.
+   */
+  function archiveFile(body: string, name = 'my-game-source.json'): File {
+    const file = new File([body], name, { type: 'application/json' })
+    if (typeof file.text !== 'function') {
+      Object.defineProperty(file, 'text', { value: async () => body })
+    }
+    return file
+  }
+
+  async function pickFile(file: File) {
     const input = screen.getByLabelText('Open a downloaded game file')
-    const file = new File([serializeBuildStudioSource(files)], 'my-game-source.json', {
-      type: 'application/json',
-    })
     await act(async () => {
       fireEvent.change(input, { target: { files: [file] } })
     })
+  }
+
+  /** Pick the file and take the explicit Replace, which is the ordinary path. */
+  async function openRecoveryFile(files: Record<string, string>) {
+    await pickFile(archiveFile(serializeBuildStudioSource(files)))
+    // A recovery replaces what is open, so it goes through the same
+    // pre-replacement check as the shelf's Open. A clean editor proceeds by
+    // itself; anything else offers the choice.
+    const replace = screen.queryByText('Replace it anyway')
+    if (replace) {
+      await act(async () => {
+        replace.click()
+      })
+    }
   }
 
   it('builds a new bridge and frame, and retires the old one', async () => {
@@ -839,18 +955,50 @@ describe('opening a downloaded copy starts a fresh visit', () => {
   it('refuses a file that is not one of this app’s archives', async () => {
     await openEditor()
     const before = bridges.length
-    const input = screen.getByLabelText('Open a downloaded game file')
-    const file = new File(['not json at all'], 'whatever.json', {
-      type: 'application/json',
-    })
-    await act(async () => {
-      fireEvent.change(input, { target: { files: [file] } })
-    })
+    await pickFile(archiveFile('not json at all', 'whatever.json'))
     await waitFor(() =>
       expect(screen.getByText(/not a game file this app saved/)).toBeInTheDocument(),
     )
     // No visit was started, so the open editor is untouched.
     expect(bridges.length).toBe(before)
+  })
+
+  /**
+   * The preservation contract, both doors. The shelf's Open consulted only the
+   * ANNOUNCED dirty flag, so an in-frame edit MakeCode had not reported was
+   * replaced and lost; recovery replaced regardless.
+   */
+  it('does not replace an UNANNOUNCED edit without asking', async () => {
+    const first = await openEditor()
+    // He typed 4 into the blocks; MakeCode has said nothing.
+    first.nextCapture = editedFiles(4)
+    const before = bridges.length
+    await pickFile(archiveFile(serializeBuildStudioSource(editedFiles(7))))
+    await waitFor(() =>
+      expect(screen.getByText(/work that is not on your shelf/)).toBeInTheDocument(),
+    )
+    // Nothing was replaced, and the live editor is untouched.
+    expect(bridges.length).toBe(before)
+    expect(first.disposed).toBe(false)
+  })
+
+  it('keeps the current edits and the pending retry on Keep working', async () => {
+    const first = await openEditor()
+    first.nextCapture = editedFiles(4)
+    saveVersion.mockRejectedValue(new Error('offline'))
+    await tapSave()
+    await waitFor(() => expect(screen.getByText('offline')).toBeInTheDocument())
+    const heldBefore = readPendingSave(OWNER)?.versionId
+
+    await pickFile(archiveFile(serializeBuildStudioSource(editedFiles(7))))
+    await waitFor(() => expect(screen.getByText('Keep working')).toBeInTheDocument())
+    await act(async () => {
+      screen.getByText('Keep working').click()
+    })
+    // The editor stayed, and the exact retry is still waiting.
+    expect(first.disposed).toBe(false)
+    expect(readPendingSave(OWNER)?.versionId).toBe(heldBefore)
+    expect(screen.getByText('Try again')).toBeInTheDocument()
   })
 })
 
