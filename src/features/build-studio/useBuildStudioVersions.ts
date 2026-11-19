@@ -10,6 +10,13 @@
 // three different sentences and only one of them is "you have not saved
 // anything yet". A rejected read rendered as an empty list would tell a child
 // his work is gone, which is the single worst thing this feature could say.
+//
+// ── An answer belongs to ONE subscription ───────────────────────────────────
+//
+// Every stored value is tagged with the request object it came from, and every
+// callback is retired by its own cleanup before `unsubscribe`. So `A → B → A`
+// cannot reuse the first A's list, and a snapshot already in flight when the
+// child changed or Try again was tapped cannot overwrite the newest answer.
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { onSnapshot, query, where } from 'firebase/firestore'
@@ -69,75 +76,121 @@ export function versionBelongsTo(
 }
 
 /**
+ * ONE subscription's identity.
+ *
+ * An OBJECT, not a string key. A string built from the family, child and
+ * project is identical for two different subscriptions, which is what let an
+ * `A → B → A` reuse A's first answer — and let a callback from before the
+ * switch overwrite the newest one. Object identity cannot be re-created by
+ * accident, so A's first answer is not an answer about A's second subscription.
+ */
+interface VersionsRequest {
+  familyId: string | null
+  childId: string | null
+  projectId: string | null
+  /** The retry this request belongs to, so a retry is a new subscription. */
+  attempt: number
+}
+
+/**
  * Subscribe to one child's saved versions.
  *
- * Keyed by the subscription's identity, so a change of child reads as
- * `Loading` immediately rather than showing the previous child's shelf for a
- * frame — and the returned `childId` lets the caller assert the answer is about
- * the child it is rendering, which an `A → B → A` cannot fake away because the
- * key is rebuilt on every change.
+ * Identified by the subscription, so a change of child — or a retry — reads as
+ * `Loading` immediately rather than showing the previous answer for a frame,
+ * and the returned `childId` lets the caller assert the answer is about the
+ * child it is rendering.
  */
 export function useBuildStudioVersions(
   familyId: string | null | undefined,
   childId: string | null | undefined,
   projectId: string | null | undefined,
 ): BuildStudioVersionsRead {
-  const key = `${familyId ?? ''}\u0000${childId ?? ''}\u0000${projectId ?? ''}`
   const [read, setRead] = useState<{
-    key: string
+    request: VersionsRequest | null
     value: Omit<BuildStudioVersionsRead, 'retry'>
-  }>({ key: '', value: UNSETTLED })
-  /** Bumped by `retry`, so the subscribe effect runs again. */
+  }>({ request: null, value: UNSETTLED })
+  /** Bumped by `retry`, so a fresh request is minted and the effect re-runs. */
   const [attempt, setAttempt] = useState(0)
   const retry = useCallback(() => {
-    setRead({ key: '', value: UNSETTLED })
+    setRead({ request: null, value: UNSETTLED })
     setAttempt((n) => n + 1)
   }, [])
 
+  /**
+   * The request this render wants. `attempt` is in it, so *Try again* mints a
+   * new identity and therefore a new subscription. A memo React drops can only
+   * cost a fresh read, which is safe.
+   */
+  const request: VersionsRequest = useMemo(
+    () => ({
+      familyId: familyId ?? null,
+      childId: childId ?? null,
+      projectId: projectId ?? null,
+      attempt,
+    }),
+    [familyId, childId, projectId, attempt],
+  )
+
   useEffect(() => {
-    if (!familyId || !childId || !projectId) return
+    const { familyId: family, childId: child, projectId: project } = request
+    if (!family || !child || !project) return
+    // This subscription's own retirement, closed over by both callbacks and
+    // set BEFORE `unsubscribe`: a snapshot already queued when the child
+    // changed, or when Try again was tapped, must not overwrite the newest
+    // answer.
+    let retired = false
     // ONE equality filter, sorted and project-filtered in memory. Two equality
     // filters would also be index-free, but keeping it to one removes the
     // question entirely — `firestore.indexes.json` is untouched either way.
-    const q = query(buildStudioVersionsCollection(familyId), where('childId', '==', childId))
+    const q = query(buildStudioVersionsCollection(family), where('childId', '==', child))
     const unsubscribe = onSnapshot(
       q,
       (snap) => {
+        if (retired) return
         const versions = snap.docs
           .map((d) => ({ ...d.data(), id: d.id }))
           // The project filter lives HERE as well as at the open action, so a
           // same-child row from another project is never on this shelf to be
           // tapped in the first place.
-          .filter((v) => versionBelongsTo(v, childId, projectId))
+          .filter((v) => versionBelongsTo(v, child, project))
         setRead({
-          key,
+          request,
           value: {
             status: VersionsStatus.Ready,
             versions,
-            childId,
-            projectId,
+            childId: child,
+            projectId: project,
             error: null,
           },
         })
       },
       (err) => {
+        if (retired) return
         console.warn('[buildStudio] versions subscribe failed:', err)
         setRead({
-          key,
+          request,
           value: {
             status: VersionsStatus.Failed,
             versions: [],
-            childId,
-            projectId,
+            childId: child,
+            projectId: project,
             error: err instanceof Error ? err.message : String(err),
           },
         })
       },
     )
-    return unsubscribe
-  }, [familyId, childId, projectId, key, attempt])
+    return () => {
+      retired = true
+      unsubscribe()
+    }
+  }, [request])
 
-  const value = read.key === key ? read.value : UNSETTLED
+  /**
+   * Only a value tagged with the request this render wants is an answer. A
+   * value from any earlier subscription — including one for the same family,
+   * child and project — is not settled.
+   */
+  const value = read.request === request ? read.value : UNSETTLED
 
   // Sorted here rather than in the listener so the comparison is in one place
   // and a stored row with a bad stamp sinks rather than throwing.

@@ -406,7 +406,11 @@ vi.mock('../../core/firebase/firestore', () => ({
   buildStudioVersionsCollection: () => ({ __col: 'buildStudioVersions' }),
 }))
 
-import { serializeBuildStudioSource } from '../../core/types/buildStudio'
+import {
+  buildStudioVersionDocId,
+  serializeBuildStudioSource,
+  type BuildStudioVersion,
+} from '../../core/types/buildStudio'
 // The real reader, through the partially-mocked module: only `downloadTextFile`
 // is replaced above, so this is the same function a parent's re-import runs.
 import { readRecoveryArchive } from './buildStudioExport'
@@ -446,6 +450,8 @@ const OWNER = { familyId: 'fam1', childId: 'c1', projectId: 'apple-dash-starter'
 interface EditorOptions {
   childId?: string
   childVoiceInputEnhanced?: boolean
+  /** The saved version an explicit entry choice picked on the way in. */
+  initialVersion?: BuildStudioVersion | null
 }
 
 /**
@@ -453,7 +459,11 @@ interface EditorOptions {
  * different child — which is what the app bar's chip does — and watch what an
  * in-flight answer does about it.
  */
-function editorElement({ childId, childVoiceInputEnhanced }: EditorOptions = {}) {
+function editorElement({
+  childId,
+  childVoiceInputEnhanced,
+  initialVersion,
+}: EditorOptions = {}) {
   return (
     <BuildStudioEditor
       familyId={OWNER.familyId}
@@ -461,6 +471,7 @@ function editorElement({ childId, childVoiceInputEnhanced }: EditorOptions = {})
       childName="Lincoln"
       projectId={OWNER.projectId}
       childVoiceInputEnhanced={childVoiceInputEnhanced}
+      initialVersion={initialVersion}
       versions={{
         status: VersionsStatus.Ready,
         versions: [],
@@ -2890,5 +2901,107 @@ describe('a capture refused for size stores nothing at all', () => {
     )
     expect(proceedSpy).not.toHaveBeenCalled()
     expect(saveVersion).not.toHaveBeenCalled()
+  })
+})
+
+// ── 8. Opening ON a saved version the child chose ──────────────────────
+
+/**
+ * The studio can be mounted already holding one of his saves.
+ *
+ * `initialVersion` is the entry's frozen choice, read once in the first visit.
+ * What these cases pin is that it reaches the editor as the existing REOPEN
+ * path and nothing else: the version's own archive is what is imported, the
+ * startup readback is the reopened-version check, the dirty comparison reads
+ * CLEAN because those bytes are what the shelf holds — and because the version
+ * is in the first visit there is no prior game, so no replacement confirmation
+ * and no second frame are involved.
+ */
+describe('a studio opened on an explicitly chosen saved version', () => {
+  /** A stored version of his own game, as the shelf read hands one over. */
+  const savedVersion = (
+    versionId: string,
+    label: string,
+    files: Record<string, string>,
+  ): BuildStudioVersion => {
+    const sourceArchive = serializeBuildStudioSource(files)
+    return {
+      id: buildStudioVersionDocId(OWNER.childId, OWNER.projectId, versionId),
+      childId: OWNER.childId,
+      projectId: OWNER.projectId,
+      versionId,
+      label,
+      createdAt: '2026-11-17T01:00:00.000Z',
+      sourceArchive,
+      byteSize: sourceArchive.length,
+      fileCount: Object.keys(files).length,
+      sourceDigest: 'digest',
+    }
+  }
+
+  /**
+   * Mount already holding `chosen`, with the frame reading back the bytes it
+   * was given — which is what a real editor hands over after that import.
+   */
+  async function openOnVersion(chosen: BuildStudioVersion, files: Record<string, string>) {
+    renderEditor({ initialVersion: chosen })
+    const bridge = bridges[bridges.length - 1]
+    bridge.nextCapture = files
+    await act(async () => {
+      bridge.ready()
+    })
+    await waitFor(() => expect(bridge.captures).toBeGreaterThan(0))
+    await waitFor(() => expect(screen.getByText('💾 Save my version')).toBeEnabled())
+    return bridge
+  }
+
+  it('imports that version’s OWN bytes, in ONE frame, asking nothing', async () => {
+    const chosen = savedVersion('v-7', 'My seven-life game', editedFiles(7))
+    const bridge = await openOnVersion(chosen, editedFiles(7))
+
+    // The version's own archive, parsed — never the starter.
+    expect(bridge.imported).toHaveLength(1)
+    expect(bridge.imported[0]).toEqual(editedFiles(7))
+    // One visit, one bridge: nothing was opened and then replaced.
+    expect(bridges).toHaveLength(1)
+    expect(screen.queryByText('Checking what is in the editor first…')).not.toBeInTheDocument()
+    expect(screen.queryByText(/work that is not on your shelf/)).not.toBeInTheDocument()
+    expect(screen.queryByText('Open it anyway')).not.toBeInTheDocument()
+  })
+
+  it('reads CLEAN, because those bytes are what the shelf holds', async () => {
+    const chosen = savedVersion('v-7', 'My seven-life game', editedFiles(7))
+    const bridge = await openOnVersion(chosen, editedFiles(7))
+    // The editor's own first announcement of the same project is not an edit.
+    await act(async () => {
+      bridge.announce(editedFiles(7))
+    })
+    expect(
+      screen.queryByText('You have changes that are not saved to your shelf yet.'),
+    ).not.toBeInTheDocument()
+
+    // A REAL edit still reads dirty — the comparison is unchanged.
+    await act(async () => {
+      bridge.announce(editedFiles(9))
+    })
+    expect(
+      screen.getByText('You have changes that are not saved to your shelf yet.'),
+    ).toBeInTheDocument()
+  })
+
+  it('says he is back in his saved game, not in the starter', async () => {
+    const chosen = savedVersion('v-7', 'My seven-life game', editedFiles(7))
+    await openOnVersion(chosen, editedFiles(7))
+    expect(screen.getByText(/back in your saved game/).textContent).toContain(
+      'My seven-life game',
+    )
+    expect(screen.queryByText(/prepared starter game/)).not.toBeInTheDocument()
+  })
+
+  it('still opens the starter, and says so, when nothing was chosen', async () => {
+    const bridge = await openEditor()
+    expect(bridge.imported[0]).toEqual(starterFiles())
+    expect(screen.getByText(/prepared starter game/)).toBeInTheDocument()
+    expect(screen.queryByText(/back in your saved game/)).not.toBeInTheDocument()
   })
 })
