@@ -32,13 +32,22 @@
  * `true`, so a mic handed nothing but an id silently gave a configured child
  * the browser's own engine instead.
  *
- * `BuildStudioEditor` is mounted with the resolved child as a PROP and keyed by
- * it, so a change of child or profile unmounts that editor and mounts a new one
- * for whoever the shell now resolves. Two things make that honest rather than
- * lossy: an accepted write already in flight is **BIND**ed to its own scope and
- * reports through `onOutOfScopeSave`; and an unfinished Save is held for its own
- * owner in `buildStudioPendingStore`, so the exact retry is offered back when
- * that child's editor mounts again rather than being lost with the component.
+ * `BuildStudioChildEntry` — and through it the editor — is mounted with the
+ * resolved child as a PROP and keyed by it, so a change of child or profile
+ * unmounts that studio and mounts a new one for whoever the shell now resolves.
+ * Two things make that honest rather than lossy: an accepted write already in
+ * flight is **BIND**ed to its own scope and reports through `onOutOfScopeSave`;
+ * and an unfinished Save is held for its own owner in
+ * `buildStudioPendingStore`, so the exact retry is offered back when that
+ * child's editor mounts again rather than being lost with the component.
+ *
+ * ── The child's door asks which game before it opens one ─────────────────
+ *
+ * The page still decides only WHICH surface to draw. What the child's half
+ * draws is `BuildStudioChildEntry`, which asks — from this same settled read —
+ * whether to carry on with his newest save or start the prepared starter, and
+ * mounts the one editor on the answer. The parent's view is untouched by that:
+ * she gets the same read-only shelf she always did.
  */
 
 import { useCallback, useState } from 'react'
@@ -61,7 +70,7 @@ import {
   resolveBuildStudioAccess,
 } from './buildStudioAccess'
 import { buildStudioDownloads, downloadTextFile } from './buildStudioExport'
-import BuildStudioEditor from './BuildStudioEditor'
+import BuildStudioChildEntry from './BuildStudioChildEntry'
 import BuildStudioSettingsSection from './BuildStudioSettingsSection'
 import { BUILD_STUDIO_PROJECT_ID } from './buildStudioStarter'
 import BuildStudioVersionShelf from './BuildStudioVersionShelf'
@@ -226,9 +235,12 @@ export default function BuildStudioPage() {
           {outOfScope}
         </Alert>
       )}
-      <BuildStudioEditor
-        // Keyed by the child AND the family, so the editor for one identity can
-        // never be reused for another — a remount is the only way across.
+      <BuildStudioChildEntry
+        // Keyed by the child AND the family, so the entry — and the editor it
+        // mounts — for one identity can never be reused for another; a remount
+        // is the only way across. It is also what retires the entry's frozen
+        // choice on a route or profile change, so a game chosen for one child
+        // can never open under another.
         key={`${familyId}\u0000${activeChildId}`}
         familyId={familyId}
         childId={activeChildId}
