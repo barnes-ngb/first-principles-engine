@@ -1339,6 +1339,12 @@ export default function BuildStudioEditor({
             editorTargetVersion: attempt.editorTargetVersion,
             goalId: attempt.goalId,
             visitId: attempt.scope.visitId,
+            // A NEW version from the normal Save gets Firestore's server
+            // acceptance time, so a parent can later review it for hours. It
+            // changes nothing the child sees and nothing about whether the save
+            // succeeds; a retry that finds the version already stored is never
+            // stamped (the writer decides, not this call).
+            creditEligible: true,
             // The record this exact Save was frozen with — never re-read from
             // the card, so a retry sends the identical shape. Absent for a
             // payload from an older build, which retries exactly as it was.

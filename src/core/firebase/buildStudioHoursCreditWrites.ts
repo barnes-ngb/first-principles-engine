@@ -73,19 +73,23 @@
 
 import {
   doc,
-  getDoc,
+  documentId,
   getDocFromServer,
   getDocsFromServer,
   limit,
+  orderBy,
   query,
   runTransaction,
   serverTimestamp,
+  startAfter,
   where,
   type DocumentReference,
+  type QueryDocumentSnapshot,
   type Transaction,
 } from 'firebase/firestore'
 
 import { challengeById } from '../../features/build-studio/buildStudioChallenges'
+import { BUILD_STUDIO_PROJECT_ID } from '../../features/build-studio/buildStudioStarter'
 import {
   buildCreditProposal,
   choosePredecessor,
@@ -133,8 +137,8 @@ import {
 /** The `source` stamped on every credit `hours` row. */
 export const BUILD_STUDIO_CREDIT_HOURS_SOURCE = 'build-studio-credit'
 
-/** Versions read to find the predecessor. More than this and the proof fails closed. */
-export const BUILD_STUDIO_MAX_SIBLING_VERSIONS = 400
+/** Page size of the predecessor history scan. A page size, NOT a limit on history. */
+const HISTORY_PAGE_SIZE = 50
 
 // ── Shapes ──────────────────────────────────────────────────────────────────
 
@@ -176,7 +180,7 @@ export type CreditPreviewResult =
   | { status: 'alreadySettled'; receipt: BuildStudioSettledCredit }
   | { status: 'unavailable' }
   | { status: 'invalid' }
-  | { status: 'unproven'; reason: CreditProofRejection | 'unordered' | 'too-many-versions' | 'pending-write' }
+  | { status: 'unproven'; reason: CreditProofRejection | 'unordered' | 'pending-write' }
   | { status: 'failed'; reason: 'malformed-budget' | 'malformed-receipt' | 'read-failed' }
 
 export type CreditConfirmResult =
@@ -187,7 +191,7 @@ export type CreditConfirmResult =
   | { status: 'declined'; reason: BuildStudioCreditRejection }
   | { status: 'unavailable' }
   | { status: 'invalid' }
-  | { status: 'unproven'; reason: CreditProofRejection }
+  | { status: 'unproven'; reason: CreditProofRejection | 'unordered' | 'pending-write' }
   /** Nothing was written. `retryable` failures are safe to confirm again verbatim. */
   | {
       status: 'failed'
@@ -207,7 +211,10 @@ export type CreditCorrectionResult =
 export type CreditVersionReadResult =
   | { status: 'ok'; version: BuildStudioVersion }
   | { status: 'unavailable' }
-  | { status: 'malformed'; reason: 'bad-scope' | 'bad-identity' | 'bad-archive' | 'bad-challenge' }
+  | {
+      status: 'malformed'
+      reason: 'bad-scope' | 'bad-provenance' | 'bad-identity' | 'bad-archive' | 'bad-challenge'
+    }
   | { status: 'failed' }
 
 // ── Internals ───────────────────────────────────────────────────────────────
@@ -310,6 +317,65 @@ function creditNote(source: VersionCreditSource): string {
   return 'Build Studio: changed own game'
 }
 
+// ── Predecessor lookup ──────────────────────────────────────────────────────
+//
+// MIXED-VERSION BOUNDARY. A version's predecessor is the latest same-child,
+// same-project version that sits BEFORE it, where a version with a server
+// `acceptedAt` is placed by that instant and a legacy version (no `acceptedAt`)
+// by its client `createdAt`. Two consequences, stated plainly:
+//
+//   • A NEW supported save is stamped with a later server time than every
+//     version that already exists, so it can never be inserted between an older
+//     source and that source's predecessor. History after the source is ignored.
+//   • A LEGACY row has only a client clock and may materialise late (an offline
+//     device syncing). It can become the source's predecessor AFTER a preview.
+//     That is why the lookup is repeated, from the server, immediately before the
+//     confirming transaction. The web SDK cannot run a query inside a transaction,
+//     so a legacy row landing in the few milliseconds between that fresh lookup
+//     and the commit is not detectable; the transaction still re-reads and
+//     re-proves the exact source and the exact predecessor.
+//
+// The scan is paged by document id over this child's and project's id prefix
+// (`{child}__{project}__…`) with only the best candidate kept in memory, so it has
+// no lifetime cap on how many saves a family may have.
+
+type PredecessorLookup =
+  | { ok: true; docId: string | null; doc: StoredVersionDoc | null }
+  | { ok: false; reason: 'unordered' | 'pending-write' }
+
+async function lookupPredecessor(
+  familyId: string,
+  childId: string,
+  projectId: string,
+  source: StoredVersionDoc,
+): Promise<PredecessorLookup> {
+  const prefix = `${childId}__${projectId}__`
+  let best: StoredVersionDoc | null = null
+  let cursor: QueryDocumentSnapshot | null = null
+  for (;;) {
+    const constraints = [
+      where(documentId(), '>=', prefix),
+      where(documentId(), '<', `${prefix}`),
+      orderBy(documentId()),
+      ...(cursor ? [startAfter(cursor)] : []),
+      limit(HISTORY_PAGE_SIZE),
+    ]
+    const page = await getDocsFromServer(query(buildStudioVersionsCollection(familyId), ...constraints))
+    const batch: StoredVersionDoc[] = []
+    for (const d of page.docs) {
+      if (d.metadata?.hasPendingWrites) return { ok: false, reason: 'pending-write' }
+      batch.push({ id: d.id, data: d.data() as unknown as Record<string, unknown> })
+    }
+    const pool = best ? [...batch, best] : batch
+    const choice = choosePredecessor(source, childId, projectId, pool)
+    if (!choice.ok) return { ok: false, reason: 'unordered' }
+    best = choice.docId ? (pool.find((p) => p.id === choice.docId) ?? null) : null
+    if (page.docs.length < HISTORY_PAGE_SIZE) break
+    cursor = page.docs[page.docs.length - 1] as unknown as QueryDocumentSnapshot
+  }
+  return { ok: true, docId: best ? best.id : null, doc: best }
+}
+
 // ── 1. Preview ──────────────────────────────────────────────────────────────
 
 /**
@@ -342,25 +408,9 @@ export async function previewBuildStudioCredit(scope: CreditScope): Promise<Cred
     // The baseline, for a free-building save only.
     let baseline: CreditBaseline | null = null
     if (!claimsChallenge(version.data)) {
-      const siblingsSnap = await getDocsFromServer(
-        query(
-          buildStudioVersionsCollection(familyId),
-          where('childId', '==', childId),
-          limit(BUILD_STUDIO_MAX_SIBLING_VERSIONS + 1),
-        ),
-      )
-      if (siblingsSnap.size > BUILD_STUDIO_MAX_SIBLING_VERSIONS) {
-        return { status: 'unproven', reason: 'too-many-versions' }
-      }
-      const siblings: StoredVersionDoc[] = siblingsSnap.docs.map((d) => ({
-        id: d.id,
-        data: d.data() as unknown as Record<string, unknown>,
-      }))
-      const choice = choosePredecessor(version, childId, projectId, siblings)
-      if (!choice.ok) return { status: 'unproven', reason: 'unordered' }
-      baseline = choice.docId
-        ? { kind: 'version', doc: siblings.find((s) => s.id === choice.docId) as StoredVersionDoc }
-        : { kind: 'starter' }
+      const found = await lookupPredecessor(familyId, childId, projectId, version)
+      if (!found.ok) return { status: 'unproven', reason: found.reason }
+      baseline = found.doc ? { kind: 'version', doc: found.doc } : { kind: 'starter' }
     }
 
     const proven = proveBuildStudioCredit({ childId, projectId, versionId, version, baseline })
@@ -422,6 +472,27 @@ export async function confirmBuildStudioCredit(
   const r = refs(familyId, childId, projectId, versionId)
 
   try {
+    // ── Fresh history, from the server, BEFORE the confirming transaction ──
+    // A committed receipt wins over everything here (changed zone, changed
+    // history, a removed visible row), so it is read first. Only free work has a
+    // predecessor; a legacy row that materialised after the preview, or a caller
+    // passing an earlier predecessor, is `stale` and writes nothing.
+    if (proposal.source?.kind === 'freeBuild') {
+      const settledSnap = await getDocFromServer(r.receipt)
+      if (settledSnap.exists()) {
+        const receipt = parseReceipt(settledSnap.data(), scope)
+        return receipt
+          ? { status: 'alreadySettled', receipt }
+          : { status: 'failed', retryable: false, reason: 'malformed-receipt' }
+      }
+      const sourceSnap = (await getDocFromServer(r.version)) as unknown as Snap
+      if (!sourceSnap.exists()) return { status: 'unavailable' }
+      if (sourceSnap.metadata?.hasPendingWrites) return { status: 'unproven', reason: 'pending-write' }
+      const found = await lookupPredecessor(familyId, childId, projectId, toDoc(sourceSnap, versionDocId))
+      if (!found.ok) return { status: 'unproven', reason: found.reason }
+      if (found.docId !== pred) return { status: 'stale', reason: 'source-changed' }
+    }
+
     return await runTransaction(db, async (tx: Transaction): Promise<CreditConfirmResult> => {
       const get: Getter = (ref) => tx.get(ref) as unknown as Promise<Snap>
 
@@ -445,9 +516,15 @@ export async function confirmBuildStudioCredit(
 
       let baseline: CreditBaseline | null = null
       if (!claimsChallenge(version.data)) {
-        baseline = predSnap
-          ? { kind: 'version', doc: toDoc(predSnap, pred as string) }
-          : { kind: 'starter' }
+        if (predSnap) {
+          const predDoc = toDoc(predSnap, pred as string)
+          // The exact predecessor must still be an ordered-before sibling of the exact source.
+          const order = choosePredecessor(version, childId, projectId, [predDoc])
+          if (!order.ok || order.docId !== pred) return { status: 'stale', reason: 'source-changed' }
+          baseline = { kind: 'version', doc: predDoc }
+        } else {
+          baseline = { kind: 'starter' }
+        }
       } else if (pred !== null) {
         return { status: 'stale', reason: 'source-changed' }
       }
@@ -608,20 +685,20 @@ export async function correctBuildStudioCreditHours(
 /**
  * The exact version a credit names — never a newer one, never another child's.
  *
- * `provenance` is what the credit's `hours` row (or receipt) recorded. The
- * deterministic document is resolved from the verified family, the SELECTED
- * child and the recorded project and version; the document must then agree with
- * every part of it. `unavailable` (not there), `malformed` (there, but not what
- * the provenance says) and `failed` (could not be read) are different answers
- * and none of them falls back to another route.
+ * `provenance` is the FULL provenance the credit's `hours` row recorded. Its
+ * schema, project (Apple Dash), `versionDocId` and `receiptId` must equal the
+ * deterministic ids of the SELECTED child and the recorded project and version;
+ * the document is then read from the server and must agree with every part of it.
+ * A credited link to an older authored revision still opens its exact archived
+ * source: the challenge is matched against what was recorded, not today's
+ * revision. `unavailable` (not there), `malformed` (there, but not what the
+ * provenance says) and `failed` (could not be read) are different answers and
+ * none of them falls back to another route.
  */
 export async function readBuildStudioCreditedVersion(args: {
   familyId: string
   childId: string
-  provenance: Pick<
-    BuildStudioCreditProvenance,
-    'kind' | 'projectId' | 'versionId' | 'challengeId' | 'challengeRevision'
-  >
+  provenance: BuildStudioCreditProvenance
 }): Promise<CreditVersionReadResult> {
   const { familyId, childId, provenance } = args
   const scope = { familyId, childId, projectId: provenance?.projectId, versionId: provenance?.versionId }
@@ -630,10 +707,32 @@ export async function readBuildStudioCreditedVersion(args: {
   }
   const { projectId, versionId } = provenance
   const id = buildStudioVersionDocId(childId, projectId, versionId)
+  // The recorded provenance must be THIS child's, for Apple Dash, and name this
+  // scope's deterministic ids. A link recorded for a sibling never opens here,
+  // even if this child has a save with the same version id.
+  if (
+    provenance.schema !== 1 ||
+    projectId !== BUILD_STUDIO_PROJECT_ID ||
+    provenance.versionDocId !== id ||
+    provenance.receiptId !== creditReceiptId(childId, projectId, versionId)
+  ) {
+    return { status: 'malformed', reason: 'bad-provenance' }
+  }
+  if (provenance.kind === 'challenge') {
+    if (
+      typeof provenance.challengeId !== 'string' ||
+      provenance.challengeId === '' ||
+      !Number.isSafeInteger(provenance.challengeRevision)
+    ) {
+      return { status: 'malformed', reason: 'bad-provenance' }
+    }
+  } else if (provenance.challengeId !== undefined || provenance.challengeRevision !== undefined) {
+    return { status: 'malformed', reason: 'bad-provenance' }
+  }
 
   let snap
   try {
-    snap = await getDoc(doc(buildStudioVersionsCollection(familyId), id))
+    snap = await getDocFromServer(doc(buildStudioVersionsCollection(familyId), id))
   } catch {
     return { status: 'failed' }
   }

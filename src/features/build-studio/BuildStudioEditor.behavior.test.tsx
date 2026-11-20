@@ -661,6 +661,13 @@ describe('an ordinary clean Save becomes clean', () => {
     expect(saveVersion.mock.calls[0][0].files['main.ts']).toBe(edited['main.ts'])
   })
 
+  it('asks the writer to stamp a server acceptance time on the normal child save', async () => {
+    await openEditor()
+    await tapSave()
+    await waitFor(() => expect(saveVersion).toHaveBeenCalled())
+    expect(saveVersion.mock.calls[0][0].creditEligible).toBe(true)
+  })
+
   it('records the runtime from `info`, never the header placeholder', async () => {
     const bridge = await openEditor()
     bridge.runtime = { target: '4.1.28', pxt: '13.1.25' }

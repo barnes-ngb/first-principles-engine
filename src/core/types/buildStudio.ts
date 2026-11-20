@@ -140,6 +140,16 @@ export interface BuildStudioVersion {
  * reads it. It names the exact saved version the credit was admitted for, so
  * the parent can open that version from Records.
  */
+/**
+ * The `source` stamped on every Build Studio credit `hours` row. ONE value shared
+ * by the writer, the Records page and the CSV export (which emits it verbatim), so
+ * the three can never drift apart. Already-written rows carry exactly this string.
+ */
+export const BUILD_STUDIO_CREDIT_HOURS_SOURCE = 'build-studio-credit'
+
+/** The human label for {@link BUILD_STUDIO_CREDIT_HOURS_SOURCE} on Records. */
+export const BUILD_STUDIO_CREDIT_SOURCE_LABEL = 'Build Studio'
+
 export interface BuildStudioCreditProvenance {
   schema: 1
   /** The immutable consumed-source receipt this row belongs to. */

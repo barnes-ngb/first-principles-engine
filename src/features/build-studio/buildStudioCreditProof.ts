@@ -51,6 +51,7 @@ import {
 import { challengeById } from './buildStudioChallenges'
 import {
   admitBuildStudioCredit,
+  BUILD_STUDIO_DAILY_CREDIT_CAP_MINUTES,
   creditForSource,
   type BuildStudioCreditDecision,
   type BuildStudioCreditReceipt,
@@ -537,9 +538,23 @@ function parseSource(raw: unknown): BuildStudioCreditSource | null {
 
 /**
  * Parse a stored day bucket. `{ entries: [] }` for a bucket that does not exist;
- * `null` (fail closed) for anything malformed: wrong child/date, an entry whose
- * minutes are not a positive safe integer, an unreadable source or instant, or
- * more entries than a bucket can ever hold.
+ * `null` (fail closed) for anything malformed.
+ *
+ * The bucket is the IMMUTABLE record of ORIGINAL fixed credit, separate from the
+ * editable `hours` rows (a parent's later correction never reaches it, so no
+ * corrected visible amount may ever be read into this budget). So an entry is
+ * valid only when:
+ *
+ *   • its `minutes` EQUAL `creditForSource(source).minutes` — a positive safe
+ *     integer that differs from the fixed amount is corruption, not credit;
+ *   • its `receiptId` is unique within the bucket (a repeat would double-count or
+ *     hide a unit), and for a saved-version source (challenge or free build) it is
+ *     exactly `creditReceiptId(childId, source.projectId, source.versionId)` with
+ *     path-safe ids, so a receipt cannot name another child's or another
+ *     version's unit;
+ *   • the bucket's own total does not already exceed the daily cap;
+ *   • child, date, source and instant are the exact shapes, and the entry count
+ *     is within what a bucket can ever hold.
  */
 export function parseCreditDay(
   exists: boolean,
@@ -551,22 +566,40 @@ export function parseCreditDay(
   if (!isRecord(data) || data.childId !== childId || data.schoolDate !== schoolDate) return null
   if (!Array.isArray(data.entries) || data.entries.length > MAX_DAY_ENTRIES) return null
   const entries: CreditDayEntry[] = []
+  const seenReceipts = new Set<string>()
+  let total = 0
   for (const raw of data.entries) {
     if (!isRecord(raw)) return null
     const source = parseSource(raw.source)
     if (
       !source ||
       typeof raw.receiptId !== 'string' ||
+      raw.receiptId.length === 0 ||
+      raw.receiptId.length > 200 ||
       typeof raw.atMs !== 'number' ||
       !Number.isFinite(raw.atMs) ||
       typeof raw.minutes !== 'number' ||
       !Number.isSafeInteger(raw.minutes) ||
-      raw.minutes <= 0
+      raw.minutes <= 0 ||
+      raw.minutes !== creditForSource(source).minutes ||
+      seenReceipts.has(raw.receiptId)
     ) {
       return null
     }
+    if (source.kind === 'challenge' || source.kind === 'freeBuild') {
+      if (
+        !isCreditPathId(source.projectId) ||
+        !isCreditPathId(source.versionId) ||
+        raw.receiptId !== creditReceiptId(childId, source.projectId, source.versionId)
+      ) {
+        return null
+      }
+    }
+    seenReceipts.add(raw.receiptId)
+    total += raw.minutes
     entries.push({ receiptId: raw.receiptId, source, atMs: raw.atMs, minutes: raw.minutes })
   }
+  if (total > BUILD_STUDIO_DAILY_CREDIT_CAP_MINUTES) return null
   return { entries }
 }
 
@@ -586,6 +619,7 @@ export function decideAdmission(
   buckets: ReadonlyMap<string, { exists: boolean; data: unknown }>,
 ): AdmissionOutcome {
   const receipts: BuildStudioCreditReceipt[] = []
+  const seenReceipts = new Set<string>()
   for (const offset of NEIGHBOUR_DAYS) {
     const date = shiftSchoolDate(proposal.schoolDate, offset)
     const snap = buckets.get(date)
@@ -593,6 +627,9 @@ export function decideAdmission(
     const parsed = parseCreditDay(snap.exists, snap.data, proposal.childId, date)
     if (!parsed) return { ok: false, reason: 'malformed-budget' }
     for (const e of parsed.entries) {
+      // One receipt is one unit on ONE date; the same id in two buckets is corruption.
+      if (seenReceipts.has(e.receiptId)) return { ok: false, reason: 'malformed-budget' }
+      seenReceipts.add(e.receiptId)
       receipts.push({
         familyId: proposal.familyId,
         childId: proposal.childId,

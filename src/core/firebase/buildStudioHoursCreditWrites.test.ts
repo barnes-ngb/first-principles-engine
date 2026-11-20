@@ -17,6 +17,7 @@ let commitMode: 'ok' | 'lostResponse' | 'fail' = 'ok'
 let failReadsFor: string | null = null
 let pendingWriteIds = new Set<string>()
 let queue: Promise<unknown> = Promise.resolve()
+let historyPages = 0
 const writtenPaths: string[] = []
 
 interface Ref {
@@ -47,28 +48,44 @@ const snapOf = (ref: Ref) => {
 vi.mock('firebase/firestore', () => ({
   doc: (col: { __path: string }, id: string) => ({ __path: `${col.__path}/${id}`, id }),
   serverTimestamp: () => ({ __sentinel: 'serverTimestamp' }),
-  where: (field: string, _op: string, value: unknown) => ({ field, value }),
+  documentId: () => '__name__',
+  where: (field: string, op: string, value: unknown) => ({ field, op, value }),
+  orderBy: (field: string) => ({ orderBy: field }),
+  startAfter: (snap: { id: string }) => ({ after: snap.id }),
   limit: (n: number) => ({ limit: n }),
   query: (col: { __path: string }, ...constraints: unknown[]) => ({ col, constraints }),
-  getDoc: async (ref: Ref) => {
-    if (failReadsFor && ref.__path.includes(failReadsFor)) throw new Error('offline')
-    return snapOf(ref)
-  },
+  // `getDoc` is deliberately NOT mocked: every read here must be server-only.
   getDocFromServer: async (ref: Ref) => {
     if (failReadsFor && ref.__path.includes(failReadsFor)) throw new Error('offline')
     return snapOf(ref)
   },
   getDocsFromServer: async (q: {
     col: { __path: string }
-    constraints: Array<{ field?: string; value?: unknown; limit?: number }>
+    constraints: Array<{ field?: string; op?: string; value?: unknown; limit?: number; after?: string }>
   }) => {
-    const where = q.constraints.find((c) => c.field)
+    if (failReadsFor && q.col.__path.includes(failReadsFor)) throw new Error('offline')
+    historyPages += 1
+    const base = `${q.col.__path}/`
+    let docs = [...store.entries()]
+      .filter(([path]) => path.startsWith(base))
+      .map(([path, row]) => ({ path, id: path.slice(base.length), row }))
+    for (const c of q.constraints) {
+      if (c.field === '__name__') {
+        docs = docs.filter((d) => (c.op === '>=' ? d.id >= (c.value as string) : d.id < (c.value as string)))
+      } else if (c.field) {
+        docs = docs.filter((d) => d.row[c.field as string] === c.value)
+      }
+    }
+    docs.sort((a, b) => (a.id < b.id ? -1 : 1))
+    const after = q.constraints.find((c) => c.after !== undefined)?.after
+    if (after !== undefined) docs = docs.filter((d) => d.id > after)
     const cap = q.constraints.find((c) => c.limit !== undefined)?.limit ?? Infinity
-    const docs = [...store.entries()]
-      .filter(([path, row]) => path.startsWith(`${q.col.__path}/`) && (!where || row[where.field as string] === where.value))
-      .slice(0, cap)
-      .map(([path, row]) => ({ id: path.slice(q.col.__path.length + 1), data: () => ({ ...row }) }))
-    return { docs, size: docs.length }
+    const out = docs.slice(0, cap).map((d) => ({
+      id: d.id,
+      data: () => ({ ...d.row }),
+      metadata: { hasPendingWrites: pendingWriteIds.has(d.path), fromCache: false },
+    }))
+    return { docs: out, size: out.length }
   },
   runTransaction: (
     _db: unknown,
@@ -224,6 +241,7 @@ beforeEach(() => {
   failReadsFor = null
   pendingWriteIds = new Set()
   queue = Promise.resolve()
+  historyPages = 0
 })
 
 describe('preview', () => {
@@ -419,12 +437,86 @@ describe('confirm', () => {
     ]) {
       expect(await confirmBuildStudioCredit(doctored as never)).toEqual({ status: 'stale', reason: 'source-changed' })
     }
-    expect(await confirmBuildStudioCredit({ ...p, predecessorDocId: 'child-lincoln__apple-dash-starter__v-zzz999' })).toMatchObject({
-      status: 'unproven',
+    expect(await confirmBuildStudioCredit({ ...p, predecessorDocId: 'child-lincoln__apple-dash-starter__v-zzz999' })).toEqual({
+      status: 'stale',
+      reason: 'source-changed',
     })
     expect(await confirmBuildStudioCredit({ ...p, childId: 'a/b' })).toEqual({ status: 'invalid' })
     expect(await confirmBuildStudioCredit({ ...p, predecessorDocId: 'other-child__x__y' })).toEqual({ status: 'invalid' })
     expect(writtenPaths).toEqual([])
+  })
+
+  describe('fresh predecessor before confirmation', () => {
+    const idOf = (v: string) => buildStudioVersionDocId(CHILD, PROJECT, v)
+
+    it('a legacy predecessor materialising after the preview makes the proposal stale, writing nothing', async () => {
+      putVersion('v-bbb222', { acceptedMs: T0, files: filesWith(5) })
+      const proposal = await ready('v-bbb222')
+      expect(proposal.predecessorDocId).toBeNull()
+      // A legacy row (no acceptedAt, client createdAt before the source) syncs late.
+      putVersion('v-late111', { acceptedMs: null, createdAt: '2026-11-20T15:30:00.000Z', files: filesWith(5) })
+      expect(await confirmBuildStudioCredit(proposal)).toEqual({ status: 'stale', reason: 'source-changed' })
+      expect(writtenPaths).toEqual([])
+      // A fresh preview now compares against the legacy row (identical source → unchanged).
+      expect(await previewBuildStudioCredit(scope('v-bbb222'))).toEqual({ status: 'unproven', reason: 'unchanged' })
+    })
+
+    it('a caller passing an earlier predecessor than the immediate one is stale', async () => {
+      putVersion('v-aaa111', { acceptedMs: T0 - 1_200_000, files: filesWith(3) })
+      putVersion('v-mid2222', { acceptedMs: T0 - 600_000, files: filesWith(4) })
+      putVersion('v-bbb222', { acceptedMs: T0, files: filesWith(5) })
+      const proposal = await ready('v-bbb222')
+      expect(proposal.predecessorDocId).toBe(idOf('v-mid2222'))
+      const earlier = { ...proposal, predecessorDocId: idOf('v-aaa111') }
+      expect(await confirmBuildStudioCredit(earlier)).toEqual({ status: 'stale', reason: 'source-changed' })
+      expect(writtenPaths).toEqual([])
+      expect((await confirmBuildStudioCredit(proposal)).status).toBe('credited')
+    })
+
+    it('a version saved after the source never becomes its predecessor', async () => {
+      putVersion('v-bbb222', { acceptedMs: T0, files: filesWith(5) })
+      const proposal = await ready('v-bbb222')
+      putVersion('v-new3333', { acceptedMs: T0 + 600_000, files: filesWith(5) })
+      expect((await confirmBuildStudioCredit(proposal)).status).toBe('credited')
+    })
+
+    it('a committed receipt wins over changed history, even after the visible row was removed', async () => {
+      putVersion('v-bbb222', { acceptedMs: T0, files: filesWith(5) })
+      const proposal = await ready('v-bbb222')
+      const first = await confirmBuildStudioCredit(proposal)
+      store.delete(hoursPath('v-bbb222'))
+      putVersion('v-late111', { acceptedMs: null, createdAt: '2026-11-20T15:30:00.000Z', files: filesWith(5) })
+      store.set(`families/${FAMILY}`, { timeZone: 'Pacific/Auckland' })
+      expect(await confirmBuildStudioCredit(proposal)).toEqual({
+        status: 'alreadySettled',
+        receipt: (first as { receipt: unknown }).receipt,
+      })
+      expect(hoursRows()).toHaveLength(0)
+    })
+
+    it('refuses a pending-write source or history row, and a failed history read does not write', async () => {
+      putVersion('v-aaa111', { acceptedMs: T0 - 600_000, files: filesWith(4) })
+      putVersion('v-bbb222', { acceptedMs: T0, files: filesWith(5) })
+      const proposal = await ready('v-bbb222')
+      pendingWriteIds.add(vPath('v-aaa111'))
+      expect(await confirmBuildStudioCredit(proposal)).toEqual({ status: 'unproven', reason: 'pending-write' })
+      expect(await previewBuildStudioCredit(scope('v-bbb222'))).toEqual({ status: 'unproven', reason: 'pending-write' })
+      pendingWriteIds.clear()
+      failReadsFor = 'buildStudioVersions'
+      expect(await confirmBuildStudioCredit(proposal)).toMatchObject({ status: 'failed', retryable: true })
+      expect(writtenPaths).toEqual([])
+    })
+
+    it('has no lifetime cap: an established family with hundreds of saves still proves', async () => {
+      for (let i = 0; i < 520; i += 1) {
+        putVersion(`v-h${String(i).padStart(4, '0')}`, { acceptedMs: T0 - (600 - i) * 60_000, files: filesWith(i % 7) })
+      }
+      putVersion('v-bbb222', { acceptedMs: T0, files: filesWith(9) })
+      const proposal = await ready('v-bbb222')
+      expect(proposal.predecessorDocId).toBe(idOf('v-h0519'))
+      expect(historyPages).toBeGreaterThan(10) // paged, not capped
+      expect((await confirmBuildStudioCredit(proposal)).status).toBe('credited')
+    })
   })
 
   it("never credits another child's version", async () => {
@@ -595,8 +687,22 @@ describe('corrections', () => {
 })
 
 describe('the exact saved version, for the parent', () => {
-  const free = { kind: 'freeBuild' as const, projectId: PROJECT, versionId: 'v-aaa111' }
-  const read = (provenance: Parameters<typeof readBuildStudioCreditedVersion>[0]['provenance'], childId = CHILD) =>
+  type Prov = Parameters<typeof readBuildStudioCreditedVersion>[0]['provenance']
+  /** Full provenance, as a credit's hours row records it. */
+  const fullProv = (versionId: string, extra: Partial<Prov> = {}, child = CHILD): Prov => ({
+    schema: 1,
+    receiptId: `${child}.${PROJECT}.${versionId}`,
+    kind: 'freeBuild',
+    projectId: PROJECT,
+    versionId,
+    versionDocId: buildStudioVersionDocId(child, PROJECT, versionId),
+    admittedMinutes: 15,
+    workAtMs: T0,
+    timeZone: 'America/Chicago',
+    ...extra,
+  })
+  const free = fullProv('v-aaa111')
+  const read = (provenance: Prov, childId = CHILD) =>
     readBuildStudioCreditedVersion({ familyId: FAMILY, childId, provenance })
 
   it('returns the exact version, not a newer one', async () => {
@@ -631,11 +737,34 @@ describe('the exact saved version, for the parent', () => {
 
   it('verifies the expected challenge provenance', async () => {
     putVersion('v-aaa111', { attempt: attempt('v-aaa111') })
-    const prov = { kind: 'challenge' as const, projectId: PROJECT, versionId: 'v-aaa111', challengeId: 'one-more-heart', challengeRevision: 1 }
+    const prov = fullProv('v-aaa111', { kind: 'challenge', challengeId: 'one-more-heart', challengeRevision: 1 })
     expect((await read(prov)).status).toBe('ok')
     expect(await read({ ...prov, challengeId: 'faster-hero' })).toEqual({ status: 'malformed', reason: 'bad-challenge' })
     expect(await read({ ...prov, challengeRevision: 2 })).toEqual({ status: 'malformed', reason: 'bad-challenge' })
     // A free-build claim over a challenge version is also a mismatch.
-    expect(await read({ ...prov, kind: 'freeBuild' })).toEqual({ status: 'malformed', reason: 'bad-challenge' })
+    expect(await read(fullProv('v-aaa111'))).toEqual({ status: 'malformed', reason: 'bad-challenge' })
+  })
+
+  it("matches the recorded challenge revision, not the authored catalogue's current one", async () => {
+    // Stored revision differs from today's (1): the archived source still opens by its own metadata.
+    putVersion('v-aaa111', { attempt: { ...attempt('v-aaa111'), challengeRevision: 2 } })
+    const prov = fullProv('v-aaa111', { kind: 'challenge', challengeId: 'one-more-heart', challengeRevision: 2 })
+    expect((await read(prov)).status).toBe('ok')
+  })
+
+  it('rejects provenance that is not this scope, schema or project, or is incoherent for its kind', async () => {
+    putVersion('v-aaa111')
+    putVersion('v-aaa111', { child: 'child-sibling' })
+    const bad = { status: 'malformed', reason: 'bad-provenance' }
+    // The sibling's link, used with this child, even though this child has the same version id.
+    expect(await read(fullProv('v-aaa111', {}, 'child-sibling'))).toEqual(bad)
+    expect(await read(fullProv('v-aaa111', { receiptId: `child-sibling.${PROJECT}.v-aaa111` }))).toEqual(bad)
+    expect(await read({ ...free, schema: 2 as never })).toEqual(bad)
+    expect(await read({ ...free, versionDocId: buildStudioVersionDocId(CHILD, PROJECT, 'v-bbb222') })).toEqual(bad)
+    expect(await read({ ...free, projectId: 'other-project', versionDocId: buildStudioVersionDocId(CHILD, 'other-project', 'v-aaa111'), receiptId: `${CHILD}.other-project.v-aaa111` })).toEqual(bad)
+    expect(await read({ ...free, challengeId: 'one-more-heart' })).toEqual(bad)
+    expect(await read(fullProv('v-aaa111', { kind: 'challenge' }))).toEqual(bad)
+    // The matching link for the sibling opens the sibling's own row.
+    expect((await read(fullProv('v-aaa111', {}, 'child-sibling'), 'child-sibling')).status).toBe('ok')
   })
 })

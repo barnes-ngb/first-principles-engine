@@ -333,10 +333,17 @@ describe('the proposal key', () => {
 
 describe('day buckets fail closed', () => {
   const entry = (over: Record<string, unknown> = {}) => ({
-    receiptId: 'r',
+    receiptId: `${CHILD}.${PROJECT}.v-x1234`,
     atMs: T0,
     minutes: 15,
     source: { kind: 'freeBuild', projectId: PROJECT, versionId: 'v-x1234' },
+    ...over,
+  })
+  const verdict = (n: number, over: Record<string, unknown> = {}) => ({
+    receiptId: `bm-${n}`,
+    atMs: T0 - n * 3_600_000,
+    minutes: 10,
+    source: { kind: 'blockMuncherVerdict', requestId: `req-${n}`, playedBuildId: `b-${n}` },
     ...over,
   })
   const day = (entries: unknown[], over: Record<string, unknown> = {}) => ({
@@ -362,6 +369,50 @@ describe('day buckets fail closed', () => {
     ['too many entries', day(Array.from({ length: 49 }, () => entry()))],
   ])('%s is malformed', (_name, data) => {
     expect(parseCreditDay(true, data, CHILD, '2026-11-20')).toBeNull()
+  })
+
+  it('a well-formed bucket parses, including a block-muncher unit at its own fixed amount', () => {
+    expect(parseCreditDay(true, day([entry(), verdict(1)]), CHILD, '2026-11-20')).toMatchObject({
+      entries: [{ minutes: 15 }, { minutes: 10 }],
+    })
+  })
+
+  it.each([
+    // The immutable bucket is ORIGINAL fixed credit: a valid positive integer that is not
+    // the fixed amount for its source is corruption, in either direction.
+    ['a free build with minutes above the fixed amount', day([entry({ minutes: 30 })])],
+    ['a free build with minutes below the fixed amount', day([entry({ minutes: 5 })])],
+    ['a verdict at the idea amount', day([verdict(1, { minutes: 5 })])],
+    ['a repeated receipt id', day([verdict(1), verdict(2, { receiptId: 'bm-1' })])],
+    ['a version receipt id that names another version', day([entry({ receiptId: `${CHILD}.${PROJECT}.v-other99` })])],
+    ["a version receipt id that names another child", day([entry({ receiptId: `child-other.${PROJECT}.v-x1234` })])],
+    ['a version source with an unsafe id', day([entry({ receiptId: `${CHILD}.${PROJECT}.v.x`, source: { kind: 'freeBuild', projectId: PROJECT, versionId: 'v.x' } })])],
+    ['an empty receipt id', day([verdict(1, { receiptId: '' })])],
+    // 25 verdicts × 10 = 250 > 240, each entry individually valid.
+    ['a bucket already beyond the daily cap', day(Array.from({ length: 25 }, (_, i) => verdict(i)))],
+  ])('%s is malformed', (_name, data) => {
+    expect(parseCreditDay(true, data, CHILD, '2026-11-20')).toBeNull()
+  })
+
+  it('a bucket exactly at the cap is still readable', () => {
+    expect(parseCreditDay(true, day(Array.from({ length: 24 }, (_, i) => verdict(i))), CHILD, '2026-11-20')?.entries).toHaveLength(24)
+  })
+
+  it('the same receipt id in two neighbouring buckets fails the whole decision', () => {
+    const proposal = buildCreditProposal({
+      familyId: 'fam-1',
+      childId: CHILD,
+      timeZone: 'America/Chicago',
+      versionDocId: 'x',
+      proof: (prove(versionDoc('v-aaa111'), { kind: 'starter' }) as { ok: true; proof: never }).proof,
+    })!
+    const buckets = new Map<string, { exists: boolean; data: unknown }>()
+    for (let i = -2; i <= 2; i += 1) buckets.set(shiftSchoolDate(proposal.schoolDate, i), { exists: false, data: undefined })
+    const d1 = shiftSchoolDate(proposal.schoolDate, -2)
+    const d2 = shiftSchoolDate(proposal.schoolDate, 2)
+    buckets.set(d1, { exists: true, data: { childId: CHILD, schoolDate: d1, entries: [verdict(1)] } })
+    buckets.set(d2, { exists: true, data: { childId: CHILD, schoolDate: d2, entries: [verdict(2, { receiptId: 'bm-1' })] } })
+    expect(decideAdmission(proposal, buckets)).toEqual({ ok: false, reason: 'malformed-budget' })
   })
 
   it('a malformed NEIGHBOUR bucket fails the whole decision (its instants feed spacing)', () => {

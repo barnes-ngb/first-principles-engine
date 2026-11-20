@@ -295,6 +295,9 @@ export async function saveBuildStudioVersion(
     // `acceptedAt` is a server sentinel, so the returned `version` (what the
     // caller renders) deliberately omits it: the real instant is unknown here and
     // must only ever be read back from the server by the credit proof.
+    // The versions collection's converter (`buildStudioVersionToFirestore`) hands
+    // `acceptedAt` through untouched; the repo-wide `stripUndefined` would flatten
+    // the sentinel into a plain map and no server time would ever be stored.
     tx.set(ref, args.creditEligible === true ? { ...version, acceptedAt: serverTimestamp() } : version)
     return { version, outcome: 'created' as const }
   })

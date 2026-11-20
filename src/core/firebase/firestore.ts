@@ -921,8 +921,22 @@ export const errorLogsCollection = (
 
 // ── Build Studio: the child's own Arcade source (LOCAL-BUILD-001) ──
 
-const buildStudioVersionConverter: FirestoreDataConverter<BuildStudioVersion> = {
-  toFirestore: (data) => stripUndefined(data as unknown as Record<string, unknown>),
+/**
+ * `stripUndefined` rebuilds every object value, which turns a Firestore
+ * `serverTimestamp()` sentinel into a plain `{}`-like map: the write would then
+ * store a map, not a server time, and the credit proof would never see an
+ * `acceptedAt`. So this converter — and only this one — hands `acceptedAt` through
+ * untouched when the writer set it, and strips everything else exactly as before.
+ * Every other field, and every version written without `acceptedAt`, is unchanged.
+ */
+export function buildStudioVersionToFirestore(data: unknown): Record<string, unknown> {
+  const { acceptedAt, ...rest } = data as Record<string, unknown>
+  const cleaned = stripUndefined(rest)
+  return acceptedAt === undefined ? cleaned : { ...cleaned, acceptedAt }
+}
+
+export const buildStudioVersionConverter: FirestoreDataConverter<BuildStudioVersion> = {
+  toFirestore: (data) => buildStudioVersionToFirestore(data),
   fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions) => {
     const data = snapshot.data(options) as BuildStudioVersion
     return { ...data, id: snapshot.id }
