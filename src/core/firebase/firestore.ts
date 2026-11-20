@@ -921,8 +921,22 @@ export const errorLogsCollection = (
 
 // ── Build Studio: the child's own Arcade source (LOCAL-BUILD-001) ──
 
-const buildStudioVersionConverter: FirestoreDataConverter<BuildStudioVersion> = {
-  toFirestore: (data) => stripUndefined(data as unknown as Record<string, unknown>),
+/**
+ * `stripUndefined` rebuilds every object value, which turns a Firestore
+ * `serverTimestamp()` sentinel into a plain `{}`-like map: the write would then
+ * store a map, not a server time, and the credit proof would never see an
+ * `acceptedAt`. So this converter — and only this one — hands `acceptedAt` through
+ * untouched when the writer set it, and strips everything else exactly as before.
+ * Every other field, and every version written without `acceptedAt`, is unchanged.
+ */
+export function buildStudioVersionToFirestore(data: unknown): Record<string, unknown> {
+  const { acceptedAt, ...rest } = data as Record<string, unknown>
+  const cleaned = stripUndefined(rest)
+  return acceptedAt === undefined ? cleaned : { ...cleaned, acceptedAt }
+}
+
+export const buildStudioVersionConverter: FirestoreDataConverter<BuildStudioVersion> = {
+  toFirestore: (data) => buildStudioVersionToFirestore(data),
   fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions) => {
     const data = snapshot.data(options) as BuildStudioVersion
     return { ...data, id: snapshot.id }
@@ -976,3 +990,31 @@ export const buildStudioOptInDoc = (
   childId: string,
 ): DocumentReference =>
   doc(db, `families/${familyId}/settings/${buildStudioOptInDocId(childId)}`)
+
+// ── Build Studio hours credit (LOCAL-VISION-007 slice 3) ──
+
+/**
+ * The family ROOT document, `families/{familyId}`. Read-only here: the Build
+ * Studio credit writer reads its `timeZone` to resolve a school date, and writes
+ * nothing to it.
+ */
+export const familyRootDoc = (familyId: string): DocumentReference =>
+  doc(db, `families/${familyId}`)
+
+/**
+ * Immutable consumed-source receipts, one per exact credited version.
+ * Path: families/{familyId}/buildStudioCreditReceipts/{childId}.{projectId}.{versionId}
+ * Written once by `buildStudioHoursCreditWrites.ts`, never updated or deleted.
+ * Under the family owner rule — `firestore.rules` is untouched.
+ */
+export const buildStudioCreditReceiptsCollection = (familyId: string): CollectionReference =>
+  collection(db, `families/${familyId}/buildStudioCreditReceipts`)
+
+/**
+ * One bounded admission bucket per child per local day.
+ * Path: families/{familyId}/buildStudioCreditDays/{childId}.{YYYY-MM-DD}
+ * Append-only: it keeps the ORIGINAL fixed units, so a later correction of the
+ * visible hours row neither frees capacity nor earns another credit.
+ */
+export const buildStudioCreditDaysCollection = (familyId: string): CollectionReference =>
+  collection(db, `families/${familyId}/buildStudioCreditDays`)

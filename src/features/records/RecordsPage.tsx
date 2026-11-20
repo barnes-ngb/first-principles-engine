@@ -1,4 +1,4 @@
-import { type SyntheticEvent, useCallback, useEffect, useMemo, useState } from 'react'
+import { type SyntheticEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -49,6 +49,8 @@ import {
 } from '../../core/firebase/firestore'
 import { migrateUnattributedAdjustments } from '../../core/firebase/migrateHoursAdjustments'
 import { useActiveChild } from '../../core/hooks/useActiveChild'
+import { useProfile } from '../../core/profile/useProfile'
+import { BUILD_STUDIO_CREDIT_HOURS_SOURCE } from '../../core/types/buildStudio'
 import type {
   Artifact,
   DadLabReport,
@@ -62,6 +64,8 @@ import { formatDateForInput } from '../../core/utils/format'
 import { getSchoolYearRange } from '../../core/utils/time'
 import type { HomeschoolState } from '../../core/compliance/stateCompliance'
 import { parseDateFromDocId } from '../today/daylog.model'
+import BuildStudioHoursCard from './BuildStudioHoursCard'
+import { buildStudioCardAllowed, type RecordsReadScope } from './buildStudioHoursCard.logic'
 import ComplianceDashboard from './ComplianceDashboard'
 import MonthlyTrend from './MonthlyTrend'
 import QuickAddHours from './QuickAddHours'
@@ -171,7 +175,34 @@ function HoursComplianceTab() {
   const [allHoursEntries, setAllHoursEntries] = useState<HoursEntry[]>([])
   const [allDayLogs, setAllDayLogs] = useState<DayLog[]>([])
   const [allAdjustments, setAllAdjustments] = useState<HoursAdjustment[]>([])
-  const { activeChildId, activeChild, children } = useActiveChild()
+  const {
+    activeChildId,
+    activeChild,
+    children,
+    childrenFamilyId,
+    isChildProfile,
+    isLoading: childrenLoading,
+    profileChildResolved,
+  } = useActiveChild()
+  const { canEdit } = useProfile()
+  // Build Studio credit rows are a PARENT's records. A child profile can reach
+  // /records directly, and the generic totals and exports read `hoursEntries`, so
+  // the rows are dropped from that one shared slice rather than from each view.
+  // The family/range the hours array above was actually READ under. The array
+  // outlives a family or range change until the next read lands, so it is not
+  // evidence of the current scope by itself.
+  const [hoursReadScope, setHoursReadScope] = useState<RecordsReadScope | null>(null)
+  // The credit rows are included only for a settled parent AND only while the
+  // array was read under this very family and range: a delayed old-family load
+  // can carry the same short child id, and must not leak its credit into a
+  // summary or export.
+  const parentCapable = canEdit && !isChildProfile && profileChildResolved === true
+  const includeBuildStudioRows =
+    parentCapable &&
+    hoursReadScope !== null &&
+    hoursReadScope.familyId === familyId &&
+    hoursReadScope.startDate === startDate &&
+    hoursReadScope.endDate === endDate
   const [allArtifacts, setAllArtifacts] = useState<Artifact[]>([])
   const [allEvaluations, setAllEvaluations] = useState<Evaluation[]>([])
   // FEAT-123 — the range's Dad Lab reports, read-only, for the pack's narrative
@@ -193,8 +224,13 @@ function HoursComplianceTab() {
 
   // Filter data by active child
   const hoursEntries = useMemo(
-    () => allHoursEntries.filter((e) => e.childId === activeChildId),
-    [allHoursEntries, activeChildId],
+    () =>
+      allHoursEntries.filter(
+        (e) =>
+          e.childId === activeChildId &&
+          (includeBuildStudioRows || e.source !== BUILD_STUDIO_CREDIT_HOURS_SOURCE),
+      ),
+    [allHoursEntries, activeChildId, includeBuildStudioRows],
   )
   const dayLogs = useMemo(
     () => allDayLogs.filter((l) => l.childId === activeChildId),
@@ -407,6 +443,9 @@ function HoursComplianceTab() {
       ])
 
     return {
+      // Stamped with the scope this read was taken under, so applying a late
+      // result can never make it look like the current one's.
+      readScope: { familyId, startDate, endDate } as RecordsReadScope,
       hoursEntries: hoursSnap.docs.map((d) => {
         const data = d.data() as HoursEntry
         return {
@@ -439,6 +478,7 @@ function HoursComplianceTab() {
 
   const applyRecords = useCallback((data: Awaited<ReturnType<typeof fetchRecords>>) => {
     setAllHoursEntries(data.hoursEntries)
+    setHoursReadScope(data.readScope)
     setAllDayLogs(data.dayLogs)
     setAllAdjustments(data.adjustments)
     setAllArtifacts(data.artifacts)
@@ -476,6 +516,54 @@ function HoursComplianceTab() {
       })
     return () => { cancelled = true }
   }, [fetchRecords, applyRecords, familyId])
+
+  // The scope this render wants. A refresh that answers after the family or range
+  // changed is dropped instead of applied over the new scope's read.
+  // A fresh identity object per family/range/parent-capability change, so
+  // A → B → A is three identities, not two: a callback made under the first A can
+  // never pass for the second. The selected CHILD is deliberately not part of it:
+  // the read is family-wide, so a confirmed write by a card for child A must still
+  // refresh Records after the parent moved to child B.
+  const scopeIdentity = useMemo(
+    () => ({ familyId, startDate, endDate, parentCapable }),
+    [familyId, startDate, endDate, parentCapable],
+  )
+  const scopeIdentityRef = useRef(scopeIdentity)
+  useEffect(() => {
+    scopeIdentityRef.current = scopeIdentity
+  }, [scopeIdentity])
+
+  /**
+   * Re-read Records after a Build Studio confirmation/correction. `false` = not
+   * refreshed. Checked before AND after the read; it survives the originating card
+   * unmounting, but not a family, range or parent-capability change.
+   */
+  const refreshAfterBuildStudioChange = useCallback(async (): Promise<boolean> => {
+    if (!scopeIdentity.parentCapable || scopeIdentityRef.current !== scopeIdentity) return false
+    try {
+      const data = await fetchRecords()
+      if (scopeIdentityRef.current !== scopeIdentity) return false
+      applyRecords(data)
+      return true
+    } catch {
+      return false
+    }
+  }, [scopeIdentity, fetchRecords, applyRecords])
+
+  const showBuildStudioCard = buildStudioCardAllowed({
+    canEdit,
+    isChildProfile,
+    profileChildResolved,
+    familyId,
+    childrenFamilyId,
+    childrenLoading,
+    activeChildId,
+    activeChildFound: !!activeChild && activeChild.id === activeChildId,
+    recordsLoading: isLoading,
+    readScope: hoursReadScope,
+    startDate,
+    endDate,
+  })
 
   const summary = useMemo(
     () => computeHoursSummary(dayLogs, hoursEntries, adjustments, activeChildId),
@@ -1055,6 +1143,19 @@ function HoursComplianceTab() {
             setSnackMessage({ text: msg, severity: 'success' })
             fetchRecords().then(applyRecords)
           }}
+        />
+      )}
+
+      {/* Build Studio hours — parent-only, and only under a settled family/child/read */}
+      {showBuildStudioCard && activeChildId && (
+        <BuildStudioHoursCard
+          familyId={familyId}
+          childId={activeChildId}
+          childName={activeChild?.name ?? 'this child'}
+          startDate={startDate}
+          endDate={endDate}
+          hoursEntries={hoursEntries}
+          onChanged={refreshAfterBuildStudioChange}
         />
       )}
 
