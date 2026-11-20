@@ -79,10 +79,18 @@ describe('the authored catalog', () => {
     ])
   })
 
-  it('does not gate the first three on a name', () => {
+  it('does not gate the first three on a name or on sibling-specific wording', () => {
+    const siblingWording = /\bsibling|\bbrother|\bsister/i
+    const challengeText = (c: (typeof BUILD_CHALLENGES)[number]) =>
+      [c.goal, c.question, c.why, c.hint, c.prediction.prompt].join(' ')
+
+    const personalNames = /\b(?:Lincoln|London)\b/i
+
     for (const c of BUILD_CHALLENGES.slice(0, 3)) {
-      const text = [c.goal, c.question, c.why, c.hint, c.prediction.prompt].join(' ')
-      expect(text).not.toMatch(/brother|sister|Lincoln|London/i)
+      const text = challengeText(c)
+      expect(text).not.toMatch(siblingWording)
+
+      expect(text).not.toMatch(personalNames)
     }
   })
 
