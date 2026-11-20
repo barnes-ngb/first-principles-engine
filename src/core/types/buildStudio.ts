@@ -49,6 +49,8 @@
  * measured with {@link utf8ByteLength}.
  */
 
+import { SubjectBucket } from './enums'
+
 /** The map a MakeCode editor hands over and takes back: file name → text. */
 export type BuildStudioSourceFiles = Readonly<Record<string, string>>
 
@@ -109,6 +111,201 @@ export interface BuildStudioVersion {
    * duplicate be recognised as a duplicate rather than guessed at.
    */
   visitId?: string
+  /**
+   * The structured Build Challenge attempt frozen with THIS explicit Save, when
+   * the child had one going (LOCAL-VISION-007). Optional and additive: a version
+   * saved before challenges existed has none — even when it carries the legacy
+   * `goalId` — and nothing may infer one. Scoped to this exact child, project
+   * and version by {@link normalizeChallengeAttempt}.
+   */
+  challengeAttempt?: BuildStudioChallengeAttempt
+}
+
+// ── The Build Challenge attempt ─────────────────────────────────────────────
+
+/** The only subjects a Build Challenge may carry: existing `SubjectBucket` values. */
+export const BUILD_STUDIO_CHALLENGE_SUBJECTS = [
+  SubjectBucket.Math,
+  SubjectBucket.Science,
+  SubjectBucket.SocialStudies,
+  SubjectBucket.LanguageArts,
+  SubjectBucket.PracticalArts,
+] as const
+export type BuildStudioChallengeSubject = (typeof BUILD_STUDIO_CHALLENGE_SUBJECTS)[number]
+
+/** What the child said about his own guess, after pressing Play. */
+export const BUILD_STUDIO_CHALLENGE_OUTCOMES = ['matched', 'different', 'unsure'] as const
+export type BuildStudioChallengeOutcome = (typeof BUILD_STUDIO_CHALLENGE_OUTCOMES)[number]
+
+/**
+ * One challenge attempt as it is stored on a version (LOCAL-VISION-007).
+ *
+ * Three facts with three different provenances, kept apart on purpose:
+ *
+ *   • `prediction` — an option the child tapped BEFORE any Play request;
+ *   • `playRequest` — the child pressed Play. It records a tap, nothing more:
+ *     the bridge cannot establish which source ran, so this never says that the
+ *     saved source was the one played;
+ *   • `reportedOutcome` — what the CHILD said he saw. Self-report, not an
+ *     observation, and not an assessment of anything.
+ *
+ * Nothing here is a score, a mastery claim or a reward.
+ */
+export interface BuildStudioChallengeAttempt {
+  /** Scope: must equal the version it is stored on, on all three. */
+  childId: string
+  projectId: string
+  versionId: string
+  /** One id per attempt, so a later save of the same attempt is recognisable. */
+  attemptId: string
+  /** The authored challenge, by its stable id and revision. */
+  challengeId: string
+  challengeRevision: number
+  /**
+   * The authored subject of this challenge, copied from the catalog at freeze
+   * time. One of {@link BUILD_STUDIO_CHALLENGE_SUBJECTS}. It is a label for
+   * future source-linked hours; nothing here writes hours or a learner record.
+   */
+  subjectBucket: BuildStudioChallengeSubject
+  prediction?: { optionId: string; at: string }
+  playRequest?: { at: string }
+  reportedOutcome?: { result: BuildStudioChallengeOutcome; at: string }
+}
+
+const CHALLENGE_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
+const CHALLENGE_PATH_ID = /^[A-Za-z0-9_-]{4,64}$/
+const CHALLENGE_OPTION_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
+
+const hasOnly = (value: Record<string, unknown>, keys: readonly string[]): boolean =>
+  Object.keys(value).every((key) => keys.includes(key))
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+
+/** An ISO-looking stamp that also parses. Returns its time, or `null`. */
+function stampTime(value: unknown): number | null {
+  if (typeof value !== 'string' || value.length > 40) return null
+  if (!/^\d{4}-\d{2}-\d{2}T/.test(value)) return null
+  const time = new Date(value).getTime()
+  return Number.isNaN(time) ? null : time
+}
+
+/**
+ * Validate a challenge attempt and return it in ONE canonical shape, or `null`.
+ *
+ * Strict by design: unknown keys are refused, ids are narrow, and the order of
+ * events is enforced (a prediction is before the Play request, the reported
+ * outcome after it, and an outcome needs both). A retry compares the canonical
+ * shapes, so the same attempt always serialises the same way.
+ */
+export function normalizeChallengeAttempt(value: unknown): BuildStudioChallengeAttempt | null {
+  if (!isRecord(value)) return null
+  if (
+    !hasOnly(value, [
+      'childId',
+      'projectId',
+      'versionId',
+      'attemptId',
+      'challengeId',
+      'challengeRevision',
+      'subjectBucket',
+      'prediction',
+      'playRequest',
+      'reportedOutcome',
+    ])
+  ) {
+    return null
+  }
+  const { childId, projectId, versionId, attemptId, challengeId, challengeRevision } = value
+  if (typeof childId !== 'string' || !childId || /[/\s]/.test(childId)) return null
+  if (typeof projectId !== 'string' || !CHALLENGE_PATH_ID.test(projectId)) return null
+  if (typeof versionId !== 'string' || !CHALLENGE_PATH_ID.test(versionId)) return null
+  if (typeof attemptId !== 'string' || !CHALLENGE_PATH_ID.test(attemptId)) return null
+  if (typeof challengeId !== 'string' || challengeId.length > 48 || !CHALLENGE_ID.test(challengeId)) {
+    return null
+  }
+  if (
+    typeof challengeRevision !== 'number' ||
+    !Number.isInteger(challengeRevision) ||
+    challengeRevision < 1 ||
+    challengeRevision > 999
+  ) {
+    return null
+  }
+  const { subjectBucket } = value
+  if (
+    typeof subjectBucket !== 'string' ||
+    !(BUILD_STUDIO_CHALLENGE_SUBJECTS as readonly string[]).includes(subjectBucket)
+  ) {
+    return null
+  }
+
+  const out: BuildStudioChallengeAttempt = {
+    childId,
+    projectId,
+    versionId,
+    attemptId,
+    challengeId,
+    challengeRevision,
+    subjectBucket: subjectBucket as BuildStudioChallengeSubject,
+  }
+
+  let predictedAt: number | null = null
+  if (value.prediction !== undefined) {
+    const p = value.prediction
+    if (!isRecord(p) || !hasOnly(p, ['optionId', 'at'])) return null
+    predictedAt = stampTime(p.at)
+    if (
+      typeof p.optionId !== 'string' ||
+      p.optionId.length > 24 ||
+      !CHALLENGE_OPTION_ID.test(p.optionId) ||
+      predictedAt === null
+    ) {
+      return null
+    }
+    out.prediction = { optionId: p.optionId, at: p.at as string }
+  }
+
+  let playedAt: number | null = null
+  if (value.playRequest !== undefined) {
+    const p = value.playRequest
+    if (!isRecord(p) || !hasOnly(p, ['at'])) return null
+    playedAt = stampTime(p.at)
+    if (playedAt === null) return null
+    out.playRequest = { at: p.at as string }
+  }
+  // A prediction is only a prediction if it came first.
+  if (predictedAt !== null && playedAt !== null && predictedAt > playedAt) return null
+
+  if (value.reportedOutcome !== undefined) {
+    const o = value.reportedOutcome
+    if (!isRecord(o) || !hasOnly(o, ['result', 'at'])) return null
+    const reportedAt = stampTime(o.at)
+    if (
+      reportedAt === null ||
+      typeof o.result !== 'string' ||
+      !(BUILD_STUDIO_CHALLENGE_OUTCOMES as readonly string[]).includes(o.result)
+    ) {
+      return null
+    }
+    // "Matched" is relative to a guess, after a Play request.
+    if (predictedAt === null || playedAt === null || reportedAt < playedAt) return null
+    out.reportedOutcome = { result: o.result as BuildStudioChallengeOutcome, at: o.at as string }
+  }
+
+  // An attempt with nothing recorded is not an attempt.
+  if (!out.prediction && !out.playRequest) return null
+  return out
+}
+
+/**
+ * The comparable form of an attempt, or `''` for none. An invalid stored value
+ * is `'!invalid'`, so it can never compare equal to anything that was sent.
+ */
+export function challengeAttemptKey(value: unknown): string {
+  if (value === undefined || value === null) return ''
+  const normalized = normalizeChallengeAttempt(value)
+  return normalized ? JSON.stringify(normalized) : '!invalid'
 }
 
 /**

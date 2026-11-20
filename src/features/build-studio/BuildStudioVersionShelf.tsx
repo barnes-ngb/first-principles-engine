@@ -23,6 +23,7 @@ import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 
 import type { BuildStudioVersion } from '../../core/types/buildStudio'
+import { describeAttemptForParent } from './buildStudioChallenges'
 import { savedLine } from './buildStudioSavedLine'
 import { VersionsStatus, type BuildStudioVersionsRead } from './useBuildStudioVersions'
 
@@ -53,6 +54,12 @@ export interface BuildStudioVersionShelfProps {
    * saved* is exactly her question.
    */
   showTechnicalDetail?: boolean
+  /**
+   * Show the compact Build Challenge line on rows that recorded one — the
+   * parent's read-only view only. Off by default, so the child's shelf is
+   * unchanged. Older rows have no record and draw nothing.
+   */
+  showChallengeLine?: boolean
 }
 
 export default function BuildStudioVersionShelf({
@@ -64,6 +71,7 @@ export default function BuildStudioVersionShelf({
   busyVersionId,
   onRetryRead,
   showTechnicalDetail = false,
+  showChallengeLine = false,
 }: BuildStudioVersionShelfProps) {
   if (read.status === VersionsStatus.Loading) {
     return (
@@ -108,6 +116,7 @@ export default function BuildStudioVersionShelf({
       {read.versions.map((version) => {
         const isCurrent = currentVersionId === version.versionId
         const isBusy = busyVersionId === version.versionId
+        const challengeLine = showChallengeLine ? describeAttemptForParent(version) : null
         return (
           <Box
             key={version.id}
@@ -137,6 +146,12 @@ export default function BuildStudioVersionShelf({
                     reopened version is the same bytes that were stored, which
                     is this slice's own acceptance check. On the kid page it was
                     routine implementation detail in the middle of his games. */}
+                {challengeLine && (
+                  <Typography variant="caption" color="text.primary">
+                    {challengeLine.summary}
+                    {challengeLine.followUp ? ` Ask: ${challengeLine.followUp}` : ''}
+                  </Typography>
+                )}
                 {showTechnicalDetail && (
                   <Typography
                     variant="caption"

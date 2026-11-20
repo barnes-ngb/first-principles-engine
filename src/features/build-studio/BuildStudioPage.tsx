@@ -219,6 +219,9 @@ export default function BuildStudioPage() {
           // Her question is "is this the source I think it is", so she keeps the
           // digest, the byte size and the file count. The kid page does not.
           showTechnicalDetail
+          // Her line on a row that recorded a challenge attempt, with the
+          // authored follow-up. Older rows draw nothing.
+          showChallengeLine
         />
 
         <Alert severity="info">{BUILD_STUDIO_PRIVACY_LINE}</Alert>
