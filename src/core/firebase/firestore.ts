@@ -976,3 +976,31 @@ export const buildStudioOptInDoc = (
   childId: string,
 ): DocumentReference =>
   doc(db, `families/${familyId}/settings/${buildStudioOptInDocId(childId)}`)
+
+// ── Build Studio hours credit (LOCAL-VISION-007 slice 3) ──
+
+/**
+ * The family ROOT document, `families/{familyId}`. Read-only here: the Build
+ * Studio credit writer reads its `timeZone` to resolve a school date, and writes
+ * nothing to it.
+ */
+export const familyRootDoc = (familyId: string): DocumentReference =>
+  doc(db, `families/${familyId}`)
+
+/**
+ * Immutable consumed-source receipts, one per exact credited version.
+ * Path: families/{familyId}/buildStudioCreditReceipts/{childId}.{projectId}.{versionId}
+ * Written once by `buildStudioHoursCreditWrites.ts`, never updated or deleted.
+ * Under the family owner rule — `firestore.rules` is untouched.
+ */
+export const buildStudioCreditReceiptsCollection = (familyId: string): CollectionReference =>
+  collection(db, `families/${familyId}/buildStudioCreditReceipts`)
+
+/**
+ * One bounded admission bucket per child per local day.
+ * Path: families/{familyId}/buildStudioCreditDays/{childId}.{YYYY-MM-DD}
+ * Append-only: it keeps the ORIGINAL fixed units, so a later correction of the
+ * visible hours row neither frees capacity nor earns another credit.
+ */
+export const buildStudioCreditDaysCollection = (familyId: string): CollectionReference =>
+  collection(db, `families/${familyId}/buildStudioCreditDays`)

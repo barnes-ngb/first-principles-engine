@@ -49,6 +49,8 @@
  * measured with {@link utf8ByteLength}.
  */
 
+import type { Timestamp } from 'firebase/firestore'
+
 import { SubjectBucket } from './enums'
 
 /** The map a MakeCode editor hands over and takes back: file name → text. */
@@ -119,6 +121,43 @@ export interface BuildStudioVersion {
    * and version by {@link normalizeChallengeAttempt}.
    */
   challengeAttempt?: BuildStudioChallengeAttempt
+  /**
+   * Firestore SERVER acceptance time of this exact save (LOCAL-VISION-007, slice 3).
+   *
+   * Written only by a NEW save that asked to be eligible for parent-reviewed
+   * hours, as `serverTimestamp()` inside the create transaction. It is the one
+   * immutable instant a credit's school date is derived from — never the
+   * client's `createdAt`, never a retry's time. Absent on every older version and
+   * on every save that did not ask; nothing backfills it, and a retry of an old
+   * version never adds it. A version without it is reference/baseline only.
+   */
+  acceptedAt?: Timestamp
+}
+
+/**
+ * Typed provenance on a Build Studio credit's `hours` row (LOCAL-VISION-007,
+ * slice 3). Additive and optional on `HoursEntry`; the counting path never
+ * reads it. It names the exact saved version the credit was admitted for, so
+ * the parent can open that version from Records.
+ */
+export interface BuildStudioCreditProvenance {
+  schema: 1
+  /** The immutable consumed-source receipt this row belongs to. */
+  receiptId: string
+  kind: 'challenge' | 'freeBuild'
+  projectId: string
+  versionId: string
+  /** `buildStudioVersionDocId(childId, projectId, versionId)`. */
+  versionDocId: string
+  /** Present for `kind: 'challenge'` only. */
+  challengeId?: string
+  challengeRevision?: number
+  /** The fixed minutes ADMITTED. A later correction lowers the row, never this. */
+  admittedMinutes: number
+  /** The server acceptance instant of the version, epoch ms. */
+  workAtMs: number
+  /** The zone the school date was resolved in, frozen at confirmation. */
+  timeZone: string
 }
 
 // ── The Build Challenge attempt ─────────────────────────────────────────────

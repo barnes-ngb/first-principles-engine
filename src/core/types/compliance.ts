@@ -1,3 +1,4 @@
+import type { BuildStudioCreditProvenance } from './buildStudio'
 import type {
   DayBlockType,
   SubjectBucket,
@@ -17,6 +18,11 @@ export interface HoursEntry {
   dayLogId?: string
   blockId?: string
   source?: string
+  /**
+   * Source-linked provenance for a parent-confirmed Build Studio credit
+   * (LOCAL-VISION-007 slice 3). Additive; never read by the hours math.
+   */
+  buildStudioCredit?: BuildStudioCreditProvenance
 }
 
 export interface HoursAdjustment {

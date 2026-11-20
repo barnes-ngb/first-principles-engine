@@ -44,7 +44,7 @@
 // not a hash comparison. A digest is stored for people to read; the rule reads
 // the bytes.
 
-import { doc, runTransaction } from 'firebase/firestore'
+import { doc, runTransaction, serverTimestamp } from 'firebase/firestore'
 
 import {
   BUILD_STUDIO_MAX_ARCHIVE_BYTES,
@@ -103,6 +103,18 @@ export interface SaveBuildStudioVersionArgs {
    * retry's identity: the same Save action always sends the same shape.
    */
   challengeAttempt?: BuildStudioChallengeAttempt
+  /**
+   * Mark a NEW version as eligible for later parent-reviewed hours
+   * (LOCAL-VISION-007 slice 3) by stamping Firestore's server acceptance time as
+   * `acceptedAt`, inside the same create. This is ALL it does: no hours, no
+   * receipt, no admission — the save never depends on any of them.
+   *
+   * Applies only when THIS call creates the document. A retry that finds the
+   * version already stored (`alreadySaved`) never adds, changes or backfills it,
+   * so an older version stays reference/baseline-only for ever. Not part of the
+   * retry identity, for the same reason.
+   */
+  creditEligible?: boolean
 }
 
 export type SaveBuildStudioVersionOutcome = 'created' | 'alreadySaved'
@@ -280,7 +292,10 @@ export async function saveBuildStudioVersion(
       }
       throw new BuildStudioRefused(BUILD_STUDIO_VERSION_CONFLICT)
     }
-    tx.set(ref, version)
+    // `acceptedAt` is a server sentinel, so the returned `version` (what the
+    // caller renders) deliberately omits it: the real instant is unknown here and
+    // must only ever be read back from the server by the credit proof.
+    tx.set(ref, args.creditEligible === true ? { ...version, acceptedAt: serverTimestamp() } : version)
     return { version, outcome: 'created' as const }
   })
 }
