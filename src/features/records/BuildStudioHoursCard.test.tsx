@@ -401,7 +401,7 @@ describe('propose → confirm → write, never automatic', () => {
     render(card())
     await userEvent.click(screen.getByRole('button', { name: 'Review credit' }))
     const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getByText('A prediction was recorded with this saved version.')).toBeInTheDocument()
+    expect(within(dialog).getByText(/A prediction was recorded with this saved version\./)).toBeInTheDocument()
     expect(within(dialog).queryByText(/they finished/i)).not.toBeInTheDocument()
   })
 

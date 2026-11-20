@@ -6,7 +6,7 @@
 
 | Metric | Count |
 |---|---|
-| Exported collection helpers in `firestore.ts` (live) | <!-- gen:collection-count -->53<!-- /gen --> |
+| Exported collection helpers in `firestore.ts` (live) | <!-- gen:collection-count -->55<!-- /gen --> |
 | Total composite indexes | 6 |
 | Total field overrides | 7 |
 | Unused composite indexes | 0 |
