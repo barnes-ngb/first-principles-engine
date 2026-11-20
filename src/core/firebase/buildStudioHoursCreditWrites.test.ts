@@ -230,7 +230,15 @@ function putDay(date: string, entries: Array<{ minutes: number; atMs: number; so
     schema: 1,
     childId: CHILD,
     schoolDate: date,
-    entries: entries.map((e, i) => ({ receiptId: `seed-${i}`, ...e })),
+    // A challenge / free-build entry's receipt id is the DETERMINISTIC id of its
+    // source (the writer's parser rejects any other); other sources are free-form.
+    entries: entries.map((e, i) => ({
+      receiptId:
+        e.source.kind === 'freeBuild' || e.source.kind === 'challenge'
+          ? `${CHILD}.${e.source.projectId}.${e.source.versionId}`
+          : `seed-${i}`,
+      ...e,
+    })),
   })
 }
 
@@ -536,6 +544,9 @@ describe('confirm', () => {
 
 describe('the daily cap and spacing', () => {
   const idea = (n: number) => ({ kind: 'blockMuncherIdea', requestId: `req-${n}` })
+  // The fixed credit for a verdict is 10 minutes (an idea is 5): a bucket entry's
+  // minutes must equal its source's fixed value, so a 10-minute entry is a verdict.
+  const verdict = (n: number) => ({ kind: 'blockMuncherVerdict', requestId: `req-${n}`, playedBuildId: `play-${n}` })
 
   it('the four-hour cap holds when two devices race for the last unit', async () => {
     // 225 committed minutes (45 × 5): exactly one 15-minute unit left.
@@ -552,7 +563,8 @@ describe('the daily cap and spacing', () => {
   })
 
   it('a unit that does not fully fit is declined, with nothing written', async () => {
-    putDay('2026-11-20', Array.from({ length: 24 }, (_, i) => ({ minutes: 10, atMs: T0 - (i + 1) * 3_600_000, source: idea(i) })))
+    // 24 × 10 = the full 240; a further 15-minute unit cannot fit.
+    putDay('2026-11-20', Array.from({ length: 24 }, (_, i) => ({ minutes: 10, atMs: T0 - (i + 1) * 3_600_000, source: verdict(i) })))
     putVersion('v-aaa111')
     const preview = await previewBuildStudioCredit(scope('v-aaa111'))
     expect(preview).toMatchObject({ status: 'declined', reason: 'over-daily-cap' })
@@ -586,7 +598,8 @@ describe('the daily cap and spacing', () => {
   })
 
   it("only THIS date's bucket counts toward this date's total", async () => {
-    putDay('2026-11-19', Array.from({ length: 24 }, (_, i) => ({ minutes: 10, atMs: T0 - 86_400_000 - i * 3_600_000, source: idea(i) })))
+    // The 19th is FULL (24 × 10); that must not touch the 20th's own room.
+    putDay('2026-11-19', Array.from({ length: 24 }, (_, i) => ({ minutes: 10, atMs: T0 - 86_400_000 - i * 3_600_000, source: verdict(i) })))
     putVersion('v-aaa111')
     expect((await previewBuildStudioCredit(scope('v-aaa111'))).status).toBe('ready')
   })
