@@ -19,6 +19,7 @@ import {
   buildStudioSourceKeys,
   EDITOR_SCRATCH_FILES,
   serializeBuildStudioSource,
+  type BuildStudioChallengeAttempt,
 } from '../../core/types/buildStudio'
 
 /**
@@ -132,6 +133,10 @@ export const newBridgeId = (now: number, random: number): string =>
  */
 export const newNoteActionId = (now: number, random: number): string =>
   pathSafeId('n', now, random)
+
+/** The id for one challenge attempt — minted when a challenge is shown or swapped. */
+export const newChallengeAttemptId = (now: number, random: number): string =>
+  pathSafeId('a', now, random)
 
 /**
  * Everything a reflection is about, frozen when the words are accepted.
@@ -315,6 +320,13 @@ export interface PendingSave {
   editorTarget?: string
   editorTargetVersion?: string
   goalId?: string
+  /**
+   * The challenge attempt frozen with THIS payload, scoped to its own child,
+   * project and version id. Absent on a payload from an older build, which
+   * stays readable and retries exactly as it was. A retry sends this value and
+   * never re-reads the card, so the record cannot drift from the bytes.
+   */
+  challengeAttempt?: BuildStudioChallengeAttempt
   /** How many times this exact payload has been sent. The auto-retry is one. */
   attempts: number
   /**
