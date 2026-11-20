@@ -1464,15 +1464,10 @@ export default function BuildStudioEditor({
         versionId,
       })
       if (frozen.state && frozen.state !== attemptRef.current) putAttempt(frozen.state)
-      // The legacy `goalId` follows the invitation that is active: a recorded
-      // attempt names its own challenge, and a visible invitation names the
-      // authored one. Only after the invitation is dismissed does the old fixed
-      // goal remain — and it is never evidence that an attempt happened.
-      const goalId = frozen.attempt
-        ? frozen.attempt.challengeId
-        : challengeDismissedRef.current
-          ? BUILD_STUDIO_GOAL.id
-          : challengeIdRef.current
+      // A challenge goal is chosen only when an actual attempt is saved. A
+      // merely visible invitation never labels a game; an ordinary save keeps
+      // the legacy fixed goal.
+      const goalId = frozen.attempt ? frozen.attempt.challengeId : BUILD_STUDIO_GOAL.id
       return frozen.attempt ? { challengeAttempt: frozen.attempt, goalId } : { goalId }
     },
     [scope.childId, scope.projectId, putAttempt],
@@ -1495,11 +1490,25 @@ export default function BuildStudioEditor({
     // The previous unfinished payload is deliberately NOT cleared here. If this
     // capture fails there is still work waiting to be retried, and clearing it
     // first would hide it; `commit` replaces it the moment a new one exists.
+    // The challenge envelope is frozen from THIS tap, before waiting for the
+    // editor's source. Freezing seals the prediction, so a change made while
+    // the capture is resolving cannot reach the held payload.
+    const newId = newVersionId(Date.now(), Math.random())
+    const attemptBefore = attemptRef.current
+    const challengeFragment = freezeForSave(newId)
+    const attemptSealed = attemptRef.current
+    // A capture that never produced bytes recorded nothing: undo only our own seal.
+    const unsealIfUnused = () => {
+      if (attemptSealed !== attemptBefore && attemptRef.current === attemptSealed) {
+        putAttempt(attemptBefore)
+      }
+    }
     try {
       let snapshot: AcceptedProject
       try {
         snapshot = await bridge.requestSnapshot()
       } catch (err) {
+        unsealIfUnused()
         if (liveTokenRef.current !== token) return
         setSaveState(SaveState.Failed)
         setSaveMessage(
@@ -1510,18 +1519,18 @@ export default function BuildStudioEditor({
         return
       }
       if (liveTokenRef.current !== token) {
+        unsealIfUnused()
         setSaveState(SaveState.Idle)
         return
       }
       // The signature of the bytes that were ACTUALLY captured, taken from the
       // fenced result rather than from a counter read before the capture began.
       const runtime = bridge.runtimeVersions()
-      const newId = newVersionId(Date.now(), Math.random())
       const payload: PendingSave = {
         scope,
         versionId: newId,
-        // Frozen HERE, with the bytes and the id, and never rebuilt by a retry.
-        ...freezeForSave(newId),
+        // Frozen at the tap, with the id, and never rebuilt by a retry.
+        ...challengeFragment,
         label: label.trim() || defaultLabel(versions.versions.length + 1),
         createdAt: new Date().toISOString(),
         files: snapshot.files,
@@ -1550,6 +1559,7 @@ export default function BuildStudioEditor({
     versions.versions.length,
     commit,
     freezeForSave,
+    putAttempt,
   ])
 
   /**
@@ -2052,6 +2062,9 @@ export default function BuildStudioEditor({
    */
   const recordPlayRequest = useCallback(() => {
     if (challengeDismissedRef.current) return
+    // A passively visible invitation is not an active challenge: ordinary Play
+    // before any prediction is free play and records nothing.
+    if (attemptRef.current.prediction === null) return
     putAttempt(withPlayRequest(attemptRef.current, new Date().toISOString()))
   }, [putAttempt])
 

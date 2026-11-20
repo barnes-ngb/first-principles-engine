@@ -220,8 +220,8 @@ describe('the card is an optional invitation', () => {
     await tap('💾 Save my version')
     await waitFor(() => expect(saveVersion).toHaveBeenCalledTimes(1))
     expect('challengeAttempt' in saveVersion.mock.calls[0][0]).toBe(false)
-    // The optional legacy goal field follows the active authored challenge.
-    expect(saveVersion.mock.calls[0][0].goalId).toBe('faster-hero')
+    // A visible card alone never labels a game with a challenge it did not take.
+    expect(saveVersion.mock.calls[0][0].goalId).toBe('one-more-life')
   })
 
   it('after the invitation is hidden, a Save names the old fixed goal — never an attempt', async () => {
@@ -315,16 +315,60 @@ describe('the guess comes before Play, and Play does not need it', () => {
     expect(normalizeChallengeAttempt(attempt)).toEqual(attempt)
   })
 
-  it('keeps Play usable when the child declines to guess, and then asks no match question', async () => {
+  it('treats Play without a guess as free play: no challenge record, no warning, and a later guess still counts', async () => {
     const { bridge } = await openEditor()
     await tap('▶ Play it')
     expect(bridge.played).toBe(1)
     expect(screen.queryByText('Did it match your guess?')).not.toBeInTheDocument()
+    // The guess is still open after the unrelated free play.
+    await tapRole('Faster')
+    await tap('▶ Play it')
     await tap('💾 Save my version')
     await waitFor(() => expect(saveVersion).toHaveBeenCalledTimes(1))
+    expect(savedAttempt()!.prediction?.optionId).toBe('faster')
+    expect(savedAttempt()!.playRequest).toBeDefined()
+    expect(saveVersion.mock.calls[0][0].goalId).toBe('faster-hero')
+  })
+
+  it('saves free work after ordinary Play with no challenge record and a clean editor has no warning', async () => {
+    await openEditor()
+    await tap('▶ Play it')
+    expect(screen.queryByText(/challenge guess or answer/)).not.toBeInTheDocument()
+    await tap('💾 Save my version')
+    await waitFor(() => expect(saveVersion).toHaveBeenCalledTimes(1))
+    expect('challengeAttempt' in saveVersion.mock.calls[0][0]).toBe(false)
+    expect(saveVersion.mock.calls[0][0].goalId).toBe('one-more-life')
+  })
+
+  it('binds the guess from the Save tap even if the guess changes while the source is resolving', async () => {
+    const { bridge } = await openEditor()
+    await tapRole('Faster')
+    let release!: () => void
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const original = bridge.requestSnapshot.bind(bridge)
+    bridge.requestSnapshot = async () => {
+      await held
+      return original()
+    }
+    await tap('💾 Save my version')
+    // Edits made while the capture is held must not reach the held payload.
+    const slower = screen.queryByRole('button', { name: 'Slower' })
+    if (slower && !(slower as HTMLButtonElement).disabled) {
+      await act(async () => {
+        slower.click()
+      })
+    }
+    await tap('🔀 A different one').catch(() => {})
+    await act(async () => {
+      release()
+    })
+    await waitFor(() => expect(saveVersion).toHaveBeenCalledTimes(1))
     const attempt = savedAttempt()!
-    expect(attempt.prediction).toBeUndefined()
-    expect(attempt.playRequest).toBeDefined()
+    expect(attempt.challengeId).toBe('faster-hero')
+    expect(attempt.prediction?.optionId).toBe('faster')
+    expect(saveVersion.mock.calls[0][0].goalId).toBe('faster-hero')
   })
 
   it('offers Matched, Different and Unsure only after a guess and an explicit Play', async () => {
