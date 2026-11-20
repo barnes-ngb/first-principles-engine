@@ -236,7 +236,7 @@ function putDay(date: string, entries: Array<{ minutes: number; atMs: number; so
       receiptId:
         e.source.kind === 'freeBuild' || e.source.kind === 'challenge'
           ? `${CHILD}.${e.source.projectId}.${e.source.versionId}`
-          : `seed-${i}`,
+          : `seed-${date}-${i}`,
       ...e,
     })),
   })

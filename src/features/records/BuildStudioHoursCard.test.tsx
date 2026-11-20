@@ -37,7 +37,8 @@ vi.mock('../build-studio/buildStudioExport', () => ({
   downloadTextFile: vi.fn(),
 }))
 
-import BuildStudioHoursCard, { buildStudioCardAllowed } from './BuildStudioHoursCard'
+import BuildStudioHoursCard from './BuildStudioHoursCard'
+import { buildStudioCardAllowed } from './buildStudioHoursCard.logic'
 
 const PROJECT = 'apple-dash-starter'
 const retry = vi.fn()
@@ -207,6 +208,21 @@ describe('card visibility', () => {
   })
 })
 
+describe('the review list is never capped for good', () => {
+  it('Show more reveals an older save that eight newer ones hide', async () => {
+    const newer = Array.from({ length: 8 }, (_, i) =>
+      version('lincoln', `v-new${i}`, { createdAt: `2026-11-20T16:0${i}:00.000Z` }),
+    )
+    const older = version('lincoln', 'v-older9', { createdAt: '2026-11-19T10:00:00.000Z' })
+    setVersions('lincoln', [...newer, older])
+    render(card())
+    expect(screen.queryByText('Game v-older9')).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Show more' }))
+    expect(screen.getByText('Game v-older9')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Show more' })).not.toBeInTheDocument()
+  })
+})
+
 describe('propose → confirm → write, never automatic', () => {
   beforeEach(() => setVersions('lincoln', [version('lincoln', 'v-aaa111')]))
 
@@ -257,7 +273,7 @@ describe('propose → confirm → write, never automatic', () => {
     const dialog = await screen.findByRole('dialog')
     await userEvent.click(within(dialog).getByRole('button', { name: 'Confirm credit' }))
 
-    expect(await within(dialog).findByText(/didn.t go through/i)).toBeInTheDocument()
+    expect(await within(dialog).findByText(/couldn.t confirm whether this was recorded/i)).toBeInTheDocument()
     expect(within(dialog).queryByText(/Credited/)).not.toBeInTheDocument()
     expect(onChanged).not.toHaveBeenCalled()
     expect(preview).toHaveBeenCalledTimes(1)
@@ -338,6 +354,55 @@ describe('propose → confirm → write, never automatic', () => {
     const dialog = await screen.findByRole('dialog')
     await userEvent.click(within(dialog).getByRole('button', { name: 'Confirm credit' }))
     expect(confirm).not.toHaveBeenCalled()
+  })
+
+  it('a confirmation that lands after the child switched still refreshes Records, and shows nothing to the new child', async () => {
+    let resolve!: (v: unknown) => void
+    preview.mockResolvedValue({ status: 'ready', proposal: proposal() })
+    confirm.mockReturnValue(new Promise((r) => (resolve = r)))
+    const onChanged = vi.fn(async () => true)
+    const { rerender } = render(card({ onChanged }))
+    await userEvent.click(screen.getByRole('button', { name: 'Review credit' }))
+    const dialog = await screen.findByRole('dialog')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Confirm credit' }))
+
+    setVersions('london', [])
+    rerender(card({ childId: 'london', childName: 'London', onChanged }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+    resolve({ status: 'credited', receipt })
+    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.queryByText(/Credited/)).not.toBeInTheDocument()
+  })
+
+  it('a correction that lands after the child switched still refreshes Records', async () => {
+    let resolve!: (v: unknown) => void
+    correct.mockReturnValue(new Promise((r) => (resolve = r)))
+    const onChanged = vi.fn(async () => true)
+    const { rerender } = render(card({ hoursEntries: [row('lincoln', 'v-aaa111')], onChanged }))
+    await userEvent.click(screen.getByRole('button', { name: 'Adjust' }))
+    const dialog = await screen.findByRole('dialog')
+    await userEvent.click(within(dialog).getByRole('radio', { name: 'Remove this row' }))
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Remove row' }))
+
+    setVersions('london', [])
+    rerender(card({ childId: 'london', childName: 'London', onChanged }))
+    resolve({ status: 'deleted' })
+    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('an unconfirmed credit is never claimed as the challenge being finished', async () => {
+    preview.mockResolvedValue({
+      status: 'ready',
+      proposal: { ...proposal(), source: { kind: 'challenge', projectId: PROJECT, versionId: 'v-aaa111' } },
+    })
+    render(card())
+    await userEvent.click(screen.getByRole('button', { name: 'Review credit' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('A prediction was recorded with this saved version.')).toBeInTheDocument()
+    expect(within(dialog).queryByText(/they finished/i)).not.toBeInTheDocument()
   })
 
   it('a preview that answers after the child switched is never shown or confirmable', async () => {

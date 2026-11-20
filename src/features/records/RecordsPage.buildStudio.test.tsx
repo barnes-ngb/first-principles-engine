@@ -129,18 +129,15 @@ vi.mock('./compliancePackArchive', () => ({
   requestCompliancePackArchive: vi.fn(async () => ({})),
 }))
 
-// The real gate; a stub in place of the card body, which has its own test file.
-vi.mock('./BuildStudioHoursCard', async () => {
-  const actual = await vi.importActual<typeof import('./BuildStudioHoursCard')>('./BuildStudioHoursCard')
-  return {
-    ...actual,
-    default: (p: { familyId: string; childId: string; hoursEntries: unknown[] }) => (
-      <div data-testid="bs-card">
-        {p.familyId}/{p.childId}/{p.hoursEntries.length}
-      </div>
-    ),
-  }
-})
+// The real gate (from the logic file, unmocked); a stub in place of the card body,
+// which has its own test file.
+vi.mock('./BuildStudioHoursCard', () => ({
+  default: (p: { familyId: string; childId: string; hoursEntries: unknown[] }) => (
+    <div data-testid="bs-card">
+      {p.familyId}/{p.childId}/{p.hoursEntries.length}
+    </div>
+  ),
+}))
 
 describe('Records — Build Studio rows and section', () => {
   beforeEach(() => {
@@ -171,7 +168,8 @@ describe('Records — Build Studio rows and section', () => {
     state.profileChildResolved = undefined
     const { default: RecordsPage } = await import('./RecordsPage')
     render(<RecordsPage />)
-    expect(await screen.findByText(/Hours entries: 2/)).toBeInTheDocument()
+    // Without a settled parent capability the credit row is not counted either.
+    expect(await screen.findByText(/Hours entries: 1/)).toBeInTheDocument()
     expect(screen.queryByTestId('bs-card')).not.toBeInTheDocument()
   })
 
@@ -187,5 +185,7 @@ describe('Records — Build Studio rows and section', () => {
     rerender(<RecordsPage />)
     await waitFor(() => expect(screen.queryByTestId('bs-card')).not.toBeInTheDocument())
     expect(screen.queryByText(/fam-1\/lincoln/)).not.toBeInTheDocument()
+    // The old family's credit (same short child id) is not in generic output.
+    expect(screen.queryByText(/Hours entries: 2/)).not.toBeInTheDocument()
   })
 })

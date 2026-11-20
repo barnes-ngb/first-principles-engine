@@ -81,10 +81,8 @@ vi.mock('./MonthlyTrend', () => ({ default: () => <div /> }))
 vi.mock('./QuickAddHours', () => ({ default: () => <div /> }))
 // The Build Studio section is gated on a settled family/child/read and reads its
 // own Firestore path; its contract is tested in BuildStudioHoursCard.test.tsx.
-vi.mock('./BuildStudioHoursCard', () => ({
-  default: () => null,
-  buildStudioCardAllowed: () => false,
-}))
+vi.mock('./BuildStudioHoursCard', () => ({ default: () => null }))
+vi.mock('./buildStudioHoursCard.logic', () => ({ buildStudioCardAllowed: () => false }))
 vi.mock('./ChapterResponsesTab', () => ({ default: () => <div /> }))
 vi.mock('./EvaluationHistoryTab', () => ({ default: () => <div /> }))
 vi.mock('./PortfolioPage', () => ({ default: () => <div /> }))

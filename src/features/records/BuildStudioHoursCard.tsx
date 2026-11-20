@@ -51,14 +51,9 @@ import {
   type CreditPreviewResult,
 } from '../../core/firebase/buildStudioHoursCreditWrites'
 import type { HoursEntry } from '../../core/types'
-import {
-  BUILD_STUDIO_CREDIT_HOURS_SOURCE,
-  type BuildStudioCreditProvenance,
-  type BuildStudioVersion,
-} from '../../core/types/buildStudio'
+import type { BuildStudioVersion } from '../../core/types/buildStudio'
 import { SubjectBucketLabel, type SubjectBucket } from '../../core/types/enums'
 import { describeAttemptForParent } from '../build-studio/buildStudioChallenges'
-import { creditHoursId } from '../build-studio/buildStudioCreditProof'
 import {
   buildStudioDownloadsForArchive,
   downloadTextFile,
@@ -70,108 +65,15 @@ import {
   VersionsStatus,
 } from '../build-studio/useBuildStudioVersions'
 import BuildStudioCreditedWorkDialog from './BuildStudioCreditedWorkDialog'
+import {
+  candidateVersions,
+  creditedRowsFor,
+  MAX_LISTED,
+  type CreditedRow,
+} from './buildStudioHoursCard.logic'
 
-// ── Gate ────────────────────────────────────────────────────────────────────
-
-export interface RecordsReadScope {
-  familyId: string
-  startDate: string
-  endDate: string
-}
-
-/**
- * May the Build Studio section read or show anything? Every term must be
- * AFFIRMATIVE, so a missing answer (an unsettled family, an older mock, a child
- * profile) is "no". Pure, so the page and the tests share one answer.
- */
-export function buildStudioCardAllowed(args: {
-  canEdit: boolean
-  isChildProfile: boolean
-  /** From `useActiveChild`: true only when identity was proven, not fallen back to. */
-  profileChildResolved: boolean | undefined
-  familyId: string | null | undefined
-  /** The family whose read produced the children list in hand. */
-  childrenFamilyId: string | null | undefined
-  childrenLoading: boolean
-  activeChildId: string | null | undefined
-  /** The `children` document for `activeChildId` was found in that list. */
-  activeChildFound: boolean
-  recordsLoading: boolean
-  /** The scope the page's hours array was actually read under. */
-  readScope: RecordsReadScope | null
-  startDate: string
-  endDate: string
-}): boolean {
-  return (
-    args.canEdit === true &&
-    !args.isChildProfile &&
-    args.profileChildResolved === true &&
-    !!args.familyId &&
-    args.childrenFamilyId === args.familyId &&
-    !args.childrenLoading &&
-    !!args.activeChildId &&
-    args.activeChildFound &&
-    !args.recordsLoading &&
-    args.readScope !== null &&
-    args.readScope.familyId === args.familyId &&
-    args.readScope.startDate === args.startDate &&
-    args.readScope.endDate === args.endDate
-  )
-}
-
-// ── Pure helpers ────────────────────────────────────────────────────────────
-
-export interface CreditedRow {
-  entry: HoursEntry
-  /** `null` when the row's provenance is not exactly this child's credit. */
-  provenance: BuildStudioCreditProvenance | null
-}
-
-/** This child's credited rows, oldest first. Anything off about a row only hides its link. */
-export function creditedRowsFor(entries: HoursEntry[], childId: string): CreditedRow[] {
-  return entries
-    .filter((e) => e.source === BUILD_STUDIO_CREDIT_HOURS_SOURCE && e.childId === childId)
-    .map((entry) => {
-      const p = entry.buildStudioCredit
-      const ok =
-        !!p &&
-        p.schema === 1 &&
-        typeof p.projectId === 'string' &&
-        typeof p.versionId === 'string' &&
-        entry.id === creditHoursId(childId, p.projectId, p.versionId)
-      return { entry, provenance: ok ? (p as BuildStudioCreditProvenance) : null }
-    })
-    .sort((a, b) => a.entry.date.localeCompare(b.entry.date))
-}
-
-const DAY_MS = 86_400_000
-const MAX_LISTED = 8
-
-/**
- * New saves worth previewing: this child's Apple Dash versions with a SERVER
- * acceptance time that falls in the Records range (a day of slack either side for
- * the family time zone) and no credit row already showing. Older saves carry no
- * `acceptedAt` and are never offered. Newest first.
- */
-export function candidateVersions(
-  versions: BuildStudioVersion[],
-  childId: string,
-  credited: ReadonlySet<string>,
-  startDate: string,
-  endDate: string,
-): BuildStudioVersion[] {
-  const from = Date.parse(`${startDate}T00:00:00Z`) - DAY_MS
-  const to = Date.parse(`${endDate}T00:00:00Z`) + 2 * DAY_MS
-  if (!Number.isFinite(from) || !Number.isFinite(to)) return []
-  return versions
-    .filter((v) => {
-      if (v.childId !== childId || v.projectId !== BUILD_STUDIO_PROJECT_ID) return false
-      if (credited.has(v.versionId)) return false
-      const ms = typeof v.acceptedAt?.toMillis === 'function' ? v.acceptedAt.toMillis() : NaN
-      return Number.isFinite(ms) && ms >= from && ms <= to
-    })
-    .sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''))
-}
+// ── Local presentation helpers ──────────────────────────────────────────────
+// The pure gate, row and candidate helpers live in `buildStudioHoursCard.logic.ts`.
 
 const subjectLabel = (s: string | undefined): string =>
   (s && SubjectBucketLabel[s as SubjectBucket]) || s || 'Subject'
@@ -270,6 +172,8 @@ function CardInner({
   const [review, setReview] = useState<ReviewState | null>(null)
   const [fix, setFix] = useState<FixState | null>(null)
   const [workRow, setWorkRow] = useState<CreditedRow | null>(null)
+  /** How many candidate saves are listed; "Show more" grows it, so none is hidden for good. */
+  const [shown, setShown] = useState(MAX_LISTED)
 
   const rows = useMemo(() => creditedRowsFor(hoursEntries, childId), [hoursEntries, childId])
   const creditedVersionIds = useMemo(
@@ -358,9 +262,15 @@ function CardInner({
         }
       }
       writing.current = false
-      if (!current(token)) return
-      setReview((r) => (r && r.token === token ? { ...r, confirming: false, outcome } : r))
-      if (outcome.status === 'credited' || outcome.status === 'alreadySettled') {
+      // A confirmed write is a fact about the family's Records even if this card
+      // was retired (the child changed) while it was in flight. The page's refresh
+      // guards itself against a family/range/profile change; the retired token
+      // only stops THIS card's dialog state from being touched.
+      const confirmed = outcome.status === 'credited' || outcome.status === 'alreadySettled'
+      if (current(token)) {
+        setReview((r) => (r && r.token === token ? { ...r, confirming: false, outcome } : r))
+      }
+      if (confirmed) {
         const refreshed = await refresh()
         if (!current(token)) return
         setReview((r) => (r && r.token === token ? { ...r, refreshed } : r))
@@ -410,9 +320,11 @@ function CardInner({
         outcome = { status: 'failed', retryable: true }
       }
       writing.current = false
-      if (!current(token)) return
-      setFix((f) => (f && f.token === token ? { ...f, busy: false, outcome } : f))
+      if (current(token)) {
+        setFix((f) => (f && f.token === token ? { ...f, busy: false, outcome } : f))
+      }
       if (outcome.status === 'corrected' || outcome.status === 'deleted') {
+        // Same rule as a credit: refresh the parent's Records even if retired.
         const refreshed = await refresh()
         if (!current(token)) return
         setFix((f) => (f && f.token === token ? { ...f, refreshed } : f))
@@ -450,7 +362,7 @@ function CardInner({
         {candidates.length > 0 && (
           <Stack spacing={1}>
             <Typography variant="subtitle2">New saves to review</Typography>
-            {candidates.slice(0, MAX_LISTED).map((v) => (
+            {candidates.slice(0, shown).map((v) => (
               <Stack
                 key={v.id}
                 direction="row"
@@ -471,10 +383,15 @@ function CardInner({
                 </Button>
               </Stack>
             ))}
-            {candidates.length > MAX_LISTED && (
-              <Typography variant="caption" color="text.secondary">
-                Showing the {MAX_LISTED} newest of {candidates.length}.
-              </Typography>
+            {candidates.length > shown && (
+              <Stack direction="row" spacing={1} alignItems="center">
+                <Typography variant="caption" color="text.secondary">
+                  Showing the {shown} newest of {candidates.length}.
+                </Typography>
+                <Button size="small" onClick={() => setShown((n) => n + MAX_LISTED)}>
+                  Show more
+                </Button>
+              </Stack>
             )}
           </Stack>
         )}
@@ -632,9 +549,9 @@ function ReviewDialog({
       case 'failed':
         if (outcome.retryable) {
           body = (
-            <Alert severity="error">
-              That didn’t go through, so nothing is confirmed yet. It’s safe to try again with the
-              same save.
+            <Alert severity="warning">
+              We couldn’t confirm whether this was recorded — it may or may not have gone through.
+              Trying again checks the same save and won’t add it twice.
             </Alert>
           )
           actions = (
@@ -700,7 +617,7 @@ function ReviewDialog({
             </Typography>
             <Typography variant="body2" color="text.secondary">
               {p.source.kind === 'challenge'
-                ? 'For a Build Challenge they finished.'
+                ? 'A prediction was recorded with this saved version.'
                 : 'For changing their own game.'}{' '}
               The amount is fixed; it doesn’t depend on how long they spent.
             </Typography>
@@ -862,7 +779,11 @@ function FixDialog({
     } else if (outcome.status === 'failed' && outcome.retryable) {
       retryable = true
       result = (
-        <Alert severity="error">That didn’t go through, so nothing changed. You can try again.</Alert>
+        <Alert severity="warning">
+          We couldn’t confirm whether this change was recorded — it may have gone through. Reload
+          Records to check, or try again; if it was already applied, the row will show as changed
+          and nothing is lowered twice.
+        </Alert>
       )
     } else if (outcome.status === 'stale') {
       result = (
@@ -923,7 +844,7 @@ function FixDialog({
             {busy ? 'Saving…' : retryable ? 'Try again' : mode === 'remove' ? 'Remove row' : 'Lower minutes'}
           </Button>
         )}
-        {outcome && !done && !retryable && <Button onClick={onReload}>Reload records</Button>}
+        {outcome && !done && <Button onClick={onReload}>Reload records</Button>}
         <Button onClick={onClose} disabled={busy}>
           {done ? 'Close' : 'Cancel'}
         </Button>

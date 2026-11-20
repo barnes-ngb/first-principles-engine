@@ -366,7 +366,7 @@ async function lookupPredecessor(
       if (d.metadata?.hasPendingWrites) return { ok: false, reason: 'pending-write' }
       batch.push({ id: d.id, data: d.data() as unknown as Record<string, unknown> })
     }
-    const pool = best ? [...batch, best] : batch
+    const pool: StoredVersionDoc[] = best ?[...batch, best] : batch
     const choice = choosePredecessor(source, childId, projectId, pool)
     if (!choice.ok) return { ok: false, reason: 'unordered' }
     best = choice.docId ? (pool.find((p) => p.id === choice.docId) ?? null) : null

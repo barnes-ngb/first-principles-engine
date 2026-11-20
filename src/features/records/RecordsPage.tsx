@@ -64,10 +64,8 @@ import { formatDateForInput } from '../../core/utils/format'
 import { getSchoolYearRange } from '../../core/utils/time'
 import type { HomeschoolState } from '../../core/compliance/stateCompliance'
 import { parseDateFromDocId } from '../today/daylog.model'
-import BuildStudioHoursCard, {
-  buildStudioCardAllowed,
-  type RecordsReadScope,
-} from './BuildStudioHoursCard'
+import BuildStudioHoursCard from './BuildStudioHoursCard'
+import { buildStudioCardAllowed, type RecordsReadScope } from './buildStudioHoursCard.logic'
 import ComplianceDashboard from './ComplianceDashboard'
 import MonthlyTrend from './MonthlyTrend'
 import QuickAddHours from './QuickAddHours'
@@ -190,11 +188,21 @@ function HoursComplianceTab() {
   // Build Studio credit rows are a PARENT's records. A child profile can reach
   // /records directly, and the generic totals and exports read `hoursEntries`, so
   // the rows are dropped from that one shared slice rather than from each view.
-  const includeBuildStudioRows = canEdit && !isChildProfile
   // The family/range the hours array above was actually READ under. The array
   // outlives a family or range change until the next read lands, so it is not
   // evidence of the current scope by itself.
   const [hoursReadScope, setHoursReadScope] = useState<RecordsReadScope | null>(null)
+  // The credit rows are included only for a settled parent AND only while the
+  // array was read under this very family and range: a delayed old-family load
+  // can carry the same short child id, and must not leak its credit into a
+  // summary or export.
+  const parentCapable = canEdit && !isChildProfile && profileChildResolved === true
+  const includeBuildStudioRows =
+    parentCapable &&
+    hoursReadScope !== null &&
+    hoursReadScope.familyId === familyId &&
+    hoursReadScope.startDate === startDate &&
+    hoursReadScope.endDate === endDate
   const [allArtifacts, setAllArtifacts] = useState<Artifact[]>([])
   const [allEvaluations, setAllEvaluations] = useState<Evaluation[]>([])
   // FEAT-123 — the range's Dad Lab reports, read-only, for the pack's narrative
@@ -511,24 +519,36 @@ function HoursComplianceTab() {
 
   // The scope this render wants. A refresh that answers after the family or range
   // changed is dropped instead of applied over the new scope's read.
-  const wantedScopeKey = `${familyId}|${startDate}|${endDate}`
-  const wantedScopeRef = useRef(wantedScopeKey)
+  // A fresh identity object per family/range/parent-capability change, so
+  // A → B → A is three identities, not two: a callback made under the first A can
+  // never pass for the second. The selected CHILD is deliberately not part of it:
+  // the read is family-wide, so a confirmed write by a card for child A must still
+  // refresh Records after the parent moved to child B.
+  const scopeIdentity = useMemo(
+    () => ({ familyId, startDate, endDate, parentCapable }),
+    [familyId, startDate, endDate, parentCapable],
+  )
+  const scopeIdentityRef = useRef(scopeIdentity)
   useEffect(() => {
-    wantedScopeRef.current = wantedScopeKey
-  }, [wantedScopeKey])
+    scopeIdentityRef.current = scopeIdentity
+  }, [scopeIdentity])
 
-  /** Re-read Records after a Build Studio confirmation/correction. `false` = not refreshed. */
+  /**
+   * Re-read Records after a Build Studio confirmation/correction. `false` = not
+   * refreshed. Checked before AND after the read; it survives the originating card
+   * unmounting, but not a family, range or parent-capability change.
+   */
   const refreshAfterBuildStudioChange = useCallback(async (): Promise<boolean> => {
-    const requestedKey = wantedScopeKey
+    if (!scopeIdentity.parentCapable || scopeIdentityRef.current !== scopeIdentity) return false
     try {
       const data = await fetchRecords()
-      if (wantedScopeRef.current !== requestedKey) return false
+      if (scopeIdentityRef.current !== scopeIdentity) return false
       applyRecords(data)
       return true
     } catch {
       return false
     }
-  }, [wantedScopeKey, fetchRecords, applyRecords])
+  }, [scopeIdentity, fetchRecords, applyRecords])
 
   const showBuildStudioCard = buildStudioCardAllowed({
     canEdit,
