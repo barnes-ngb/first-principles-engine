@@ -64,6 +64,15 @@ vi.mock('./BuildStudioSettingsSection', () => ({
   default: () => <div>settings control</div>,
 }))
 
+/** Every scope the automatic-credit driver was mounted with, newest last. */
+const creditMounts: Array<{ familyId: string; childId: string; enabled: boolean; nudgeKey?: unknown }> = []
+vi.mock('./BuildStudioAutoCredit', () => ({
+  default: (props: { familyId: string; childId: string; enabled: boolean; nudgeKey?: unknown }) => {
+    creditMounts.push(props)
+    return null
+  },
+}))
+
 /** Every read the ENTRY was handed, newest last. */
 const entryReads: Array<{ childId: string; status: string; versions: unknown[] }> = []
 vi.mock('./BuildStudioChildEntry', () => ({
@@ -109,6 +118,7 @@ const { default: BuildStudioPage } = await import('./BuildStudioPage')
 beforeEach(() => {
   entryReads.length = 0
   shelfProps.length = 0
+  creditMounts.length = 0
   shell.profile = 'lincoln'
   shell.isChildProfile = true
   shell.activeChildId = 'c1'
@@ -134,6 +144,18 @@ describe('the child’s half goes through the saved-game entry', () => {
     render(<BuildStudioPage />)
     expect(entryReads.at(-1)).toMatchObject({ status: 'loading' })
     expect(entryReads.at(-1)?.versions).toHaveLength(0)
+  })
+
+  it('runs automatic credit for exactly the settled family and child, with no control of its own', () => {
+    render(<BuildStudioPage />)
+    expect(creditMounts.at(-1)).toMatchObject({ familyId: 'fam1', childId: 'c1', enabled: true, nudgeKey: 1 })
+    expect(screen.queryByRole('button')).not.toBeInTheDocument()
+  })
+
+  it('does not nudge from a shelf read that is about another child', () => {
+    shell.readChildId = 'c-sibling'
+    render(<BuildStudioPage />)
+    expect(creditMounts.at(-1)).toMatchObject({ childId: 'c1', nudgeKey: -1 })
   })
 })
 
@@ -168,5 +190,10 @@ describe('the parent’s view is unchanged', () => {
     shell.readChildId = 'c-sibling'
     render(<BuildStudioPage />)
     expect(shelfProps.at(-1)).toMatchObject({ status: 'loading' })
+  })
+
+  it('does not run automatic credit from her read-only view (Records does that)', () => {
+    render(<BuildStudioPage />)
+    expect(creditMounts).toHaveLength(0)
   })
 })

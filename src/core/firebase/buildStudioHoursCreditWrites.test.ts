@@ -15,6 +15,11 @@ type Row = Record<string, unknown>
 const store = new Map<string, Row>()
 let commitMode: 'ok' | 'lostResponse' | 'fail' = 'ok'
 let failReadsFor: string | null = null
+let failDeleteFor: string | null = null
+/** Runs after a server read returns, so a test can change the world BETWEEN two reads. */
+let afterRead: ((path: string) => void) | null = null
+let active = 0
+let maxActive = 0
 let pendingWriteIds = new Set<string>()
 let queue: Promise<unknown> = Promise.resolve()
 let historyPages = 0
@@ -32,6 +37,7 @@ vi.mock('./firestore', () => ({
   buildStudioVersionsCollection: (f: string) => colRef(`families/${f}/buildStudioVersions`),
   buildStudioCreditReceiptsCollection: (f: string) => colRef(`families/${f}/buildStudioCreditReceipts`),
   buildStudioCreditDaysCollection: (f: string) => colRef(`families/${f}/buildStudioCreditDays`),
+  buildStudioCreditJobsCollection: (f: string) => colRef(`families/${f}/buildStudioCreditJobs`),
   hoursCollection: (f: string) => colRef(`families/${f}/hours`),
 }))
 
@@ -51,13 +57,20 @@ vi.mock('firebase/firestore', () => ({
   documentId: () => '__name__',
   where: (field: string, op: string, value: unknown) => ({ field, op, value }),
   orderBy: (field: string) => ({ orderBy: field }),
-  startAfter: (snap: { id: string }) => ({ after: snap.id }),
+  startAfter: (v: string | { id: string }) => ({ after: typeof v === 'string' ? v : v.id }),
   limit: (n: number) => ({ limit: n }),
   query: (col: { __path: string }, ...constraints: unknown[]) => ({ col, constraints }),
   // `getDoc` is deliberately NOT mocked: every read here must be server-only.
   getDocFromServer: async (ref: Ref) => {
     if (failReadsFor && ref.__path.includes(failReadsFor)) throw new Error('offline')
-    return snapOf(ref)
+    // Concurrency probe: a SERIAL pass never has two server reads in flight.
+    active += 1
+    maxActive = Math.max(maxActive, active)
+    await Promise.resolve()
+    const snap = snapOf(ref)
+    active -= 1
+    afterRead?.(ref.__path)
+    return snap
   },
   getDocsFromServer: async (q: {
     col: { __path: string }
@@ -119,6 +132,7 @@ vi.mock('firebase/firestore', () => ({
           })
         },
         delete: (ref) => {
+          if (failDeleteFor && ref.__path.includes(failDeleteFor)) throw new Error('delete rejected')
           wrote = true
           writes.push(() => {
             store.delete(ref.__path)
@@ -147,8 +161,12 @@ import { starterSourceFiles } from '../../features/build-studio/buildStudioStart
 import {
   confirmBuildStudioCredit,
   correctBuildStudioCreditHours,
+  CREDIT_JOB_PAGE_SIZE,
+  listPendingBuildStudioCreditJobs,
   previewBuildStudioCredit,
   readBuildStudioCreditedVersion,
+  reconcileBuildStudioCreditJob,
+  reconcileBuildStudioCreditJobsForChild,
   type CreditScope,
 } from './buildStudioHoursCreditWrites'
 
@@ -247,6 +265,10 @@ beforeEach(() => {
   writtenPaths.length = 0
   commitMode = 'ok'
   failReadsFor = null
+  failDeleteFor = null
+  afterRead = null
+  active = 0
+  maxActive = 0
   pendingWriteIds = new Set()
   queue = Promise.resolve()
   historyPages = 0
@@ -779,5 +801,341 @@ describe('the exact saved version, for the parent', () => {
     expect(await read(fullProv('v-aaa111', { kind: 'challenge' }))).toEqual(bad)
     // The matching link for the sibling opens the sibling's own row.
     expect((await read(fullProv('v-aaa111', {}, 'child-sibling'), 'child-sibling')).status).toBe('ok')
+  })
+})
+
+// ── Automatic credit: the pending job ───────────────────────────────────────
+
+describe('automatic credit jobs', () => {
+  const jobPath = (versionId: string, child = CHILD) =>
+    `families/${FAMILY}/buildStudioCreditJobs/${child}.${PROJECT}.${versionId}`
+  const receiptPath = (versionId: string) =>
+    `families/${FAMILY}/buildStudioCreditReceipts/${CHILD}.${PROJECT}.${versionId}`
+  const jobKeys = () => [...store.keys()].filter((k) => k.includes('/buildStudioCreditJobs/'))
+
+  function putJob(versionId: string, child = CHILD, over: Row = {}) {
+    store.set(jobPath(versionId, child), {
+      schema: 1,
+      childId: child,
+      projectId: PROJECT,
+      versionId,
+      versionDocId: buildStudioVersionDocId(child, PROJECT, versionId),
+      ...over,
+    })
+  }
+
+  describe('listing', () => {
+    it("returns only this child's exact jobs: foreign, mismatched and doctored ones are never worked", async () => {
+      putJob('v-aaa111')
+      putJob('v-bbb222', 'child-other')
+      store.set(`families/${FAMILY}/buildStudioCreditJobs/junk`, { schema: 1, childId: CHILD, projectId: PROJECT, versionId: 'v-ccc333' })
+      putJob('v-ddd444', CHILD, { projectId: 'other-project' })
+      putJob('v-eee555', CHILD, { versionDocId: 'child-other__apple-dash-starter__v-eee555' })
+      const listed = await listPendingBuildStudioCreditJobs({ familyId: FAMILY, childId: CHILD })
+      expect(listed).toEqual({ status: 'ok', jobs: [scope('v-aaa111')], more: false, nextCursor: null })
+    })
+
+    it('continues after a document-id cursor, past held rows, and returns to the start after the last page', async () => {
+      // 30 held (malformed) rows sort first; 30 healthy rows sort after them.
+      for (let i = 0; i < 30; i += 1) {
+        store.set(`families/${FAMILY}/buildStudioCreditJobs/a-held${String(i).padStart(3, '0')}`, { schema: 1, childId: CHILD })
+      }
+      for (let i = 0; i < 30; i += 1) putJob(`v-job${String(i).padStart(3, '0')}`)
+      const first = await listPendingBuildStudioCreditJobs({ familyId: FAMILY, childId: CHILD })
+      expect(first.status === 'ok' && first.jobs).toEqual([]) // page 1 is all held rows
+      if (first.status !== 'ok') throw new Error('unreachable')
+      expect(first.more).toBe(true)
+      expect(first.nextCursor).toBe('a-held024')
+      const second = await listPendingBuildStudioCreditJobs({ familyId: FAMILY, childId: CHILD, after: first.nextCursor })
+      if (second.status !== 'ok') throw new Error('unreachable')
+      // 5 held rows left, then the first 20 healthy ones.
+      expect(second.jobs).toHaveLength(20)
+      expect(second.nextCursor).toBe('v-job019')
+      const third = await listPendingBuildStudioCreditJobs({ familyId: FAMILY, childId: CHILD, after: second.nextCursor })
+      if (third.status !== 'ok') throw new Error('unreachable')
+      expect(third.jobs).toHaveLength(10)
+      expect(third.nextCursor).toBeNull() // the end: the caller starts over
+    })
+
+    it('is one bounded page of the queue, never a scan of saved games', async () => {
+      for (let i = 0; i < CREDIT_JOB_PAGE_SIZE + 5; i += 1) putJob(`v-job${String(i).padStart(3, '0')}`)
+      putVersion('v-aaa111') // saved work is never listed or read here
+      const listed = await listPendingBuildStudioCreditJobs({ familyId: FAMILY, childId: CHILD })
+      expect(listed.status).toBe('ok')
+      if (listed.status === 'ok') {
+        expect(listed.jobs).toHaveLength(CREDIT_JOB_PAGE_SIZE)
+        expect(listed.more).toBe(true)
+      }
+      expect(historyPages).toBe(1)
+    })
+
+    it('a failed read is failed, not an empty queue; a job still being written is looked at again soon', async () => {
+      failReadsFor = 'buildStudioCreditJobs'
+      expect(await listPendingBuildStudioCreditJobs({ familyId: FAMILY, childId: CHILD })).toEqual({ status: 'failed' })
+      failReadsFor = null
+      putJob('v-aaa111')
+      pendingWriteIds.add(jobPath('v-aaa111'))
+      expect(await listPendingBuildStudioCreditJobs({ familyId: FAMILY, childId: CHILD })).toEqual({
+        status: 'ok',
+        jobs: [],
+        more: true,
+        nextCursor: null,
+      })
+    })
+  })
+
+  describe('a new eligible save is credited automatically', () => {
+    it('proves, credits through the one writer transaction, and consumes the job', async () => {
+      putVersion('v-aaa111')
+      putJob('v-aaa111')
+      const result = await reconcileBuildStudioCreditJob(scope('v-aaa111'))
+      expect(result).toMatchObject({
+        status: 'settled',
+        outcome: 'credited',
+        jobRemoved: true,
+        receipt: { minutes: 15, subjectBucket: 'PracticalArts', schoolDate: '2026-11-20' },
+      })
+      expect(store.get(hoursPath('v-aaa111'))).toMatchObject({ childId: CHILD, minutes: 15, source: 'build-studio-credit' })
+      expect(store.has(receiptPath('v-aaa111'))).toBe(true)
+      expect(jobKeys()).toEqual([])
+      // Exactly the writer's own three documents, plus the job's removal; nothing else.
+      expect([...writtenPaths].sort()).toEqual(
+        [receiptPath('v-aaa111'), dayPath('2026-11-20'), hoursPath('v-aaa111'), jobPath('v-aaa111')].sort(),
+      )
+    })
+
+    it('a challenge save is credited under its authored subject', async () => {
+      putVersion('v-aaa111', { attempt: attempt('v-aaa111') })
+      putJob('v-aaa111')
+      expect(await reconcileBuildStudioCreditJob(scope('v-aaa111'))).toMatchObject({
+        status: 'settled',
+        receipt: { subjectBucket: 'Math', source: { kind: 'challenge' } },
+      })
+    })
+
+    it('once finished there is nothing left to work and no second credit', async () => {
+      putVersion('v-aaa111')
+      putJob('v-aaa111')
+      await reconcileBuildStudioCreditJob(scope('v-aaa111'))
+      writtenPaths.length = 0
+      expect(await reconcileBuildStudioCreditJob(scope('v-aaa111'))).toEqual({ status: 'closed', reason: 'no-job' })
+      expect(hoursRows()).toHaveLength(1)
+      expect(writtenPaths).toEqual([])
+    })
+
+    it('stops at the same protected rules: a full day declines, terminally, and consumes the job', async () => {
+      putDay('2026-11-20', Array.from({ length: 24 }, (_, i) => ({
+        minutes: 10,
+        atMs: T0 - (i + 1) * 3_600_000,
+        source: { kind: 'blockMuncherVerdict', requestId: `req-${i}`, playedBuildId: `play-${i}` },
+      })))
+      putVersion('v-aaa111')
+      putJob('v-aaa111')
+      expect(await reconcileBuildStudioCreditJob(scope('v-aaa111'))).toEqual({ status: 'closed', reason: 'declined' })
+      expect(hoursRows()).toHaveLength(0)
+      expect(jobKeys()).toEqual([])
+    })
+
+    it('a version that is not eligible (no server time, or nothing changed) is closed, not credited', async () => {
+      putVersion('v-aaa111', { acceptedMs: null })
+      putJob('v-aaa111')
+      expect(await reconcileBuildStudioCreditJob(scope('v-aaa111'))).toEqual({ status: 'closed', reason: 'ineligible' })
+      putVersion('v-bbb222', { files: { ...starterSourceFiles() } })
+      putJob('v-bbb222')
+      expect(await reconcileBuildStudioCreditJob(scope('v-bbb222'))).toEqual({ status: 'closed', reason: 'ineligible' })
+      expect(hoursRows()).toHaveLength(0)
+      expect(jobKeys()).toEqual([])
+    })
+
+    it('a job whose version is gone is closed as unavailable', async () => {
+      putJob('v-aaa111')
+      expect(await reconcileBuildStudioCreditJob(scope('v-aaa111'))).toEqual({ status: 'closed', reason: 'unavailable' })
+      expect(jobKeys()).toEqual([])
+    })
+  })
+
+  describe('legacy saves are deliberately not backfilled', () => {
+    it('a stamped, eligible, un-credited version with NO job is never previewed or credited', async () => {
+      putVersion('v-old1111') // eligible by every proof rule, but saved before jobs existed
+      writtenPaths.length = 0
+      expect(await reconcileBuildStudioCreditJob(scope('v-old1111'))).toEqual({ status: 'closed', reason: 'no-job' })
+      const pass = await reconcileBuildStudioCreditJobsForChild({ familyId: FAMILY, childId: CHILD })
+      expect(pass).toEqual({ listed: 'ok', settled: 0, retrying: 0, more: false, nextCursor: null })
+      expect(writtenPaths).toEqual([])
+      expect(hoursRows()).toHaveLength(0)
+      expect(store.has(receiptPath('v-old1111'))).toBe(false)
+    })
+  })
+
+  describe('interrupted attempts finish exactly once', () => {
+    it('a lost confirm response after a landed commit finishes from the receipt, with ONE credit', async () => {
+      putVersion('v-aaa111')
+      putJob('v-aaa111')
+      commitMode = 'lostResponse'
+      const first = await reconcileBuildStudioCreditJob(scope('v-aaa111'))
+      expect(first).toMatchObject({ status: 'settled', outcome: 'alreadySettled' })
+      expect(hoursRows()).toHaveLength(1)
+      commitMode = 'ok'
+      const again = await reconcileBuildStudioCreditJob(scope('v-aaa111'))
+      expect(['closed', 'settled']).toContain(again.status)
+      expect(hoursRows()).toHaveLength(1)
+      expect(jobKeys()).toEqual([])
+    })
+
+    it('a commit that did not land is retryable, leaves the job, and credits on the next attempt', async () => {
+      putVersion('v-aaa111')
+      putJob('v-aaa111')
+      commitMode = 'fail'
+      expect(await reconcileBuildStudioCreditJob(scope('v-aaa111'))).toEqual({ status: 'retry', reason: 'write-failed' })
+      expect(hoursRows()).toHaveLength(0)
+      expect(jobKeys()).toHaveLength(1)
+      commitMode = 'ok'
+      expect(await reconcileBuildStudioCreditJob(scope('v-aaa111'))).toMatchObject({ status: 'settled', outcome: 'credited' })
+      expect(hoursRows()).toHaveLength(1)
+    })
+
+    it('offline reads leave the job pending, whichever read fails', async () => {
+      putVersion('v-aaa111')
+      putJob('v-aaa111')
+      failReadsFor = 'buildStudioCreditJobs'
+      expect(await reconcileBuildStudioCreditJob(scope('v-aaa111'))).toEqual({ status: 'retry', reason: 'read-failed' })
+      failReadsFor = 'buildStudioVersions'
+      expect(await reconcileBuildStudioCreditJob(scope('v-aaa111'))).toEqual({ status: 'retry', reason: 'read-failed' })
+      failReadsFor = null
+      expect(jobKeys()).toHaveLength(1)
+      expect(hoursRows()).toHaveLength(0)
+    })
+
+    it('a version or job still pending on the server is retried, not consumed', async () => {
+      putVersion('v-aaa111')
+      putJob('v-aaa111')
+      pendingWriteIds.add(vPath('v-aaa111'))
+      expect(await reconcileBuildStudioCreditJob(scope('v-aaa111'))).toEqual({ status: 'retry', reason: 'pending' })
+      pendingWriteIds = new Set([jobPath('v-aaa111')])
+      expect(await reconcileBuildStudioCreditJob(scope('v-aaa111'))).toEqual({ status: 'retry', reason: 'pending' })
+      expect(jobKeys()).toHaveLength(1)
+    })
+
+    it('a stale preview (the zone changed before the write) is retried, not consumed or credited', async () => {
+      putVersion('v-aaa111')
+      putJob('v-aaa111')
+      store.set(`families/${FAMILY}`, { timeZone: 'America/Chicago' })
+      afterRead = (path) => {
+        // The preview has just read the zone; the confirming transaction reads a changed one.
+        if (path === `families/${FAMILY}`) store.set(`families/${FAMILY}`, { timeZone: 'Pacific/Auckland' })
+      }
+      expect(await reconcileBuildStudioCreditJob(scope('v-aaa111'))).toEqual({ status: 'retry', reason: 'stale' })
+      afterRead = null
+      expect(hoursRows()).toHaveLength(0)
+      expect(jobKeys()).toHaveLength(1)
+    })
+
+    it('if the job cannot be removed it stays pending, and the re-run is receipt-first with no second credit', async () => {
+      putVersion('v-aaa111')
+      putJob('v-aaa111')
+      failDeleteFor = 'buildStudioCreditJobs'
+      const first = await reconcileBuildStudioCreditJob(scope('v-aaa111'))
+      expect(first).toMatchObject({ status: 'settled', outcome: 'credited', jobRemoved: false })
+      expect(jobKeys()).toHaveLength(1)
+      failDeleteFor = null
+      writtenPaths.length = 0
+      const second = await reconcileBuildStudioCreditJob(scope('v-aaa111'))
+      expect(second).toMatchObject({ status: 'settled', outcome: 'alreadySettled', jobRemoved: true })
+      expect(hoursRows()).toHaveLength(1)
+      expect(writtenPaths).toEqual([jobPath('v-aaa111')]) // only the job's removal
+    })
+
+    it('a terminal answer whose job cannot be removed is left pending (retry), not dropped', async () => {
+      putVersion('v-aaa111', { acceptedMs: null })
+      putJob('v-aaa111')
+      failDeleteFor = 'buildStudioCreditJobs'
+      expect(await reconcileBuildStudioCreditJob(scope('v-aaa111'))).toEqual({ status: 'retry', reason: 'job-not-removed' })
+      expect(jobKeys()).toHaveLength(1)
+    })
+
+    it('a credit whose visible row was corrected or removed is never re-credited, and the job is consumed', async () => {
+      putVersion('v-aaa111')
+      putJob('v-aaa111')
+      await reconcileBuildStudioCreditJob(scope('v-aaa111'))
+      expect((await correctBuildStudioCreditHours({ ...scope('v-aaa111'), expectedMinutes: 15, minutes: 'delete' })).status).toBe('deleted')
+      putJob('v-aaa111') // a job left behind by a failed removal
+      writtenPaths.length = 0
+      expect(await reconcileBuildStudioCreditJob(scope('v-aaa111'))).toMatchObject({
+        status: 'settled',
+        outcome: 'alreadySettled',
+        jobRemoved: true,
+      })
+      expect(hoursRows()).toHaveLength(0) // the removed row stays removed
+      expect(writtenPaths).toEqual([jobPath('v-aaa111')])
+    })
+  })
+
+  describe('identity: no stale or foreign write', () => {
+    it('refuses a doctored job, another project, and an invalid scope without writing', async () => {
+      putVersion('v-aaa111')
+      putJob('v-aaa111', CHILD, { versionDocId: 'child-other__apple-dash-starter__v-aaa111' })
+      expect(await reconcileBuildStudioCreditJob(scope('v-aaa111'))).toEqual({ status: 'invalid' })
+      expect(await reconcileBuildStudioCreditJob({ ...scope('v-aaa111'), projectId: 'other-project' })).toEqual({ status: 'invalid' })
+      expect(await reconcileBuildStudioCreditJob({ ...scope('v-aaa111'), childId: 'a/b' })).toEqual({ status: 'invalid' })
+      expect(hoursRows()).toHaveLength(0)
+      expect(writtenPaths).toEqual([])
+    })
+
+    it('a job names only its own child: a sibling’s version is never credited through it', async () => {
+      putVersion('v-aaa111', { child: 'child-other' })
+      putJob('v-aaa111', 'child-other')
+      // Worked as THIS child, there is no such job and no such version.
+      expect(await reconcileBuildStudioCreditJob(scope('v-aaa111'))).toEqual({ status: 'closed', reason: 'no-job' })
+      expect(hoursRows()).toHaveLength(0)
+      expect(store.has(jobPath('v-aaa111', 'child-other'))).toBe(true)
+    })
+  })
+
+  describe('a pass over one child’s queue', () => {
+    it('works the child’s jobs strictly one at a time and leaves another child’s job untouched', async () => {
+      putVersion('v-aaa111', { acceptedMs: T0, files: filesWith(4) })
+      putVersion('v-bbb222', { acceptedMs: T0 + 1_800_000, files: filesWith(5) })
+      putVersion('v-ccc333', { acceptedMs: T0, files: filesWith(6), child: 'child-other' })
+      putJob('v-aaa111')
+      putJob('v-bbb222')
+      putJob('v-ccc333', 'child-other')
+      const pass = await reconcileBuildStudioCreditJobsForChild({ familyId: FAMILY, childId: CHILD })
+      expect(pass).toEqual({ listed: 'ok', settled: 2, retrying: 0, more: false, nextCursor: null })
+      expect(maxActive).toBe(1)
+      expect(hoursRows().sort()).toEqual([hoursPath('v-aaa111'), hoursPath('v-bbb222')].sort())
+      expect(jobKeys()).toEqual([jobPath('v-ccc333', 'child-other')])
+    })
+
+    it('stops at a job boundary when the scope is no longer current', async () => {
+      putVersion('v-aaa111', { acceptedMs: T0, files: filesWith(4) })
+      putVersion('v-bbb222', { acceptedMs: T0 + 1_800_000, files: filesWith(5) })
+      putJob('v-aaa111')
+      putJob('v-bbb222')
+      let checks = 0
+      const pass = await reconcileBuildStudioCreditJobsForChild({
+        familyId: FAMILY,
+        childId: CHILD,
+        isCurrent: () => checks++ < 1,
+      })
+      expect(pass.settled).toBe(1)
+      expect(jobKeys()).toEqual([jobPath('v-bbb222')])
+    })
+
+    it('counts retryable and unlisted work so the caller backs off instead of spinning', async () => {
+      putVersion('v-aaa111')
+      putJob('v-aaa111')
+      commitMode = 'fail'
+      expect(await reconcileBuildStudioCreditJobsForChild({ familyId: FAMILY, childId: CHILD })).toEqual({
+        listed: 'ok',
+        settled: 0,
+        retrying: 1,
+        more: false,
+        nextCursor: null,
+      })
+      failReadsFor = 'buildStudioCreditJobs'
+      expect(await reconcileBuildStudioCreditJobsForChild({ familyId: FAMILY, childId: CHILD })).toMatchObject({
+        listed: 'failed',
+      })
+    })
   })
 })

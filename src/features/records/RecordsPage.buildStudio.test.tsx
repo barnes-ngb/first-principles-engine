@@ -1,5 +1,6 @@
 import { render as renderInTest, screen, waitFor } from '@testing-library/react'
 import type { ReactElement } from 'react'
+import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -112,8 +113,6 @@ vi.mock('../../core/firebase/migrateHoursAdjustments', () => ({
   migrateUnattributedAdjustments: vi.fn(async () => 0),
 }))
 vi.mock('../../core/firebase/buildStudioHoursCreditWrites', () => ({
-  previewBuildStudioCredit: vi.fn(),
-  confirmBuildStudioCredit: vi.fn(),
   correctBuildStudioCreditHours: vi.fn(),
   readBuildStudioCreditedVersion: vi.fn(),
 }))
@@ -131,10 +130,18 @@ vi.mock('./compliancePackArchive', () => ({
 
 // The real gate (from the logic file, unmocked); a stub in place of the card body,
 // which has its own test file.
+const settleResults: boolean[] = []
 vi.mock('./BuildStudioHoursCard', () => ({
-  default: (p: { familyId: string; childId: string; hoursEntries: unknown[] }) => (
+  default: (p: {
+    familyId: string
+    childId: string
+    hoursEntries: unknown[]
+    onChanged: () => Promise<boolean>
+  }) => (
     <div data-testid="bs-card">
       {p.familyId}/{p.childId}/{p.hoursEntries.length}
+      {/* What the automatic worker calls after a credit settles. */}
+      <button onClick={() => void p.onChanged().then((ok) => settleResults.push(ok))}>settled</button>
     </div>
   ),
 }))
@@ -153,6 +160,20 @@ describe('Records — Build Studio rows and section', () => {
     render(<RecordsPage />)
     expect(await screen.findByTestId('bs-card')).toHaveTextContent('fam-1/lincoln/2')
     expect(screen.getByText(/Hours entries: 2/)).toBeInTheDocument()
+  })
+
+  it('a settled automatic credit re-reads Records for the active family and range', async () => {
+    const { getDocs } = await import('firebase/firestore')
+    const hoursReads = () =>
+      vi.mocked(getDocs).mock.calls.filter((c) => (c[0] as { kind?: string }).kind === 'hours').length
+    settleResults.length = 0
+    const { default: RecordsPage } = await import('./RecordsPage')
+    render(<RecordsPage />)
+    const settled = await screen.findByRole('button', { name: 'settled' })
+    const before = hoursReads()
+    await userEvent.click(settled)
+    await waitFor(() => expect(settleResults).toEqual([true]))
+    expect(hoursReads()).toBeGreaterThan(before)
   })
 
   it('a child profile on direct /records: no section, and the rows are dropped from the shared slice', async () => {
