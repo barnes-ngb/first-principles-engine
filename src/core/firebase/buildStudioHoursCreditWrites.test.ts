@@ -850,7 +850,7 @@ describe('automatic credit jobs', () => {
       if (second.status !== 'ok') throw new Error('unreachable')
       // 5 held rows left, then the first 20 healthy ones.
       expect(second.jobs).toHaveLength(20)
-      expect(second.nextCursor).toBe('v-job019')
+      expect(second.nextCursor).toBe(`${CHILD}.${PROJECT}.v-job019`)
       const third = await listPendingBuildStudioCreditJobs({ familyId: FAMILY, childId: CHILD, after: second.nextCursor })
       if (third.status !== 'ok') throw new Error('unreachable')
       expect(third.jobs).toHaveLength(10)
@@ -937,7 +937,9 @@ describe('automatic credit jobs', () => {
     })
 
     it('a version that is not eligible (no server time, or nothing changed) is closed, not credited', async () => {
-      putVersion('v-aaa111', { acceptedMs: null })
+      // The untimestamped predecessor carries the same starter files as the next save,
+      // so the second save is genuinely unchanged relative to it.
+      putVersion('v-aaa111', { acceptedMs: null, files: { ...starterSourceFiles() } })
       putJob('v-aaa111')
       expect(await reconcileBuildStudioCreditJob(scope('v-aaa111'))).toEqual({ status: 'closed', reason: 'ineligible' })
       putVersion('v-bbb222', { files: { ...starterSourceFiles() } })
