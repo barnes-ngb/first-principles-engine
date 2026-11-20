@@ -623,6 +623,20 @@ describe('words stay on the existing note lane, bound to their own version', () 
     await waitFor(() => expect(saveNote).toHaveBeenCalledTimes(1))
     expect(saveNote.mock.calls[0][0].help).toBe('hints-offered')
   })
+
+  it('keeps the offered-help evidence after the hinted challenge is swapped or hidden', async () => {
+    await openEditor()
+    await tap('💡 Where to look')
+    await tap('🔀 A different one')
+    await tap('Not now')
+    await tap('💾 Save my version')
+    await waitFor(() => expect(screen.getByText('Pretend mic')).toBeInTheDocument())
+    await tap('Pretend mic')
+    await tap('Save my words')
+    await waitFor(() => expect(saveNote).toHaveBeenCalledTimes(1))
+    expect(saveNote.mock.calls[0][0].help).toBe('hints-offered')
+    expect(saveNote.mock.calls[0][0].hintsOffered).toBe(1)
+  })
 })
 
 describe('visit and child ownership', () => {

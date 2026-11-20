@@ -618,8 +618,13 @@ export default function BuildStudioEditor({
   const [challengeDismissed, setChallengeDismissed] = useState(false)
   const challengeDismissedRef = useRef(false)
   const [challengeHintShown, setChallengeHintShown] = useState(false)
-  /** Challenge hints offered in this attempt. Folded into a note's help stamp. */
-  const challengeHintsRef = useRef(0)
+  /**
+   * Distinct challenge hints offered in this VISIT, by challenge id. Folded into
+   * a note's help stamp. Offered help is history, not card state: swapping or
+   * hiding the card does not unsay it, and a repeat tap does not double-count.
+   * Reset only for a genuinely new game or visit.
+   */
+  const challengeHintsRef = useRef<Set<string>>(new Set())
   const [challengeState, setChallengeState] = useState<ChallengeAttemptState>(() =>
     startAttempt(DEFAULT_BUILD_CHALLENGE, newChallengeAttemptId(Date.now(), Math.random())),
   )
@@ -648,8 +653,7 @@ export default function BuildStudioEditor({
       challengeIdRef.current = next.id
       setChallengeId(next.id)
       setChallengeHintShown(false)
-      challengeHintsRef.current = 0
-      putAttempt(startAttempt(next, newChallengeAttemptId(Date.now(), Math.random())))
+      putAttempt(startAttempt(next,newChallengeAttemptId(Date.now(), Math.random())))
     },
     [putAttempt],
   )
@@ -1111,7 +1115,7 @@ export default function BuildStudioEditor({
       ),
     )
     setChallengeHintShown(false)
-    challengeHintsRef.current = 0
+    challengeHintsRef.current = new Set()
     settledSignatureRef.current = null
     announcedSignatureRef.current = null
     window.addEventListener('message', bridge.handleMessage)
@@ -1833,6 +1837,9 @@ export default function BuildStudioEditor({
       setNoteMessage(null)
       setHintsOffered(0)
       hintsOfferedRef.current = 0
+      // An explicit reopen is a new visit: challenge help offered in the old one
+      // does not carry over.
+      challengeHintsRef.current = new Set()
       departureFilesRef.current = null
       setLoadedToken(null)
       // A brand new visit: a new id, so nothing from the previous one can act
@@ -1996,7 +2003,7 @@ export default function BuildStudioEditor({
   }, [tts, challenge])
 
   const handleChallengeHint = useCallback(() => {
-    challengeHintsRef.current = 1
+    challengeHintsRef.current.add(challenge.id)
     setChallengeHintShown(true)
     tts.speak(challenge.hint)
   }, [tts, challenge])
@@ -2118,7 +2125,7 @@ export default function BuildStudioEditor({
     (slot: BuildStudioNoteSlot): BuildStudioNoteTarget => {
       // The challenge's own "where to look" is help too, and is counted with
       // the ladder so a note never says none was offered when one was.
-      const offered = hintsOfferedRef.current + challengeHintsRef.current
+      const offered = hintsOfferedRef.current + challengeHintsRef.current.size
       return {
         ...slot,
         help: offered > 0 ? 'hints-offered' : 'none-offered',
