@@ -67,6 +67,17 @@
  * they were about named. Holding is not saving: nothing is written down until
  * *Save my words*, and discarding is a button somebody has to press.
  *
+ * ── The optional Build Challenge card (LOCAL-VISION-007) ────────────────
+ *
+ * One authored invitation in the ready editor. UI state until an explicit Save:
+ * `freezeForSave` copies the attempt into THAT Save's payload, scoped to the
+ * Save's own child, project and version id, and `commit` sends the payload's
+ * copy — never the card's — so a retry is the identical shape. A Play tap is
+ * recorded as a request, never as proof of which source ran; the child's
+ * Matched / Different / Unsure is his own report. An answer given after a Save
+ * is not written back: it waits for the next explicit Save. A new visit starts
+ * the attempt empty; swapping or skipping never touches MakeCode.
+ *
  * ── Nothing here is scored ──────────────────────────────────────────────
  *
  * No streak, no level, no meter, no reward, no completion. Hints are counted as
@@ -130,8 +141,25 @@ import {
   readRecoveryArchive,
   RecoveryRefused,
 } from './buildStudioExport'
+import BuildStudioChallengeCard from './BuildStudioChallengeCard'
 import {
-  BUILD_STUDIO_GOAL_LINE,
+  afterSaveLanded,
+  challengeResponseAtRisk,
+  freezeAttempt,
+  startAttempt,
+  withOutcome,
+  withPlayRequest,
+  withPrediction,
+  type ChallengeAttemptState,
+} from './buildStudioChallengeAttempt'
+import {
+  challengeById,
+  challengeSpeech,
+  DEFAULT_BUILD_CHALLENGE,
+  nextChallenge,
+  type BuildChallenge,
+} from './buildStudioChallenges'
+import {
   BUILD_STUDIO_HINTS_DONE,
   BUILD_STUDIO_HINT_COUNT,
   goalSpeech,
@@ -158,6 +186,7 @@ import {
 } from './buildStudioPendingStore'
 import {
   newBridgeId,
+  newChallengeAttemptId,
   newNoteActionId,
   newVersionId,
   newVisitId,
@@ -578,6 +607,57 @@ export default function BuildStudioEditor({
   /** What the last tap on a download door produced. Never a save message. */
   const [downloadOutcome, setDownloadOutcome] = useState<DownloadOutcome | null>(null)
 
+  // ── The optional challenge invitation ───────────────────────────────────
+  //
+  // UI state only: nothing here is written until an explicit Save freezes a copy
+  // into that Save's payload. The selected challenge survives a visit change;
+  // the ATTEMPT does not, because it was about the game that was open.
+  const [challengeId, setChallengeId] = useState(DEFAULT_BUILD_CHALLENGE.id)
+  const challenge = challengeById(challengeId) ?? DEFAULT_BUILD_CHALLENGE
+  const challengeIdRef = useRef(challengeId)
+  const [challengeDismissed, setChallengeDismissed] = useState(false)
+  const challengeDismissedRef = useRef(false)
+  const [challengeHintShown, setChallengeHintShown] = useState(false)
+  /**
+   * Distinct challenge hints offered in this VISIT, by challenge id. Folded into
+   * a note's help stamp. Offered help is history, not card state: swapping or
+   * hiding the card does not unsay it, and a repeat tap does not double-count.
+   * Reset only for a genuinely new game or visit.
+   */
+  const challengeHintsRef = useRef<Set<string>>(new Set())
+  const [challengeState, setChallengeState] = useState<ChallengeAttemptState>(() =>
+    startAttempt(DEFAULT_BUILD_CHALLENGE, newChallengeAttemptId(Date.now(), Math.random())),
+  )
+  /** Readable synchronously: a Play tap and a Save can land in one tick. */
+  const attemptRef = useRef<ChallengeAttemptState>(challengeState)
+  /**
+   * The exact frozen challenge payload of the unfinished Save, readable
+   * synchronously. A response is "at risk" when it differs from this (or, with
+   * no unfinished Save, from what a landed Save acknowledged).
+   */
+  const pendingChallengeRef = useRef<PendingSave['challengeAttempt']>(undefined)
+  /**
+   * Does a recorded challenge response exist only on this page? Kept in a ref
+   * so a navigation in the same gesture as a tap is already held — the same
+   * rule as the other departure refs.
+   */
+  const challengeAtRiskRef = useRef(false)
+  const putAttempt = useCallback((next: ChallengeAttemptState) => {
+    attemptRef.current = next
+    challengeAtRiskRef.current = challengeResponseAtRisk(next, pendingChallengeRef.current)
+    setChallengeState(next)
+  }, [])
+  /** A fresh, empty attempt at a challenge. Selection is made by the caller. */
+  const beginAttempt = useCallback(
+    (next: BuildChallenge) => {
+      challengeIdRef.current = next.id
+      setChallengeId(next.id)
+      setChallengeHintShown(false)
+      putAttempt(startAttempt(next,newChallengeAttemptId(Date.now(), Math.random())))
+    },
+    [putAttempt],
+  )
+
   const [hintsOffered, setHintsOffered] = useState(0)
   /**
    * The same count, readable synchronously — because a note records the help
@@ -664,6 +744,12 @@ export default function BuildStudioEditor({
   useEffect(() => {
     atRiskRef.current = editorDirty || pending !== null
   }, [editorDirty, pending])
+  // The pending Save changing (landed, retried, discarded) re-asks the question.
+  const challengeAtRisk = challengeResponseAtRisk(challengeState, pending?.challengeAttempt)
+  useEffect(() => {
+    pendingChallengeRef.current = pending?.challengeAttempt
+    challengeAtRiskRef.current = challengeAtRisk
+  }, [pending, challengeAtRisk])
   useEffect(() => {
     inFlightRef.current = writeInFlight
   }, [writeInFlight])
@@ -711,7 +797,7 @@ export default function BuildStudioEditor({
    * not on the shelf, a Save that did not finish, or words nobody saved.
    */
   const workAtRiskNow = useCallback(
-    () => atRiskRef.current || wordsAtRiskRef.current,
+    () => atRiskRef.current || wordsAtRiskRef.current || challengeAtRiskRef.current,
     [],
   )
   const hasWorkAtRisk = useCallback(
@@ -880,7 +966,7 @@ export default function BuildStudioEditor({
       // release effect needs it the moment the last thing at risk is dealt
       // with. What it no longer does by itself is leave.
       if (result === 'clean') cleanConfirmedRef.current = true
-      if (result === 'clean' && !wordsAtRiskRef.current) {
+      if (result === 'clean' && !wordsAtRiskRef.current && !challengeAtRiskRef.current) {
         // Nothing at all is at risk, so the person is not asked a question
         // about nothing — the departure they already chose simply continues.
         departure.leaveAnyway()
@@ -932,7 +1018,7 @@ export default function BuildStudioEditor({
         if (result !== 'clean') return
         // A clean GAME is not an empty page: words he said are only here. The
         // ask stays open, with Save my words, Discard and Stay on it.
-        if (wordsAtRiskRef.current) return
+        if (wordsAtRiskRef.current || challengeAtRiskRef.current) return
         // Verified clean while the editor was still here, so the change the
         // person already asked for simply happens.
         profileAskRef.current = null
@@ -1018,6 +1104,18 @@ export default function BuildStudioEditor({
     // be holding is that visit's bytes. Both go with it — the render is fenced
     // on the token as well, so this is housekeeping rather than the guard.
     setDownloadOutcome(null)
+    // A challenge attempt is about the game that was open in the visit that is
+    // gone: its guess and its Play request do not carry into a different game.
+    // The CHOICE of challenge stays; the attempt starts empty. A Save already
+    // frozen keeps its own copy in its payload.
+    putAttempt(
+      startAttempt(
+        challengeById(challengeIdRef.current) ?? DEFAULT_BUILD_CHALLENGE,
+        newChallengeAttemptId(Date.now(), Math.random()),
+      ),
+    )
+    setChallengeHintShown(false)
+    challengeHintsRef.current = new Set()
     settledSignatureRef.current = null
     announcedSignatureRef.current = null
     window.addEventListener('message', bridge.handleMessage)
@@ -1028,7 +1126,7 @@ export default function BuildStudioEditor({
       // setup has already replaced it by the time the first cleanup runs.
       setSession((current) => (current?.bridge === bridge ? null : current))
     }
-  }, [token])
+  }, [token, putAttempt])
 
   // The frame element, bound as soon as it exists — before the editor's first
   // `workspacesync`, which `onLoad` alone does not guarantee.
@@ -1241,6 +1339,12 @@ export default function BuildStudioEditor({
             editorTargetVersion: attempt.editorTargetVersion,
             goalId: attempt.goalId,
             visitId: attempt.scope.visitId,
+            // The record this exact Save was frozen with — never re-read from
+            // the card, so a retry sends the identical shape. Absent for a
+            // payload from an older build, which retries exactly as it was.
+            ...(attempt.challengeAttempt
+              ? { challengeAttempt: attempt.challengeAttempt }
+              : {}),
           })
           // Durable now, whatever the screen is showing. This save releases
           // ITS OWN recovery slot and no other — an owner-only clear let an old
@@ -1255,6 +1359,12 @@ export default function BuildStudioEditor({
             )
             return
           }
+          // The attempt this Save recorded is finished only if it recorded the
+          // child's outcome exactly as it stands now. Matched by attempt id, so
+          // a restored retry of an older visit's payload cannot close the
+          // attempt that is on the card.
+          const afterLanding = afterSaveLanded(attemptRef.current, attempt.challengeAttempt)
+          if (afterLanding && afterLanding !== attemptRef.current) putAttempt(afterLanding)
           if (sourceIsCurrent) {
             // These bytes ARE what is open, so they are what "clean" means from
             // here on, and they are a legitimate note target.
@@ -1341,7 +1451,30 @@ export default function BuildStudioEditor({
         }
       }
     },
-    [onOutOfScopeSave, noteSavedForDeparture],
+    [onOutOfScopeSave, noteSavedForDeparture, putAttempt],
+  )
+
+  /**
+   * Freeze the challenge attempt for ONE Save, scoped to that Save's own child,
+   * project and version id. Returns the payload fragment (empty when there is
+   * nothing to record). Reads the live attempt synchronously and seals its
+   * prediction, so a retry and a later change cannot disagree about the guess.
+   */
+  const freezeForSave = useCallback(
+    (versionId: string) => {
+      const frozen = freezeAttempt(attemptRef.current, {
+        childId: scope.childId,
+        projectId: scope.projectId,
+        versionId,
+      })
+      if (frozen.state && frozen.state !== attemptRef.current) putAttempt(frozen.state)
+      // A challenge goal is chosen only when an actual attempt is saved. A
+      // merely visible invitation never labels a game; an ordinary save keeps
+      // the legacy fixed goal.
+      const goalId = frozen.attempt ? frozen.attempt.challengeId : BUILD_STUDIO_GOAL.id
+      return frozen.attempt ? { challengeAttempt: frozen.attempt, goalId } : { goalId }
+    },
+    [scope.childId, scope.projectId, putAttempt],
   )
 
   const handleSave = useCallback(async () => {
@@ -1361,11 +1494,25 @@ export default function BuildStudioEditor({
     // The previous unfinished payload is deliberately NOT cleared here. If this
     // capture fails there is still work waiting to be retried, and clearing it
     // first would hide it; `commit` replaces it the moment a new one exists.
+    // The challenge envelope is frozen from THIS tap, before waiting for the
+    // editor's source. Freezing seals the prediction, so a change made while
+    // the capture is resolving cannot reach the held payload.
+    const newId = newVersionId(Date.now(), Math.random())
+    const attemptBefore = attemptRef.current
+    const challengeFragment = freezeForSave(newId)
+    const attemptSealed = attemptRef.current
+    // A capture that never produced bytes recorded nothing: undo only our own seal.
+    const unsealIfUnused = () => {
+      if (attemptSealed !== attemptBefore && attemptRef.current === attemptSealed) {
+        putAttempt(attemptBefore)
+      }
+    }
     try {
       let snapshot: AcceptedProject
       try {
         snapshot = await bridge.requestSnapshot()
       } catch (err) {
+        unsealIfUnused()
         if (liveTokenRef.current !== token) return
         setSaveState(SaveState.Failed)
         setSaveMessage(
@@ -1376,6 +1523,7 @@ export default function BuildStudioEditor({
         return
       }
       if (liveTokenRef.current !== token) {
+        unsealIfUnused()
         setSaveState(SaveState.Idle)
         return
       }
@@ -1384,7 +1532,9 @@ export default function BuildStudioEditor({
       const runtime = bridge.runtimeVersions()
       const payload: PendingSave = {
         scope,
-        versionId: newVersionId(Date.now(), Math.random()),
+        versionId: newId,
+        // Frozen at the tap, with the id, and never rebuilt by a retry.
+        ...challengeFragment,
         label: label.trim() || defaultLabel(versions.versions.length + 1),
         createdAt: new Date().toISOString(),
         files: snapshot.files,
@@ -1392,7 +1542,6 @@ export default function BuildStudioEditor({
         // project header's `targetVersion`, which is a `0.0.0` placeholder.
         editorTarget: runtime?.target ? 'arcade' : undefined,
         editorTargetVersion: runtime?.target,
-        goalId: BUILD_STUDIO_GOAL.id,
         attempts: 0,
         capturedSignature: sourceSignature(snapshot.files),
       }
@@ -1404,7 +1553,18 @@ export default function BuildStudioEditor({
         inFlightRef.current = false
       }
     }
-  }, [phase, projectReady, label, scope, token, owner, versions.versions.length, commit])
+  }, [
+    phase,
+    projectReady,
+    label,
+    scope,
+    token,
+    owner,
+    versions.versions.length,
+    commit,
+    freezeForSave,
+    putAttempt,
+  ])
 
   /**
    * The deliberate Retry. The payload's provenance is untouched — same bytes,
@@ -1442,16 +1602,17 @@ export default function BuildStudioEditor({
     inFlightRef.current = true
     try {
       const runtime = bridgeRef.current?.runtimeVersions() ?? null
+      const newId = newVersionId(Date.now(), Math.random())
       await commit(
         {
           scope,
-          versionId: newVersionId(Date.now(), Math.random()),
+          versionId: newId,
+          ...freezeForSave(newId),
           label: label.trim() || defaultLabel(versions.versions.length + 1),
           createdAt: new Date().toISOString(),
           files,
           editorTarget: runtime?.target ? 'arcade' : undefined,
           editorTargetVersion: runtime?.target,
-          goalId: BUILD_STUDIO_GOAL.id,
           attempts: 0,
           capturedSignature: sourceSignature(files),
         },
@@ -1464,7 +1625,7 @@ export default function BuildStudioEditor({
         inFlightRef.current = false
       }
     }
-  }, [commit, scope, label, token, owner, versions.versions.length])
+  }, [commit, scope, label, token, owner, versions.versions.length, freezeForSave])
 
   const handleDiscardPending = useCallback(() => {
     // Discards exactly the payload that was shown, by its own id.
@@ -1676,6 +1837,9 @@ export default function BuildStudioEditor({
       setNoteMessage(null)
       setHintsOffered(0)
       hintsOfferedRef.current = 0
+      // An explicit reopen is a new visit: challenge help offered in the old one
+      // does not carry over.
+      challengeHintsRef.current = new Set()
       departureFilesRef.current = null
       setLoadedToken(null)
       // A brand new visit: a new id, so nothing from the previous one can act
@@ -1727,7 +1891,7 @@ export default function BuildStudioEditor({
       setProspectCheck('checking')
       void checkSourceNow().then((result) => {
         if (replaceRunRef.current !== runId) return
-        if (result === 'clean' && !wordsAtRiskRef.current) {
+        if (result === 'clean' && !wordsAtRiskRef.current && !challengeAtRiskRef.current) {
           replaceRunRef.current = null
           setProspect(null)
           setProspectCheck('idle')
@@ -1829,6 +1993,88 @@ export default function BuildStudioEditor({
 
   const currentHint = hintsOffered > 0 ? nextHint(hintsOffered - 1, openLives) : null
 
+  // ── The challenge card's handlers ──────────────────────────────────────
+  //
+  // None of these can reach the editor: they change this component's own
+  // state and may speak. Swapping, skipping and hiding never touch MakeCode.
+
+  const handleChallengeHear = useCallback(() => {
+    tts.speak(challengeSpeech(challenge))
+  }, [tts, challenge])
+
+  const handleChallengeHint = useCallback(() => {
+    challengeHintsRef.current.add(challenge.id)
+    setChallengeHintShown(true)
+    tts.speak(challenge.hint)
+  }, [tts, challenge])
+
+  const handleChallengePredict = useCallback(
+    (optionId: string) => {
+      const live = challengeById(challengeIdRef.current)
+      if (!live) return
+      putAttempt(withPrediction(attemptRef.current, live, optionId, new Date().toISOString()))
+    },
+    [putAttempt],
+  )
+
+  const handleChallengeOutcome = useCallback(
+    (result: 'matched' | 'different' | 'unsure') => {
+      putAttempt(withOutcome(attemptRef.current, result, new Date().toISOString()))
+    },
+    [putAttempt],
+  )
+
+  /**
+   * Swapping or hiding replaces the attempt, which would silently drop a
+   * response no save holds. So that case asks first (`disposal`), and only the
+   * explicit confirm below discards it. An attempt a save already holds — or an
+   * empty one — changes at once, as before.
+   */
+  const [disposal, setDisposal] = useState<'swap' | 'dismiss' | null>(null)
+
+  const applyDisposal = useCallback(
+    (kind: 'swap' | 'dismiss') => {
+      setDisposal(null)
+      if (kind === 'swap') {
+        beginAttempt(nextChallenge(challengeIdRef.current))
+        return
+      }
+      challengeDismissedRef.current = true
+      setChallengeDismissed(true)
+      // Declining the invitation discards an unsaved guess; it records nothing.
+      beginAttempt(challengeById(challengeIdRef.current) ?? DEFAULT_BUILD_CHALLENGE)
+    },
+    [beginAttempt],
+  )
+
+  const handleChallengeSwap = useCallback(() => {
+    if (challengeAtRiskRef.current) setDisposal('swap')
+    else applyDisposal('swap')
+  }, [applyDisposal])
+
+  const handleChallengeDismiss = useCallback(() => {
+    if (challengeAtRiskRef.current) setDisposal('dismiss')
+    else applyDisposal('dismiss')
+  }, [applyDisposal])
+
+  const handleChallengeShow = useCallback(() => {
+    challengeDismissedRef.current = false
+    setChallengeDismissed(false)
+  }, [])
+
+  /**
+   * The child pressed Play. Recorded as a REQUEST — a tap — and nothing more:
+   * the bridge cannot say which source the simulator then ran, so this never
+   * claims that. Only while the invitation is showing, and only the first one.
+   */
+  const recordPlayRequest = useCallback(() => {
+    if (challengeDismissedRef.current) return
+    // A passively visible invitation is not an active challenge: ordinary Play
+    // before any prediction is free play and records nothing.
+    if (attemptRef.current.prediction === null) return
+    putAttempt(withPlayRequest(attemptRef.current, new Date().toISOString()))
+  }, [putAttempt])
+
   // ── The reflection ────────────────────────────────────────────────────
 
   /**
@@ -1858,7 +2104,6 @@ export default function BuildStudioEditor({
     // `hintsOffered` is deliberately NOT a dependency: the identity of the save
     // these words are about must not change because help state changed, or an
     // accepted draft would be retargeted by a hint.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastSaved, familyId, childId, projectId, visit.visitId])
 
   /**
@@ -1878,7 +2123,9 @@ export default function BuildStudioEditor({
    */
   const newNoteFor = useCallback(
     (slot: BuildStudioNoteSlot): BuildStudioNoteTarget => {
-      const offered = hintsOfferedRef.current
+      // The challenge's own "where to look" is help too, and is counted with
+      // the ladder so a note never says none was offered when one was.
+      const offered = hintsOfferedRef.current + challengeHintsRef.current.size
       return {
         ...slot,
         help: offered > 0 ? 'hints-offered' : 'none-offered',
@@ -2249,6 +2496,18 @@ export default function BuildStudioEditor({
       : 'Your words are not saved yet. They stay on this page until you save or discard them, and closing the app loses them.'
 
   /**
+   * What is true about a challenge response nothing has captured. It exists
+   * only on this page: a guess, a Play tap or a reported result that no landed
+   * Save (and no unfinished Save's frozen payload) holds exactly. It says so
+   * plainly and claims nothing about the game's own source.
+   */
+  const challengeRiskLine = !challengeAtRisk
+    ? null
+    : pending?.challengeAttempt?.attemptId === challengeState.attemptId
+      ? 'Your challenge answer has something newer than the save that did not finish. Trying that save again keeps what it had; the newer part is only here until your next Save my version.'
+      : 'Your challenge guess or answer is not saved with a game yet. If you leave now it is gone.'
+
+  /**
    * Save or discard the words, from a dialog.
    *
    * *Save my words* sends the ones on screen first and the earlier ones after,
@@ -2315,7 +2574,8 @@ export default function BuildStudioEditor({
     departureCheck === 'checking' ||
     departureCheck === 'dirty' ||
     departureCheck === 'unknown' ||
-    wordsAtRisk
+    wordsAtRisk ||
+    challengeAtRisk
 
   /**
    * What is at risk about the GAME, or `null` when the answer is "nothing".
@@ -2346,7 +2606,13 @@ export default function BuildStudioEditor({
         <Typography variant="h5" sx={{ fontWeight: 800 }}>
           {childName}&apos;s Build Studio
         </Typography>
-        <Typography variant="body1">{BUILD_STUDIO_GOAL_LINE}</Typography>
+        {/* While the optional challenge is offered it is the ONLY visible
+            assignment (and the only help lane, in its card). Once it is hidden,
+            the free-building controls return with a neutral cue — the fixed
+            extra-life job is not presented as the thing to do. */}
+        {challengeDismissed && (
+          <Typography variant="body1">Change the game any way you like.</Typography>
+        )}
         {/* Which game this is, said plainly — because "reopened my own save"
             and "started the prepared starter" are two different things, and a
             page that says starter about a reopened version invites a child to
@@ -2362,23 +2628,27 @@ export default function BuildStudioEditor({
       </Stack>
 
       <Stack direction="row" spacing={1} flexWrap="wrap" rowGap={1}>
-        <Button
-          variant="outlined"
-          size="large"
-          onClick={handleHearGoal}
-          sx={{ textTransform: 'none', minHeight: 48, fontWeight: 600 }}
-        >
-          🔊 Hear it
-        </Button>
-        <Button
-          variant="outlined"
-          size="large"
-          onClick={handleHint}
-          sx={{ textTransform: 'none', minHeight: 48, fontWeight: 600 }}
-        >
-          💡 Hint
-          {hintsOffered > 0 ? ` (${hintsOffered} of ${BUILD_STUDIO_HINT_COUNT})` : ''}
-        </Button>
+        {challengeDismissed && (
+          <>
+            <Button
+              variant="outlined"
+              size="large"
+              onClick={handleHearGoal}
+              sx={{ textTransform: 'none', minHeight: 48, fontWeight: 600 }}
+            >
+              🔊 Hear it
+            </Button>
+            <Button
+              variant="outlined"
+              size="large"
+              onClick={handleHint}
+              sx={{ textTransform: 'none', minHeight: 48, fontWeight: 600 }}
+            >
+              💡 Hint
+              {hintsOffered > 0 ? ` (${hintsOffered} of ${BUILD_STUDIO_HINT_COUNT})` : ''}
+            </Button>
+          </>
+        )}
         {/* Play and Edit are the two measured stock presentation modes.
             `startsimulator` alone leaves a 96 × 85 preview; expanding the
             simulator is what gives a playable screen and the touch controls.
@@ -2389,6 +2659,7 @@ export default function BuildStudioEditor({
           disabled={gated}
           onClick={() => {
             setPlaying(true)
+            recordPlayRequest()
             void bridgeRef.current?.playFullscreen()
           }}
           sx={{ textTransform: 'none', minHeight: 48, fontWeight: 600 }}
@@ -2409,9 +2680,60 @@ export default function BuildStudioEditor({
         </Button>
       </Stack>
 
-      {currentHint && (
+      {challengeDismissed && currentHint && (
         <Alert severity="info" icon={false}>
           {currentHint.text}
+        </Alert>
+      )}
+
+      {/* The optional invitation. Only once the editor is ready, and nothing
+          about it is required to play or save. */}
+      {!gated && (
+        <BuildStudioChallengeCard
+          challenge={challenge}
+          attempt={challengeState}
+          dismissed={challengeDismissed}
+          hintShown={challengeHintShown}
+          compact={playing}
+          pendingSaveLacksOutcome={
+            pending !== null && !pending.challengeAttempt?.reportedOutcome
+          }
+          onPredict={handleChallengePredict}
+          onOutcome={handleChallengeOutcome}
+          onHear={handleChallengeHear}
+          onHint={handleChallengeHint}
+          onSwap={handleChallengeSwap}
+          onDismiss={handleChallengeDismiss}
+          onShow={handleChallengeShow}
+        />
+      )}
+
+      {/* Asked before a response nobody has saved is thrown away. */}
+      {disposal && challengeAtRisk && !challengeDismissed && (
+        <Alert
+          severity="warning"
+          action={
+            <Stack direction="row" spacing={1} flexWrap="wrap" rowGap={1}>
+              <Button
+                size="small"
+                onClick={() => setDisposal(null)}
+                sx={{ textTransform: 'none', fontWeight: 700 }}
+              >
+                Keep my answer
+              </Button>
+              <Button
+                size="small"
+                color="error"
+                onClick={() => applyDisposal(disposal)}
+                sx={{ textTransform: 'none' }}
+              >
+                {disposal === 'swap' ? 'Swap and throw it away' : 'Hide and throw it away'}
+              </Button>
+            </Stack>
+          }
+        >
+          Your guess or answer for this challenge is not saved yet.
+          {disposal === 'swap' ? ' Swapping' : ' Hiding it'} throws it away.
         </Alert>
       )}
 
@@ -2888,8 +3210,15 @@ export default function BuildStudioEditor({
                 : pending
                   ? `A save called “${pending.label}” did not finish. Opening something else leaves it behind.`
                   : prospectCheck === 'words'
-                    ? 'Your game is saved. Your words are not — opening something else keeps them here to save or discard, but it does not save them.'
+                    ? wordsAtRisk
+                      ? 'Your game is saved. Your words are not — opening something else keeps them here to save or discard, but it does not save them.'
+                      : 'Your game is saved. Your challenge guess or answer is not — opening something else loses it.'
                     : 'You have work that is not on your shelf. Opening something else will lose it.'}
+            {prospectCheck !== 'checking' &&
+            challengeAtRisk &&
+            (prospectCheck !== 'words' || wordsAtRisk)
+              ? ' Your challenge guess or answer is not saved either.'
+              : ''}
             {prospectCheck === 'dirty' && wordsAtRisk
               ? ' Your words are not saved either.'
               : ''}
@@ -2942,18 +3271,25 @@ export default function BuildStudioEditor({
             ? 'Checking your game…'
             : departureGameLine
               ? 'Keep your game first?'
-              : 'Keep your words first?'}
+              : wordsRiskLine
+                ? 'Keep your words first?'
+                : 'Keep your challenge answer first?'}
         </DialogTitle>
         <DialogContent>
           <DialogContentText>
             {departureCheck === 'checking'
               ? 'One moment — looking at what is in the editor.'
-              : (departureGameLine ?? wordsRiskLine)}
+              : (departureGameLine ?? wordsRiskLine ?? challengeRiskLine)}
           </DialogContentText>
-          {/* Both, when both are true — never one standing in for the other. */}
+          {/* Each true thing, never one standing in for another. */}
           {departureCheck !== 'checking' && departureGameLine && wordsRiskLine && (
             <DialogContentText sx={{ mt: 1 }}>{wordsRiskLine}</DialogContentText>
           )}
+          {departureCheck !== 'checking' &&
+            challengeRiskLine &&
+            (departureGameLine || wordsRiskLine) && (
+              <DialogContentText sx={{ mt: 1 }}>{challengeRiskLine}</DialogContentText>
+            )}
           {/* A download tapped from this dialog reports INTO this dialog, so a
               refusal is seen and the earlier copy's choice can be reached. */}
           {heldProfile === null && downloadReceipt && (
@@ -2997,6 +3333,17 @@ export default function BuildStudioEditor({
                 Save it now
               </Button>
             )}
+            {/* Challenge answer only: the game is on the shelf, so this keeps
+                the answer with a new save of it. An unfinished save is never
+                replaced — its own retry is above. */}
+            {!pending && !departureGameLine && challengeAtRisk && canSave && (
+              <Button
+                onClick={() => void handleSave()}
+                sx={{ textTransform: 'none', minHeight: 48 }}
+              >
+                Save my answer
+              </Button>
+            )}
             <Button
               disabled={downloadBusy}
               onClick={() => void handleDownloadCurrent()}
@@ -3011,7 +3358,11 @@ export default function BuildStudioEditor({
               onClick={departure.leaveAnyway}
               sx={{ textTransform: 'none', minHeight: 48 }}
             >
-              {departureGameLine ? 'Leave and lose it' : 'Leave without saving them'}
+              {departureGameLine
+                ? 'Leave and lose it'
+                : wordsRiskLine
+                  ? 'Leave without saving them'
+                  : 'Leave without saving my answer'}
             </Button>
           </DialogActions>
         )}
@@ -3035,12 +3386,19 @@ export default function BuildStudioEditor({
                     : // A clean game is not an empty page. And when the words
                       // have been dealt with too, this says so rather than
                       // warning about nothing.
-                      (wordsRiskLine ?? 'Your game and your words are saved. You can switch now.')}
+                      (wordsRiskLine ??
+                      challengeRiskLine ??
+                      'Your game and your words are saved. You can switch now.')}
           </DialogContentText>
           {profileCheck !== 'checking' &&
             (profileCheck === 'dirty' || editorDirty || pending) &&
             wordsRiskLine && (
               <DialogContentText sx={{ mt: 1 }}>{wordsRiskLine}</DialogContentText>
+            )}
+          {profileCheck !== 'checking' &&
+            challengeRiskLine &&
+            (profileCheck === 'dirty' || profileCheck === 'unknown' || editorDirty || pending || wordsRiskLine) && (
+              <DialogContentText sx={{ mt: 1 }}>{challengeRiskLine}</DialogContentText>
             )}
           {/* Same reason as the leaving dialog: the receipt belongs where the
               tap happened. */}
@@ -3061,6 +3419,15 @@ export default function BuildStudioEditor({
               sx={{ textTransform: 'none', minHeight: 48 }}
             >
               Save it now
+            </Button>
+          )}
+          {!pending && !departureFilesRef.current && challengeAtRisk && canSave && (
+            <Button
+              disabled={profileCheck === 'checking'}
+              onClick={() => void handleSave()}
+              sx={{ textTransform: 'none', minHeight: 48 }}
+            >
+              Save my answer
             </Button>
           )}
           <Button

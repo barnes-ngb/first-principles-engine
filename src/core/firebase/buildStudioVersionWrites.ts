@@ -53,8 +53,11 @@ import {
   buildStudioSourceDigest,
   buildStudioSourceKeys,
   buildStudioVersionDocId,
+  challengeAttemptKey,
+  normalizeChallengeAttempt,
   serializeBuildStudioSource,
   utf8ByteLength,
+  type BuildStudioChallengeAttempt,
   type BuildStudioSourceFiles,
   type BuildStudioVersion,
 } from '../types/buildStudio'
@@ -94,6 +97,12 @@ export interface SaveBuildStudioVersionArgs {
   goalId?: string
   /** The visit that produced this save — diagnostic. */
   visitId?: string
+  /**
+   * The Build Challenge attempt frozen with this exact Save, when there was one.
+   * Validated here, scoped to this child, project and version, and part of the
+   * retry's identity: the same Save action always sends the same shape.
+   */
+  challengeAttempt?: BuildStudioChallengeAttempt
 }
 
 export type SaveBuildStudioVersionOutcome = 'created' | 'alreadySaved'
@@ -196,6 +205,27 @@ export async function saveBuildStudioVersion(
     }
   }
 
+  // ── The optional challenge attempt ───────────────────────────────────
+  //
+  // Checked before the transaction opens, like everything else. A malformed one
+  // is refused rather than dropped: silently saving the game without the record
+  // the child's Save was frozen with would make a retry a different payload.
+  let challengeAttempt: BuildStudioChallengeAttempt | undefined
+  if (args.challengeAttempt !== undefined) {
+    const normalized = normalizeChallengeAttempt(args.challengeAttempt)
+    if (
+      !normalized ||
+      normalized.childId !== childId ||
+      normalized.projectId !== projectId ||
+      normalized.versionId !== versionId
+    ) {
+      throw new BuildStudioRefused(
+        'The challenge note for this save could not be kept with it, so nothing was saved. Save again.',
+      )
+    }
+    challengeAttempt = normalized
+  }
+
   const sourceArchive = serializeBuildStudioSource(files)
   // The canonical final string's own byte length — the number Firestore
   // charges for the field, and the number stored as `byteSize`.
@@ -222,6 +252,9 @@ export async function saveBuildStudioVersion(
     editorTargetVersion: args.editorTargetVersion,
     goalId: args.goalId,
     visitId: args.visitId,
+    // Present only when there is one, so a version without a challenge is
+    // byte-for-byte the document it always was.
+    ...(challengeAttempt ? { challengeAttempt } : {}),
   }
 
   const ref = doc(buildStudioVersionsCollection(familyId), id)
@@ -233,7 +266,13 @@ export async function saveBuildStudioVersion(
       // The exact bytes, not a digest of them. A retry sending the same source
       // resolves; a DIFFERENT source under the same action id is a bug in the
       // caller's id discipline and must not overwrite a record.
-      if (stored?.sourceArchive === sourceArchive) {
+      // The challenge record is compared too: the same bytes under the same id
+      // with a DIFFERENT record is not this action's retry, and a stored version
+      // is never rewritten to add, change or drop one.
+      if (
+        stored?.sourceArchive === sourceArchive &&
+        challengeAttemptKey(stored?.challengeAttempt) === challengeAttemptKey(challengeAttempt)
+      ) {
         return {
           version: { ...stored, id },
           outcome: 'alreadySaved' as const,

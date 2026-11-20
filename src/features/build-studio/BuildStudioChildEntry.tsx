@@ -9,6 +9,13 @@
  * first screen is now a question with explicit answers, and neither is taken
  * for him.
  *
+ * ── A games shelf (LOCAL-VISION-007) ────────────────────────────────────
+ *
+ * Apple Dash — the one editable game — keeps every control in its own card.
+ * Beside it, once the read has settled, sits a play-only card (Block Muncher): a
+ * fixed link in a separate tab, with no save, editor, request or setting behind
+ * it. Both catalogs live in `buildStudioGames`.
+ *
  * ── What it refuses to do ───────────────────────────────────────────────
  *
  *   • It never chooses. An unsettled read says it is LOOKING and offers
@@ -45,6 +52,7 @@ import AlertTitle from '@mui/material/AlertTitle'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import CircularProgress from '@mui/material/CircularProgress'
+import Paper from '@mui/material/Paper'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 
@@ -55,6 +63,7 @@ import {
   readPendingSave,
   type PendingOwner,
 } from './buildStudioPendingStore'
+import { editableGameForProject, PLAY_ONLY_GAMES } from './buildStudioGames'
 import { savedLine } from './buildStudioSavedLine'
 import { versionBelongsTo, VersionsStatus } from './useBuildStudioVersions'
 import type { BuildStudioVersionsRead } from './useBuildStudioVersions'
@@ -261,6 +270,15 @@ export default function BuildStudioChildEntry({
     )
   }
 
+  /**
+   * The editable game this chooser is for. Today the catalog holds exactly one
+   * (Apple Dash), found by the project this screen was handed; the saved-game
+   * reads, the starter and the shelf are that project's, unchanged.
+   */
+  const game = editableGameForProject(projectId)
+  const gameTitle = game?.title ?? 'Apple Dash'
+  const gameEmoji = game?.emoji ?? '🍎'
+
   /** The starter, as an explicit answer. Primary when it is the only one. */
   const starterChoice = (
     <Button
@@ -271,15 +289,76 @@ export default function BuildStudioChildEntry({
       onClick={() => choose(null)}
       sx={{ textTransform: 'none', fontWeight: 700, minHeight: 56 }}
     >
-      🍎 Start Apple Dash
+      {gameEmoji} Start {gameTitle}
     </Button>
   )
+
+  /**
+   * Play-only games: a fixed link, a separate tab, and nothing else. Drawn only
+   * once the shelf read has settled (the same moment the chooser offers
+   * anything), and never reads, writes or requests anything — the click is the
+   * browser following a link, so this screen, and any work it is holding, stays
+   * exactly where it is.
+   */
+  const playOnlyCards =
+    status === VersionsStatus.Loading
+      ? null
+      : PLAY_ONLY_GAMES.map((playOnly) => (
+          <Paper
+            key={playOnly.id}
+            component="section"
+            variant="outlined"
+            aria-labelledby={`game-${playOnly.id}`}
+            sx={{ p: 2, borderRadius: 2 }}
+          >
+            <Stack spacing={1.5}>
+              <Typography
+                id={`game-${playOnly.id}`}
+                variant="h6"
+                component="h2"
+                sx={{ fontWeight: 800 }}
+              >
+                {playOnly.emoji} {playOnly.title}
+              </Typography>
+              <Button
+                component="a"
+                href={playOnly.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                variant="contained"
+                size="large"
+                fullWidth
+                aria-label={`Play ${playOnly.title} (opens in a new tab)`}
+                sx={{ textTransform: 'none', fontWeight: 700, minHeight: 56 }}
+              >
+                Play
+              </Button>
+            </Stack>
+          </Paper>
+        ))
 
   return (
     <Stack spacing={2} sx={{ maxWidth: 560 }}>
       <Typography variant="h5" sx={{ fontWeight: 800 }}>
         {childName}&apos;s Build Studio
       </Typography>
+
+      {/* Apple Dash's own card: every control it already had, grouped. */}
+      <Paper
+        component="section"
+        variant="outlined"
+        aria-labelledby={`game-${game?.id ?? 'apple-dash'}`}
+        sx={{ p: 2, borderRadius: 2 }}
+      >
+        <Stack spacing={2}>
+          <Typography
+            id={`game-${game?.id ?? 'apple-dash'}`}
+            variant="h6"
+            component="h2"
+            sx={{ fontWeight: 800 }}
+          >
+            {gameEmoji} {gameTitle}
+          </Typography>
 
       {refused && (
         <Alert severity="warning">
@@ -358,6 +437,10 @@ export default function BuildStudioChildEntry({
           {starterChoice}
         </>
       )}
+        </Stack>
+      </Paper>
+
+      {playOnlyCards}
     </Stack>
   )
 }
