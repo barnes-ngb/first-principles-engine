@@ -2097,7 +2097,6 @@ export default function BuildStudioEditor({
     // `hintsOffered` is deliberately NOT a dependency: the identity of the save
     // these words are about must not change because help state changed, or an
     // accepted draft would be retargeted by a hint.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastSaved, familyId, childId, projectId, visit.visitId])
 
   /**

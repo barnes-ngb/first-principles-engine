@@ -291,9 +291,11 @@ describe('the guess comes before Play, and Play does not need it', () => {
     expect(within(group).getByRole('button', { name: 'Faster' })).toHaveAttribute('aria-pressed', 'true')
     await tap('▶ Play it')
     expect(bridge.played).toBe(1)
-    // Fixed now: every option is closed.
+    // Fixed now. Compact Play replaced the pre-Play group, so assert on fresh
+    // DOM: the choice buttons are gone and only the locked text remains.
+    expect(screen.queryByRole('group', { name: 'Your guess' })).not.toBeInTheDocument()
     for (const name of ['Faster', 'Slower', 'The same']) {
-      expect(within(group).getByRole('button', { name })).toBeDisabled()
+      expect(screen.queryByRole('button', { name })).not.toBeInTheDocument()
     }
     expect(screen.getByText('Your guess is locked in: Faster.')).toBeInTheDocument()
 
