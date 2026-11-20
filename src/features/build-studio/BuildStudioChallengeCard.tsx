@@ -33,6 +33,8 @@ export interface BuildStudioChallengeCardProps {
   /** Hidden by *Not now*. Only a small way back is drawn. */
   dismissed: boolean
   hintShown: boolean
+  /** In Play mode: keep the card short so the game stays easy to reach. */
+  compact?: boolean
   /** A Save that did not finish is waiting, with whatever it was frozen with. */
   pendingSaveLacksOutcome: boolean
   onPredict: (optionId: string) => void
@@ -51,6 +53,7 @@ export default function BuildStudioChallengeCard({
   attempt,
   dismissed,
   hintShown,
+  compact = false,
   pendingSaveLacksOutcome,
   onPredict,
   onOutcome,
@@ -97,9 +100,9 @@ export default function BuildStudioChallengeCard({
       component="section"
       variant="outlined"
       aria-labelledby="build-challenge-title"
-      sx={{ p: 2, borderRadius: 2 }}
+      sx={{ p: compact ? 1 : 2, borderRadius: 2 }}
     >
-      <Stack spacing={1.5}>
+      <Stack spacing={compact ? 0.75 : 1.5}>
         <Typography variant="overline" color="text.secondary">
           Something to try (only if you want)
         </Typography>
@@ -115,9 +118,11 @@ export default function BuildStudioChallengeCard({
             {challenge.goal}
           </Typography>
           <Typography variant="body1">{challenge.question}</Typography>
-          <Typography variant="body2" color="text.secondary">
-            {challenge.why}
-          </Typography>
+          {!compact && (
+            <Typography variant="body2" color="text.secondary">
+              {challenge.why}
+            </Typography>
+          )}
         </Stack>
 
         <Stack direction="row" spacing={1} flexWrap="wrap" rowGap={1}>
@@ -143,32 +148,41 @@ export default function BuildStudioChallengeCard({
 
         {/* The guess comes BEFORE the Play request, and is optional: Play is
             the editor's own button above and works the same without it. */}
-        <Stack spacing={1} role="group" aria-label="Your guess">
-          <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
-            {challenge.prediction.prompt}
-          </Typography>
-          <Stack direction="row" spacing={1} flexWrap="wrap" rowGap={1}>
-            {challenge.prediction.options.map((option) => (
-              <Button
-                key={option.id}
-                variant={chosen === option.id ? 'contained' : 'outlined'}
-                aria-pressed={chosen === option.id}
-                disabled={!predicting}
-                onClick={() => onPredict(option.id)}
-                sx={TAP}
-              >
-                {option.label}
-              </Button>
-            ))}
+        {/* In Play mode a locked guess is just a line; the buttons are not needed. */}
+        {compact && !predicting ? (
+          chosenLabel && (
+            <Typography variant="caption" color="text.secondary">
+              {`Your guess is locked in: ${chosenLabel}.`}
+            </Typography>
+          )
+        ) : (
+          <Stack spacing={1} role="group" aria-label="Your guess">
+            <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+              {challenge.prediction.prompt}
+            </Typography>
+            <Stack direction="row" spacing={1} flexWrap="wrap" rowGap={1}>
+              {challenge.prediction.options.map((option) => (
+                <Button
+                  key={option.id}
+                  variant={chosen === option.id ? 'contained' : 'outlined'}
+                  aria-pressed={chosen === option.id}
+                  disabled={!predicting}
+                  onClick={() => onPredict(option.id)}
+                  sx={TAP}
+                >
+                  {option.label}
+                </Button>
+              ))}
+            </Stack>
+            <Typography variant="caption" color="text.secondary">
+              {chosenLabel && !predicting
+                ? `Your guess is locked in: ${chosenLabel}.`
+                : chosenLabel
+                  ? 'You can change your guess until you press Play.'
+                  : 'Guessing is optional. You can just press Play.'}
+            </Typography>
           </Stack>
-          <Typography variant="caption" color="text.secondary">
-            {chosenLabel && !predicting
-              ? `Your guess is locked in: ${chosenLabel}.`
-              : chosenLabel
-                ? 'You can change your guess until you press Play.'
-                : 'Guessing is optional. You can just press Play.'}
-          </Typography>
-        </Stack>
+        )}
 
         {asksOutcome && (
           <Stack spacing={1} role="group" aria-label="How it went">

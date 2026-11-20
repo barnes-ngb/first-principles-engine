@@ -33,7 +33,11 @@
  * No streak, no level, no completion, no reward. Skipping is free.
  */
 
-import { normalizeChallengeAttempt } from '../../core/types/buildStudio'
+import {
+  normalizeChallengeAttempt,
+  type BuildStudioChallengeSubject,
+} from '../../core/types/buildStudio'
+import { SubjectBucket } from '../../core/types/enums'
 
 export interface BuildChallengeOption {
   /** Stable, lowercase-with-dashes. Stored on a saved attempt. */
@@ -57,6 +61,11 @@ export interface BuildChallenge {
   why: string
   /** One plain label for what this is about. Not a skill claim. */
   subject: string
+  /**
+   * The canonical authored subject, frozen onto a saved attempt. One of the
+   * five allowed `SubjectBucket` values. Not a skill claim and not hours.
+   */
+  subjectBucket: BuildStudioChallengeSubject
   /** Where to look, as a question. Never the answer. */
   hint: string
   /** The prediction asked BEFORE Play. */
@@ -78,6 +87,7 @@ export const BUILD_CHALLENGES: readonly BuildChallenge[] = [
     question: 'Can you cross the screen in less time?',
     why: 'Feel the difference right away.',
     subject: 'speed and motion',
+    subjectBucket: SubjectBucket.PracticalArts,
     hint: 'Look in the on start blocks, at the block that moves your hero with the buttons. What do you think its number is for?',
     prediction: {
       prompt: 'After your change, will the hero cross the screen faster, slower, or the same?',
@@ -95,6 +105,7 @@ export const BUILD_CHALLENGES: readonly BuildChallenge[] = [
     question: 'How many will you see before you play?',
     why: 'Get one more chance.',
     subject: 'counting what is on screen',
+    subjectBucket: SubjectBucket.Math,
     hint: 'Look in the on start blocks for the block with the heart word. Count the hearts at the top before you play. How many do you see?',
     prediction: {
       prompt: 'How many hearts will you see at the top, compared with now?',
@@ -112,6 +123,7 @@ export const BUILD_CHALLENGES: readonly BuildChallenge[] = [
     question: 'Try two different numbers.',
     why: 'Make an easy and a tricky version.',
     subject: 'comparing two numbers',
+    subjectBucket: SubjectBucket.Math,
     hint: 'Look in the rock loop for the number that sets how fast a rock moves down. Which of your two numbers is larger?',
     prediction: {
       prompt: 'Which number will make the rock fall faster?',
@@ -133,6 +145,7 @@ export const BUILD_CHALLENGES: readonly BuildChallenge[] = [
     question: 'Decide what each apple will be worth.',
     why: 'Make the score jump in big steps.',
     subject: 'making ten',
+    subjectBucket: SubjectBucket.Math,
     hint: 'Look for the change score by block inside the apple catch. What is each apple worth now, and what could two of them add up to?',
     prediction: {
       prompt: 'How many points will two apples give you?',
@@ -153,6 +166,7 @@ export const BUILD_CHALLENGES: readonly BuildChallenge[] = [
     question: 'How many apples would you need at your score setting?',
     why: 'Design a high-score hunt.',
     subject: 'skip counting and what is possible',
+    subjectBucket: SubjectBucket.Math,
     hint: 'Look at the points for one apple and at how long a round lasts. How many apples would it take to reach fifty?',
     prediction: {
       prompt: 'Can 50 points fit in one round the way your game is set now?',
@@ -174,6 +188,7 @@ export const BUILD_CHALLENGES: readonly BuildChallenge[] = [
     question: 'From 8 points, how many more must the last apple give to reach 10?',
     why: 'Make the last catch matter.',
     subject: 'one-step story problem',
+    subjectBucket: SubjectBucket.Math,
     hint: 'Look at the change score by block in the apple catch. What is the gap between 8 and 10?',
     prediction: {
       prompt: 'How many more points does the last apple need to give?',
@@ -190,6 +205,7 @@ export const BUILD_CHALLENGES: readonly BuildChallenge[] = [
     question: 'Let him try two speeds.',
     why: 'Make a game for a real player.',
     subject: 'designing for another player',
+    subjectBucket: SubjectBucket.SocialStudies,
     hint: 'Pick one number to change, like how fast the rocks fall. What will you ask your player after each try?',
     prediction: {
       prompt: 'Which speed do you think will feel fair to your player?',
@@ -207,6 +223,7 @@ export const BUILD_CHALLENGES: readonly BuildChallenge[] = [
     question: 'Try a slower, a faster, and an in-between rock.',
     why: 'Make a real difficulty challenge.',
     subject: 'difficulty and a threshold',
+    subjectBucket: SubjectBucket.Science,
     hint: 'Look in the rock loop for the fall speed. Can you change only that one number each time?',
     prediction: {
       prompt: 'Which rock speed will be the first one that feels too hard?',
@@ -224,6 +241,7 @@ export const BUILD_CHALLENGES: readonly BuildChallenge[] = [
     question: 'Choose its chance and its reward.',
     why: 'Make one catch a surprise.',
     subject: 'chance and payoff',
+    subjectBucket: SubjectBucket.Math,
     hint: 'Think about how often the golden apple should show up and how many points it should give. How will you make it rare?',
     prediction: {
       prompt: 'Over ten rounds, how often will your golden apple show up?',
@@ -241,6 +259,7 @@ export const BUILD_CHALLENGES: readonly BuildChallenge[] = [
     question: 'Put the catches from the two versions in a tiny table and show which column is higher.',
     why: 'Prove which version wins your test.',
     subject: 'reading data',
+    subjectBucket: SubjectBucket.Math,
     hint: 'Play each version once and write down how many apples you caught. Which column is higher?',
     prediction: {
       prompt: 'Which speed do you think will catch more apples?',
@@ -257,6 +276,7 @@ export const BUILD_CHALLENGES: readonly BuildChallenge[] = [
     question: 'Make an item that helps a player who is about to lose.',
     why: 'Give a losing round a comeback.',
     subject: 'conditions and edge cases',
+    subjectBucket: SubjectBucket.PracticalArts,
     hint: 'Think about when the rescue should help, and when it should not. How will your game tell the difference?',
     prediction: {
       prompt: 'When will your rescue item help?',
@@ -274,6 +294,7 @@ export const BUILD_CHALLENGES: readonly BuildChallenge[] = [
     question: 'Write up to three rules and let a new player try them.',
     why: 'See a player use your instructions.',
     subject: 'writing for a reader',
+    subjectBucket: SubjectBucket.LanguageArts,
     hint: 'Write your rules in plain words, then watch your player read them. Where did they get stuck?',
     prediction: {
       prompt: 'Will a new player understand your rules the first time?',
@@ -338,7 +359,11 @@ export function describeAttemptForParent(version: {
   if (!challenge) return null
   const current = attempt.challengeRevision === challenge.revision
 
-  const parts: string[] = [`Challenge: “${challenge.goal}”`]
+  // A known id at a different revision was shown different words. The current
+  // goal is never used to describe it — only what was recorded is stated.
+  const parts: string[] = [
+    current ? `Challenge: “${challenge.goal}”` : 'An earlier version of a challenge.',
+  ]
   if (attempt.prediction) {
     const label = current
       ? challenge.prediction.options.find((o) => o.id === attempt.prediction?.optionId)?.label

@@ -101,9 +101,20 @@ vi.mock('../../core/firebase/buildStudioNoteWrites', () => ({
 vi.mock('react-router-dom', () => ({
   useBlocker: () => ({ state: 'unblocked', proceed: () => {}, reset: () => {} }),
 }))
-vi.mock('../../core/profile/useProfile', () => ({
-  useProfile: () => ({ selectProfile: vi.fn(), registerProfileChangeGuard: () => () => {} }),
-}))
+// The profile-change guard is the same departure rule the router blocker uses,
+// and it can be driven without a router: the editor registers it, a test calls it.
+const selectProfile = vi.fn()
+let profileGuard: ((next: unknown) => boolean) | null = null
+const profileValue = {
+  selectProfile,
+  registerProfileChangeGuard: (guard: (next: unknown) => boolean) => {
+    profileGuard = guard
+    return () => {
+      if (profileGuard === guard) profileGuard = null
+    }
+  },
+}
+vi.mock('../../core/profile/useProfile', () => ({ useProfile: () => profileValue }))
 const speak = vi.fn()
 const ttsValue = { speak }
 vi.mock('../../core/hooks/useTTS', () => ({ useTTS: () => ttsValue }))
@@ -178,6 +189,7 @@ const tapRole = async (name: string | RegExp) => {
 beforeEach(() => {
   bridges.length = 0
   speak.mockClear()
+  selectProfile.mockClear()
   saveVersion.mockReset()
   saveVersion.mockImplementation(async (args: { versionId: string }) => ({
     outcome: 'created',
@@ -208,8 +220,17 @@ describe('the card is an optional invitation', () => {
     await tap('💾 Save my version')
     await waitFor(() => expect(saveVersion).toHaveBeenCalledTimes(1))
     expect('challengeAttempt' in saveVersion.mock.calls[0][0]).toBe(false)
-    // The legacy goal is untouched.
+    // The optional legacy goal field follows the active authored challenge.
+    expect(saveVersion.mock.calls[0][0].goalId).toBe('faster-hero')
+  })
+
+  it('after the invitation is hidden, a Save names the old fixed goal — never an attempt', async () => {
+    await openEditor()
+    await tap('Not now')
+    await tap('💾 Save my version')
+    await waitFor(() => expect(saveVersion).toHaveBeenCalledTimes(1))
     expect(saveVersion.mock.calls[0][0].goalId).toBe('one-more-life')
+    expect('challengeAttempt' in saveVersion.mock.calls[0][0]).toBe(false)
   })
 
   it('swap and skip never touch MakeCode', async () => {
@@ -240,8 +261,20 @@ describe('the card is an optional invitation', () => {
     expect(screen.getByText(hint)).toBeInTheDocument()
   })
 
-  it('keeps the existing Hear it and Hint controls on the existing goal', async () => {
+  it('shows the challenge as the only assignment and the only help lane while it is offered', async () => {
     await openEditor()
+    expect(screen.getByText('Make the hero faster.')).toBeInTheDocument()
+    expect(screen.queryByText(/Your job/)).not.toBeInTheDocument()
+    expect(screen.queryByText('🔊 Hear it')).not.toBeInTheDocument()
+    expect(screen.queryByText('💡 Hint')).not.toBeInTheDocument()
+    expect(screen.getAllByText(/💡/)).toHaveLength(1) // the card's "Where to look"
+  })
+
+  it('brings the free-building controls back, with a neutral cue, once the card is hidden', async () => {
+    await openEditor()
+    await tap('Not now')
+    expect(screen.getByText('Change the game any way you like.')).toBeInTheDocument()
+    expect(screen.queryByText(/Your job/)).not.toBeInTheDocument()
     expect(screen.getByText('🔊 Hear it')).toBeInTheDocument()
     await tap('💡 Hint')
     expect(speak.mock.calls.at(-1)![0]).toMatch(/one more life/)
@@ -277,6 +310,7 @@ describe('the guess comes before Play, and Play does not need it', () => {
       versionId: saveVersion.mock.calls[0][0].versionId,
       challengeId: 'faster-hero',
       challengeRevision: 1,
+      subjectBucket: 'PracticalArts',
     })
     expect(normalizeChallengeAttempt(attempt)).toEqual(attempt)
   })
@@ -310,10 +344,107 @@ describe('the guess comes before Play, and Play does not need it', () => {
     await tapRole('Faster')
     await tap('▶ Play it')
     await tap('🔀 A different one')
+    // A staged response is not thrown away silently: it asks first.
+    expect(screen.getByText(/not saved yet\. Swapping throws it away/)).toBeInTheDocument()
+    expect(screen.getByText('Make the hero faster.')).toBeInTheDocument()
+    await tap('Swap and throw it away')
     expect(screen.queryByText('Did it match your guess?')).not.toBeInTheDocument()
     await tap('💾 Save my version')
     await waitFor(() => expect(saveVersion).toHaveBeenCalledTimes(1))
     expect(savedAttempt()).toBeUndefined()
+  })
+
+  it('Keep my answer leaves a staged response where it was', async () => {
+    await openEditor()
+    await tapRole('Faster')
+    await tap('Not now')
+    await tap('Keep my answer')
+    expect(screen.queryByText('Keep my answer')).not.toBeInTheDocument()
+    expect(screen.getByText('Make the hero faster.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Faster' })).toHaveAttribute('aria-pressed', 'true')
+  })
+})
+
+describe('a challenge answer is not lost while the game itself is clean', () => {
+  const askToSwitch = async () => {
+    let allowed: boolean | undefined
+    await act(async () => {
+      allowed = profileGuard!({ id: 'other' })
+    })
+    return allowed
+  }
+
+  it('lets a clean editor with no response go without a prompt', async () => {
+    await openEditor()
+    expect(await askToSwitch()).toBe(false) // the live editor is always read first…
+    await waitFor(() => expect(selectProfile).toHaveBeenCalledTimes(1)) // …then it just goes
+    expect(screen.queryByText('Switch profile?')).not.toBeInTheDocument()
+  })
+
+  it('holds a guess nobody saved, names it, and offers Stay and Save my answer', async () => {
+    await openEditor()
+    await tapRole('Faster')
+    expect(await askToSwitch()).toBe(false)
+    await waitFor(() =>
+      expect(screen.getByText(/challenge guess or answer is not saved with a game yet/)).toBeInTheDocument(),
+    )
+    expect(selectProfile).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Save my answer' })).toBeInTheDocument()
+    await tapRole('Stay here')
+    expect(selectProfile).not.toHaveBeenCalled()
+  })
+
+  it('after Save my answer lands, the same clean editor goes without another prompt', async () => {
+    await openEditor()
+    await tapRole('Faster')
+    await tap('▶ Play it')
+    await askToSwitch()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save my answer' })).toBeEnabled())
+    await tapRole('Save my answer')
+    await waitFor(() => expect(saveVersion).toHaveBeenCalledTimes(1))
+    expect(savedAttempt()?.prediction?.optionId).toBe('faster')
+    await tapRole('Stay here')
+    await askToSwitch()
+    await waitFor(() => expect(selectProfile).toHaveBeenCalledTimes(1))
+  })
+
+  it('holds a result reported AFTER the save, which that save does not contain', async () => {
+    await openEditor()
+    await tapRole('Faster')
+    await tap('▶ Play it')
+    await tap('💾 Save my version')
+    await waitFor(() => expect(screen.getByText('Saved. Your game is on your shelf.')).toBeInTheDocument())
+    await tapRole('Matched')
+    await askToSwitch()
+    await waitFor(() =>
+      expect(screen.getByText(/challenge guess or answer is not saved with a game yet/)).toBeInTheDocument(),
+    )
+    expect(selectProfile).not.toHaveBeenCalled()
+  })
+
+  it('keeps the original unfinished save and its retry exact while naming the newer answer', async () => {
+    saveVersion.mockRejectedValue(new Error('offline'))
+    await openEditor()
+    await tapRole('Faster')
+    await tap('▶ Play it')
+    await tap('💾 Save my version')
+    await waitFor(() => expect(saveVersion).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(screen.getByText('Try again')).toBeInTheDocument())
+    await tapRole('Matched')
+    await askToSwitch()
+    await waitFor(() => expect(screen.getByText(/did not finish\. Switching now leaves it behind/)).toBeInTheDocument())
+    expect(screen.getByText(/something newer than the save that did not finish/)).toBeInTheDocument()
+    // No second save is offered over the first one's slot.
+    expect(screen.queryByRole('button', { name: 'Save my answer' })).not.toBeInTheDocument()
+    expect(saveVersion).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not hold for a card that was only looked at, or one that was hidden', async () => {
+    await openEditor()
+    await tap('Not now')
+    await tap('💭 Show me something to try')
+    expect(await askToSwitch()).toBe(false)
+    await waitFor(() => expect(selectProfile).toHaveBeenCalledTimes(1))
   })
 })
 
@@ -375,6 +506,7 @@ describe('an exact Save retry sends the identical record', () => {
     // The child answers and swaps while the failed Save waits.
     await tapRole('Matched')
     await tap('🔀 A different one')
+    await tap('Swap and throw it away')
 
     saveVersion.mockResolvedValue({ outcome: 'created', version: { id: 'doc-x' } })
     await tap('Try again')
@@ -471,6 +603,12 @@ describe('visit and child ownership', () => {
         target: { files: [file] },
       })
     })
+    // The code is clean but the guess and Play tap are not saved, so the
+    // replacement asks first instead of quietly dropping them.
+    await waitFor(() => expect(screen.getByText('Replace it anyway')).toBeInTheDocument())
+    expect(screen.getByText(/challenge guess or answer is not/)).toBeInTheDocument()
+    expect(bridges).toHaveLength(1)
+    await tap('Replace it anyway')
     await waitFor(() => expect(bridges).toHaveLength(2))
     expect(bridge.disposed).toBe(true)
     const second = bridges[1]

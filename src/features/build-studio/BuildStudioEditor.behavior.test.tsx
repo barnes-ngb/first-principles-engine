@@ -1269,8 +1269,11 @@ describe('Play and Edit use the bridge’s verified modes', () => {
       screen.getByText('▶ Play it').click()
     })
     expect(screen.getByText('💾 Save my version')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Hint/ })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Hear it/ })).toBeInTheDocument()
+    // While the optional challenge is offered, its card is the one help lane
+    // (and it is compact in Play mode, so the game stays easy to reach).
+    expect(screen.getByRole('button', { name: /Where to look/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Read this to me/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Hear it/ })).not.toBeInTheDocument()
   })
 })
 
@@ -1996,7 +1999,12 @@ describe('a note records the help that had been OFFERED when he spoke', () => {
   it('records a hint offered after the save and before the words', async () => {
     const bridge = await openEditor()
     await saveAVersion(bridge)
-    // Save the game, THEN ask for a hint, THEN say what he was trying.
+    // Save the game, THEN ask for a hint, THEN say what he was trying. The
+    // lives hint is the free-building lane, which returns once the optional
+    // challenge is hidden.
+    await act(async () => {
+      screen.getByText('Not now').click()
+    })
     await act(async () => {
       screen.getByRole('button', { name: /Hint/ }).click()
     })
@@ -2015,6 +2023,9 @@ describe('a note records the help that had been OFFERED when he spoke', () => {
     await saveAVersion(bridge)
     await sayWords()
     // The hint comes after the sentence was accepted.
+    await act(async () => {
+      screen.getByText('Not now').click()
+    })
     await act(async () => {
       screen.getByRole('button', { name: /Hint/ }).click()
     })

@@ -49,6 +49,8 @@
  * measured with {@link utf8ByteLength}.
  */
 
+import { SubjectBucket } from './enums'
+
 /** The map a MakeCode editor hands over and takes back: file name → text. */
 export type BuildStudioSourceFiles = Readonly<Record<string, string>>
 
@@ -121,6 +123,16 @@ export interface BuildStudioVersion {
 
 // ── The Build Challenge attempt ─────────────────────────────────────────────
 
+/** The only subjects a Build Challenge may carry: existing `SubjectBucket` values. */
+export const BUILD_STUDIO_CHALLENGE_SUBJECTS = [
+  SubjectBucket.Math,
+  SubjectBucket.Science,
+  SubjectBucket.SocialStudies,
+  SubjectBucket.LanguageArts,
+  SubjectBucket.PracticalArts,
+] as const
+export type BuildStudioChallengeSubject = (typeof BUILD_STUDIO_CHALLENGE_SUBJECTS)[number]
+
 /** What the child said about his own guess, after pressing Play. */
 export const BUILD_STUDIO_CHALLENGE_OUTCOMES = ['matched', 'different', 'unsure'] as const
 export type BuildStudioChallengeOutcome = (typeof BUILD_STUDIO_CHALLENGE_OUTCOMES)[number]
@@ -149,6 +161,12 @@ export interface BuildStudioChallengeAttempt {
   /** The authored challenge, by its stable id and revision. */
   challengeId: string
   challengeRevision: number
+  /**
+   * The authored subject of this challenge, copied from the catalog at freeze
+   * time. One of {@link BUILD_STUDIO_CHALLENGE_SUBJECTS}. It is a label for
+   * future source-linked hours; nothing here writes hours or a learner record.
+   */
+  subjectBucket: BuildStudioChallengeSubject
   prediction?: { optionId: string; at: string }
   playRequest?: { at: string }
   reportedOutcome?: { result: BuildStudioChallengeOutcome; at: string }
@@ -190,6 +208,7 @@ export function normalizeChallengeAttempt(value: unknown): BuildStudioChallengeA
       'attemptId',
       'challengeId',
       'challengeRevision',
+      'subjectBucket',
       'prediction',
       'playRequest',
       'reportedOutcome',
@@ -213,6 +232,13 @@ export function normalizeChallengeAttempt(value: unknown): BuildStudioChallengeA
   ) {
     return null
   }
+  const { subjectBucket } = value
+  if (
+    typeof subjectBucket !== 'string' ||
+    !(BUILD_STUDIO_CHALLENGE_SUBJECTS as readonly string[]).includes(subjectBucket)
+  ) {
+    return null
+  }
 
   const out: BuildStudioChallengeAttempt = {
     childId,
@@ -221,6 +247,7 @@ export function normalizeChallengeAttempt(value: unknown): BuildStudioChallengeA
     attemptId,
     challengeId,
     challengeRevision,
+    subjectBucket: subjectBucket as BuildStudioChallengeSubject,
   }
 
   let predictedAt: number | null = null

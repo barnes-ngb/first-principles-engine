@@ -51,6 +51,7 @@ const withAttempt = (versionId: string) =>
       attemptId: 'a-attempt1',
       challengeId: 'faster-hero',
       challengeRevision: 1,
+      subjectBucket: 'PracticalArts',
       prediction: { optionId: 'faster', at: '2026-11-20T10:00:00.000Z' },
       playRequest: { at: '2026-11-20T10:01:00.000Z' },
       reportedOutcome: { result: 'different', at: '2026-11-20T10:02:00.000Z' },

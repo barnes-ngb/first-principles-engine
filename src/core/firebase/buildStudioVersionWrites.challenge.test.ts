@@ -71,6 +71,7 @@ const attemptFor = (
   attemptId: 'a-attempt1',
   challengeId: 'faster-hero',
   challengeRevision: 1,
+  subjectBucket: 'PracticalArts',
   prediction: { optionId: 'faster', at: '2026-11-20T10:00:00.000Z' },
   playRequest: { at: '2026-11-20T10:01:00.000Z' },
   ...overrides,
@@ -137,6 +138,21 @@ describe('a challenge attempt rides on the explicit Save', () => {
     ).rejects.toBeInstanceOf(BuildStudioRefused)
     expect(sets).toHaveLength(0)
   })
+
+  it('refuses a missing or non-canonical subject, and stores the authored one', async () => {
+    for (const subjectBucket of [undefined, 'Reading', 'Other', 'math']) {
+      await expect(
+        saveBuildStudioVersion(
+          args({ challengeAttempt: { ...attemptFor(), subjectBucket } }),
+        ),
+      ).rejects.toBeInstanceOf(BuildStudioRefused)
+    }
+    expect(sets).toHaveLength(0)
+    await saveBuildStudioVersion(
+      args({ challengeAttempt: attemptFor({ subjectBucket: 'Math' }) }),
+    )
+    expect(sets[0].data.challengeAttempt).toMatchObject({ subjectBucket: 'Math' })
+  })
 })
 
 describe('an exact retry compares the identical shape', () => {
@@ -155,6 +171,7 @@ describe('an exact retry compares the identical shape', () => {
       playRequest: a.playRequest,
       prediction: a.prediction,
       challengeRevision: a.challengeRevision,
+      subjectBucket: a.subjectBucket,
       challengeId: a.challengeId,
       attemptId: a.attemptId,
       versionId: a.versionId,
