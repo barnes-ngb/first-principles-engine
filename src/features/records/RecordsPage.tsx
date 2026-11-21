@@ -532,10 +532,7 @@ function HoursComplianceTab() {
     () => ({ familyId, startDate, endDate, parentCapable }),
     [familyId, startDate, endDate, parentCapable],
   )
-  const scopeIdentityRef = useRef(scopeIdentity)
-  useEffect(() => {
-    scopeIdentityRef.current = scopeIdentity
-  }, [scopeIdentity])
+  const scopeIdentityRef = useRef<typeof scopeIdentity | null>(scopeIdentity)
 
   // A failed re-read is retained and retried here, on the PAGE, so it survives the
   // Build Studio card remounting for another child and a settle that arrives after
@@ -543,7 +540,16 @@ function HoursComplianceTab() {
   const [reloadRetry] = useState(() =>
     createRecordsReloadRetry((identity) => scopeIdentityRef.current === identity),
   )
-  useEffect(() => () => reloadRetry.reset(), [scopeIdentity, reloadRetry])
+  // One effect so setup and cleanup stay paired (Strict Mode: setup → cleanup →
+  // setup). Cleanup nulls the ref, so a callback first invoked after unmount or an
+  // identity change matches nothing; setup restores the live identity.
+  useEffect(() => {
+    scopeIdentityRef.current = scopeIdentity
+    return () => {
+      scopeIdentityRef.current = null
+      reloadRetry.reset()
+    }
+  }, [scopeIdentity, reloadRetry])
 
   /**
    * Re-read Records after a Build Studio confirmation/correction. `false` = not

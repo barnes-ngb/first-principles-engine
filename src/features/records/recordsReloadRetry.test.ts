@@ -137,6 +137,23 @@ describe('recordsReloadRetry — ordering', () => {
     expect(applied).toEqual([]) // the guard refused the apply
   })
 
+  it('an inactive identity invoked later registers nothing and cannot invalidate the current read', async () => {
+    const OLD = {}
+    const NEW = {}
+    const retry = createRecordsReloadRetry((identity) => identity === NEW)
+    const applied: string[] = []
+    const held = deferred<void>()
+    const oldRead = vi.fn(async () => 'applied' as ReloadOutcome)
+
+    const currentRun = retry.run(NEW, guardedRead('NEW', applied, held.promise, () => 'ok'))
+    expect(await retry.run(OLD, oldRead)).toBe('dropped') // retired closure, new invocation
+    expect(oldRead).not.toHaveBeenCalled() // never even read
+
+    held.resolve()
+    expect(await currentRun).toBe('applied') // its sequence was not taken from it
+    expect(applied).toEqual(['NEW'])
+  })
+
   it('reset also drops a retained retry', async () => {
     const retry = createRecordsReloadRetry(() => true)
     const applied: string[] = []

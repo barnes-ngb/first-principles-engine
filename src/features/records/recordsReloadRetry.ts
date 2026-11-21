@@ -124,6 +124,10 @@ export function createRecordsReloadRetry(isCurrent: (identity: object) => boolea
   }
 
   const exec = async (identity: object, read: ReloadRead): Promise<ReloadOutcome> => {
+    // An inactive identity (a retired closure invoked after the page moved on)
+    // registers nothing: no sequence, no in-flight count, no read. Taking a sequence
+    // here would invalidate the current scope's valid read.
+    if (!isCurrent(identity)) return 'dropped'
     // Taken synchronously, before the read's first await.
     const myEpoch = epoch
     const mySeq = ++seq

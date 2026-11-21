@@ -158,6 +158,8 @@ vi.mock('./compliancePackArchive', () => ({
 // The real gate (from the logic file, unmocked); a stub in place of the card body,
 // which has its own test file.
 const settleResults: boolean[] = []
+// The newest callback a card was handed, kept so a test can call it after unmount.
+let heldOnChanged: (() => Promise<boolean>) | null = null
 vi.mock('./BuildStudioHoursCard', () => ({
   default: (p: {
     familyId: string
@@ -165,7 +167,7 @@ vi.mock('./BuildStudioHoursCard', () => ({
     hoursEntries: unknown[]
     onChanged: () => Promise<boolean>
   }) => (
-    <div data-testid="bs-card">
+    <div data-testid="bs-card" ref={() => { heldOnChanged = p.onChanged }}>
       {p.familyId}/{p.childId}/{p.hoursEntries.length}
       {/* What the automatic worker calls after a credit settles. */}
       <button onClick={() => void p.onChanged().then((ok) => settleResults.push(ok))}>settled</button>
@@ -210,6 +212,18 @@ describe('Records — Build Studio rows and section', () => {
     await userEvent.click(settled)
     await waitFor(() => expect(settleResults).toEqual([true]))
     expect(hoursReads()).toBeGreaterThan(before)
+  })
+
+  it('a card callback first invoked after Records unmounted starts no read', async () => {
+    const { default: RecordsPage } = await import('./RecordsPage')
+    const { unmount } = render(<RecordsPage />)
+    await screen.findByTestId('bs-card')
+    expect(heldOnChanged).not.toBeNull()
+    const late = heldOnChanged!
+    const before = hoursReadsByFamily.length
+    unmount()
+    await expect(late()).resolves.toBe(false)
+    expect(hoursReadsByFamily.length).toBe(before)
   })
 
   it('a child profile on direct /records: no section, and the rows are dropped from the shared slice', async () => {
