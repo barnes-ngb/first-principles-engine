@@ -65,6 +65,10 @@ import { getSchoolYearRange } from '../../core/utils/time'
 import type { HomeschoolState } from '../../core/compliance/stateCompliance'
 import { parseDateFromDocId } from '../today/daylog.model'
 import BuildStudioHoursCard from './BuildStudioHoursCard'
+import {
+  createRecordsReloadRetry,
+  type ReloadOutcome,
+} from './recordsReloadRetry'
 import { buildStudioCardAllowed, type RecordsReadScope } from './buildStudioHoursCard.logic'
 import ComplianceDashboard from './ComplianceDashboard'
 import MonthlyTrend from './MonthlyTrend'
@@ -533,22 +537,38 @@ function HoursComplianceTab() {
     scopeIdentityRef.current = scopeIdentity
   }, [scopeIdentity])
 
+  // A failed re-read is retained and retried here, on the PAGE, so it survives the
+  // Build Studio card remounting for another child and a settle that arrives after
+  // the queue is empty. Reset on any identity change and on unmount.
+  const [reloadRetry] = useState(() =>
+    createRecordsReloadRetry((identity) => scopeIdentityRef.current === identity),
+  )
+  useEffect(() => () => reloadRetry.reset(), [scopeIdentity, reloadRetry])
+
   /**
    * Re-read Records after a Build Studio confirmation/correction. `false` = not
-   * refreshed. Checked before AND after the read; it survives the originating card
-   * unmounting, but not a family, range or parent-capability change.
+   * refreshed (the caller's immediate result and warning are unchanged). Checked
+   * before AND after the read against the coordinator's generation guard (still the
+   * latest request, no reset or unmount since, same identity), so an older read that
+   * answers late applies nothing; it survives the originating card unmounting, but
+   * not a family, range or parent-capability change. A read that FAILED while still
+   * the latest is also retained and retried automatically until it succeeds. The
+   * boolean is this call's own immediate result: `false` for a superseded read.
    */
   const refreshAfterBuildStudioChange = useCallback(async (): Promise<boolean> => {
-    if (!scopeIdentity.parentCapable || scopeIdentityRef.current !== scopeIdentity) return false
-    try {
-      const data = await fetchRecords()
-      if (scopeIdentityRef.current !== scopeIdentity) return false
-      applyRecords(data)
-      return true
-    } catch {
-      return false
-    }
-  }, [scopeIdentity, fetchRecords, applyRecords])
+    const outcome = await reloadRetry.run(scopeIdentity, async (isLatest): Promise<ReloadOutcome> => {
+      if (!scopeIdentity.parentCapable || !isLatest()) return 'dropped'
+      try {
+        const data = await fetchRecords()
+        if (!isLatest()) return 'dropped'
+        applyRecords(data)
+        return 'applied'
+      } catch {
+        return 'failed'
+      }
+    })
+    return outcome === 'applied'
+  }, [reloadRetry, scopeIdentity, fetchRecords, applyRecords])
 
   const showBuildStudioCard = buildStudioCardAllowed({
     canEdit,

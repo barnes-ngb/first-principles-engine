@@ -138,7 +138,9 @@ export function useBuildStudioAutoCredit({
           try {
             await (cancelled ? retiredNotify : onSettledRef.current)?.()
           } catch {
-            /* the credit is recorded; a failed refresh is the caller's to report */
+            /* the credit is recorded; the caller owns a failed refresh. The job is gone
+               and may be the last one, so nothing here would ask again: the Records page
+               retains the failed re-read and retries it itself (`recordsReloadRetry.ts`). */
           }
         }
         if (cancelled) return
