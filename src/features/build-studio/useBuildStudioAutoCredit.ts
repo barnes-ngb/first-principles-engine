@@ -3,9 +3,9 @@
  *
  * ── What it is, and what it is not ──────────────────────────────────────────
  *
- * A NEW eligible Apple Dash save leaves one tiny pending job
+ * A NEW eligible Apple Dash or Lantern Cove save leaves one tiny pending job
  * (`buildStudioCreditJobs`) in its own save transaction. This hook works that
- * queue for ONE child: while it is mounted it lists the child's pending jobs and
+ * queue for ONE child, whichever game a job names: while it is mounted it lists the child's pending jobs and
  * works them one at a time through `reconcileBuildStudioCreditJobsForChild`, which
  * composes the ordinary credit writer. It decides nothing itself.
  *

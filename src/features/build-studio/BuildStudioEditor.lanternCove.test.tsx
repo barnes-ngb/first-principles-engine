@@ -145,6 +145,8 @@ import {
   type BuildStudioSourceFiles,
   type BuildStudioVersion,
 } from '../../core/types/buildStudio'
+import { SubjectBucket } from '../../core/types/enums'
+import { BUILD_CHALLENGES, LANTERN_COVE_CHALLENGES } from './buildStudioChallenges'
 import { readPendingSave, resetPendingSaveStore } from './buildStudioPendingStore'
 import { starterSourceFiles } from './buildStudioStarter'
 import {
@@ -269,19 +271,35 @@ describe('opening the starter', () => {
     expect(typeof bridge.options.acceptsFiles).toBe('function')
   })
 
-  it('says it is a prepared starter, and suggests moving the hero’s starting spot', async () => {
+  it('says it is a prepared starter; the first-edit suggestion waits while the challenge card is the one assignment', async () => {
     await openReady(LANTERN_COVE_PROJECT_ID, lanternCoveStarterFiles())
     expect(screen.getByText(/This is a prepared starter game\. Walk around the cove/)).toBeInTheDocument()
+    // The card's first challenge IS that suggestion, so it is not said twice.
+    expect(screen.queryByText(/move your hero’s starting spot/)).not.toBeInTheDocument()
+    await act(async () => {
+      screen.getByText('Not now').click()
+    })
     expect(screen.getByText(/move your hero’s starting spot/)).toBeInTheDocument()
   })
 
-  it('draws none of Apple Dash’s surfaces: no challenge help, no numbers list, no reflection, no PNG', async () => {
+  it('draws its OWN challenge and reflection but none of Apple Dash’s surfaces: no lives hints, no numbers list, no PNG', async () => {
     await openReady(LANTERN_COVE_PROJECT_ID, lanternCoveStarterFiles())
-    expect(screen.queryByText('Say what you were trying (if you want to)')).not.toBeInTheDocument()
+    expect(screen.getByText('Move your starting spot.')).toBeInTheDocument()
+    expect(screen.queryByText('Make the hero faster.')).not.toBeInTheDocument()
+    expect(screen.getByText('Say what you were trying (if you want to)')).toBeInTheDocument()
     expect(screen.queryByText('Numbers you can change')).not.toBeInTheDocument()
     expect(screen.queryByText('💡 Hint')).not.toBeInTheDocument()
     expect(screen.queryByText(/starter project file/)).not.toBeInTheDocument()
+  })
+
+  it('after the challenge is set aside, free building returns with no Apple Dash lives goal or hint', async () => {
+    await openReady(LANTERN_COVE_PROJECT_ID, lanternCoveStarterFiles())
+    await act(async () => {
+      screen.getByText('Not now').click()
+    })
     expect(screen.getByText('Change the game any way you like.')).toBeInTheDocument()
+    expect(screen.queryByText('🔊 Hear it')).not.toBeInTheDocument()
+    expect(screen.queryByText(/💡 Hint \(/)).not.toBeInTheDocument()
   })
 
   it('control: Apple Dash binds on its own name, enforces nothing extra, and keeps every surface', async () => {
@@ -306,9 +324,8 @@ describe('opening the starter', () => {
 })
 
 describe('saving', () => {
-  it('Lantern Cove: not credit-eligible, no challenge record, no goal id — and Apple Dash on the same path IS eligible', async () => {
-    // Positive control first: if Apple Dash stopped being creditable the Lantern
-    // Cove assertion below would prove nothing.
+  it('Lantern Cove: credit-eligible like Apple Dash, but with no challenge record and no Apple Dash goal id unless a prediction is saved', async () => {
+    // Positive control first: Apple Dash on the same path is eligible too.
     const apple = await openReady('apple-dash-starter', starterSourceFiles())
     await tapSave()
     await waitFor(() => expect(saveVersion).toHaveBeenCalledTimes(1))
@@ -325,8 +342,10 @@ describe('saving', () => {
     await waitFor(() => expect(saveVersion).toHaveBeenCalledTimes(1))
     const args = saveVersion.mock.calls[0][0]
     expect(args.projectId).toBe(LANTERN_COVE_PROJECT_ID)
-    expect(args.creditEligible).toBe(false)
+    expect(args.creditEligible).toBe(true)
     expect(args.files).toEqual(movedHero())
+    // A merely visible invitation records nothing; Apple Dash's lives goal is not
+    // this game's, so an ordinary save carries no goal id at all.
     expect('challengeAttempt' in args).toBe(false)
     expect(args.goalId).toBeUndefined()
     await waitFor(() =>
@@ -372,7 +391,7 @@ describe('saving', () => {
     expect(retried.label).toBe('Cove at dusk')
     expect(retried.files).toEqual(movedHero())
     expect(retried.projectId).toBe(LANTERN_COVE_PROJECT_ID)
-    expect(retried.creditEligible).toBe(false)
+    expect(retried.creditEligible).toBe(true)
     // A retry re-sends the held bytes; it does not re-read the editor.
     expect(bridge.captures).toBe(capturesBeforeRetry)
     await waitFor(() => expect(readPendingSave(COVE)).toBeNull())
@@ -454,5 +473,48 @@ describe('reopening a saved Lantern Cove', () => {
     // Nothing was opened, so nothing can be saved over the saved game.
     expect(saveVersion).not.toHaveBeenCalled()
     expect(screen.queryByText(/prepared starter game/)).not.toBeInTheDocument()
+  })
+})
+
+describe('the five Lantern Cove challenges through the editor (slice 4)', () => {
+  it('a prediction is frozen with the exact save, scoped to Lantern Cove, with its authored subject and revision', async () => {
+    const { bridge } = await openReady(LANTERN_COVE_PROJECT_ID, lanternCoveStarterFiles())
+    await act(async () => {
+      screen.getByText('Left').click()
+    })
+    bridge.nextCapture = movedHero()
+    await tapSave()
+    await waitFor(() => expect(saveVersion).toHaveBeenCalledTimes(1))
+    const args = saveVersion.mock.calls[0][0]
+    expect(args.projectId).toBe(LANTERN_COVE_PROJECT_ID)
+    expect(args.creditEligible).toBe(true)
+    expect(args.goalId).toBe('move-your-starting-spot')
+    expect(args.challengeAttempt).toMatchObject({
+      childId: CHILD,
+      projectId: LANTERN_COVE_PROJECT_ID,
+      versionId: args.versionId,
+      challengeId: 'move-your-starting-spot',
+      challengeRevision: 1,
+      subjectBucket: SubjectBucket.PracticalArts,
+      prediction: { optionId: 'left' },
+    })
+  })
+
+  it('Try a different one walks Lantern Cove’s own five and never lands on an Apple Dash challenge', async () => {
+    await openReady(LANTERN_COVE_PROJECT_ID, lanternCoveStarterFiles())
+    const seen: string[] = []
+    for (const challenge of LANTERN_COVE_CHALLENGES) {
+      expect(screen.getByText(challenge.goal)).toBeInTheDocument()
+      seen.push(challenge.id)
+      await act(async () => {
+        screen.getByText('🔀 A different one').click()
+      })
+    }
+    // Five swaps wrap back to the first, and no Apple Dash goal ever appeared.
+    expect(screen.getByText(LANTERN_COVE_CHALLENGES[0].goal)).toBeInTheDocument()
+    expect(seen).toHaveLength(5)
+    for (const apple of BUILD_CHALLENGES) {
+      expect(screen.queryByText(apple.goal)).not.toBeInTheDocument()
+    }
   })
 })

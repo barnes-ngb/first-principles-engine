@@ -153,10 +153,11 @@ import {
   type ChallengeAttemptState,
 } from './buildStudioChallengeAttempt'
 import {
-  challengeById,
+  challengeFor,
   challengeSpeech,
   DEFAULT_BUILD_CHALLENGE,
-  nextChallenge,
+  defaultChallengeFor,
+  nextChallengeFor,
   type BuildChallenge,
 } from './buildStudioChallenges'
 import {
@@ -623,8 +624,14 @@ export default function BuildStudioEditor({
   // UI state only: nothing here is written until an explicit Save freezes a copy
   // into that Save's payload. The selected challenge survives a visit change;
   // the ATTEMPT does not, because it was about the game that was open.
-  const [challengeId, setChallengeId] = useState(DEFAULT_BUILD_CHALLENGE.id)
-  const challenge = challengeById(challengeId) ?? DEFAULT_BUILD_CHALLENGE
+  //
+  // The catalog is the GAME's own (`game.projectId`): a challenge id is only ever
+  // read against the project it was authored for. A game with no catalog never
+  // renders the card, so the Apple Dash default below is only a type-level fallback.
+  const challengeProjectRef = useRef(game.projectId)
+  const firstChallenge = defaultChallengeFor(game.projectId) ?? DEFAULT_BUILD_CHALLENGE
+  const [challengeId, setChallengeId] = useState(firstChallenge.id)
+  const challenge = challengeFor(game.projectId, challengeId) ?? firstChallenge
   const challengeIdRef = useRef(challengeId)
   const [challengeDismissed, setChallengeDismissed] = useState(false)
   const challengeDismissedRef = useRef(false)
@@ -637,7 +644,7 @@ export default function BuildStudioEditor({
    */
   const challengeHintsRef = useRef<Set<string>>(new Set())
   const [challengeState, setChallengeState] = useState<ChallengeAttemptState>(() =>
-    startAttempt(DEFAULT_BUILD_CHALLENGE, newChallengeAttemptId(Date.now(), Math.random())),
+    startAttempt(firstChallenge, newChallengeAttemptId(Date.now(), Math.random())),
   )
   /** Readable synchronously: a Play tap and a Save can land in one tick. */
   const attemptRef = useRef<ChallengeAttemptState>(challengeState)
@@ -1125,7 +1132,9 @@ export default function BuildStudioEditor({
     // frozen keeps its own copy in its payload.
     putAttempt(
       startAttempt(
-        challengeById(challengeIdRef.current) ?? DEFAULT_BUILD_CHALLENGE,
+        challengeFor(challengeProjectRef.current, challengeIdRef.current) ??
+          defaultChallengeFor(challengeProjectRef.current) ??
+          DEFAULT_BUILD_CHALLENGE,
         newChallengeAttemptId(Date.now(), Math.random()),
       ),
     )
@@ -1509,12 +1518,16 @@ export default function BuildStudioEditor({
       })
       if (frozen.state && frozen.state !== attemptRef.current) putAttempt(frozen.state)
       // A challenge goal is chosen only when an actual attempt is saved. A
-      // merely visible invitation never labels a game; an ordinary save keeps
-      // the legacy fixed goal.
-      const goalId = frozen.attempt ? frozen.attempt.challengeId : BUILD_STUDIO_GOAL.id
-      return frozen.attempt ? { challengeAttempt: frozen.attempt, goalId } : { goalId }
+      // merely visible invitation never labels a game; an ordinary Apple Dash
+      // save keeps the legacy fixed goal. That goal is about Apple Dash's lives,
+      // so a game without it (Lantern Cove) records no goal at all unless a
+      // challenge attempt is saved.
+      if (frozen.attempt) {
+        return { challengeAttempt: frozen.attempt, goalId: frozen.attempt.challengeId }
+      }
+      return game.hasLivesGoal ? { goalId: BUILD_STUDIO_GOAL.id } : {}
     },
-    [scope.childId, scope.projectId, putAttempt, game.hasChallenge],
+    [scope.childId, scope.projectId, putAttempt, game.hasChallenge, game.hasLivesGoal],
   )
 
   const handleSave = useCallback(async () => {
@@ -2067,7 +2080,7 @@ export default function BuildStudioEditor({
 
   const handleChallengePredict = useCallback(
     (optionId: string) => {
-      const live = challengeById(challengeIdRef.current)
+      const live = challengeFor(challengeProjectRef.current, challengeIdRef.current)
       if (!live) return
       putAttempt(withPrediction(attemptRef.current, live, optionId, new Date().toISOString()))
     },
@@ -2092,14 +2105,20 @@ export default function BuildStudioEditor({
   const applyDisposal = useCallback(
     (kind: 'swap' | 'dismiss') => {
       setDisposal(null)
+      const project = challengeProjectRef.current
       if (kind === 'swap') {
-        beginAttempt(nextChallenge(challengeIdRef.current))
+        const next = nextChallengeFor(project, challengeIdRef.current)
+        if (next) beginAttempt(next)
         return
       }
       challengeDismissedRef.current = true
       setChallengeDismissed(true)
       // Declining the invitation discards an unsaved guess; it records nothing.
-      beginAttempt(challengeById(challengeIdRef.current) ?? DEFAULT_BUILD_CHALLENGE)
+      beginAttempt(
+        challengeFor(project, challengeIdRef.current) ??
+          defaultChallengeFor(project) ??
+          DEFAULT_BUILD_CHALLENGE,
+      )
     },
     [beginAttempt],
   )
@@ -2672,7 +2691,10 @@ export default function BuildStudioEditor({
         )}
         {/* A suggestion for the game's FIRST edit, on the starter only. Nothing
             records whether it was done. */}
-        {game.firstEditPrompt && !visit.version && !visit.recovery && (
+        {game.firstEditPrompt &&
+          !visit.version &&
+          !visit.recovery &&
+          (challengeDismissed || !game.hasChallenge) && (
           <Typography variant="body2">{game.firstEditPrompt}</Typography>
         )}
         {/* Which game this is, said plainly — because "reopened my own save"
@@ -2690,7 +2712,7 @@ export default function BuildStudioEditor({
       </Stack>
 
       <Stack direction="row" spacing={1} flexWrap="wrap" rowGap={1}>
-        {challengeDismissed && game.hasChallenge && (
+        {challengeDismissed && game.hasChallenge && game.hasLivesGoal && (
           <>
             <Button
               variant="outlined"
@@ -2742,7 +2764,7 @@ export default function BuildStudioEditor({
         </Button>
       </Stack>
 
-      {challengeDismissed && game.hasChallenge && currentHint && (
+      {challengeDismissed && game.hasChallenge && game.hasLivesGoal && currentHint && (
         <Alert severity="info" icon={false}>
           {currentHint.text}
         </Alert>
@@ -3035,9 +3057,10 @@ export default function BuildStudioEditor({
       </Stack>
 
       {/* ── The optional reflection ────────────────────────────────────
-          Apple Dash only. It files an `artifacts` note, which is evidence, and
-          Lantern Cove records none (FEAT-247) — so for that game the section
-          does not exist rather than existing and doing nothing. */}
+          Files an `artifacts` note about the exact acknowledged version, in
+          every game whose descriptor offers it (Apple Dash and, since slice 4,
+          Lantern Cove). A game without it has no section rather than one that
+          does nothing. */}
       {game.hasReflection && (
       <>
       <Divider />
@@ -3313,8 +3336,9 @@ export default function BuildStudioEditor({
       {/* ── The numbers worth changing. Read-only, on purpose. ────────
           Apple Dash's list (lives, speed, apples). Another game has its own
           numbers in its own blocks, and naming Apple Dash's there would send a
-          child looking for blocks his game does not have. */}
-      {game.hasChallenge && (
+          child looking for blocks his game does not have. Keyed on the lives
+          goal, NOT on `hasChallenge`: Lantern Cove has challenges of its own. */}
+      {game.hasLivesGoal && (
       <>
       <Divider />
       <Stack spacing={1}>

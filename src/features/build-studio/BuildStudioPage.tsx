@@ -256,7 +256,10 @@ export default function BuildStudioPage() {
         familyId={familyId}
         childId={activeChildId}
         enabled
-        nudgeKey={shelfIsCurrent ? versions.versions.length : -1}
+        // Every saved row of THIS child, across both games: a new Lantern Cove
+        // save leaves a pending credit job exactly as an Apple Dash one does, and
+        // the worker's queue is the child's, not the open shelf's.
+        nudgeKey={shelfIsCurrent ? (versions.childRows ?? versions.versions).length : -1}
       />
       {outOfScope && (
         <Alert severity="warning">

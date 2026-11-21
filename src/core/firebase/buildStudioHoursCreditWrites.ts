@@ -113,8 +113,9 @@ import {
   type Transaction,
 } from 'firebase/firestore'
 
-import { challengeById } from '../../features/build-studio/buildStudioChallenges'
+import { challengeFor } from '../../features/build-studio/buildStudioChallenges'
 import { BUILD_STUDIO_PROJECT_ID } from '../../features/build-studio/buildStudioStarter'
+import { LANTERN_COVE_PROJECT_ID, LANTERN_COVE_PROJECT_NAME } from '../../features/build-studio/lanternCoveStarter'
 import {
   buildCreditProposal,
   choosePredecessor,
@@ -125,6 +126,7 @@ import {
   creditReceiptId,
   decideAdmission,
   isCreditPathId,
+  isCreditProject,
   isSchoolDate,
   NEIGHBOUR_DAYS,
   parseCreditDay,
@@ -338,11 +340,14 @@ function parseReceipt(data: unknown, scope: CreditScope): BuildStudioSettledCred
 
 /** What the parent reads on the Records row. Short, and says only what was proven. */
 function creditNote(source: VersionCreditSource): string {
+  // Apple Dash's wording is unchanged; Lantern Cove's rows name their game so the
+  // two read apart on one Records card. The goal comes from the source's OWN game.
+  const game = source.projectId === LANTERN_COVE_PROJECT_ID ? ` (${LANTERN_COVE_PROJECT_NAME})` : ''
   if (source.kind === 'challenge') {
-    const goal = challengeById(source.challengeId)?.goal
-    return goal ? `Build Studio challenge: ${goal}` : 'Build Studio challenge'
+    const goal = challengeFor(source.projectId, source.challengeId)?.goal
+    return goal ? `Build Studio challenge: ${goal}${game}` : `Build Studio challenge${game}`
   }
-  return 'Build Studio: changed own game'
+  return `Build Studio: changed own game${game}`
 }
 
 // ── Predecessor lookup ──────────────────────────────────────────────────────
@@ -714,7 +719,7 @@ export async function correctBuildStudioCreditHours(
  * The exact version a credit names — never a newer one, never another child's.
  *
  * `provenance` is the FULL provenance the credit's `hours` row recorded. Its
- * schema, project (Apple Dash), `versionDocId` and `receiptId` must equal the
+ * schema, project (an EDITABLE credit game — never a play-only link), `versionDocId` and `receiptId` must equal the
  * deterministic ids of the SELECTED child and the recorded project and version;
  * the document is then read from the server and must agree with every part of it.
  * A credited link to an older authored revision still opens its exact archived
@@ -735,12 +740,14 @@ export async function readBuildStudioCreditedVersion(args: {
   }
   const { projectId, versionId } = provenance
   const id = buildStudioVersionDocId(childId, projectId, versionId)
-  // The recorded provenance must be THIS child's, for Apple Dash, and name this
-  // scope's deterministic ids. A link recorded for a sibling never opens here,
-  // even if this child has a save with the same version id.
+  // The recorded provenance must be THIS child's, for a credit-eligible editable
+  // game, and name this scope's deterministic ids. A link recorded for a sibling
+  // never opens here, even if this child has a save with the same version id, and
+  // a project outside the editable-credit list (a play-only game, a foreign id)
+  // has no saved version to open at all.
   if (
     provenance.schema !== 1 ||
-    projectId !== BUILD_STUDIO_PROJECT_ID ||
+    !isCreditProject(projectId) ||
     provenance.versionDocId !== id ||
     provenance.receiptId !== creditReceiptId(childId, projectId, versionId)
   ) {
@@ -770,7 +777,7 @@ export async function readBuildStudioCreditedVersion(args: {
   if (data.childId !== childId || data.projectId !== projectId || data.versionId !== versionId) {
     return { status: 'malformed', reason: 'bad-identity' }
   }
-  if (!validatedArchiveFiles(data)) return { status: 'malformed', reason: 'bad-archive' }
+  if (!validatedArchiveFiles(data, projectId)) return { status: 'malformed', reason: 'bad-archive' }
 
   if (provenance.kind === 'challenge') {
     const attempt = normalizeChallengeAttempt(data.challengeAttempt)
@@ -957,7 +964,7 @@ const unprovenResult = (
  * job there is no work: a save made before this existed is never previewed here.
  */
 export async function reconcileBuildStudioCreditJob(scope: CreditScope): Promise<CreditJobResult> {
-  if (!validScope(scope) || scope.projectId !== BUILD_STUDIO_PROJECT_ID) return { status: 'invalid' }
+  if (!validScope(scope) || !isCreditProject(scope.projectId)) return { status: 'invalid' }
   const exact: CreditScope = {
     familyId: scope.familyId,
     childId: scope.childId,

@@ -265,17 +265,19 @@ describe('the starter check is stricter than "complete", and only for the starte
 })
 
 describe('the descriptors', () => {
-  it('Apple Dash stays creditable and Lantern Cove does not', () => {
+  it('both editable games are creditable (slice 4)', () => {
     expect(APPLE_DASH_GAME.creditEligible).toBe(true)
-    expect(LANTERN_COVE_GAME.creditEligible).toBe(false)
+    expect(LANTERN_COVE_GAME.creditEligible).toBe(true)
   })
 
-  it('Lantern Cove has no challenge, no reflection and no PNG fallback; Apple Dash keeps all three', () => {
-    expect(LANTERN_COVE_GAME.hasChallenge).toBe(false)
-    expect(LANTERN_COVE_GAME.hasReflection).toBe(false)
+  it('Lantern Cove has its own challenge and reflection but no lives goal and no PNG fallback; Apple Dash keeps all of them', () => {
+    expect(LANTERN_COVE_GAME.hasChallenge).toBe(true)
+    expect(LANTERN_COVE_GAME.hasReflection).toBe(true)
+    expect(LANTERN_COVE_GAME.hasLivesGoal).toBe(false)
     expect(LANTERN_COVE_GAME.starterFallbackUrl).toBeNull()
     expect(APPLE_DASH_GAME.hasChallenge).toBe(true)
     expect(APPLE_DASH_GAME.hasReflection).toBe(true)
+    expect(APPLE_DASH_GAME.hasLivesGoal).toBe(true)
     expect(APPLE_DASH_GAME.starterFallbackUrl).toBe('/build-studio/apple-dash-starter.png')
   })
 

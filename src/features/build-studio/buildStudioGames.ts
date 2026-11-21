@@ -20,11 +20,11 @@
  * ── What a descriptor decides, and what it must not ─────────────────────────
  *
  * It decides which source a game starts from, what "this arrived whole" means
- * for it, whether it carries the Apple Dash challenge/reflection surfaces, and
- * whether a NEW save is eligible for automatic hours credit. That last flag is
- * only the editor's half of a fence: the writer independently refuses to stamp
- * or queue credit for any project but Apple Dash, so a descriptor mistake cannot
- * credit anything.
+ * for it, whether it carries a challenge/reflection surface, and whether a NEW
+ * save is eligible for automatic hours credit. That last flag is only the
+ * editor's half of a fence: the writer independently refuses to stamp or queue
+ * credit for any project outside `CREDIT_PROJECT_IDS`, so a descriptor mistake
+ * cannot credit an unrecognised game.
  */
 
 import {
@@ -90,13 +90,24 @@ export interface EditableGame {
   firstEditPrompt: string | null
   /** The MakeCode project file for a grown-up fallback, when one was prepared. */
   starterFallbackUrl: string | null
-  /** Apple Dash's authored Build Challenge, hints and tuning list. */
+  /**
+   * This game's authored Build Challenges (`buildStudioChallenges.ts`, one catalog
+   * per project): the optional card with Hear it, a prediction, Play, a reported
+   * result, swap and skip, frozen with the exact version it was saved in.
+   */
   hasChallenge: boolean
+  /**
+   * Apple Dash's fixed "extra life" goal, its Hear it / Hint buttons and the
+   * legacy goal id an ordinary save carries. Read from the source's life value,
+   * so it belongs to Apple Dash alone.
+   */
+  hasLivesGoal: boolean
   /** The optional spoken/typed reflection, which files an `artifacts` note. */
   hasReflection: boolean
   /**
-   * May a NEW save of this game be stamped for automatic hours credit?
-   * Apple Dash only. See the module note: the writer fences this again.
+   * May a NEW save of this game be stamped for automatic hours credit? Apple Dash
+   * and Lantern Cove. See the module note: the writer fences this again, against
+   * the one list of credit projects (`CREDIT_PROJECT_IDS`).
    */
   creditEligible: boolean
 }
@@ -128,11 +139,15 @@ export const APPLE_DASH_GAME: EditableGame = {
   firstEditPrompt: null,
   starterFallbackUrl: STARTER_PROJECT_PNG_URL,
   hasChallenge: true,
+  hasLivesGoal: true,
   hasReflection: true,
   creditEligible: true,
 }
 
-/** Lantern Cove — a native-tilemap walk-around, saved but never credited. */
+/**
+ * Lantern Cove — a native-tilemap walk-around with its own five challenges, saved
+ * versions, optional reflection and the same automatic hours credit as Apple Dash.
+ */
 export const LANTERN_COVE_GAME: EditableGame = {
   id: 'lantern-cove',
   title: 'Lantern Cove',
@@ -148,9 +163,10 @@ export const LANTERN_COVE_GAME: EditableGame = {
   starterVisitLine: LANTERN_COVE_STARTER_LINE,
   firstEditPrompt: LANTERN_COVE_FIRST_EDIT_PROMPT,
   starterFallbackUrl: null,
-  hasChallenge: false,
-  hasReflection: false,
-  creditEligible: false,
+  hasChallenge: true,
+  hasLivesGoal: false,
+  hasReflection: true,
+  creditEligible: true,
 }
 
 /** Order is the order the chooser draws them. Apple Dash stays first. */

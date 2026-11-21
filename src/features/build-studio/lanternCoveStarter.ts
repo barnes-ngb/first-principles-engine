@@ -33,13 +33,20 @@
  *
  * {@link lanternCoveStarterLooksCorrect} asks whether the STARTER arrived. It is
  * stricter, and it runs exactly once per starter visit, before anything is
- * touched, for the same reason `starterImportLooksCorrect` does.
+ * touched, for the same reason `starterImportLooksCorrect` does. It keeps the
+ * scaffold checks below AND compares all five returned sources with the staged
+ * starter (`lanternCoveFidelity.ts`), forgiving only the differences stock
+ * MakeCode's own serialisation produces — so a separately changed `main.ts`, an
+ * altered Blocks value, rule or asset, or a corrupt map or wall layer closes the
+ * controls even though the scaffold survived.
  *
- * Neither function compares bytes with the staged files: a round trip through
- * MakeCode re-serializes, and a child's edit is the whole point.
+ * {@link lanternCoveArchiveComplete} never compares bytes with the staged files: a
+ * child's edit is the whole point, so a reopened save, a recovery file and a
+ * capture are judged for completeness alone.
  */
 
 import type { BuildStudioSourceFiles } from '../../core/types/buildStudio'
+import { compareLanternCoveToStarter } from './lanternCoveFidelity'
 import STARTER_BLOCKS from './starters/lantern-cove/main.blocks?raw'
 import STARTER_MAIN_TS from './starters/lantern-cove/main.ts.txt?raw'
 import STARTER_PXT_JSON from './starters/lantern-cove/pxt.json?raw'
@@ -290,5 +297,21 @@ export function lanternCoveStarterLooksCorrect(files: BuildStudioSourceFiles): b
 
   const jres = parseJsonObject(files['tilemap.g.jres'])
   if (!jres) return false
-  return tilemapEntries(jres).some((map) => map.id === 'Lantern Cove1')
+  if (!tilemapEntries(jres).some((map) => map.id === 'Lantern Cove1')) return false
+
+  // The scaffold above can survive a changed value, a changed rule, a swapped
+  // asset or a corrupted map. The last word is the prepared starter itself,
+  // compared file by file with only MakeCode's own re-serialisation forgiven.
+  return lanternCoveStarterProblem(files) === null
+}
+
+/**
+ * Why the returned sources are not the prepared starter — or `null` when all five
+ * match it after only the known stock serialisation differences. The reason names
+ * the first file that differs; it is for tests and diagnostics, never a child.
+ */
+export function lanternCoveStarterProblem(files: BuildStudioSourceFiles): string | null {
+  const report = compareLanternCoveToStarter(files, lanternCoveStarterFiles())
+  const bad = report.files.find((f) => f.status !== 'identical' && f.status !== 'equivalent')
+  return bad ? `${bad.file}:${bad.status}` : null
 }
