@@ -91,7 +91,14 @@ class FakeBridge {
         { kind: 'bad-project', tooBig: false },
       )
     }
-    return { header: { id: 'h1', name: this.options.projectName, targetVersion: '0.0.0' }, files }
+    const project: FakeProject = {
+      header: { id: 'h1', name: this.options.projectName, targetVersion: '0.0.0' },
+      files,
+    }
+    // The real bridge accepts the workspace save and announces it through
+    // onEditorSave with this file map BEFORE it resolves the capture ACK.
+    this.options.onEditorSave?.(project)
+    return project
   }
   dispose() {
     this.disposed = true
@@ -431,11 +438,19 @@ describe('reopening a saved Lantern Cove', () => {
       'main.ts': movedHero()['main.ts'],
       'main.blocks': lanternCoveStarterFiles()['main.blocks'],
     }
-    const { bridge } = await open(LANTERN_COVE_PROJECT_ID, lanternCoveStarterFiles(), storedVersion(mapless))
+    // Mount and handshake only: the refusal happens BEFORE any import or capture,
+    // so the positive `open` helper (which waits for a capture) does not apply.
+    render(element(LANTERN_COVE_PROJECT_ID, storedVersion(mapless)))
+    const bridge = bridges[bridges.length - 1]
+    bridge.nextCapture = lanternCoveStarterFiles()
+    await act(async () => {
+      bridge.ready()
+    })
     await waitFor(() =>
       expect(screen.getByText(LANTERN_COVE_ARCHIVE_INCOMPLETE)).toBeInTheDocument(),
     )
     expect(bridge.imported).toHaveLength(0)
+    expect(bridge.captures).toBe(0)
     // Nothing was opened, so nothing can be saved over the saved game.
     expect(saveVersion).not.toHaveBeenCalled()
     expect(screen.queryByText(/prepared starter game/)).not.toBeInTheDocument()

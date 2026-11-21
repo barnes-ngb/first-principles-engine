@@ -85,7 +85,7 @@ export const LANTERN_COVE_FIRST_EDIT_PROMPT =
 
 /** Said when the starter did not arrive whole. The ORIGINAL starter, named as such. */
 export const LANTERN_COVE_STARTER_NOT_READY =
-  'The Lantern Cove starter did not open properly, so saving is turned off. Nothing is lost — your saved games are still on your shelf. Try again, or ask a grown-up.'
+  'The Lantern Cove starter did not open properly, so saving is turned off. Nothing is lost — your saved games are still on your shelf. Reload Build Studio to try again.'
 
 /** Said when a saved or opened game is missing part of itself. */
 export const LANTERN_COVE_ARCHIVE_INCOMPLETE =

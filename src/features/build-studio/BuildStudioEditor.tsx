@@ -1164,11 +1164,13 @@ export default function BuildStudioEditor({
       setPhase(EditorPhase.Failed)
       setProjectReady(false)
       setOpenFailure(
-        'The editor did not open in time. Nothing of yours was lost — tap Try again, or a grown-up can open the starter directly.',
+        game.starterFallbackUrl
+          ? 'The editor did not open in time. Nothing of yours was lost — tap Try again, or a grown-up can open the starter directly.'
+          : 'The editor did not open in time. Nothing of yours was lost — tap Try again.',
       )
     }, ARCADE_OPENING_TIMEOUT_MS)
     return () => clearTimeout(timer)
-  }, [liveSession, loadedToken, token])
+  }, [game.starterFallbackUrl, liveSession, loadedToken, token])
 
   /** Start a brand new visit on the same source — the Try again door. */
   const reopenCurrent = useCallback(() => {
@@ -1247,7 +1249,9 @@ export default function BuildStudioEditor({
           // something this page cannot read back.
           setProjectReady(false)
           setAdvisory(
-            'The editor opened but this page could not read the game back, so saving is turned off for now. Use the starter download below, or reload the page.',
+            game.starterFallbackUrl
+              ? 'The editor opened but this page could not read the game back, so saving is turned off for now. Use the starter download below, or reload the page.'
+              : 'The editor opened but this page could not read the game back, so Save is unavailable for now. Reload Build Studio to try opening the game again. Your previous versions are safe.',
           )
           return
         }
