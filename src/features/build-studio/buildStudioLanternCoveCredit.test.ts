@@ -253,7 +253,7 @@ describe('Lantern Cove challenge credit', () => {
 
   it('a challenge without a prediction is never laundered into free building', () => {
     const v = versionDoc(COVE, 'v-aaa111', movedHero(), {
-      attempt: attemptFor(COVE, 'v-aaa111', 'move-your-starting-spot', 'left', { prediction: undefined, reportedOutcome: undefined }),
+      attempt: attemptFor(COVE, 'v-aaa111', 'move-your-starting-spot', 'left', { prediction: undefined, reportedOutcome: undefined, playRequest: { at: '2026-11-20T15:51:00.000Z' } }),
     })
     expect(prove(COVE, v, { kind: 'starter' })).toEqual({ ok: false, reason: 'challenge-unverified' })
   })
