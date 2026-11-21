@@ -9,27 +9,34 @@ import type { BuildStudioCreditProvenance } from '../../core/types/buildStudio'
 /**
  * Parent Records: Build Studio hours card.
  *
- * Boundaries mocked: the four guarded writer operations and the versions hook.
- * What is under test is the card's own contract — gating, the propose → confirm →
- * write order, same-proposal retry, exact-version links, and that no answer from a
- * retired request or another child is ever shown.
+ * Credit is automatic now, so the card has NO review or approve control. Boundaries
+ * mocked: the guarded writer's correction/read operations and the automatic worker
+ * (its own lifecycle is tested in `useBuildStudioAutoCredit.test.tsx`). What is under
+ * test is the card's own contract — gating, that the worker is mounted for exactly
+ * this family and child and a settlement refreshes Records, exact-version links, the
+ * parent's correction, and that no answer from a retired request or another child is
+ * ever shown.
  */
 
-const preview = vi.fn()
-const confirm = vi.fn()
 const correct = vi.fn()
 const readVersion = vi.fn()
 vi.mock('../../core/firebase/buildStudioHoursCreditWrites', () => ({
-  previewBuildStudioCredit: (...a: unknown[]) => preview(...a),
-  confirmBuildStudioCredit: (...a: unknown[]) => confirm(...a),
   correctBuildStudioCreditHours: (...a: unknown[]) => correct(...a),
   readBuildStudioCreditedVersion: (...a: unknown[]) => readVersion(...a),
 }))
 
-const mockVersions = vi.fn()
-vi.mock('../build-studio/useBuildStudioVersions', () => ({
-  VersionsStatus: { Loading: 'loading', Ready: 'ready', Failed: 'failed' },
-  useBuildStudioVersions: (...a: unknown[]) => mockVersions(...a),
+interface WorkerProps {
+  familyId: string
+  childId: string
+  enabled: boolean
+  onSettled?: () => unknown
+}
+const workerMounts: WorkerProps[] = []
+vi.mock('../build-studio/BuildStudioAutoCredit', () => ({
+  default: (props: WorkerProps) => {
+    workerMounts.push(props)
+    return null
+  },
 }))
 
 vi.mock('../build-studio/buildStudioExport', () => ({
@@ -41,11 +48,6 @@ import BuildStudioHoursCard from './BuildStudioHoursCard'
 import { buildStudioCardAllowed } from './buildStudioHoursCard.logic'
 
 const PROJECT = 'apple-dash-starter'
-const retry = vi.fn()
-
-function ts(iso: string) {
-  return { toMillis: () => Date.parse(iso) }
-}
 
 function version(childId: string, versionId: string, over: Record<string, unknown> = {}) {
   return {
@@ -59,13 +61,8 @@ function version(childId: string, versionId: string, over: Record<string, unknow
     byteSize: 10,
     fileCount: 2,
     sourceDigest: 'abc123',
-    acceptedAt: ts('2026-11-20T15:00:01.000Z'),
     ...over,
   }
-}
-
-function setVersions(childId: string, versions: unknown[], status = 'ready') {
-  mockVersions.mockReturnValue({ status, versions, childId, projectId: PROJECT, error: null, retry })
 }
 
 const prov = (childId: string, versionId: string, over: Partial<BuildStudioCreditProvenance> = {}): BuildStudioCreditProvenance => ({
@@ -95,25 +92,6 @@ function row(childId: string, versionId: string, over: Partial<HoursEntry> = {})
   } as HoursEntry
 }
 
-const proposal = (childId = 'lincoln', versionId = 'v-aaa111') => ({
-  familyId: 'fam-1',
-  childId,
-  projectId: PROJECT,
-  versionId,
-  versionDocId: `${childId}__${PROJECT}__${versionId}`,
-  source: { kind: 'freeBuild', projectId: PROJECT, versionId },
-  workMs: Date.parse('2026-11-20T15:00:01.000Z'),
-  timeZone: 'America/Chicago',
-  schoolDate: '2026-11-20',
-  minutes: 15,
-  subjectBucket: 'PracticalArts',
-  predecessorDocId: null,
-  sourceDigest: 'abc123',
-  baselineDigest: null,
-})
-
-const receipt = { minutes: 15, subjectBucket: 'PracticalArts', schoolDate: '2026-11-20' }
-
 function card(over: Partial<ComponentProps<typeof BuildStudioHoursCard>> = {}) {
   return (
     <BuildStudioHoursCard
@@ -131,7 +109,7 @@ function card(over: Partial<ComponentProps<typeof BuildStudioHoursCard>> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  setVersions('lincoln', [])
+  workerMounts.length = 0
 })
 
 describe('buildStudioCardAllowed — every term is affirmative', () => {
@@ -175,252 +153,67 @@ describe('buildStudioCardAllowed — every term is affirmative', () => {
 })
 
 describe('card visibility', () => {
-  it('renders nothing for a child with no eligible saves or credits', () => {
+  it('renders nothing visible for a child with no credits', () => {
     const { container } = render(card())
     expect(container).toBeEmptyDOMElement()
   })
 
-  it('does not offer an older save that carries no server acceptance time', () => {
-    setVersions('lincoln', [version('lincoln', 'v-old1111', { acceptedAt: undefined })])
-    const { container } = render(card())
-    expect(container).toBeEmptyDOMElement()
-  })
-
-  it('does not offer a save that already has its credit row showing', () => {
-    setVersions('lincoln', [version('lincoln', 'v-aaa111')])
-    const { container } = render(card({ hoursEntries: [row('lincoln', 'v-aaa111')] }))
-    expect(screen.queryByText('New saves to review')).not.toBeInTheDocument()
-    expect(container).not.toBeEmptyDOMElement() // the credited row is there
-  })
-
-  it('says a failed read failed, with Retry, and does not claim there is nothing', async () => {
-    setVersions('lincoln', [], 'failed')
-    render(card())
-    expect(screen.getByText(/couldn.t check lincoln.s saved games/i)).toBeInTheDocument()
-    await userEvent.click(screen.getByRole('button', { name: 'Retry' }))
-    expect(retry).toHaveBeenCalledTimes(1)
-  })
-
-  it('ignores an answer that is about another child', () => {
-    setVersions('london', [version('london', 'v-aaa111')])
-    const { container } = render(card())
+  it('never lists another child’s credit', () => {
+    const { container } = render(card({ hoursEntries: [row('london', 'v-aaa111')] }))
     expect(container).toBeEmptyDOMElement()
   })
 })
 
-describe('the review list is never capped for good', () => {
-  it('Show more reveals an older save that eight newer ones hide', async () => {
-    const newer = Array.from({ length: 8 }, (_, i) =>
-      version('lincoln', `v-new${i}`, { createdAt: `2026-11-20T16:0${i}:00.000Z` }),
-    )
-    const older = version('lincoln', 'v-older9', { createdAt: '2026-11-19T10:00:00.000Z' })
-    setVersions('lincoln', [...newer, older])
-    render(card())
-    expect(screen.queryByText('Game v-older9')).not.toBeInTheDocument()
-    await userEvent.click(screen.getByRole('button', { name: 'Show more' }))
-    expect(screen.getByText('Game v-older9')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Show more' })).not.toBeInTheDocument()
-  })
-})
-
-describe('propose → confirm → write, never automatic', () => {
-  beforeEach(() => setVersions('lincoln', [version('lincoln', 'v-aaa111')]))
-
-  it('lists the save and touches the writer only on a click', () => {
-    render(card())
-    expect(screen.getByText('Game v-aaa111')).toBeInTheDocument()
-    expect(preview).not.toHaveBeenCalled()
-    expect(confirm).not.toHaveBeenCalled()
-  })
-
-  it('previews the exact scope, shows the proposal, and confirms only on the second click', async () => {
-    const p = proposal()
-    preview.mockResolvedValue({ status: 'ready', proposal: p })
-    confirm.mockResolvedValue({ status: 'credited', receipt })
-    const onChanged = vi.fn(async () => true)
-    render(card({ onChanged }))
-
-    await userEvent.click(screen.getByRole('button', { name: 'Review credit' }))
-    expect(preview).toHaveBeenCalledWith({
-      familyId: 'fam-1',
-      childId: 'lincoln',
-      projectId: PROJECT,
-      versionId: 'v-aaa111',
-    })
-    const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getByText(/15 minutes/)).toBeInTheDocument()
-    expect(within(dialog).getByText('2026-11-20')).toBeInTheDocument()
-    expect(within(dialog).getByText('Lincoln')).toBeInTheDocument()
-    expect(within(dialog).getByText('Saved work: Game v-aaa111')).toBeInTheDocument()
-    expect(confirm).not.toHaveBeenCalled()
-
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Confirm credit' }))
-    expect(confirm).toHaveBeenCalledTimes(1)
-    expect(confirm.mock.calls[0][0]).toBe(p) // the exact preview, not a rebuilt one
-    expect(await within(dialog).findByText(/Credited 15 minutes/)).toBeInTheDocument()
-    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1))
-  })
-
-  it('a network failure is retryable with the SAME proposal and is never shown as success', async () => {
-    const p = proposal()
-    preview.mockResolvedValue({ status: 'ready', proposal: p })
-    confirm
-      .mockResolvedValueOnce({ status: 'failed', retryable: true, reason: 'write-failed' })
-      .mockResolvedValueOnce({ status: 'credited', receipt })
-    const onChanged = vi.fn(async () => true)
-    render(card({ onChanged }))
-    await userEvent.click(screen.getByRole('button', { name: 'Review credit' }))
-    const dialog = await screen.findByRole('dialog')
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Confirm credit' }))
-
-    expect(await within(dialog).findByText(/couldn.t confirm whether this was recorded/i)).toBeInTheDocument()
-    expect(within(dialog).queryByText(/Credited/)).not.toBeInTheDocument()
-    expect(onChanged).not.toHaveBeenCalled()
-    expect(preview).toHaveBeenCalledTimes(1)
-
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Try again' }))
-    expect(confirm).toHaveBeenCalledTimes(2)
-    expect(confirm.mock.calls[1][0]).toBe(p)
-    expect(preview).toHaveBeenCalledTimes(1) // not re-derived
-    expect(await within(dialog).findByText(/Credited 15 minutes/)).toBeInTheDocument()
-  })
-
-  it('a daily-full preview says so and offers no confirmation', async () => {
-    preview.mockResolvedValue({ status: 'declined', reason: 'over-daily-cap', proposal: proposal() })
-    render(card())
-    await userEvent.click(screen.getByRole('button', { name: 'Review credit' }))
-    const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getByText(/credit is full/i)).toBeInTheDocument()
-    expect(within(dialog).queryByRole('button', { name: /confirm credit/i })).not.toBeInTheDocument()
-    expect(confirm).not.toHaveBeenCalled()
-  })
-
+describe('automatic credit: no adult approval control', () => {
   it.each([
-    [{ status: 'declined', reason: 'challenge-already-credited-today', proposal: proposal() }, /already credited/i],
-    [{ status: 'unproven', reason: 'unchanged' }, /nothing changed/i],
-    [{ status: 'alreadySettled', receipt }, /can.t\s+be credited again/i],
-    [{ status: 'unavailable' }, /can.t be credited/i],
-  ])('explains %j and offers no confirmation', async (result, text) => {
-    preview.mockResolvedValue(result)
-    render(card())
-    await userEvent.click(screen.getByRole('button', { name: 'Review credit' }))
-    const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getByText(text)).toBeInTheDocument()
-    expect(within(dialog).queryByRole('button', { name: /confirm credit/i })).not.toBeInTheDocument()
+    ['no credits yet', []],
+    ['a credited row', [row('lincoln', 'v-aaa111')]],
+  ])('offers no review, confirm or approve button with %s', (_name, hoursEntries) => {
+    render(card({ hoursEntries }))
+    expect(screen.queryByRole('button', { name: /review|confirm|approve|accept/i })).not.toBeInTheDocument()
+    expect(screen.queryByText(/new saves to review/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
-  it('a competing confirmation (alreadySettled) is reported as already credited, nothing added', async () => {
-    preview.mockResolvedValue({ status: 'ready', proposal: proposal() })
-    confirm.mockResolvedValue({ status: 'alreadySettled', receipt })
-    render(card())
-    await userEvent.click(screen.getByRole('button', { name: 'Review credit' }))
-    const dialog = await screen.findByRole('dialog')
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Confirm credit' }))
-    expect(await within(dialog).findByText(/Nothing more was added/)).toBeInTheDocument()
+  it('never previews or confirms a credit itself — the worker is the only path', () => {
+    // The mocked writer module exports no preview or confirm: a card that reached
+    // for either would throw on access. Rendering with rows proves it does not.
+    render(card({ hoursEntries: [row('lincoln', 'v-aaa111')] }))
+    expect(screen.getByText(/added automatically/i)).toBeInTheDocument()
   })
 
-  it('work that is no longer eligible offers Close / Reload, not a retry', async () => {
-    preview.mockResolvedValue({ status: 'ready', proposal: proposal() })
-    confirm.mockResolvedValue({ status: 'stale', reason: 'source-changed' })
+  it('mounts the worker for exactly this family and child, even before any row shows', () => {
+    render(card())
+    expect(workerMounts.at(-1)).toMatchObject({ familyId: 'fam-1', childId: 'lincoln', enabled: true })
+  })
+
+  it('a settlement refreshes Records once through the page’s existing refresh', async () => {
     const onChanged = vi.fn(async () => true)
     render(card({ onChanged }))
-    await userEvent.click(screen.getByRole('button', { name: 'Review credit' }))
-    const dialog = await screen.findByRole('dialog')
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Confirm credit' }))
-    expect(await within(dialog).findByText(/nothing was added/i)).toBeInTheDocument()
-    expect(within(dialog).queryByRole('button', { name: /try again|confirm credit/i })).not.toBeInTheDocument()
-    expect(within(dialog).getByRole('button', { name: 'Close' })).toBeInTheDocument()
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Reload records' }))
+    await workerMounts.at(-1)?.onSettled?.()
     expect(onChanged).toHaveBeenCalledTimes(1)
-    expect(confirm).toHaveBeenCalledTimes(1)
   })
 
-  it('a preview read failure is retryable by re-previewing, and writes nothing', async () => {
-    preview
-      .mockResolvedValueOnce({ status: 'failed', reason: 'read-failed' })
-      .mockResolvedValueOnce({ status: 'ready', proposal: proposal() })
-    render(card())
-    await userEvent.click(screen.getByRole('button', { name: 'Review credit' }))
-    const dialog = await screen.findByRole('dialog')
-    await userEvent.click(await within(dialog).findByRole('button', { name: 'Try again' }))
-    expect(await within(dialog).findByRole('button', { name: 'Confirm credit' })).toBeInTheDocument()
-    expect(confirm).not.toHaveBeenCalled()
-  })
-
-  it('refuses to send a proposal that is not this card’s family and child', async () => {
-    preview.mockResolvedValue({ status: 'ready', proposal: { ...proposal(), childId: 'london' } })
-    render(card())
-    await userEvent.click(screen.getByRole('button', { name: 'Review credit' }))
-    const dialog = await screen.findByRole('dialog')
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Confirm credit' }))
-    expect(confirm).not.toHaveBeenCalled()
-  })
-
-  it('a confirmation that lands after the child switched still refreshes Records, and shows nothing to the new child', async () => {
-    let resolve!: (v: unknown) => void
-    preview.mockResolvedValue({ status: 'ready', proposal: proposal() })
-    confirm.mockReturnValue(new Promise((r) => (resolve = r)))
-    const onChanged = vi.fn(async () => true)
-    const { rerender } = render(card({ onChanged }))
-    await userEvent.click(screen.getByRole('button', { name: 'Review credit' }))
-    const dialog = await screen.findByRole('dialog')
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Confirm credit' }))
-
-    setVersions('london', [])
-    rerender(card({ childId: 'london', childName: 'London', onChanged }))
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-
-    resolve({ status: 'credited', receipt })
-    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1))
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    expect(screen.queryByText(/Credited/)).not.toBeInTheDocument()
-  })
-
-  it('a correction that lands after the child switched still refreshes Records', async () => {
-    let resolve!: (v: unknown) => void
-    correct.mockReturnValue(new Promise((r) => (resolve = r)))
-    const onChanged = vi.fn(async () => true)
-    const { rerender } = render(card({ hoursEntries: [row('lincoln', 'v-aaa111')], onChanged }))
-    await userEvent.click(screen.getByRole('button', { name: 'Adjust' }))
-    const dialog = await screen.findByRole('dialog')
-    await userEvent.click(within(dialog).getByRole('radio', { name: 'Remove this row' }))
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Remove row' }))
-
-    setVersions('london', [])
-    rerender(card({ childId: 'london', childName: 'London', onChanged }))
-    resolve({ status: 'deleted' })
-    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1))
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-  })
-
-  it('an unconfirmed credit is never claimed as the challenge being finished', async () => {
-    preview.mockResolvedValue({
-      status: 'ready',
-      proposal: { ...proposal(), source: { kind: 'challenge', projectId: PROJECT, versionId: 'v-aaa111' } },
+  it('a refresh that throws is not an unhandled failure', async () => {
+    const onChanged = vi.fn(async () => {
+      throw new Error('offline')
     })
-    render(card())
-    await userEvent.click(screen.getByRole('button', { name: 'Review credit' }))
-    const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getByText(/A prediction was recorded with this saved version\./)).toBeInTheDocument()
-    expect(within(dialog).queryByText(/they finished/i)).not.toBeInTheDocument()
+    render(card({ onChanged }))
+    await expect(Promise.resolve(workerMounts.at(-1)?.onSettled?.())).resolves.toBe(false)
   })
 
-  it('a preview that answers after the child switched is never shown or confirmable', async () => {
-    let resolve!: (v: unknown) => void
-    preview.mockReturnValue(new Promise((r) => (resolve = r)))
+  it('does not keep the first child’s worker for the next child', () => {
     const { rerender } = render(card())
-    await userEvent.click(screen.getByRole('button', { name: 'Review credit' }))
-    expect(await screen.findByText(/checking this save/i)).toBeInTheDocument()
-
-    setVersions('london', [])
     rerender(card({ childId: 'london', childName: 'London' }))
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(workerMounts.at(-1)).toMatchObject({ familyId: 'fam-1', childId: 'london' })
+  })
 
-    resolve({ status: 'ready', proposal: proposal() })
-    await Promise.resolve()
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /confirm credit/i })).not.toBeInTheDocument()
-    expect(confirm).not.toHaveBeenCalled()
+  it('keeps the same worker mounted when the first row arrives (no restart)', () => {
+    const { rerender } = render(card())
+    const mountsBefore = workerMounts.length
+    rerender(card({ hoursEntries: [row('lincoln', 'v-aaa111')] }))
+    // Re-rendered with identical identity props; never swapped for another scope.
+    expect(workerMounts.slice(mountsBefore).every((p) => p.childId === 'lincoln' && p.familyId === 'fam-1')).toBe(true)
   })
 })
 
@@ -480,7 +273,6 @@ describe('credited rows and the exact saved work', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Open saved work' }))
     expect(await screen.findByText(/opening the saved work/i)).toBeInTheDocument()
 
-    setVersions('london', [])
     rerender(card({ childId: 'london', childName: 'London', hoursEntries: [] }))
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
 
@@ -495,14 +287,9 @@ describe('credited rows and the exact saved work', () => {
     expect(screen.queryByRole('button', { name: 'Open saved work' })).not.toBeInTheDocument()
     expect(screen.getByText(/link unavailable/i)).toBeInTheDocument()
   })
-
-  it('never lists another child’s credit', () => {
-    const { container } = render(card({ hoursEntries: [row('london', 'v-aaa111')] }))
-    expect(container).toBeEmptyDOMElement()
-  })
 })
 
-describe('correcting a credited row', () => {
+describe('correcting a credited row (the parent’s only write here)', () => {
   const hours = [row('lincoln', 'v-aaa111')]
 
   it('lowers only after an explicit confirmation naming the row, with the minutes the parent saw', async () => {
@@ -555,5 +342,21 @@ describe('correcting a credited row', () => {
     expect(await within(dialog).findByText(/nothing was changed/i)).toBeInTheDocument()
     expect(within(dialog).queryByText(/Removed/)).not.toBeInTheDocument()
     expect(onChanged).not.toHaveBeenCalled()
+  })
+
+  it('a correction that lands after the child switched still refreshes Records', async () => {
+    let resolve!: (v: unknown) => void
+    correct.mockReturnValue(new Promise((r) => (resolve = r)))
+    const onChanged = vi.fn(async () => true)
+    const { rerender } = render(card({ hoursEntries: hours, onChanged }))
+    await userEvent.click(screen.getByRole('button', { name: 'Adjust' }))
+    const dialog = await screen.findByRole('dialog')
+    await userEvent.click(within(dialog).getByRole('radio', { name: 'Remove this row' }))
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Remove row' }))
+
+    rerender(card({ childId: 'london', childName: 'London', onChanged }))
+    resolve({ status: 'deleted' })
+    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 })

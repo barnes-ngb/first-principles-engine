@@ -86,6 +86,7 @@ vi.mock('./useBuildStudioVersions', () => ({
 
 vi.mock('./BuildStudioVersionShelf', () => ({ default: () => null }))
 vi.mock('./BuildStudioSettingsSection', () => ({ default: () => null }))
+vi.mock('./BuildStudioAutoCredit', () => ({ default: () => null }))
 
 /** Every set of props the editor was mounted with, newest last. */
 const editorProps: Array<{ childId: string; childVoiceInputEnhanced?: boolean }> = []

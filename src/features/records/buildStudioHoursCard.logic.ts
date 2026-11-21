@@ -10,10 +10,8 @@ import type { HoursEntry } from '../../core/types'
 import {
   BUILD_STUDIO_CREDIT_HOURS_SOURCE,
   type BuildStudioCreditProvenance,
-  type BuildStudioVersion,
 } from '../../core/types/buildStudio'
 import { creditHoursId } from '../build-studio/buildStudioCreditProof'
-import { BUILD_STUDIO_PROJECT_ID } from '../build-studio/buildStudioStarter'
 
 // ── Gate ────────────────────────────────────────────────────────────────────
 
@@ -86,35 +84,4 @@ export function creditedRowsFor(entries: HoursEntry[], childId: string): Credite
       return { entry, provenance: ok ? (p as BuildStudioCreditProvenance) : null }
     })
     .sort((a, b) => a.entry.date.localeCompare(b.entry.date))
-}
-
-const DAY_MS = 86_400_000
-
-/** How many candidate saves are listed at first; "Show more" grows it by this much. */
-export const MAX_LISTED = 8
-
-/**
- * New saves worth previewing: this child's Apple Dash versions with a SERVER
- * acceptance time that falls in the Records range (a day of slack either side for
- * the family time zone) and no credit row already showing. Older saves carry no
- * `acceptedAt` and are never offered. Newest first.
- */
-export function candidateVersions(
-  versions: BuildStudioVersion[],
-  childId: string,
-  credited: ReadonlySet<string>,
-  startDate: string,
-  endDate: string,
-): BuildStudioVersion[] {
-  const from = Date.parse(`${startDate}T00:00:00Z`) - DAY_MS
-  const to = Date.parse(`${endDate}T00:00:00Z`) + 2 * DAY_MS
-  if (!Number.isFinite(from) || !Number.isFinite(to)) return []
-  return versions
-    .filter((v) => {
-      if (v.childId !== childId || v.projectId !== BUILD_STUDIO_PROJECT_ID) return false
-      if (credited.has(v.versionId)) return false
-      const ms = typeof v.acceptedAt?.toMillis === 'function' ? v.acceptedAt.toMillis() : NaN
-      return Number.isFinite(ms) && ms >= from && ms <= to
-    })
-    .sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''))
 }
