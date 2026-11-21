@@ -36,7 +36,14 @@ Any user-facing write to a child's record goes propose → confirm → write; ne
 credit for a NEW eligible Apple Dash save is written automatically — no per-save confirmation — through
 `buildStudioHoursCreditWrites.ts` only, which reuses the confirmed writer's proof, family time zone,
 predecessor rule, daily cap, cadence and permanent receipt unchanged. A pending job is created in the same
-transaction as the new version (`buildStudioCreditJobs`); older saves are never backfilled. The parent keeps
+transaction as the new version (`buildStudioCreditJobs`); older saves are never backfilled.
+**Extended to exactly one more game by the owner (FEAT-247 slice 4): a NEW eligible Lantern Cove save is
+credited the same way** — the same writer, rail, receipts, 15-minute whole credits, 240-minute child/day cap
+(shared across the two games), challenge dedup and free-building spacing, with no new writer, rule, index or
+migration. The list of credit games is the one `CREDIT_PROJECT_IDS` in `buildStudioCreditProof.ts`; a third game
+is a new decision, not a new row. Each game reads only its own authored challenge catalog and is compared with its
+own starter and predecessor; Lantern Cove compares its code, map and wall layer (`lanternCoveFidelity.ts`), so an
+unchanged stock round trip earns nothing. Lantern Cove saves made before this shipped are never backfilled. The parent keeps
 correction and removal on the Records card, and a corrected or removed row is never re-credited. This is a
 **client workflow** — pending credit is processed only while the child's Build Studio page or the parent's
 Records view is open. It exempts nothing else: every other write, and any change to the credit's math, still

@@ -13,7 +13,7 @@
  *
  *   1. `bad-scope`          — the document id, its own childId/projectId/versionId
  *                             and the caller's tuple all agree, and the project is
- *                             the Apple Dash starter's.
+ *                             a credit-eligible game's (Apple Dash or Lantern Cove).
  *   2. `not-eligible`       — it carries a real server `acceptedAt`. An older
  *                             version, a retry of an older version, a cached or
  *                             still-pending write has none and is reference only.
@@ -30,6 +30,10 @@
  *   5. Otherwise free building: `baseline-unreadable` when the baseline is
  *      malformed or belongs elsewhere, `unchanged` when the exact canonical bytes
  *      (minus `_`-private keys and {@link EDITOR_SCRATCH_FILES}) equal the baseline.
+ *      Lantern Cove compares its WORK instead (`comparableForProject`): code, map
+ *      and wall layer, so a stock import round trip of an unchanged cove is
+ *      `unchanged`. The baseline is always the same game's own predecessor or
+ *      starter, and a challenge id is read only in the same game's catalog.
  */
 import type { SubjectBucket } from '../../core/types/enums'
 import {
@@ -48,7 +52,7 @@ import {
   type BuildStudioChallengeSubject,
   type BuildStudioSourceFiles,
 } from '../../core/types/buildStudio'
-import { challengeById } from './buildStudioChallenges'
+import { challengeFor } from './buildStudioChallenges'
 import {
   admitBuildStudioCredit,
   BUILD_STUDIO_DAILY_CREDIT_CAP_MINUTES,
@@ -58,6 +62,26 @@ import {
   type BuildStudioCreditSource,
 } from './buildStudioHoursCredit'
 import { BUILD_STUDIO_PROJECT_ID, starterSourceFiles } from './buildStudioStarter'
+import { lanternCoveCreditSignature } from './lanternCoveFidelity'
+import {
+  lanternCoveArchiveComplete,
+  LANTERN_COVE_PROJECT_ID,
+  lanternCoveStarterFiles,
+} from './lanternCoveStarter'
+
+// ── Which games can earn credit ─────────────────────────────────────────────
+
+/**
+ * The projects whose NEW saves may be stamped, queued and credited: the two
+ * editable games (LOCAL-VISION-007 slice 3 for Apple Dash, FEAT-247 slice 4 for
+ * Lantern Cove). One list, read by the version writer, the job parser, the proof,
+ * the worker and the Records reader, so a game cannot be eligible at one and not
+ * another. A project that is not here earns nothing, whatever a caller passes.
+ */
+export const CREDIT_PROJECT_IDS: readonly string[] = [BUILD_STUDIO_PROJECT_ID, LANTERN_COVE_PROJECT_ID]
+
+export const isCreditProject = (projectId: unknown): projectId is string =>
+  typeof projectId === 'string' && CREDIT_PROJECT_IDS.includes(projectId)
 
 // ── Ids ─────────────────────────────────────────────────────────────────────
 
@@ -118,7 +142,7 @@ export function buildCreditJobFields(childId: string, projectId: string, version
 
 /**
  * A job document back into its exact scope, or `null` unless it is precisely the
- * job its own id names, for the Apple Dash project. A doctored, foreign or
+ * job its own id names, for a credit-eligible project. A doctored, foreign or
  * mismatched document is never worked.
  */
 export function parseCreditJob(
@@ -130,7 +154,7 @@ export function parseCreditJob(
   if (d.schema !== CREDIT_JOB_SCHEMA) return null
   const { childId, projectId, versionId } = d
   if (!isCreditPathId(childId) || !isCreditPathId(projectId) || !isCreditPathId(versionId)) return null
-  if (projectId !== BUILD_STUDIO_PROJECT_ID) return null
+  if (!isCreditProject(projectId)) return null
   if (id !== creditJobId(childId, projectId, versionId)) return null
   if (d.versionDocId !== buildStudioVersionDocId(childId, projectId, versionId)) return null
   return { childId, projectId, versionId }
@@ -204,8 +228,25 @@ export interface StoredVersionDoc {
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v)
 
-/** The parsed files of a stored archive, or `null` when it is not a valid, canonical one. */
-export function validatedArchiveFiles(data: Record<string, unknown>): BuildStudioSourceFiles | null {
+/**
+ * The parsed files of a stored archive, or `null` when it is not a valid, canonical one.
+ *
+ * `projectId` adds the game's own completeness rule: Lantern Cove's whole native
+ * archive (a manifest, Blocks, code and its map pair) rather than the minimum
+ * every archive needs. Omitted, only the minimum is asked — Apple Dash's released
+ * behaviour, which its stored saves were accepted under.
+ */
+export function validatedArchiveFiles(
+  data: Record<string, unknown>,
+  projectId?: string,
+): BuildStudioSourceFiles | null {
+  const files = validatedMinimalArchiveFiles(data)
+  if (!files) return null
+  if (projectId === LANTERN_COVE_PROJECT_ID && !lanternCoveArchiveComplete(files)) return null
+  return files
+}
+
+function validatedMinimalArchiveFiles(data: Record<string, unknown>): BuildStudioSourceFiles | null {
   const archive = data.sourceArchive
   if (typeof archive !== 'string') return null
   const bytes = utf8ByteLength(archive)
@@ -243,6 +284,27 @@ export function comparableSource(files: BuildStudioSourceFiles): string {
     if (!scratch.has(key)) comparable[key] = files[key]
   }
   return serializeBuildStudioSource(comparable)
+}
+
+/**
+ * The bytes two saves of ONE game are compared by for free-building credit, or
+ * `null` when that game's source cannot be read well enough to compare.
+ *
+ * Apple Dash keeps {@link comparableSource} exactly. Lantern Cove is judged on its
+ * work — code, map and wall layer — by `lanternCoveCreditSignature`, because a
+ * stock import re-serialises its Blocks and manifest and an exact-bytes comparison
+ * would credit an unchanged round trip as a change.
+ */
+export function comparableForProject(projectId: string, files: BuildStudioSourceFiles): string | null {
+  if (projectId === LANTERN_COVE_PROJECT_ID) return lanternCoveCreditSignature(files)
+  return comparableSource(files)
+}
+
+/** A project's prepared starter, as the free-building baseline. `null` for a project with none. */
+function starterBaselineFiles(projectId: string): BuildStudioSourceFiles | null {
+  if (projectId === BUILD_STUDIO_PROJECT_ID) return starterSourceFiles()
+  if (projectId === LANTERN_COVE_PROJECT_ID) return lanternCoveStarterFiles()
+  return null
 }
 
 // ── Ordering: which version immediately precedes the source ─────────────────
@@ -359,7 +421,7 @@ export function proveBuildStudioCredit(args: ProveArgs): CreditProofResult {
   if (!isCreditPathId(childId) || !isCreditPathId(projectId) || !isCreditPathId(versionId)) {
     return { ok: false, reason: 'bad-scope' }
   }
-  if (projectId !== BUILD_STUDIO_PROJECT_ID) return { ok: false, reason: 'bad-scope' }
+  if (!isCreditProject(projectId)) return { ok: false, reason: 'bad-scope' }
   if (!data || version.id !== buildStudioVersionDocId(childId, projectId, versionId)) {
     return { ok: false, reason: 'bad-scope' }
   }
@@ -372,7 +434,7 @@ export function proveBuildStudioCredit(args: ProveArgs): CreditProofResult {
   if (workMs === null) return { ok: false, reason: 'not-eligible' }
 
   // 3. The archive.
-  const files = validatedArchiveFiles(data)
+  const files = validatedArchiveFiles(data, projectId)
   if (!files) return { ok: false, reason: 'malformed-source' }
   const sourceDigest = data.sourceDigest as string
 
@@ -387,7 +449,9 @@ export function proveBuildStudioCredit(args: ProveArgs): CreditProofResult {
     ) {
       return { ok: false, reason: 'malformed-attempt' }
     }
-    const challenge = challengeById(attempt.challengeId)
+    // THIS project's catalog only: an id authored for the other game is unknown
+    // here, so a cross-game attempt can earn neither challenge nor free-build credit.
+    const challenge = challengeFor(projectId, attempt.challengeId)
     if (
       !challenge ||
       attempt.challengeRevision !== challenge.revision ||
@@ -423,7 +487,7 @@ export function proveBuildStudioCredit(args: ProveArgs): CreditProofResult {
   let baselineFiles: BuildStudioSourceFiles | null
   let predecessorDocId: string | null = null
   if (baseline.kind === 'starter') {
-    baselineFiles = starterSourceFiles()
+    baselineFiles = starterBaselineFiles(projectId)
   } else {
     const b = baseline.doc.data
     if (
@@ -436,13 +500,16 @@ export function proveBuildStudioCredit(args: ProveArgs): CreditProofResult {
     ) {
       return { ok: false, reason: 'baseline-unreadable' }
     }
-    baselineFiles = validatedArchiveFiles(b)
+    baselineFiles = validatedArchiveFiles(b, projectId)
     predecessorDocId = baseline.doc.id
   }
   if (!baselineFiles) return { ok: false, reason: 'baseline-unreadable' }
 
-  const baselineBytes = comparableSource(baselineFiles)
-  if (comparableSource(files) === baselineBytes) return { ok: false, reason: 'unchanged' }
+  const baselineBytes = comparableForProject(projectId, baselineFiles)
+  const sourceBytes = comparableForProject(projectId, files)
+  if (baselineBytes === null) return { ok: false, reason: 'baseline-unreadable' }
+  if (sourceBytes === null) return { ok: false, reason: 'malformed-source' }
+  if (sourceBytes === baselineBytes) return { ok: false, reason: 'unchanged' }
 
   return {
     ok: true,

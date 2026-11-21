@@ -1,0 +1,4 @@
+* -text
+main.blocks whitespace=-blank-at-eol
+main.ts.txt whitespace=-blank-at-eol
+tilemap.g.ts.txt whitespace=-blank-at-eol

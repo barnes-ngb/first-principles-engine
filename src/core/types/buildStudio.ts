@@ -399,7 +399,7 @@ export const buildStudioVersionDocId = (
  * opens with the same program, the same blocks and the same assets, and an
  * empty undo stack.
  */
-const EDITOR_PRIVATE_PREFIX = '_'
+export const EDITOR_PRIVATE_PREFIX = '_'
 
 /**
  * Files the editor writes for ITSELF, which are not the program.

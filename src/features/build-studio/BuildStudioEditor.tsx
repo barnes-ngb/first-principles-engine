@@ -153,10 +153,11 @@ import {
   type ChallengeAttemptState,
 } from './buildStudioChallengeAttempt'
 import {
-  challengeById,
+  challengeFor,
   challengeSpeech,
   DEFAULT_BUILD_CHALLENGE,
-  nextChallenge,
+  defaultChallengeFor,
+  nextChallengeFor,
   type BuildChallenge,
 } from './buildStudioChallenges'
 import {
@@ -203,13 +204,14 @@ import {
 } from './buildStudioScope'
 import {
   BUILD_STUDIO_GOAL,
-  BUILD_STUDIO_PROJECT_NAME,
   reopenedVersionLooksLoaded,
-  starterImportLooksCorrect,
-  starterSourceFiles,
-  STARTER_PROJECT_PNG_URL,
   STARTER_TUNING_NUMBERS,
 } from './buildStudioStarter'
+import {
+  APPLE_DASH_GAME,
+  editableGameForProject,
+  savedVersionIsWhole,
+} from './buildStudioGames'
 import BuildStudioVersionShelf from './BuildStudioVersionShelf'
 import { useBuildStudioDepartureGuard } from './useBuildStudioDepartureGuard'
 import { versionBelongsTo, type BuildStudioVersionsRead } from './useBuildStudioVersions'
@@ -458,6 +460,16 @@ export default function BuildStudioEditor({
   )
 
   /**
+   * The game this mount is FOR, from the one explicit descriptor (FEAT-247).
+   * Everything game-specific below — the project name the bridge binds on, the
+   * starter, what "arrived whole" means, whether the Apple Dash challenge and
+   * reflection surfaces exist, whether a save is credit-eligible — reads this and
+   * never the project id. A project the catalog does not know keeps the Apple
+   * Dash behaviour this editor always had.
+   */
+  const game = useMemo(() => editableGameForProject(projectId) ?? APPLE_DASH_GAME, [projectId])
+
+  /**
    * Whose voice this is, and which engine his settings ask for.
    *
    * The id is this editor's OWN captured `childId` and is never the shell's
@@ -612,8 +624,14 @@ export default function BuildStudioEditor({
   // UI state only: nothing here is written until an explicit Save freezes a copy
   // into that Save's payload. The selected challenge survives a visit change;
   // the ATTEMPT does not, because it was about the game that was open.
-  const [challengeId, setChallengeId] = useState(DEFAULT_BUILD_CHALLENGE.id)
-  const challenge = challengeById(challengeId) ?? DEFAULT_BUILD_CHALLENGE
+  //
+  // The catalog is the GAME's own (`game.projectId`): a challenge id is only ever
+  // read against the project it was authored for. A game with no catalog never
+  // renders the card, so the Apple Dash default below is only a type-level fallback.
+  const challengeProjectRef = useRef(game.projectId)
+  const firstChallenge = defaultChallengeFor(game.projectId) ?? DEFAULT_BUILD_CHALLENGE
+  const [challengeId, setChallengeId] = useState(firstChallenge.id)
+  const challenge = challengeFor(game.projectId, challengeId) ?? firstChallenge
   const challengeIdRef = useRef(challengeId)
   const [challengeDismissed, setChallengeDismissed] = useState(false)
   const challengeDismissedRef = useRef(false)
@@ -626,7 +644,7 @@ export default function BuildStudioEditor({
    */
   const challengeHintsRef = useRef<Set<string>>(new Set())
   const [challengeState, setChallengeState] = useState<ChallengeAttemptState>(() =>
-    startAttempt(DEFAULT_BUILD_CHALLENGE, newChallengeAttemptId(Date.now(), Math.random())),
+    startAttempt(firstChallenge, newChallengeAttemptId(Date.now(), Math.random())),
   )
   /** Readable synchronously: a Play tap and a Save can land in one tick. */
   const attemptRef = useRef<ChallengeAttemptState>(challengeState)
@@ -1071,7 +1089,11 @@ export default function BuildStudioEditor({
   // ── The session, one per visit ──────────────────────────────────────────
   useEffect(() => {
     const bridge = new ArcadeBridge({
-      projectName: BUILD_STUDIO_PROJECT_NAME,
+      projectName: game.projectName,
+      // A game with a whole-archive rule has it enforced on every payload the
+      // bridge would accept — the latest save, the readback and a download's
+      // capture — not only on a reopened file.
+      ...(game.enforceCompleteCapture ? { acceptsFiles: game.archiveComplete } : {}),
       isScopeLive: () => liveTokenRef.current === token,
       newId: () => newBridgeId(Date.now(), Math.random()),
       // A late readiness from a frame whose visit has retired must not revive
@@ -1110,7 +1132,9 @@ export default function BuildStudioEditor({
     // frozen keeps its own copy in its payload.
     putAttempt(
       startAttempt(
-        challengeById(challengeIdRef.current) ?? DEFAULT_BUILD_CHALLENGE,
+        challengeFor(challengeProjectRef.current, challengeIdRef.current) ??
+          defaultChallengeFor(challengeProjectRef.current) ??
+          DEFAULT_BUILD_CHALLENGE,
         newChallengeAttemptId(Date.now(), Math.random()),
       ),
     )
@@ -1126,7 +1150,7 @@ export default function BuildStudioEditor({
       // setup has already replaced it by the time the first cleanup runs.
       setSession((current) => (current?.bridge === bridge ? null : current))
     }
-  }, [token, putAttempt])
+  }, [token, putAttempt, game])
 
   // The frame element, bound as soon as it exists — before the editor's first
   // `workspacesync`, which `onLoad` alone does not guarantee.
@@ -1149,11 +1173,13 @@ export default function BuildStudioEditor({
       setPhase(EditorPhase.Failed)
       setProjectReady(false)
       setOpenFailure(
-        'The editor did not open in time. Nothing of yours was lost — tap Try again, or a grown-up can open the starter directly.',
+        game.starterFallbackUrl
+          ? 'The editor did not open in time. Nothing of yours was lost — tap Try again, or a grown-up can open the starter directly.'
+          : 'The editor did not open in time. Nothing of yours was lost — tap Try again.',
       )
     }, ARCADE_OPENING_TIMEOUT_MS)
     return () => clearTimeout(timer)
-  }, [liveSession, loadedToken, token])
+  }, [game.starterFallbackUrl, liveSession, loadedToken, token])
 
   /** Start a brand new visit on the same source — the Try again door. */
   const reopenCurrent = useCallback(() => {
@@ -1184,7 +1210,19 @@ export default function BuildStudioEditor({
             ? // The chosen version's OWN bytes, read back from its archive —
               // never "whatever the latest frame happens to hold".
               parseBuildStudioSource(reopening.sourceArchive)
-            : starterSourceFiles()
+            : game.starterFiles()
+        // A saved version or a recovered file of a game with a whole-archive rule
+        // is checked BEFORE it is imported: an archive that lost part of itself
+        // opens nothing, rather than opening something the readback must then
+        // catch. The ORIGINAL starter is never substituted for it — that would
+        // put a different game in front of a child who asked for his own.
+        if (
+          (reopening || recovering) &&
+          game.enforceCompleteCapture &&
+          !game.archiveComplete(files)
+        ) {
+          throw new Error(game.incompleteArchiveLine)
+        }
         // What the app believes is on the shelf for this visit: a reopened
         // version IS a saved version, and a freshly imported starter is
         // unchanged. Either way the editor's first `workspacesave` carries
@@ -1220,7 +1258,9 @@ export default function BuildStudioEditor({
           // something this page cannot read back.
           setProjectReady(false)
           setAdvisory(
-            'The editor opened but this page could not read the game back, so saving is turned off for now. Use the starter download below, or reload the page.',
+            game.starterFallbackUrl
+              ? 'The editor opened but this page could not read the game back, so saving is turned off for now. Use the starter download below, or reload the page.'
+              : 'The editor opened but this page could not read the game back, so Save is unavailable for now. Reload Build Studio to try opening the game again. Your previous versions are safe.',
           )
           return
         }
@@ -1237,8 +1277,8 @@ export default function BuildStudioEditor({
         // require a life block in his game.
         const ok =
           reopening || recovering
-            ? reopenedVersionLooksLoaded(round.files)
-            : starterImportLooksCorrect(round.files)
+            ? reopenedVersionLooksLoaded(round.files) && game.archiveComplete(round.files)
+            : game.starterReady(round.files)
         setProjectReady(ok)
         setAdvisory(
           ok
@@ -1249,7 +1289,7 @@ export default function BuildStudioEditor({
               ? 'That game file did not open properly, so saving is turned off to protect it. Try opening the file again.'
               : reopening
                 ? 'That saved game did not open properly, so saving is turned off to protect it. Use Download a copy, or try opening it again.'
-                : 'The starter did not open properly, so saving is turned off. Nothing is lost — a grown-up can import the starter file below into MakeCode.',
+                : game.starterNotReadyLine,
         )
       } catch (err) {
         if (cancelled) return
@@ -1266,7 +1306,7 @@ export default function BuildStudioEditor({
     return () => {
       cancelled = true
     }
-  }, [loadedToken, token, visit.version, visit.recovery])
+  }, [loadedToken, token, visit.version, visit.recovery, game])
 
   // ── Save ───────────────────────────────────────────────────────────────
 
@@ -1344,7 +1384,7 @@ export default function BuildStudioEditor({
             // changes nothing the child sees and nothing about whether the save
             // succeeds; a retry that finds the version already stored is never
             // stamped (the writer decides, not this call).
-            creditEligible: true,
+            creditEligible: game.creditEligible,
             // The record this exact Save was frozen with — never re-read from
             // the card, so a retry sends the identical shape. Absent for a
             // payload from an older build, which retries exactly as it was.
@@ -1457,7 +1497,7 @@ export default function BuildStudioEditor({
         }
       }
     },
-    [onOutOfScopeSave, noteSavedForDeparture, putAttempt],
+    [onOutOfScopeSave, noteSavedForDeparture, putAttempt, game.creditEligible],
   )
 
   /**
@@ -1468,6 +1508,9 @@ export default function BuildStudioEditor({
    */
   const freezeForSave = useCallback(
     (versionId: string) => {
+      // A game with no Build Challenge records none: nothing is frozen, nothing
+      // is sealed, and the version carries no challenge record and no goal id.
+      if (!game.hasChallenge) return {}
       const frozen = freezeAttempt(attemptRef.current, {
         childId: scope.childId,
         projectId: scope.projectId,
@@ -1475,12 +1518,16 @@ export default function BuildStudioEditor({
       })
       if (frozen.state && frozen.state !== attemptRef.current) putAttempt(frozen.state)
       // A challenge goal is chosen only when an actual attempt is saved. A
-      // merely visible invitation never labels a game; an ordinary save keeps
-      // the legacy fixed goal.
-      const goalId = frozen.attempt ? frozen.attempt.challengeId : BUILD_STUDIO_GOAL.id
-      return frozen.attempt ? { challengeAttempt: frozen.attempt, goalId } : { goalId }
+      // merely visible invitation never labels a game; an ordinary Apple Dash
+      // save keeps the legacy fixed goal. That goal is about Apple Dash's lives,
+      // so a game without it (Lantern Cove) records no goal at all unless a
+      // challenge attempt is saved.
+      if (frozen.attempt) {
+        return { challengeAttempt: frozen.attempt, goalId: frozen.attempt.challengeId }
+      }
+      return game.hasLivesGoal ? { goalId: BUILD_STUDIO_GOAL.id } : {}
     },
-    [scope.childId, scope.projectId, putAttempt],
+    [scope.childId, scope.projectId, putAttempt, game.hasChallenge, game.hasLivesGoal],
   )
 
   const handleSave = useCallback(async () => {
@@ -1829,6 +1876,14 @@ export default function BuildStudioEditor({
         setSaveMessage('That saved game is not part of this one, so it was not opened.')
         return
       }
+      // A saved version that lost part of itself opens nothing, and the open
+      // game is left exactly as it is.
+      if (version && !savedVersionIsWhole(game, version)) {
+        setProspect(null)
+        setProspectCheck('idle')
+        setSaveMessage(game.incompleteArchiveLine)
+        return
+      }
       if (version) setOpeningVersionId(version.versionId)
       setProspect(null)
       setProspectCheck('idle')
@@ -1856,7 +1911,7 @@ export default function BuildStudioEditor({
         recovery: 'recovery' in next ? next.recovery : null,
       })
     },
-    [childId, projectId],
+    [childId, projectId, game],
   )
 
   useEffect(() => {
@@ -1879,6 +1934,15 @@ export default function BuildStudioEditor({
   const requestReplace = useCallback(
     (next: { version: BuildStudioVersion } | { recovery: BuildStudioSourceFiles }) => {
       if (writeInFlight || saveLatchRef.current) return
+      // Refused BEFORE the "you will lose work" question: asking someone to
+      // sacrifice an open game for one that then will not open is the worst order.
+      if (
+        ('version' in next && !savedVersionIsWhole(game, next.version)) ||
+        ('recovery' in next && game.enforceCompleteCapture && !game.archiveComplete(next.recovery))
+      ) {
+        setSaveMessage(game.incompleteArchiveLine)
+        return
+      }
       replaceSeqRef.current += 1
       const runId = replaceSeqRef.current
       replaceRunRef.current = runId
@@ -1912,7 +1976,7 @@ export default function BuildStudioEditor({
         )
       })
     },
-    [writeInFlight, pending, checkSourceNow, applyReplace],
+    [writeInFlight, pending, checkSourceNow, applyReplace, game],
   )
 
   /** Abandon the replacement. Current edits and any pending retry stay. */
@@ -2016,7 +2080,7 @@ export default function BuildStudioEditor({
 
   const handleChallengePredict = useCallback(
     (optionId: string) => {
-      const live = challengeById(challengeIdRef.current)
+      const live = challengeFor(challengeProjectRef.current, challengeIdRef.current)
       if (!live) return
       putAttempt(withPrediction(attemptRef.current, live, optionId, new Date().toISOString()))
     },
@@ -2041,14 +2105,20 @@ export default function BuildStudioEditor({
   const applyDisposal = useCallback(
     (kind: 'swap' | 'dismiss') => {
       setDisposal(null)
+      const project = challengeProjectRef.current
       if (kind === 'swap') {
-        beginAttempt(nextChallenge(challengeIdRef.current))
+        const next = nextChallengeFor(project, challengeIdRef.current)
+        if (next) beginAttempt(next)
         return
       }
       challengeDismissedRef.current = true
       setChallengeDismissed(true)
       // Declining the invitation discards an unsaved guess; it records nothing.
-      beginAttempt(challengeById(challengeIdRef.current) ?? DEFAULT_BUILD_CHALLENGE)
+      beginAttempt(
+        challengeFor(project, challengeIdRef.current) ??
+          defaultChallengeFor(project) ??
+          DEFAULT_BUILD_CHALLENGE,
+      )
     },
     [beginAttempt],
   )
@@ -2616,8 +2686,16 @@ export default function BuildStudioEditor({
             assignment (and the only help lane, in its card). Once it is hidden,
             the free-building controls return with a neutral cue — the fixed
             extra-life job is not presented as the thing to do. */}
-        {challengeDismissed && (
+        {(challengeDismissed || !game.hasChallenge) && (
           <Typography variant="body1">Change the game any way you like.</Typography>
+        )}
+        {/* A suggestion for the game's FIRST edit, on the starter only. Nothing
+            records whether it was done. */}
+        {game.firstEditPrompt &&
+          !visit.version &&
+          !visit.recovery &&
+          (challengeDismissed || !game.hasChallenge) && (
+          <Typography variant="body2">{game.firstEditPrompt}</Typography>
         )}
         {/* Which game this is, said plainly — because "reopened my own save"
             and "started the prepared starter" are two different things, and a
@@ -2629,12 +2707,12 @@ export default function BuildStudioEditor({
             ? 'This is the game file you opened. It is not on your shelf until you save it.'
             : visit.version
               ? `You are back in your saved game “${visit.version.label}”. Change it however you like — saving keeps a new version and the one before it stays on your shelf.`
-              : 'This is a prepared starter game. Change it however you like — every save keeps the one before it.'}
+              : game.starterVisitLine}
         </Typography>
       </Stack>
 
       <Stack direction="row" spacing={1} flexWrap="wrap" rowGap={1}>
-        {challengeDismissed && (
+        {challengeDismissed && game.hasChallenge && game.hasLivesGoal && (
           <>
             <Button
               variant="outlined"
@@ -2686,7 +2764,7 @@ export default function BuildStudioEditor({
         </Button>
       </Stack>
 
-      {challengeDismissed && currentHint && (
+      {challengeDismissed && game.hasChallenge && game.hasLivesGoal && currentHint && (
         <Alert severity="info" icon={false}>
           {currentHint.text}
         </Alert>
@@ -2694,7 +2772,7 @@ export default function BuildStudioEditor({
 
       {/* The optional invitation. Only once the editor is ready, and nothing
           about it is required to play or save. */}
-      {!gated && (
+      {!gated && game.hasChallenge && (
         <BuildStudioChallengeCard
           challenge={challenge}
           attempt={challengeState}
@@ -2762,11 +2840,14 @@ export default function BuildStudioEditor({
       {/* The adult-assisted fallback. STARTER only, and it says so — a MakeCode
           project file is a different thing from this app's archive, and
           offering it for failed EDITED work would replace what he made. */}
-      {gated && phase !== EditorPhase.Opening && phase !== EditorPhase.Importing && (
+      {gated &&
+        game.starterFallbackUrl &&
+        phase !== EditorPhase.Opening &&
+        phase !== EditorPhase.Importing && (
         <Alert severity="info">
           <AlertTitle>A grown-up can open the starter directly</AlertTitle>
           Download{' '}
-          <Link href={STARTER_PROJECT_PNG_URL} download>
+          <Link href={game.starterFallbackUrl} download>
             the starter project file
           </Link>{' '}
           and, at{' '}
@@ -2801,7 +2882,7 @@ export default function BuildStudioEditor({
               key={liveSession.bridge.frameId}
               ref={iframeRef}
               src={liveSession.url}
-              title={`${BUILD_STUDIO_PROJECT_NAME} editor`}
+              title={`${game.projectName} editor`}
               allow="autoplay; fullscreen; gamepad"
               style={{ width: '100%', height: '100%', border: 0, display: 'block' }}
               onLoad={() => {
@@ -2975,7 +3056,13 @@ export default function BuildStudioEditor({
         />
       </Stack>
 
-      {/* ── The optional reflection ──────────────────────────────────── */}
+      {/* ── The optional reflection ────────────────────────────────────
+          Files an `artifacts` note about the exact acknowledged version, in
+          every game whose descriptor offers it (Apple Dash and, since slice 4,
+          Lantern Cove). A game without it has no section rather than one that
+          does nothing. */}
+      {game.hasReflection && (
+      <>
       <Divider />
       <Stack spacing={1}>
         <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
@@ -3164,6 +3251,8 @@ export default function BuildStudioEditor({
           <Alert severity={noteState === 'failed' ? 'error' : 'success'}>{noteMessage}</Alert>
         )}
       </Stack>
+      </>
+      )}
 
       {/* ── The shelf ───────────────────────────────────────────────── */}
       <Divider />
@@ -3244,7 +3333,13 @@ export default function BuildStudioEditor({
         />
       </Stack>
 
-      {/* ── The numbers worth changing. Read-only, on purpose. ──────── */}
+      {/* ── The numbers worth changing. Read-only, on purpose. ────────
+          Apple Dash's list (lives, speed, apples). Another game has its own
+          numbers in its own blocks, and naming Apple Dash's there would send a
+          child looking for blocks his game does not have. Keyed on the lives
+          goal, NOT on `hasChallenge`: Lantern Cove has challenges of its own. */}
+      {game.hasLivesGoal && (
+      <>
       <Divider />
       <Stack spacing={1}>
         <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
@@ -3267,6 +3362,8 @@ export default function BuildStudioEditor({
           ))}
         </Stack>
       </Stack>
+      </>
+      )}
 
       {/* ── Leaving ───────────────────────────────────────────────────
           Shown only once the pre-departure capture has an answer, so a clean

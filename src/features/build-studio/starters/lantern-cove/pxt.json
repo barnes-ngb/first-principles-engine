@@ -1,0 +1,14 @@
+{
+    "name": "Lantern Cove",
+    "description": "Walk around the cove, find five treasures, and raise the camp flag.",
+    "dependencies": {
+        "device": "*"
+    },
+    "files": [
+        "main.blocks",
+        "main.ts",
+        "tilemap.g.jres",
+        "tilemap.g.ts"
+    ],
+    "preferredEditor": "blocksprj"
+}
