@@ -67,8 +67,8 @@ import {
   buildCreditJobFields,
   creditJobId,
   isCreditPathId,
+  isCreditProject,
 } from '../../features/build-studio/buildStudioCreditProof'
-import { BUILD_STUDIO_PROJECT_ID } from '../../features/build-studio/buildStudioStarter'
 import { buildStudioCreditJobsCollection, buildStudioVersionsCollection, db } from './firestore'
 
 /** Thrown before anything is written. The message is child-readable. */
@@ -281,12 +281,13 @@ export async function saveBuildStudioVersion(
   }
 
   const ref = doc(buildStudioVersionsCollection(familyId), id)
-  // A job only for a NEW eligible Apple Dash save whose ids the credit writer can
-  // address. Anything else (an unstamped save, another project, an id the credit
-  // paths do not accept) saves exactly as before and has no job.
+  // A job only for a NEW eligible save of a recognised game (Apple Dash or Lantern
+  // Cove) whose ids the credit writer can address. Anything else (an unstamped
+  // save, another project, an id the credit paths do not accept) saves exactly as
+  // before and has no job.
   const jobRef =
     args.creditEligible === true &&
-    projectId === BUILD_STUDIO_PROJECT_ID &&
+    isCreditProject(projectId) &&
     isCreditPathId(childId) &&
     isCreditPathId(versionId)
       ? doc(buildStudioCreditJobsCollection(familyId), creditJobId(childId, projectId, versionId))
@@ -319,7 +320,12 @@ export async function saveBuildStudioVersion(
     // The versions collection's converter (`buildStudioVersionToFirestore`) hands
     // `acceptedAt` through untouched; the repo-wide `stripUndefined` would flatten
     // the sentinel into a plain map and no server time would ever be stored.
-    tx.set(ref, args.creditEligible === true ? { ...version, acceptedAt: serverTimestamp() } : version)
+    // The stamp and the job share ONE boundary: a NEW eligible save of a
+    // recognised game. `creditEligible` from any other project saves as a plain
+    // version — no `acceptedAt`, no job — so a caller that passes the flag by
+    // mistake cannot make an unrecognised game look creditable to the Records reader.
+    const stamped = args.creditEligible === true && isCreditProject(projectId)
+    tx.set(ref, stamped ? { ...version, acceptedAt: serverTimestamp() } : version)
     // The pending automatic-credit job, in the SAME transaction as the new
     // version and only here: a retry that finds the version stored returned
     // above, so it can never create, re-create or backfill one. The job is just

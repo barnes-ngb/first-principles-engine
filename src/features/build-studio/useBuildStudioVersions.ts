@@ -44,6 +44,18 @@ export interface BuildStudioVersionsRead {
   error: string | null
   /** Run the read again after a failure. Always wired, by both audiences. */
   retry: () => void
+  /**
+   * Every row of THIS child's, across all projects, newest first — from the same
+   * ONE subscription that produced `versions` (FEAT-247).
+   *
+   * Present on a settled read of the real hook; each row is validated against its
+   * own project and document id exactly as `versions` is. It exists so a second
+   * game's shelf is DERIVED from the listener that is already open
+   * ({@link versionsReadForProject}) instead of opening a second identical one.
+   * Absent on a read that came from anywhere else, which is then simply a read
+   * about the one project it names.
+   */
+  childRows?: BuildStudioVersion[]
 }
 
 const UNSETTLED: Omit<BuildStudioVersionsRead, 'retry'> = {
@@ -52,6 +64,7 @@ const UNSETTLED: Omit<BuildStudioVersionsRead, 'retry'> = {
   childId: null,
   projectId: null,
   error: null,
+  childRows: [],
 }
 
 /**
@@ -73,6 +86,19 @@ export function versionBelongsTo(
   if (version.childId !== childId) return false
   if (version.projectId !== projectId) return false
   return version.id === buildStudioVersionDocId(childId, projectId, version.versionId)
+}
+
+/**
+ * Is this stored row this child's, under whatever project its OWN fields name?
+ *
+ * The project-agnostic half of {@link versionBelongsTo}: the `childId` field and
+ * the document id (`{childId}__{projectId}__{versionId}`) must agree. Used only to
+ * keep `childRows` honest; a shelf still goes through `versionBelongsTo`.
+ */
+function rowBelongsToChild(version: BuildStudioVersion, childId: string): boolean {
+  if (!version.versionId || !version.projectId) return false
+  if (version.childId !== childId) return false
+  return version.id === buildStudioVersionDocId(childId, version.projectId, version.versionId)
 }
 
 /**
@@ -147,12 +173,16 @@ export function useBuildStudioVersions(
       q,
       (snap) => {
         if (retired) return
-        const versions = snap.docs
+        const rows = snap.docs
           .map((d) => ({ ...d.data(), id: d.id }))
-          // The project filter lives HERE as well as at the open action, so a
-          // same-child row from another project is never on this shelf to be
-          // tapped in the first place.
-          .filter((v) => versionBelongsTo(v, child, project))
+          // Every row that is really this child's, whatever project its own
+          // fields name — kept so a second game's shelf can be derived from this
+          // same listener (`versionsReadForProject`) instead of a second one.
+          .filter((v) => rowBelongsToChild(v, child))
+        // The project filter lives HERE as well as at the open action, so a
+        // same-child row from another project is never on this shelf to be
+        // tapped in the first place.
+        const versions = rows.filter((v) => versionBelongsTo(v, child, project))
         setRead({
           request,
           value: {
@@ -161,6 +191,7 @@ export function useBuildStudioVersions(
             childId: child,
             projectId: project,
             error: null,
+            childRows: rows,
           },
         })
       },
@@ -175,6 +206,7 @@ export function useBuildStudioVersions(
             childId: child,
             projectId: project,
             error: err instanceof Error ? err.message : String(err),
+            childRows: [],
           },
         })
       },
@@ -194,14 +226,14 @@ export function useBuildStudioVersions(
 
   // Sorted here rather than in the listener so the comparison is in one place
   // and a stored row with a bad stamp sinks rather than throwing.
-  return useMemo(
-    () => ({
+  return useMemo(() => {
+    const newestFirst = (rows: BuildStudioVersion[]) =>
+      [...rows].sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''))
+    return {
       ...value,
-      versions: [...value.versions].sort((a, b) =>
-        (b.createdAt ?? '').localeCompare(a.createdAt ?? ''),
-      ),
+      versions: newestFirst(value.versions),
+      childRows: newestFirst(value.childRows ?? []),
       retry,
-    }),
-    [value, retry],
-  )
+    }
+  }, [value, retry])
 }

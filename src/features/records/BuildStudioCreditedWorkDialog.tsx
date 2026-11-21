@@ -4,9 +4,11 @@
  *
  * Opened from a credited Records row. It resolves the ONE version the row's own
  * provenance names (`readBuildStudioCreditedVersion`, which re-checks that the
- * provenance is this child's, for Apple Dash, and names the deterministic ids) and
- * shows it. It never falls back to the newest version, never reads MakeCode and
- * never writes.
+ * provenance is this child's, for an EDITABLE credit game — Apple Dash or Lantern
+ * Cove — and names the deterministic ids) and shows it, naming the game it belongs
+ * to. A play-only game has no saved version, so it can never be a credit source
+ * and never reaches this dialog. It never falls back to the newest version, never
+ * reads MakeCode and never writes.
  *
  * ── An answer belongs to ONE request ────────────────────────────────────────
  * The effect's own cleanup retires its callbacks before anything else, and a
@@ -32,6 +34,7 @@ import {
 } from '../../core/firebase/buildStudioHoursCreditWrites'
 import type { BuildStudioCreditProvenance } from '../../core/types/buildStudio'
 import { describeAttemptForParent } from '../build-studio/buildStudioChallenges'
+import { editableGameForProject } from '../build-studio/buildStudioGames'
 import {
   buildStudioDownloadsForArchive,
   downloadTextFile,
@@ -134,8 +137,16 @@ export default function BuildStudioCreditedWorkDialog({
   } else {
     const { version } = result
     const challenge = describeAttemptForParent(version)
+    // The reader proved `version.projectId` is the provenance's own, so this names
+    // the exact game the credit was given for, from the editable-games catalog only.
+    const game = editableGameForProject(version.projectId)
     body = (
       <Stack spacing={1}>
+        {game && (
+          <Typography variant="overline" color="text.secondary">
+            {game.emoji} {game.title}
+          </Typography>
+        )}
         <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
           {version.label}
         </Typography>

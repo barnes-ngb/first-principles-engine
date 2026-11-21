@@ -1,0 +1,42 @@
+{
+    "transparency16": {
+        "data": "hwQQABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+        "mimeType": "image/x-mkcd-f4",
+        "tilemapTile": true
+    },
+    "tile1": {
+        "data": "hwQQABAAAACIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiImIiIiImIiIiYiIiIiYiIiJiIiIiJiIiImIiIiImIiIiYiIiIiYiIiJiIiIiJiIiImIiIiImIiIiYiIiIiYiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiA==",
+        "mimeType": "image/x-mkcd-f4",
+        "tilemapTile": true,
+        "displayName": "Cove water"
+    },
+    "tile2": {
+        "data": "hwQQABAAAADU3d3d3d3d3d3d3d3d3d3d3d3d3d3d3U3d3dTd3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d1N3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3U3U3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3dTd3d3d3d3d3d3d3d3d3d3d3d3d3d3Q==",
+        "mimeType": "image/x-mkcd-f4",
+        "tilemapTile": true,
+        "displayName": "Sandy trail"
+    },
+    "tile3": {
+        "data": "hwQQABAAAADMzMzMzMzMzBGxG7u7sbvLEbEbu7uxu8sRsRu7u7G7yxGxG7u7sbvLEbEbu7uxu8sRsRu7u7G7yxGxG7u7sbvLEbGxuxu7u8ERsbG7G7u7wRGxsbsbu7vBEbGxuxu7u8ERsbG7G7u7wRGxsbsbu7vBEbGxuxu7u8HMzMzMzMzMzA==",
+        "mimeType": "image/x-mkcd-f4",
+        "tilemapTile": true,
+        "displayName": "Ridge rock"
+    },
+    "Lantern Cove1": {
+        "id": "Lantern Cove1",
+        "mimeType": "application/mkcd-tilemap",
+        "data": "MTAwYTAwMDcwMDAxMDEwMTAxMDEwMTAxMDEwMTAxMDEwMjAyMDIwMzAyMDIwMjAyMDEwMTAyMDIwMjAzMDIwMjAyMDIwMTAxMDIwMjAyMDMwMjAyMDIwMjAxMDEwMjAyMDIwMjAyMDIwMjAyMDEwMTAyMDIwMjAyMDIwMjAyMDIwMTAxMDEwMTAxMDEwMTAxMDEwMTAxMjIyMjIyMjIyMjAyMDAwMjAwMjAwMjAwMDIwMDIwMDIwMDAyMDAyMDAyMDAwMDAwMjAwMjAwMDAwMDIwMjIyMjIyMjIyMg==",
+        "tileset": [
+            "myTiles.transparency16",
+            "myTiles.tile1",
+            "myTiles.tile2",
+            "myTiles.tile3"
+        ],
+        "displayName": "Lantern Cove"
+    },
+    "*": {
+        "mimeType": "image/x-mkcd-f4",
+        "dataEncoding": "base64",
+        "namespace": "myTiles"
+    }
+}

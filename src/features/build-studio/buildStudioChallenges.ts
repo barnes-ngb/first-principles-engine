@@ -38,6 +38,8 @@ import {
   type BuildStudioChallengeSubject,
 } from '../../core/types/buildStudio'
 import { SubjectBucket } from '../../core/types/enums'
+import { BUILD_STUDIO_PROJECT_ID } from './buildStudioStarter'
+import { LANTERN_COVE_PROJECT_ID } from './lanternCoveStarter'
 
 export interface BuildChallengeOption {
   /** Stable, lowercase-with-dashes. Stored on a saved attempt. */
@@ -306,20 +308,167 @@ export const BUILD_CHALLENGES: readonly BuildChallenge[] = [
   },
 ]
 
-/** The default invitation. */
-export const DEFAULT_BUILD_CHALLENGE: BuildChallenge = BUILD_CHALLENGES[0]
+/**
+ * The five authored Lantern Cove challenges (FEAT-247, slice 4).
+ *
+ * A separate catalog on purpose: a challenge belongs to ONE game's source, so a
+ * lookup always names the project and a Lantern Cove id can never resolve to
+ * Apple Dash wording or the other way round. The same rules as above apply — a
+ * stable `id`, a `revision` bumped when the meaning changes, one plain `subject`
+ * that is not a skill claim, a hint that says WHERE to look and asks a question,
+ * and nothing scored. The only runtime tag a saved attempt carries is the
+ * authored `subjectBucket`; nothing subjective is derived from play.
+ *
+ * Challenges 2 and 3 are worked from the starter's own scoring (one point per
+ * treasure). Their wording says so, so a child who has already changed the points
+ * is told to start fresh rather than being asked about numbers that moved.
+ */
+export const LANTERN_COVE_CHALLENGES: readonly BuildChallenge[] = [
+  {
+    id: 'move-your-starting-spot',
+    revision: 1,
+    order: 1,
+    goal: 'Move your starting spot.',
+    question: 'Change only how far across the hero starts. Keep the down number.',
+    why: 'See your change the moment you start.',
+    subject: 'where things are on a grid',
+    subjectBucket: SubjectBucket.PracticalArts,
+    hint: 'Look in the on start blocks for the block that puts the hero on a tile. Which number is across, and which is down?',
+    prediction: {
+      prompt: 'After your change, will the hero start left of where it did, right of it, or in the same spot?',
+      options: [opt('left', 'Left'), opt('right', 'Right'), opt('same', 'The same spot')],
+    },
+    parentIdea:
+      'Position on a grid. Notice whether they changed one number and kept the other, then restarted to compare.',
+    followUp: 'Which number did you change, and where did the hero start this time?',
+  },
+  {
+    id: 'two-points-per-treasure',
+    revision: 1,
+    order: 2,
+    goal: 'Give each treasure two points.',
+    question: 'Start from the starter, where each treasure is one point. If you changed the points already, start fresh first.',
+    why: 'Make every find count for more.',
+    subject: 'counting by twos',
+    subjectBucket: SubjectBucket.Math,
+    hint: 'Look in the treasure pickup for the block that changes the score. What is each treasure worth now?',
+    prediction: {
+      prompt: 'After you pick up three treasures, what will your score be?',
+      options: [opt('three-points', '3 points'), opt('six-points', '6 points'), opt('nine-points', '9 points')],
+    },
+    parentIdea:
+      'Skip counting by twos. Notice whether they check the total after each pickup, not only at the end.',
+    followUp: 'What was your score after the first, second and third treasure?',
+  },
+  {
+    id: 'raise-the-camp-flag-sooner',
+    revision: 1,
+    order: 3,
+    goal: 'Raise the camp flag sooner.',
+    question: 'Keep each find at one point and set the flag goal to three. If you changed the points already, start fresh first.',
+    why: 'Make the win come earlier.',
+    subject: 'a goal number and counting up to it',
+    subjectBucket: SubjectBucket.Math,
+    hint: 'Look for the block that checks the score before the flag goes up. Which number does it compare with?',
+    prediction: {
+      prompt: 'On which treasure pickup will the camp flag go up?',
+      options: [
+        opt('second-pickup', 'The second one'),
+        opt('third-pickup', 'The third one'),
+        opt('fourth-pickup', 'The fourth one'),
+      ],
+    },
+    parentIdea:
+      'Counting up to a goal. Notice whether they check the flag before the predicted pickup and on it.',
+    followUp: 'What did the flag do before your predicted pickup, and what did it do on it?',
+  },
+  {
+    id: 'move-a-treasure',
+    revision: 1,
+    order: 4,
+    goal: 'Move a treasure.',
+    question: 'Move the treasure nearest camp one column over, onto ground you can walk to.',
+    why: 'Change how far you have to go.',
+    subject: 'counting steps on a map',
+    subjectBucket: SubjectBucket.Math,
+    hint: 'Look in the on start blocks for the treasure blocks. Which one is nearest camp, and which number is its column?',
+    prediction: {
+      prompt: 'Counting tile steps from camp, will the moved treasure be fewer steps, more steps, or the same?',
+      options: [opt('fewer-steps', 'Fewer steps'), opt('more-steps', 'More steps'), opt('same', 'The same')],
+    },
+    parentIdea:
+      'Distance as a count of tiles. Notice whether they count steps along the ground rather than guessing by eye.',
+    followUp: 'How many steps from camp was it before, and how many now?',
+  },
+  {
+    id: 'open-a-shortcut',
+    revision: 1,
+    order: 5,
+    goal: 'Open a shortcut.',
+    question: 'Do your map editing last. Paint floor on the ridge and clear its wall mark.',
+    why: 'Make a new way through the cove.',
+    subject: 'a path and what blocks it',
+    subjectBucket: SubjectBucket.PracticalArts,
+    hint: 'Open the map editor after your blocks are done. Find the ridge tile. Which tool paints floor, and which one clears the wall mark?',
+    prediction: {
+      prompt: 'When you walk the direct way, will the hero go through the ridge, go around it, or are you unsure?',
+      options: [opt('through', 'Through'), opt('around', 'Around'), opt('unsure', 'Not sure')],
+    },
+    parentIdea:
+      'A tile has a look and a wall setting. Notice whether they test the direct route and a rock next to it.',
+    followUp: 'What happened on the direct way, and what happened at the rock next to it?',
+  },
+]
 
-export function challengeById(id: string): BuildChallenge | null {
-  return BUILD_CHALLENGES.find((challenge) => challenge.id === id) ?? null
+const CHALLENGE_CATALOGS: ReadonlyMap<string, readonly BuildChallenge[]> = new Map([
+  [BUILD_STUDIO_PROJECT_ID, BUILD_CHALLENGES],
+  [LANTERN_COVE_PROJECT_ID, LANTERN_COVE_CHALLENGES],
+])
+
+/**
+ * The authored challenges of ONE game, or `[]` for a project that has none.
+ * Every lookup below goes through this, so a challenge id is only ever read
+ * against the project it was written for.
+ */
+export function challengesForProject(projectId: string): readonly BuildChallenge[] {
+  return CHALLENGE_CATALOGS.get(projectId) ?? []
+}
+
+/** A challenge by id, in THIS project's catalog only. */
+export function challengeFor(projectId: string, id: string): BuildChallenge | null {
+  return challengesForProject(projectId).find((challenge) => challenge.id === id) ?? null
+}
+
+/** The first invitation of a project, or `null` when it has none. */
+export function defaultChallengeFor(projectId: string): BuildChallenge | null {
+  return challengesForProject(projectId)[0] ?? null
 }
 
 /**
- * The challenge after this one, wrapping at the end. Used by *Try a different
- * one*: a swap never needs the source, so it cannot touch MakeCode.
+ * The challenge after this one in the same project, wrapping at the end. Used by
+ * *Try a different one*: a swap never needs the source, so it cannot touch MakeCode.
  */
+export function nextChallengeFor(projectId: string, currentId: string): BuildChallenge | null {
+  const catalog = challengesForProject(projectId)
+  if (catalog.length === 0) return null
+  const index = catalog.findIndex((challenge) => challenge.id === currentId)
+  return catalog[(index + 1) % catalog.length] ?? catalog[0]
+}
+
+/** The default Apple Dash invitation. */
+export const DEFAULT_BUILD_CHALLENGE: BuildChallenge = BUILD_CHALLENGES[0]
+
+/**
+ * Apple Dash only, by name. Kept for the released callers and tests; anything
+ * that can be handed another game's id uses {@link challengeFor}.
+ */
+export function challengeById(id: string): BuildChallenge | null {
+  return challengeFor(BUILD_STUDIO_PROJECT_ID, id)
+}
+
+/** Apple Dash only, by name — see {@link nextChallengeFor} for any other game. */
 export function nextChallenge(currentId: string): BuildChallenge {
-  const index = BUILD_CHALLENGES.findIndex((challenge) => challenge.id === currentId)
-  return BUILD_CHALLENGES[(index + 1) % BUILD_CHALLENGES.length] ?? DEFAULT_BUILD_CHALLENGE
+  return nextChallengeFor(BUILD_STUDIO_PROJECT_ID, currentId) ?? DEFAULT_BUILD_CHALLENGE
 }
 
 /** What the card reads aloud: the goal, the question, nothing more. */
@@ -355,7 +504,9 @@ export function describeAttemptForParent(version: {
   ) {
     return null
   }
-  const challenge = challengeById(attempt.challengeId)
+  // The catalog is the attempt's OWN project's (verified equal to the row's above),
+  // so an id from another game never borrows that game's wording.
+  const challenge = challengeFor(attempt.projectId, attempt.challengeId)
   if (!challenge) return null
   const current = attempt.challengeRevision === challenge.revision
 

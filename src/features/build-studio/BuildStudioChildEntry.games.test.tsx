@@ -90,9 +90,11 @@ afterEach(cleanup)
 const BLOCK_MUNCHER_URL = 'https://barnes-ngb.github.io/block-muncher/'
 
 describe('the catalogs keep editable and play-only games apart', () => {
-  it('has Apple Dash as the only editable game, with its existing project id', () => {
-    expect(EDITABLE_GAMES.map((g) => g.id)).toEqual(['apple-dash'])
+  it('has Apple Dash first, with its existing project id, and Lantern Cove second under its own', () => {
+    expect(EDITABLE_GAMES.map((g) => g.id)).toEqual(['apple-dash', 'lantern-cove'])
     expect(EDITABLE_GAMES[0].projectId).toBe('apple-dash-starter')
+    expect(EDITABLE_GAMES[1].projectId).toBe('lantern-cove-starter')
+    expect(new Set(EDITABLE_GAMES.map((g) => g.projectId)).size).toBe(EDITABLE_GAMES.length)
   })
 
   it('has Block Muncher as a play-only link with no project of its own', () => {

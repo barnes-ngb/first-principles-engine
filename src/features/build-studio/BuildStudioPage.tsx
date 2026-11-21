@@ -73,6 +73,12 @@ import BuildStudioAutoCredit from './BuildStudioAutoCredit'
 import { buildStudioDownloads, downloadTextFile } from './buildStudioExport'
 import BuildStudioChildEntry from './BuildStudioChildEntry'
 import BuildStudioSettingsSection from './BuildStudioSettingsSection'
+import {
+  allGamesVersionsRead,
+  gameTitleForVersion,
+  versionsReadForProject,
+} from './buildStudioGameReads'
+import { LANTERN_COVE_PROJECT_ID } from './lanternCoveStarter'
 import { BUILD_STUDIO_PROJECT_ID } from './buildStudioStarter'
 import BuildStudioVersionShelf from './BuildStudioVersionShelf'
 import { useBuildStudioOptIn } from './useBuildStudioOptIn'
@@ -104,6 +110,8 @@ export default function BuildStudioPage() {
   } = useActiveChild()
 
   const optIn = useBuildStudioOptIn(familyId, activeChildId || null)
+  // ONE listener for the child's whole shelf. Every other game's shelf — and the
+  // parent's combined one — is derived from this read below, never subscribed to.
   const versions = useBuildStudioVersions(
     familyId,
     activeChildId || null,
@@ -169,6 +177,12 @@ export default function BuildStudioPage() {
   const shelfIsCurrent =
     versions.childId === activeChildId && versions.projectId === BUILD_STUDIO_PROJECT_ID
   const enrolled = buildStudioChildEnrolled(optIn, activeChildId)
+  // A read about another child or project is reported as still loading rather
+  // than shown — for the primary game and, derived from it, for every other.
+  const currentRead = shelfIsCurrent
+    ? versions
+    : { ...versions, status: VersionsStatus.Loading, versions: [], childRows: [] }
+  const lanternRead = versionsReadForProject(currentRead, LANTERN_COVE_PROJECT_ID)
 
   if (access === BuildStudioAccess.ParentView) {
     return (
@@ -207,11 +221,11 @@ export default function BuildStudioPage() {
           Saved versions
         </Typography>
         <BuildStudioVersionShelf
-          read={
-            shelfIsCurrent
-              ? versions
-              : { ...versions, status: VersionsStatus.Loading, versions: [] }
-          }
+          // Every editable game's saves on one read-only shelf, each row naming
+          // its game. Derived from the one listener; a read about anyone else is
+          // still reported as loading.
+          read={allGamesVersionsRead(currentRead)}
+          gameTitleFor={gameTitleForVersion}
           // The parent view's whole contract, in one prop. There is no `onOpen`
           // to pass, so there is no control to hide.
           canOpen={false}
@@ -242,7 +256,10 @@ export default function BuildStudioPage() {
         familyId={familyId}
         childId={activeChildId}
         enabled
-        nudgeKey={shelfIsCurrent ? versions.versions.length : -1}
+        // Every saved row of THIS child, across both games: a new Lantern Cove
+        // save leaves a pending credit job exactly as an Apple Dash one does, and
+        // the worker's queue is the child's, not the open shelf's.
+        nudgeKey={shelfIsCurrent ? (versions.childRows ?? versions.versions).length : -1}
       />
       {outOfScope && (
         <Alert severity="warning">
@@ -273,11 +290,11 @@ export default function BuildStudioPage() {
         }
         // A shelf read that is about another child or another project is
         // reported as still loading rather than shown.
-        versions={
-          shelfIsCurrent
-            ? versions
-            : { ...versions, status: VersionsStatus.Loading, versions: [] }
-        }
+        versions={currentRead}
+        // The other editable game's shelf, derived from the same read. Absent
+        // when this read carries no rows to derive it from, in which case that
+        // game is simply not offered.
+        gameReads={{ [LANTERN_COVE_PROJECT_ID]: lanternRead }}
         onOutOfScopeSave={noteOutOfScope}
       />
     </Stack>

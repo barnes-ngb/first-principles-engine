@@ -159,6 +159,47 @@ describe('creditEligible', () => {
       await saveBuildStudioVersion(args({ creditEligible: true, childId: 'child.with.dots' }))
       expect(jobSets()).toHaveLength(0)
     })
+
+    it('Lantern Cove (FEAT-247 slice 4): a NEW eligible save is stamped and queued like Apple Dash, under its own ids', async () => {
+      await saveBuildStudioVersion(
+        args({ creditEligible: true, projectId: 'lantern-cove-starter' }),
+      )
+      expect(sets.map((s) => (s.ref.__col as { __col: string }).__col)).toEqual([
+        'buildStudioVersions',
+        'buildStudioCreditJobs',
+      ])
+      expect(sets[0].data.acceptedAt).toEqual({ __sentinel: 'serverTimestamp' })
+      expect(jobSets()[0].ref.__id).toBe('child-lincoln.lantern-cove-starter.v-abc123')
+      expect(stored['buildStudioCreditJobs/child-lincoln.lantern-cove-starter.v-abc123']).toEqual({
+        schema: 1,
+        childId: 'child-lincoln',
+        projectId: 'lantern-cove-starter',
+        versionId: 'v-abc123',
+        versionDocId: 'child-lincoln__lantern-cove-starter__v-abc123',
+        createdAt: { __sentinel: 'serverTimestamp' },
+      })
+    })
+
+    it('Lantern Cove: an unstamped save, and a retry of an older one, get no stamp and no job (no backfill)', async () => {
+      await saveBuildStudioVersion(args({ projectId: 'lantern-cove-starter' }))
+      expect('acceptedAt' in sets[0].data).toBe(false)
+      expect(jobSets()).toHaveLength(0)
+
+      sets = []
+      const retry = await saveBuildStudioVersion(
+        args({ creditEligible: true, projectId: 'lantern-cove-starter' }),
+      )
+      expect(retry.outcome).toBe('alreadySaved')
+      expect(sets).toHaveLength(0)
+    })
+
+    it('a project outside the credit list still saves plainly even when a caller passes the flag', async () => {
+      const other = await saveBuildStudioVersion(args({ creditEligible: true, projectId: 'block-muncher' }))
+      expect(other.outcome).toBe('created')
+      expect(sets).toHaveLength(1)
+      expect('acceptedAt' in sets[0].data).toBe(false)
+      expect(jobSets()).toHaveLength(0)
+    })
   })
 
   it('does not change the retry identity or the rest of the document', async () => {
