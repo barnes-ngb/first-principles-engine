@@ -60,6 +60,12 @@ export interface BuildStudioVersionShelfProps {
    * unchanged. Older rows have no record and draw nothing.
    */
   showChallengeLine?: boolean
+  /**
+   * Name the game a row belongs to (FEAT-247). Used by the parent's read-only
+   * view, which lists every editable game's saves on one shelf; the child's own
+   * shelf is per game and passes nothing, so it is unchanged.
+   */
+  gameTitleFor?: (version: BuildStudioVersion) => string | null
 }
 
 export default function BuildStudioVersionShelf({
@@ -72,6 +78,7 @@ export default function BuildStudioVersionShelf({
   onRetryRead,
   showTechnicalDetail = false,
   showChallengeLine = false,
+  gameTitleFor,
 }: BuildStudioVersionShelfProps) {
   if (read.status === VersionsStatus.Loading) {
     return (
@@ -117,6 +124,7 @@ export default function BuildStudioVersionShelf({
         const isCurrent = currentVersionId === version.versionId
         const isBusy = busyVersionId === version.versionId
         const challengeLine = showChallengeLine ? describeAttemptForParent(version) : null
+        const gameTitle = gameTitleFor ? gameTitleFor(version) : null
         return (
           <Box
             key={version.id}
@@ -139,6 +147,11 @@ export default function BuildStudioVersionShelf({
                   {version.label}
                   {isCurrent && ' — open now'}
                 </Typography>
+                {gameTitle && (
+                  <Typography variant="caption" sx={{ fontWeight: 700 }}>
+                    {gameTitle}
+                  </Typography>
+                )}
                 <Typography variant="caption" color="text.secondary">
                   {savedLine(version.createdAt)}
                 </Typography>

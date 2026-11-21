@@ -1,0 +1,42 @@
+// Auto-generated code. Do not edit.
+namespace myTiles {
+    //% fixedInstance jres blockIdentity=images._tile
+    export const transparency16 = image.ofBuffer(hex``);
+    //% fixedInstance jres blockIdentity=images._tile
+    export const tile1 = image.ofBuffer(hex``);
+    //% fixedInstance jres blockIdentity=images._tile
+    export const tile2 = image.ofBuffer(hex``);
+    //% fixedInstance jres blockIdentity=images._tile
+    export const tile3 = image.ofBuffer(hex``);
+
+    helpers._registerFactory("tilemap", function(name: string) {
+        switch(helpers.stringTrim(name)) {
+            case "Lantern Cove":
+            case "Lantern Cove1":return tiles.createTilemap(hex`0a00070001010101010101010101010202020302020202010102020203020202020101020202030202020201010202020202020202010102020202020202020101010101010101010101`, img`
+2 2 2 2 2 2 2 2 2 2 
+2 . . . 2 . . . . 2 
+2 . . . 2 . . . . 2 
+2 . . . 2 . . . . 2 
+2 . . . . . . . . 2 
+2 . . . . . . . . 2 
+2 2 2 2 2 2 2 2 2 2 
+`, [myTiles.transparency16,myTiles.tile1,myTiles.tile2,myTiles.tile3], TileScale.Sixteen);
+        }
+        return null;
+    })
+
+    helpers._registerFactory("tile", function(name: string) {
+        switch(helpers.stringTrim(name)) {
+            case "transparency16":return transparency16;
+            case "Cove water":
+            case "tile1":return tile1;
+            case "Sandy trail":
+            case "tile2":return tile2;
+            case "Ridge rock":
+            case "tile3":return tile3;
+        }
+        return null;
+    })
+
+}
+// Auto-generated code. Do not edit.

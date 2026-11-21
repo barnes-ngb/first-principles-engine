@@ -214,6 +214,20 @@ export interface ArcadeBridgeOptions {
   newId: () => string
   /** `Date.now`, injected for the same reason. */
   now?: () => number
+  /**
+   * A game-specific completeness rule, asked of every payload of OURS after the
+   * released minimum ({@link projectShapeComplete}) and before the caps.
+   *
+   * Absent for Apple Dash, whose admission is exactly what it always was. Lantern
+   * Cove passes its complete-native-archive rule, because `main.ts` and
+   * `pxt.json` alone are enough to satisfy the minimum while the map is gone. A
+   * payload that fails it takes the SAME path as a missing required file
+   * ({@link ArcadeBridge.refuseIncomplete}): it is not accepted, it is not a save
+   * candidate, and it INVALIDATES whatever the running capture had collected —
+   * so an incomplete current capture can never be answered with an earlier
+   * complete one.
+   */
+  acceptsFiles?: (files: BuildStudioSourceFiles) => boolean
   /** The editor saved — NOT a durable app save. Used only for the dirty mark. */
   onEditorSave?: (project: AcceptedProject) => void
   /** The editor finished loading and the host answered. */
@@ -678,6 +692,13 @@ export class ArcadeBridge {
     // still OURS and still the newest reading of the current source, which is
     // what `refuseIncomplete` acts on.
     if (!projectShapeComplete(files)) {
+      this.refuseIncomplete()
+      return null
+    }
+    // The game's own completeness rule, when it has one. Same path, same
+    // invalidation: a map-less Lantern Cove capture is the newest reading of the
+    // current source and is provably NOT the complete one collected before it.
+    if (this.options.acceptsFiles && !this.options.acceptsFiles(files)) {
       this.refuseIncomplete()
       return null
     }

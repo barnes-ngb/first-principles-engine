@@ -1,0 +1,79 @@
+namespace SpriteKind {
+    export const Treasure = SpriteKind.create()
+    export const CampFlag = SpriteKind.create()
+}
+sprites.onOverlap(SpriteKind.Player, SpriteKind.Treasure, function (player2, treasure) {
+    treasure.destroy()
+    info.changeScoreBy(pointsPerTreasure)
+    music.play(music.melodyPlayable(music.baDing), music.PlaybackMode.InBackground)
+    if (!(flagRaised) && info.score() >= flagGoal) {
+        flagRaised = true
+        flag.setImage(img`
+            e 5 5 5 5 5 5 . 
+            e 5 1 1 5 5 . . 
+            e 5 1 5 5 . . . 
+            e 5 5 5 5 5 . . 
+            e 5 5 5 5 5 5 . 
+            e . . . . . . . 
+            e . . . . . . . 
+            e . . . . . . . 
+            e . . . . . . . 
+            e e e . . . . . 
+            `)
+    }
+})
+function placeTreasure (column: number, row: number) {
+    treasure = sprites.create(img`
+        . . 4 4 4 4 . . 
+        . 4 5 5 5 5 4 . 
+        4 5 1 1 5 5 5 4 
+        4 5 1 5 5 5 5 4 
+        4 5 5 5 5 5 5 4 
+        . 4 5 5 5 5 4 . 
+        . . 4 4 4 4 . . 
+        `, SpriteKind.Treasure)
+    tiles.placeOnTile(treasure, tiles.getTileLocation(column, row))
+}
+let treasure: Sprite = null
+let flagRaised = false
+let flag: Sprite = null
+let flagGoal = 0
+let pointsPerTreasure = 0
+let walkSpeed = 60
+pointsPerTreasure = 1
+flagGoal = 5
+scene.setBackgroundColor(8)
+tiles.setCurrentTilemap(tilemap`Lantern Cove`)
+info.setScore(0)
+let hero = sprites.create(img`
+    . . . 7 7 7 7 . . . 
+    . . 7 7 7 7 7 7 . . 
+    . 6 6 7 7 7 7 6 6 . 
+    . . d f d d f d . . 
+    . . d d d d d d . . 
+    . . . d d d d . . . 
+    . d 6 6 1 1 6 6 d . 
+    . . 6 6 6 6 6 6 . . 
+    . . . c c c c . . . 
+    . . c c . . c c . . 
+    `, SpriteKind.Player)
+tiles.placeOnTile(hero, tiles.getTileLocation(1, 1))
+controller.moveSprite(hero, walkSpeed, walkSpeed)
+flag = sprites.create(img`
+    e . . . . . . . 
+    e . . . . . . . 
+    e . . . . . . . 
+    e . . . . . . . 
+    e . . . . . . . 
+    e . . . . . . . 
+    e 7 7 7 7 . . . 
+    e 7 7 7 . . . . 
+    e 7 7 7 7 . . . 
+    e e e . . . . . 
+    `, SpriteKind.CampFlag)
+tiles.placeOnTile(flag, tiles.getTileLocation(1, 2))
+placeTreasure(2, 3)
+placeTreasure(7, 1)
+placeTreasure(7, 4)
+placeTreasure(1, 5)
+placeTreasure(6, 5)

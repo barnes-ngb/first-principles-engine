@@ -319,7 +319,12 @@ export async function saveBuildStudioVersion(
     // The versions collection's converter (`buildStudioVersionToFirestore`) hands
     // `acceptedAt` through untouched; the repo-wide `stripUndefined` would flatten
     // the sentinel into a plain map and no server time would ever be stored.
-    tx.set(ref, args.creditEligible === true ? { ...version, acceptedAt: serverTimestamp() } : version)
+    // The stamp and the job share ONE boundary: a NEW eligible Apple Dash save.
+    // `creditEligible` from any other project (Lantern Cove, FEAT-247) saves as a
+    // plain version — no `acceptedAt`, no job — so a caller that passes the flag
+    // by mistake cannot make that game look creditable to the Records reader.
+    const stamped = args.creditEligible === true && projectId === BUILD_STUDIO_PROJECT_ID
+    tx.set(ref, stamped ? { ...version, acceptedAt: serverTimestamp() } : version)
     // The pending automatic-credit job, in the SAME transaction as the new
     // version and only here: a retry that finds the version stored returned
     // above, so it can never create, re-create or backfill one. The job is just

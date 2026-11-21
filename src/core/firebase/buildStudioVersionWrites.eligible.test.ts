@@ -159,6 +159,25 @@ describe('creditEligible', () => {
       await saveBuildStudioVersion(args({ creditEligible: true, childId: 'child.with.dots' }))
       expect(jobSets()).toHaveLength(0)
     })
+
+    it('Lantern Cove (FEAT-247): even a caller that passes creditEligible gets no stamp and no job; Apple Dash on the same call keeps both', async () => {
+      // The positive control comes FIRST and in the same shape: if this stops
+      // being creditable the negative below proves nothing.
+      await saveBuildStudioVersion(args({ creditEligible: true }))
+      expect(sets[0].data.acceptedAt).toEqual({ __sentinel: 'serverTimestamp' })
+      expect(jobSets()).toHaveLength(1)
+
+      sets = []
+      stored = {}
+      const lantern = await saveBuildStudioVersion(
+        args({ creditEligible: true, projectId: 'lantern-cove-starter' }),
+      )
+      expect(lantern.outcome).toBe('created')
+      expect(sets).toHaveLength(1)
+      expect((sets[0].ref.__col as { __col: string }).__col).toBe('buildStudioVersions')
+      expect('acceptedAt' in sets[0].data).toBe(false)
+      expect(jobSets()).toHaveLength(0)
+    })
   })
 
   it('does not change the retry identity or the rest of the document', async () => {
