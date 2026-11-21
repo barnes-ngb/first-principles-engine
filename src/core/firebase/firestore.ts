@@ -1018,3 +1018,15 @@ export const buildStudioCreditReceiptsCollection = (familyId: string): Collectio
  */
 export const buildStudioCreditDaysCollection = (familyId: string): CollectionReference =>
   collection(db, `families/${familyId}/buildStudioCreditDays`)
+
+/**
+ * Pending automatic-credit jobs: one tiny reference per NEWLY saved eligible
+ * version, `{childId}.{projectId}.{versionId}`.
+ * Path: families/{familyId}/buildStudioCreditJobs/{childId}.{projectId}.{versionId}
+ * Created only inside the version-save transaction (`buildStudioVersionWrites.ts`);
+ * removed by `buildStudioHoursCreditWrites.ts` once a credit result is KNOWN. It is
+ * a work queue, not a record: the receipt, day bucket and `hours` row are the
+ * record. Under the family owner rule — `firestore.rules` is untouched.
+ */
+export const buildStudioCreditJobsCollection = (familyId: string): CollectionReference =>
+  collection(db, `families/${familyId}/buildStudioCreditJobs`)

@@ -91,6 +91,51 @@ export const creditDayId = (childId: string, schoolDate: string): string => `${c
 export const creditHoursId = (childId: string, projectId: string, versionId: string): string =>
   `bsc.${childId}.${projectId}.${versionId}`
 
+// ── The pending automatic-credit job ────────────────────────────────────────
+//
+// One tiny document per NEWLY created eligible Apple Dash save, written in the
+// same transaction as the version (`buildStudioVersionWrites.ts`). It is only a
+// durable reference to ONE exact source — family (its collection), child,
+// project and version — and carries no minutes, date, subject or decision.
+// Everything is re-proven from the stored version when the job is worked.
+
+/** The job document's schema. */
+export const CREDIT_JOB_SCHEMA = 1
+
+/** The job id is the receipt id of the same exact source: one job per version. */
+export const creditJobId = creditReceiptId
+
+/** The stored shape of a job (plus a server `createdAt` the writer adds). */
+export function buildCreditJobFields(childId: string, projectId: string, versionId: string) {
+  return {
+    schema: CREDIT_JOB_SCHEMA,
+    childId,
+    projectId,
+    versionId,
+    versionDocId: buildStudioVersionDocId(childId, projectId, versionId),
+  }
+}
+
+/**
+ * A job document back into its exact scope, or `null` unless it is precisely the
+ * job its own id names, for the Apple Dash project. A doctored, foreign or
+ * mismatched document is never worked.
+ */
+export function parseCreditJob(
+  id: string,
+  data: unknown,
+): { childId: string; projectId: string; versionId: string } | null {
+  if (typeof data !== 'object' || data === null) return null
+  const d = data as Record<string, unknown>
+  if (d.schema !== CREDIT_JOB_SCHEMA) return null
+  const { childId, projectId, versionId } = d
+  if (!isCreditPathId(childId) || !isCreditPathId(projectId) || !isCreditPathId(versionId)) return null
+  if (projectId !== BUILD_STUDIO_PROJECT_ID) return null
+  if (id !== creditJobId(childId, projectId, versionId)) return null
+  if (d.versionDocId !== buildStudioVersionDocId(childId, projectId, versionId)) return null
+  return { childId, projectId, versionId }
+}
+
 // ── Dates ───────────────────────────────────────────────────────────────────
 
 /**

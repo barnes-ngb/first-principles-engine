@@ -1,9 +1,11 @@
 // ── The one write that saves a Build Studio version (LOCAL-BUILD-001) ────────
 //
-// `buildStudioVersions` and nothing else. The list of what this module
-// deliberately cannot reach is the point of the feature, and it is enforced by
-// its own test rather than described: the `./firestore` mock in
-// `buildStudioVersionWrites.test.ts` exports exactly the two helpers below, and
+// `buildStudioVersions` — plus, for a NEW eligible save only, one tiny pending
+// credit job (`buildStudioCreditJobs`) in the same transaction — and nothing
+// else. The list of what this module deliberately cannot reach is the point of
+// the feature, and it is enforced by its own test rather than described: the
+// `./firestore` mock in `buildStudioVersionWrites.test.ts` exports exactly the
+// three helpers this module uses, and
 // vitest throws on access to any other export of a mocked module. So a future
 // edit that reached for one of these would fail at that line:
 //
@@ -61,7 +63,13 @@ import {
   type BuildStudioSourceFiles,
   type BuildStudioVersion,
 } from '../types/buildStudio'
-import { buildStudioVersionsCollection, db } from './firestore'
+import {
+  buildCreditJobFields,
+  creditJobId,
+  isCreditPathId,
+} from '../../features/build-studio/buildStudioCreditProof'
+import { BUILD_STUDIO_PROJECT_ID } from '../../features/build-studio/buildStudioStarter'
+import { buildStudioCreditJobsCollection, buildStudioVersionsCollection, db } from './firestore'
 
 /** Thrown before anything is written. The message is child-readable. */
 export class BuildStudioRefused extends Error {}
@@ -104,15 +112,18 @@ export interface SaveBuildStudioVersionArgs {
    */
   challengeAttempt?: BuildStudioChallengeAttempt
   /**
-   * Mark a NEW version as eligible for later parent-reviewed hours
-   * (LOCAL-VISION-007 slice 3) by stamping Firestore's server acceptance time as
-   * `acceptedAt`, inside the same create. This is ALL it does: no hours, no
-   * receipt, no admission — the save never depends on any of them.
+   * Mark a NEW version as eligible for automatic Build Studio hours credit
+   * (LOCAL-VISION-007) by stamping Firestore's server acceptance time as
+   * `acceptedAt`, and persisting one tiny pending job (a reference to this exact
+   * version, `buildStudioCreditJobs`) in the SAME transaction. That is ALL it
+   * does: no hours, no receipt, no admission — the save never depends on any of
+   * them, and the credit is attempted later, by `buildStudioHoursCreditWrites`.
    *
    * Applies only when THIS call creates the document. A retry that finds the
-   * version already stored (`alreadySaved`) never adds, changes or backfills it,
-   * so an older version stays reference/baseline-only for ever. Not part of the
-   * retry identity, for the same reason.
+   * version already stored (`alreadySaved`) never adds, changes or backfills the
+   * stamp or the job, so an older version stays reference/baseline-only for ever
+   * and a retried save is never credited twice. Not part of the retry identity,
+   * for the same reason.
    */
   creditEligible?: boolean
 }
@@ -270,6 +281,16 @@ export async function saveBuildStudioVersion(
   }
 
   const ref = doc(buildStudioVersionsCollection(familyId), id)
+  // A job only for a NEW eligible Apple Dash save whose ids the credit writer can
+  // address. Anything else (an unstamped save, another project, an id the credit
+  // paths do not accept) saves exactly as before and has no job.
+  const jobRef =
+    args.creditEligible === true &&
+    projectId === BUILD_STUDIO_PROJECT_ID &&
+    isCreditPathId(childId) &&
+    isCreditPathId(versionId)
+      ? doc(buildStudioCreditJobsCollection(familyId), creditJobId(childId, projectId, versionId))
+      : null
 
   return runTransaction(db, async (tx) => {
     const existing = await tx.get(ref)
@@ -299,6 +320,11 @@ export async function saveBuildStudioVersion(
     // `acceptedAt` through untouched; the repo-wide `stripUndefined` would flatten
     // the sentinel into a plain map and no server time would ever be stored.
     tx.set(ref, args.creditEligible === true ? { ...version, acceptedAt: serverTimestamp() } : version)
+    // The pending automatic-credit job, in the SAME transaction as the new
+    // version and only here: a retry that finds the version stored returned
+    // above, so it can never create, re-create or backfill one. The job is just
+    // a durable reference to this exact version; the save never waits on it.
+    if (jobRef) tx.set(jobRef, { ...buildCreditJobFields(childId, projectId, versionId), createdAt: serverTimestamp() })
     return { version, outcome: 'created' as const }
   })
 }

@@ -1,25 +1,49 @@
-// ── Parent-confirmed Build Studio hours credit (LOCAL-VISION-007 slice 3) ────
+// ── Automatic Build Studio hours credit (LOCAL-VISION-007 slice 3) ───────────
 //
-// Writer stage 1. Four guarded operations and no UI:
+// Guarded operations, no UI:
 //
 //   previewBuildStudioCredit        read-only. Proves one exact saved version and
-//                                   returns the proposal a PARENT reviews.
-//   confirmBuildStudioCredit        the one write. Re-proves everything inside a
-//                                   transaction and writes a receipt, a day bucket
+//                                   returns the proposal (the proof and the fixed
+//                                   credit the writer will admit).
+//   confirmBuildStudioCredit        the one credit write. Re-proves everything inside
+//                                   a transaction and writes a receipt, a day bucket
 //                                   and an `hours` row together, or nothing.
 //   correctBuildStudioCreditHours   lowers (or deletes) the visible `hours` row of
 //                                   one credit. Never touches receipt or bucket.
 //   readBuildStudioCreditedVersion  the exact saved version a credit names, for the
 //                                   parent's detail view and archive download.
+//   listPendingBuildStudioCreditJobs / reconcileBuildStudioCreditJob /
+//   reconcileBuildStudioCreditJobsForChild
+//                                   the AUTOMATIC path (below): work one pending job
+//                                   by composing preview and confirm — the same proof,
+//                                   zone, predecessor, cap, cadence and receipt, with
+//                                   no second copy of any of it.
 //
-// ── Why the child's save is untouched ───────────────────────────────────────
+// ── Automatic credit, and the owner's exception to confirm-before-write ─────
 //
-// Nothing here runs when a child saves. `saveBuildStudioVersion` only stamps a
-// server acceptance time on a new version (`creditEligible`); a save succeeds
-// whether or not any credit is ever proposed, and no total, minute or credit is
-// shown to the child. Credit exists only after a parent opens Records, reviews
-// the proposal (date, subject, minutes, source) and confirms — this repo's
-// propose → confirm → write rule.
+// CLAUDE.md says a user-facing write to a child's record goes propose → confirm →
+// write. The owner (Nathan) approved a NARROW exception: this derived Build Studio
+// credit, and only it, is written automatically for a new eligible Apple Dash save,
+// with no per-save confirmation. The parent keeps correction and removal on the
+// Records card (`correctBuildStudioCreditHours`). Nothing else is exempted.
+//
+// The save is untouched. `saveBuildStudioVersion` stamps a server acceptance time on
+// a NEW eligible version and writes one tiny job (`buildStudioCreditJobs`) in the
+// same transaction; a save succeeds whether or not any credit is ever attempted, and
+// no total, minute or credit is shown to the child. Older saves have no job and are
+// never credited (there is no backfill, by design).
+//
+// THIS IS A CLIENT WORKFLOW. There is no server worker: pending jobs are processed
+// only while the child's Build Studio page or the parent's Records view is open
+// (`useBuildStudioAutoCredit`). A job whose attempt could not finish stays pending
+// and is retried when either view is next open or the connection returns.
+//
+// A job is consumed ONLY after a known result — credited, already credited (the
+// permanent receipt, whether or not its visible row was later corrected or removed),
+// or a terminal answer (declined by the fixed policy, not eligible, source gone).
+// Offline, read/write failures, stale and pending answers leave it pending. If a
+// confirm's response is lost, the receipt is read back before anything else, so a
+// commit that landed is finished exactly once and never written twice.
 //
 // ── What a confirmed credit writes (all in ONE transaction) ─────────────────
 //
@@ -84,6 +108,7 @@ import {
   startAfter,
   where,
   type DocumentReference,
+  type QueryConstraint,
   type QueryDocumentSnapshot,
   type Transaction,
 } from 'firebase/firestore'
@@ -96,12 +121,14 @@ import {
   claimsChallenge,
   creditDayId,
   creditHoursId,
+  creditJobId,
   creditReceiptId,
   decideAdmission,
   isCreditPathId,
   isSchoolDate,
   NEIGHBOUR_DAYS,
   parseCreditDay,
+  parseCreditJob,
   proposalKey,
   proveBuildStudioCredit,
   shiftSchoolDate,
@@ -127,6 +154,7 @@ import {
 import { DayBlockType, type SubjectBucket } from '../types/enums'
 import {
   buildStudioCreditDaysCollection,
+  buildStudioCreditJobsCollection,
   buildStudioCreditReceiptsCollection,
   buildStudioVersionsCollection,
   db,
@@ -760,4 +788,303 @@ export async function readBuildStudioCreditedVersion(args: {
     return { status: 'malformed', reason: 'bad-challenge' }
   }
   return { status: 'ok', version: { ...(data as unknown as BuildStudioVersion), id: snap.id } }
+}
+
+// ── 5. Automatic credit: the pending job ────────────────────────────────────
+
+/** Jobs looked at per pass. A page size for ONE child's QUEUE, never the saved archives. */
+export const CREDIT_JOB_PAGE_SIZE = 25
+
+const jobRefFor = (s: CreditScope) =>
+  doc(buildStudioCreditJobsCollection(s.familyId), creditJobId(s.childId, s.projectId, s.versionId))
+
+export type CreditJobListResult =
+  /**
+   * `more`: another pass is wanted soon (a further page, or a job still being written).
+   * `nextCursor`: the document id of the last row EXAMINED when a further page exists,
+   * else `null` (the end of the queue: the caller returns to the start).
+   */
+  | { status: 'ok'; jobs: CreditScope[]; more: boolean; nextCursor: string | null }
+  | { status: 'failed' }
+
+/**
+ * This child's pending jobs, from the server. A bounded read of the QUEUE (a job
+ * is deleted once its result is known), so it never scans saved games. Only jobs
+ * that are exactly this child's and exactly the id they name are returned; a
+ * foreign or doctored document is ignored, never worked.
+ *
+ * Pages are ordered by document id. `after` is the last document id a previous
+ * page examined, so a page of held or malformed rows that stays pending is passed
+ * over rather than re-read forever.
+ */
+export async function listPendingBuildStudioCreditJobs(args: {
+  familyId: string
+  childId: string
+  after?: string | null
+}): Promise<CreditJobListResult> {
+  const { familyId, childId } = args
+  if (!validScope({ familyId, childId, projectId: BUILD_STUDIO_PROJECT_ID, versionId: 'x' })) {
+    return { status: 'failed' }
+  }
+  try {
+    const constraints: QueryConstraint[] = [where('childId', '==', childId), orderBy(documentId())]
+    if (args.after) constraints.push(startAfter(args.after))
+    const page = await getDocsFromServer(
+      query(buildStudioCreditJobsCollection(familyId), ...constraints, limit(CREDIT_JOB_PAGE_SIZE + 1)),
+    )
+    const jobs: CreditScope[] = []
+    const hasNextPage = page.docs.length > CREDIT_JOB_PAGE_SIZE
+    const examined = page.docs.slice(0, CREDIT_JOB_PAGE_SIZE)
+    const nextCursor = hasNextPage ? examined[examined.length - 1].id : null
+    let more = hasNextPage
+    for (const d of examined) {
+      // A job still being written locally is not yet the server's; look again soon.
+      if (d.metadata?.hasPendingWrites) {
+        more = true
+        continue
+      }
+      const parsed = parseCreditJob(d.id, d.data())
+      if (!parsed || parsed.childId !== childId) continue
+      jobs.push({ familyId, ...parsed })
+    }
+    return { status: 'ok', jobs, more, nextCursor }
+  } catch {
+    return { status: 'failed' }
+  }
+}
+
+/** Why a job was closed without a credit. Each is a KNOWN, final answer. */
+export type CreditJobClosedReason = 'no-job' | 'declined' | 'ineligible' | 'unavailable'
+
+export type CreditJobRetryReason =
+  | 'read-failed'
+  | 'write-failed'
+  | 'stale'
+  | 'pending'
+  | 'blocked'
+  | 'job-not-removed'
+
+export type CreditJobResult =
+  /** The credit is on record. `jobRemoved: false` keeps the job for a safe, receipt-first re-run. */
+  | {
+      status: 'settled'
+      outcome: 'credited' | 'alreadySettled'
+      receipt: BuildStudioSettledCredit
+      jobRemoved: boolean
+    }
+  /** A terminal answer: nothing to credit. The job is gone (`no-job`: it already was). */
+  | { status: 'closed'; reason: CreditJobClosedReason }
+  /** No known result. The job is left pending and is safe to work again verbatim. */
+  | { status: 'retry'; reason: CreditJobRetryReason }
+  /** Not a job this writer will work (bad scope, doctored document). Nothing was written. */
+  | { status: 'invalid' }
+
+type ReceiptRead =
+  | { status: 'found'; receipt: BuildStudioSettledCredit }
+  | { status: 'absent' }
+  | { status: 'failed' }
+
+/** The permanent receipt of one exact source, read from the server. */
+async function readSettledReceipt(scope: CreditScope): Promise<ReceiptRead> {
+  try {
+    const snap = await getDocFromServer(refs(scope.familyId, scope.childId, scope.projectId, scope.versionId).receipt)
+    if (!snap.exists()) return { status: 'absent' }
+    const receipt = parseReceipt(snap.data(), scope)
+    return receipt ? { status: 'found', receipt } : { status: 'failed' }
+  } catch {
+    return { status: 'failed' }
+  }
+}
+
+/**
+ * Remove ONE job, only if it still is exactly the job this scope names. `true`
+ * when it is gone (including already gone); `false` when it could not be removed,
+ * in which case it stays pending and is re-run receipt-first.
+ */
+async function removeJob(scope: CreditScope): Promise<boolean> {
+  const ref = jobRefFor(scope)
+  try {
+    return await runTransaction(db, async (tx: Transaction) => {
+      const snap = await tx.get(ref)
+      if (!snap.exists()) return true
+      const parsed = parseCreditJob(ref.id, snap.data())
+      if (
+        !parsed ||
+        parsed.childId !== scope.childId ||
+        parsed.projectId !== scope.projectId ||
+        parsed.versionId !== scope.versionId
+      ) {
+        return false
+      }
+      tx.delete(ref)
+      return true
+    })
+  } catch {
+    return false
+  }
+}
+
+/** Remove the job, then report the credit that is on record. */
+async function settleJob(
+  scope: CreditScope,
+  outcome: 'credited' | 'alreadySettled',
+  receipt: BuildStudioSettledCredit,
+): Promise<CreditJobResult> {
+  return { status: 'settled', outcome, receipt, jobRemoved: await removeJob(scope) }
+}
+
+/** Remove the job after a terminal answer; a failed removal is just a pending job. */
+async function closeJob(scope: CreditScope, reason: CreditJobClosedReason): Promise<CreditJobResult> {
+  return (await removeJob(scope)) ? { status: 'closed', reason } : { status: 'retry', reason: 'job-not-removed' }
+}
+
+/** A proof rejection is a final answer about immutable bytes; the rest may change. */
+const unprovenResult = (
+  scope: CreditScope,
+  reason: CreditProofRejection | 'unordered' | 'pending-write',
+): Promise<CreditJobResult> =>
+  reason === 'pending-write' || reason === 'unordered'
+    ? Promise.resolve<CreditJobResult>({ status: 'retry', reason: 'pending' })
+    : closeJob(scope, 'ineligible')
+
+/**
+ * Work ONE pending job to a known result, or leave it pending.
+ *
+ * It addresses only the exact version the job names, re-proves it from the server
+ * (`previewBuildStudioCredit`) and writes only through `confirmBuildStudioCredit`'s
+ * single transaction, so every protected rule — proof, zone, predecessor, daily
+ * cap, cadence, permanent receipt — is the one the ordinary writer applies. With no
+ * job there is no work: a save made before this existed is never previewed here.
+ */
+export async function reconcileBuildStudioCreditJob(scope: CreditScope): Promise<CreditJobResult> {
+  if (!validScope(scope) || scope.projectId !== BUILD_STUDIO_PROJECT_ID) return { status: 'invalid' }
+  const exact: CreditScope = {
+    familyId: scope.familyId,
+    childId: scope.childId,
+    projectId: scope.projectId,
+    versionId: scope.versionId,
+  }
+
+  // 1. The job itself must exist, be settled on the server, and be exactly this one.
+  const ref = jobRefFor(exact)
+  let jobSnap
+  try {
+    jobSnap = await getDocFromServer(ref)
+  } catch {
+    return { status: 'retry', reason: 'read-failed' }
+  }
+  if (!jobSnap.exists()) return { status: 'closed', reason: 'no-job' }
+  if (jobSnap.metadata?.hasPendingWrites) return { status: 'retry', reason: 'pending' }
+  const parsed = parseCreditJob(ref.id, jobSnap.data())
+  if (
+    !parsed ||
+    parsed.childId !== exact.childId ||
+    parsed.projectId !== exact.projectId ||
+    parsed.versionId !== exact.versionId
+  ) {
+    return { status: 'invalid' }
+  }
+
+  // 2. Prove it. A committed receipt answers first, whatever happened to its row.
+  const preview = await previewBuildStudioCredit(exact)
+  switch (preview.status) {
+    case 'alreadySettled':
+      return settleJob(exact, 'alreadySettled', preview.receipt)
+    case 'declined':
+      return closeJob(exact, 'declined')
+    case 'unavailable':
+      return closeJob(exact, 'unavailable')
+    case 'invalid':
+      return { status: 'invalid' }
+    case 'unproven':
+      return unprovenResult(exact, preview.reason)
+    case 'failed':
+      return { status: 'retry', reason: preview.reason === 'read-failed' ? 'read-failed' : 'blocked' }
+    case 'ready':
+      break
+  }
+
+  // 3. Credit it, only if the proposal still names this exact job's source.
+  const proposal = preview.proposal
+  if (
+    proposal.familyId !== exact.familyId ||
+    proposal.childId !== exact.childId ||
+    proposal.projectId !== exact.projectId ||
+    proposal.versionId !== exact.versionId
+  ) {
+    return { status: 'invalid' }
+  }
+  const confirmed = await confirmBuildStudioCredit(proposal)
+  switch (confirmed.status) {
+    case 'credited':
+      return settleJob(exact, 'credited', confirmed.receipt)
+    case 'alreadySettled':
+      return settleJob(exact, 'alreadySettled', confirmed.receipt)
+    case 'declined':
+      return closeJob(exact, 'declined')
+    case 'unavailable':
+      return closeJob(exact, 'unavailable')
+    case 'invalid':
+      return { status: 'invalid' }
+    case 'stale':
+      return { status: 'retry', reason: 'stale' }
+    case 'unproven':
+      return unprovenResult(exact, confirmed.reason)
+    case 'failed': {
+      if (!confirmed.retryable) return { status: 'retry', reason: 'blocked' }
+      // The commit may have landed before the response failed. The permanent
+      // receipt is the only truth: finish from it, or leave the job pending.
+      const landed = await readSettledReceipt(exact)
+      if (landed.status === 'found') return settleJob(exact, 'alreadySettled', landed.receipt)
+      return { status: 'retry', reason: 'write-failed' }
+    }
+  }
+}
+
+export interface CreditJobsPassResult {
+  listed: 'ok' | 'failed'
+  /** Jobs whose credit is on record after this pass (credited or already credited). */
+  settled: number
+  /** Jobs left pending: another pass will work them. */
+  retrying: number
+  /** More jobs than one page, or one not yet on the server. */
+  more: boolean
+  /** Continue after this document id next pass; `null` = the queue ended, start over. */
+  nextCursor: string | null
+}
+
+/**
+ * One SERIAL pass over one child's pending jobs: list a bounded page, then work
+ * the jobs strictly one after another. `isCurrent` is checked before each job, so
+ * a pass for a child or family no longer on screen stops at a job boundary (a job
+ * already in flight finishes under its own exact scope — it was never the new one's).
+ */
+export async function reconcileBuildStudioCreditJobsForChild(args: {
+  familyId: string
+  childId: string
+  isCurrent?: () => boolean
+  /** Continue after this document id (the previous pass's `nextCursor`). */
+  after?: string | null
+}): Promise<CreditJobsPassResult> {
+  const isCurrent = args.isCurrent ?? (() => true)
+  const listed = await listPendingBuildStudioCreditJobs(args)
+  if (listed.status === 'failed') return { listed: 'failed', settled: 0, retrying: 0, more: false, nextCursor: null }
+  let settled = 0
+  let retrying = 0
+  for (const job of listed.jobs) {
+    if (!isCurrent()) break
+    let result: CreditJobResult
+    try {
+      result = await reconcileBuildStudioCreditJob(job)
+    } catch {
+      result = { status: 'retry', reason: 'read-failed' }
+    }
+    if (result.status === 'settled') {
+      settled += 1
+      if (!result.jobRemoved) retrying += 1
+    } else if (result.status === 'retry') {
+      retrying += 1
+    }
+  }
+  return { listed: 'ok', settled, retrying, more: listed.more, nextCursor: listed.nextCursor }
 }

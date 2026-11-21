@@ -69,6 +69,7 @@ import {
   buildStudioChildEnrolled,
   resolveBuildStudioAccess,
 } from './buildStudioAccess'
+import BuildStudioAutoCredit from './BuildStudioAutoCredit'
 import { buildStudioDownloads, downloadTextFile } from './buildStudioExport'
 import BuildStudioChildEntry from './BuildStudioChildEntry'
 import BuildStudioSettingsSection from './BuildStudioSettingsSection'
@@ -232,6 +233,17 @@ export default function BuildStudioPage() {
   // ── The child's own studio ─────────────────────────────────────────────
   return (
     <Stack spacing={2} sx={{ p: 2 }}>
+      {/* Automatic Build Studio credit for THIS settled child. It renders nothing:
+          no credit detail reaches the child. It runs only while this page is open
+          (a client workflow, no server worker), and a new saved version nudges it
+          so a Save needs no extra tap. Keyed like the entry, so a switch remounts. */}
+      <BuildStudioAutoCredit
+        key={`credit\u0000${familyId}\u0000${activeChildId}`}
+        familyId={familyId}
+        childId={activeChildId}
+        enabled
+        nudgeKey={shelfIsCurrent ? versions.versions.length : -1}
+      />
       {outOfScope && (
         <Alert severity="warning">
           <AlertTitle>About an earlier save</AlertTitle>

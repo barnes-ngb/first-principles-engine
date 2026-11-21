@@ -32,6 +32,15 @@ after the PR is open — see **End of run**.
 `xpLedger`, `skillSnapshots` (write only via the central `skillSnapshotWrites.ts`), the charter
 preamble, or `firestore.rules`. Changes touching these are proposed and stop for a human decision.
 Any user-facing write to a child's record goes propose → confirm → write; never auto-write.
+**One narrow owner exception (Nathan, 2026-11-20): automatic Build Studio credit.** The derived `hours`
+credit for a NEW eligible Apple Dash save is written automatically — no per-save confirmation — through
+`buildStudioHoursCreditWrites.ts` only, which reuses the confirmed writer's proof, family time zone,
+predecessor rule, daily cap, cadence and permanent receipt unchanged. A pending job is created in the same
+transaction as the new version (`buildStudioCreditJobs`); older saves are never backfilled. The parent keeps
+correction and removal on the Records card, and a corrected or removed row is never re-credited. This is a
+**client workflow** — pending credit is processed only while the child's Build Studio page or the parent's
+Records view is open. It exempts nothing else: every other write, and any change to the credit's math, still
+stops for a decision.
 The central `skillSnapshotWrites.ts` writer is **additive-only**: beyond the scan mastered-skill
 write-through, it supports additive, evidence-stamped edit ops (Build 6a / Tier C Option 2) —
 `addPrioritySkills` / `addSupports` / `addStopRules`, each deduped and stamped as a parent
