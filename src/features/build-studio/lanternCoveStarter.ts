@@ -35,10 +35,13 @@
  * stricter, and it runs exactly once per starter visit, before anything is
  * touched, for the same reason `starterImportLooksCorrect` does. It keeps the
  * scaffold checks below AND compares all five returned sources with the staged
- * starter (`lanternCoveFidelity.ts`), forgiving only the differences stock
- * MakeCode's own serialisation produces — so a separately changed `main.ts`, an
- * altered Blocks value, rule or asset, or a corrupt map or wall layer closes the
- * controls even though the scaffold survived.
+ * starter (`lanternCoveFidelity.ts`), forgiving only the differences the stock
+ * editor's import → capture round trip was MEASURED to make (one trailing LF on
+ * `pxt.json`, and the x/y of three starter blocks) — so a separately changed
+ * `main.ts`, an altered Blocks value, variable id, rule or asset, a changed
+ * dependency version, an extra file, or a corrupt map or wall layer closes the
+ * controls even though the scaffold survived. The Blocks are still parsed by the
+ * real `DOMParser` (in {@link lanternCoveArchiveComplete}) before that comparison.
  *
  * {@link lanternCoveArchiveComplete} never compares bytes with the staged files: a
  * child's edit is the whole point, so a reopened save, a recovery file and a
@@ -307,7 +310,7 @@ export function lanternCoveStarterLooksCorrect(files: BuildStudioSourceFiles): b
 
 /**
  * Why the returned sources are not the prepared starter — or `null` when all five
- * match it after only the known stock serialisation differences. The reason names
+ * match it after only the measured stock round-trip differences. The reason names
  * the first file that differs; it is for tests and diagnostics, never a child.
  */
 export function lanternCoveStarterProblem(files: BuildStudioSourceFiles): string | null {

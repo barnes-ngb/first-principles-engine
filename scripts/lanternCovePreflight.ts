@@ -10,16 +10,20 @@
  * of the five files it prints the byte length, a SHA-256, and the app's own verdict
  * (`identical` / `equivalent` / `different` / `unreadable` / `missing`) with the
  * first differing line, so the exact differences a stock import → capture round
- * trip produces can be inspected instead of inferred. It then prints whether the
- * credit signature (code, map and wall layer) of the returned copy equals the
- * starter's — which is the property that stops an unchanged round trip earning
- * hours — and exits non-zero when the returned copy is not the starter.
+ * trip produces can be inspected instead of inferred. The pristine verdict is
+ * exact: only the measured differences (one trailing LF on `pxt.json`, the x/y of
+ * the three starter blocks) are `equivalent`, and any other file in the directory
+ * is reported as a difference. It then prints whether the credit signature (code,
+ * map and wall layer) of the returned copy equals the starter's — which is the
+ * property that stops an unchanged round trip earning hours — and exits non-zero
+ * when the returned copy is not the starter. The Blocks' well-formedness is the
+ * app's `DOMParser` check, which needs a DOM and is not run here.
  *
  * The returned directory is untrusted data: it is only ever read, by path, as text.
  */
 
 import { createHash } from 'node:crypto'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
 import {
@@ -51,6 +55,21 @@ function readSet(dir: string, staged: boolean): Record<string, string> {
   return out
 }
 
+/**
+ * Every regular file directly inside the returned directory, as raw text, so a file
+ * the prepared starter does not have is reported rather than silently skipped.
+ * (Editor scratch — `.simstate.json`, `_`-private names — is ignored by the
+ * comparison itself, not here.)
+ */
+function readReturned(dir: string): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const name of readdirSync(dir)) {
+    const path = join(dir, name)
+    if (statSync(path).isFile()) out[name] = readFileSync(path, 'utf8')
+  }
+  return out
+}
+
 const sha = (text: string) => createHash('sha256').update(text, 'utf8').digest('hex').slice(0, 16)
 
 function main(): number {
@@ -60,7 +79,7 @@ function main(): number {
     return 2
   }
   const starterDir = starterDirArg ?? join('src', 'features', 'build-studio', 'starters', 'lantern-cove')
-  const returned = readSet(returnedDir, false)
+  const returned = readReturned(returnedDir)
   const starter = readSet(starterDir, true)
 
   const report = compareLanternCoveToStarter(returned, starter)
