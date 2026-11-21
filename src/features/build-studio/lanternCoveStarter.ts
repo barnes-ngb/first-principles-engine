@@ -148,9 +148,10 @@ function tilemapEntries(jres: Record<string, unknown>): TilemapEntry[] {
  * The field is base64 of the ASCII hex of the map's buffer: a version byte, the
  * width and the height as little-endian 16-bit numbers, then one tile id per
  * cell (and the wall layer after it). This checks the header and that the tile
- * layer is all there — a truncated or emptied map is the "missing tile data"
- * failure — and deliberately NOT the wall layer's own layout, which is the
- * editor's business and not worth refusing a child's game over.
+ * layer AND the wall bitmap are all there — a truncated or emptied map is the
+ * "missing tile data" failure — and deliberately NOT the wall layer's own
+ * contents, which are the editor's business and not worth refusing a child's
+ * game over.
  */
 function tilemapDataLooksUsable(data: unknown): boolean {
   if (!isNonBlank(data)) return false
@@ -165,7 +166,12 @@ function tilemapDataLooksUsable(data: unknown): boolean {
   const width = byteAt(1) | (byteAt(2) << 8)
   const height = byteAt(3) | (byteAt(4) << 8)
   if (width < 1 || height < 1) return false
-  return hex.length / 2 >= 5 + width * height
+  // 5-byte header, one terrain byte per cell, then the 4bpp wall bitmap
+  // (ceil(cells / 2) bytes). MakeCode reads a missing wall tail as zero bits
+  // without complaint, so a truncation that keeps every terrain byte but loses
+  // the wall plane must be refused here.
+  const cells = width * height
+  return hex.length / 2 >= 5 + cells + Math.ceil(cells / 2)
 }
 
 /**
@@ -190,6 +196,12 @@ export function lanternCoveArchiveProblem(files: BuildStudioSourceFiles): string
   for (const entry of declared) {
     if (typeof entry !== 'string' || !entry) return 'manifest-bad-file-entry'
     if (typeof files[entry] !== 'string') return `declared-file-missing:${entry}`
+  }
+  // The manifest must also LIST the four other required files: a physical map
+  // pair the manifest omits is not part of the project MakeCode will load.
+  for (const name of LANTERN_COVE_REQUIRED_FILES) {
+    if (name === 'pxt.json') continue
+    if (!declared.includes(name)) return `manifest-omits-file:${name}`
   }
 
   // ── The Blocks: well-formed, and actually holding blocks ─────────────────

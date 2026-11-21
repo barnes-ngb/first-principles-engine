@@ -77,7 +77,7 @@ describe('the staged source', () => {
   })
 
   it('is a fresh object each call, so one visit cannot mutate the next one’s starter', () => {
-    const a = starter()
+    const a: Record<string, string> = { ...starter() }
     a['main.ts'] = 'changed'
     expect(starter()['main.ts']).not.toBe('changed')
   })
@@ -153,6 +153,21 @@ describe('a complete archive', () => {
     ['no tilemap entry in the jres', (f) => ({ ...f, 'tilemap.g.jres': JSON.stringify({ '*': { mimeType: 'image/x-mkcd-f4' } }) }), 'map-missing'],
     ['tilemap data emptied', (f) => withEditedMap(f, () => ''), 'map-data-unusable'],
     ['tilemap data cut off after the header', (f) => withEditedMap(f, (hex) => hex.slice(0, 20)), 'map-data-unusable'],
+    [
+      'tilemap data keeps every terrain byte but loses the wall plane',
+      (f) =>
+        withEditedMap(f, (hex) => {
+          const byteAt = (i: number) => parseInt(hex.slice(i * 2, i * 2 + 2), 16)
+          const cells = (byteAt(1) | (byteAt(2) << 8)) * (byteAt(3) | (byteAt(4) << 8))
+          return hex.slice(0, (5 + cells) * 2)
+        }),
+      'map-data-unusable',
+    ],
+    [
+      'tilemap data loses only the last wall byte',
+      (f) => withEditedMap(f, (hex) => hex.slice(0, -2)),
+      'map-data-unusable',
+    ],
     ['tilemap data not hex', (f) => withEditedMap(f, (hex) => 'zz' + hex.slice(2)), 'map-data-unusable'],
     ['tilemap data zero-sized', (f) => withEditedMap(f, (hex) => hex.slice(0, 2) + '0000' + hex.slice(6)), 'map-data-unusable'],
     [
@@ -196,6 +211,17 @@ describe('a complete archive', () => {
       (f) => ({ ...f, 'pxt.json': JSON.stringify({ ...JSON.parse(f['pxt.json']), files: [...JSON.parse(f['pxt.json']).files, 'images.g.ts'] }) }),
       'declared-file-missing:images.g.ts',
     ],
+    ...['main.ts', 'main.blocks', 'tilemap.g.ts', 'tilemap.g.jres'].map(
+      (omitted): [string, (f: BuildStudioSourceFiles) => BuildStudioSourceFiles, string] => [
+        `the manifest omits ${omitted} although the file is present`,
+        (f) => {
+          const manifest = JSON.parse(f['pxt.json'])
+          manifest.files = manifest.files.filter((entry: string) => entry !== omitted)
+          return { ...f, 'pxt.json': JSON.stringify(manifest) }
+        },
+        `manifest-omits-file:${omitted}`,
+      ],
+    ),
     ['the Blocks are not well-formed XML', (f) => ({ ...f, 'main.blocks': f['main.blocks'] + '</block>' }), 'blocks-unreadable'],
     ['the Blocks are an empty workspace', (f) => ({ ...f, 'main.blocks': '<xml xmlns="https://developers.google.com/blockly/xml"></xml>' }), 'blocks-empty'],
   ])('is NOT complete: %s', (_name, mutate, expected) => {

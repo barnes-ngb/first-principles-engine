@@ -2856,7 +2856,7 @@ export default function BuildStudioEditor({
               key={liveSession.bridge.frameId}
               ref={iframeRef}
               src={liveSession.url}
-              title={`${BUILD_STUDIO_PROJECT_NAME} editor`}
+              title={`${game.projectName} editor`}
               allow="autoplay; fullscreen; gamepad"
               style={{ width: '100%', height: '100%', border: 0, display: 'block' }}
               onLoad={() => {
