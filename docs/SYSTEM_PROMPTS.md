@@ -46,6 +46,7 @@ src/core/ai/useAI.ts              functions/src/ai/
                                       conundrum  → handleConundrum
                                       weeklyFocus → handleWeeklyFocus
                                       scan       → handleScan
+                                      pageCheck  → handlePageCheck
                                       shellyChat → handleShellyChat
                                       foundationsReview → handleFoundationsReview
                                       chapterQuestions → handleChapterQuestions
@@ -117,6 +118,7 @@ Since FEAT-58 the model strings live in one table — `functions/src/ai/models.t
 | `conundrum` | `claude-sonnet-5` | Weekly conundrum generation |
 | `weeklyFocus` | `claude-sonnet-5` | Unified weekly focus + conundrum |
 | `scan` | `claude-sonnet-5` | Curriculum photo analysis (vision) |
+| `pageCheck` | `claude-sonnet-5` | Before-work (prospective) page check — vision; resolves its model via `modelForTask("plan")`, `low` effort, 1024 max tokens |
 | `shellyChat` | `claude-sonnet-5` | Parent AI assistant (family context) |
 | `foundationsReview` | `claude-sonnet-5` | Foundations Review Chat — subject-scoped concept-state review (FEAT-51) |
 | `chapterQuestions` | `claude-sonnet-5` | Chapter book discussion question generation |
@@ -419,6 +421,18 @@ page at a time, in response to TTS-read-aloud listener feedback.
 - Compares against child's skill snapshot for level alignment
 - Outputs JSON with `pageType`, `subject`, `specificTopic`, `skillsTargeted[]`, `estimatedDifficulty`, `recommendation` (do/skip/quick-review/modify), `estimatedMinutes`, `teacherNotes`
 - Notes neurodivergent-friendly concerns (dense text, too many problems)
+
+### `pageCheck` (tasks/pageCheck.ts)
+
+**System prompt assembly:**
+1. Context slices for "scan" — `buildContextForTask("scan", …)`, deliberately reused and unchanged (no `learnerModel`)
+2. `buildProspectiveCheckPrompt` (exported from `tasks/scan.ts`) — the before-work prompt
+
+**Key behaviors:**
+- The PROSPECTIVE page check: a distinct task name rather than a `checkPurpose` flag on `scan`, so an old dispatcher rejects it with `invalid-argument` before the workbook backfill runs (fails closed under release skew)
+- Reads no purpose field — arriving at this handler is the intent; `handleScan` has no prospective branch
+- Uses `callClaudeWithVision` at `low` effort with a 1024-token budget
+- Writes only the `aiUsage` row; no learning or progress record
 
 ### `shellyChat` (tasks/shellyChat.ts)
 
